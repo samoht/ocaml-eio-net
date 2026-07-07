@@ -13,7 +13,7 @@
 
 (package
  (name eio-net)
- (synopsis "Small Eio network backends and test helpers")
+ (synopsis "Eio network backends and test helpers")
  (tags (org:blacksun network eio test))
  (depends
   (ocaml (>= 5.1))
