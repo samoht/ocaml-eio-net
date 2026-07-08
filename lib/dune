@@ -1,0 +1,8 @@
+; eio-net: generic Eio networking primitives. Frame is the bidirectional
+; packet-channel carrier that frame-based protocols (CCSDS, AX.25, Ethernet)
+; read and write over, independent of the underlying transport.
+
+(library
+ (name eio_net)
+ (public_name eio-net)
+ (libraries eio cstruct fmt))

@@ -19,5 +19,6 @@
   (ocaml (>= 5.1))
   eio
   cstruct
+  fmt
   (alcotest :with-test)
   (eio_main :with-test)))
