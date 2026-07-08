@@ -5,4 +5,4 @@
 (library
  (name eio_net)
  (public_name eio-net)
- (libraries eio cstruct fmt))
+ (libraries eio cstruct fmt nox-rope))

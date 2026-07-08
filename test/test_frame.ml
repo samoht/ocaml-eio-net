@@ -1,3 +1,5 @@
+let send frame rope = frame.Eio_net.Frame.send (Rope.of_string rope)
+
 (* A frame sent on one end of a pair arrives whole on the other, in both
    directions, preserving frame boundaries (each recv is exactly one send). *)
 let test_pair () =
@@ -6,9 +8,9 @@ let test_pair () =
   let got = ref [] in
   Eio.Fiber.both
     (fun () ->
-      a.Eio_net.Frame.send "first";
-      a.Eio_net.Frame.send "second";
-      b.Eio_net.Frame.send "reply")
+      send a "first";
+      send a "second";
+      send b "reply")
     (fun () ->
       let f1 = b.Eio_net.Frame.recv () in
       let f2 = b.Eio_net.Frame.recv () in
@@ -16,7 +18,79 @@ let test_pair () =
       got := [ f1; f2; r ]);
   Alcotest.(check (list string))
     "frames arrive whole and in order"
-    [ "first"; "second"; "reply" ] !got
+    [ "first"; "second"; "reply" ]
+    !got
+
+(* of_length_prefixed_flow frames a byte stream as [4-byte big-endian length]
+   [payload]: each recv returns exactly one sent frame, boundaries preserved
+   even when several frames share a read and a frame spans reads. *)
+let test_length_prefixed_roundtrip () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  let sender = Eio_net.Frame.of_length_prefixed_flow a in
+  let receiver = Eio_net.Frame.of_length_prefixed_flow b in
+  let payloads = [ ""; "one"; String.make 1000 'x'; "\x00\xff binary \x00" ] in
+  let got = ref [] in
+  Eio.Fiber.both
+    (fun () -> List.iter (send sender) payloads)
+    (fun () ->
+      got := List.map (fun _ -> receiver.Eio_net.Frame.recv ()) payloads);
+  Alcotest.(check (list string))
+    "frames arrive whole and in order" payloads !got
+
+(* A clean close at a frame boundary makes the next recv raise End_of_file. *)
+let test_length_prefixed_eof () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  let sender = Eio_net.Frame.of_length_prefixed_flow a in
+  let receiver = Eio_net.Frame.of_length_prefixed_flow b in
+  let got = ref None in
+  Eio.Fiber.both
+    (fun () ->
+      send sender "last";
+      Eio.Flow.close a)
+    (fun () ->
+      let first = receiver.Eio_net.Frame.recv () in
+      let ended =
+        match receiver.Eio_net.Frame.recv () with
+        | _ -> false
+        | exception End_of_file -> true
+      in
+      got := Some (first, ended));
+  Alcotest.(check (option (pair string bool)))
+    "one frame then end-of-stream"
+    (Some ("last", true))
+    !got
+
+(* A length prefix over [max_frame] is refused before the payload is read, so a
+   hostile peer cannot force an unbounded allocation. *)
+let test_length_prefixed_over_limit () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  let receiver = Eio_net.Frame.of_length_prefixed_flow ~max_frame:16 b in
+  let raised = ref false in
+  Eio.Fiber.both
+    (fun () ->
+      let hdr = Bytes.create 4 in
+      Bytes.set_int32_be hdr 0 1000l;
+      Eio.Flow.write a [ Cstruct.of_bytes hdr ])
+    (fun () ->
+      (try ignore (receiver.Eio_net.Frame.recv ())
+       with Invalid_argument _ -> raised := true);
+      Eio.Flow.close a);
+  Alcotest.(check bool) "over-limit frame refused" true !raised
 
 let suite =
-  ("frame", [ Alcotest.test_case "in-memory pair round-trip" `Quick test_pair ])
+  ( "frame",
+    [
+      Alcotest.test_case "in-memory pair round-trip" `Quick test_pair;
+      Alcotest.test_case "length-prefixed round-trip" `Quick
+        test_length_prefixed_roundtrip;
+      Alcotest.test_case "length-prefixed end-of-stream" `Quick
+        test_length_prefixed_eof;
+      Alcotest.test_case "length-prefixed over-limit refused" `Quick
+        test_length_prefixed_over_limit;
+    ] )

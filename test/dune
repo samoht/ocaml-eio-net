@@ -1,4 +1,12 @@
 (test
  (name test)
  (package eio-net)
- (libraries eio-net eio-net.mem eio eio_main alcotest))
+ (libraries
+  eio-net
+  eio-net.mem
+  eio
+  eio.unix
+  eio_main
+  cstruct
+  nox-rope
+  alcotest))

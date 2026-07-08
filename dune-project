@@ -20,5 +20,6 @@
   eio
   cstruct
   fmt
+  nox-rope
   (alcotest :with-test)
   (eio_main :with-test)))
