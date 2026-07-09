@@ -7,18 +7,32 @@
     codec layers over it by decoding what {!recv} returns and encoding into
     {!send}; the channel itself is untyped bytes. *)
 
-type t = { recv : unit -> string; send : Rope.t -> unit }
-(** A frame channel. {!recv} returns one whole received frame; {!send} takes an
-    outgoing frame as a {!Rope.t} so a payload carried as a zero-copy rope leaf
-    reaches the wire without being concatenated into a whole-frame string. A
-    sender that already has a string wraps it with [Rope.of_string] (O(1)). *)
+type t = {
+  recv : unit -> string;
+  send : Rope.t -> unit;
+  send_batch : Rope.t list -> unit;
+}
+(** A frame channel.
+
+    {!recv} returns one whole received frame. {!send} takes an outgoing frame as
+    a {!Rope.t} so a payload carried as a zero-copy rope leaf reaches the wire
+    through [writev] without being concatenated into a whole-frame string; a
+    sender that already has a string wraps it with [Rope.of_string] (O(1)).
+
+    {!send_batch} sends a burst of frames, coalescing them into a single
+    [writev] where the transport allows (software GSO) -- one syscall for the
+    whole burst instead of one per frame. A transport that cannot coalesce (a
+    datagram socket, where each frame is its own datagram) falls back to sending
+    them one at a time. *)
 
 val pp : t Fmt.t
 (** [pp] prints an opaque placeholder: a frame channel is an I/O handle with no
     inspectable state. *)
 
 val v : recv:(unit -> string) -> send:(Rope.t -> unit) -> t
-(** [v ~recv ~send] is a frame channel from a receive and a send function. *)
+(** [v ~recv ~send] is a frame channel from a receive and a send function.
+    {!send_batch} sends the burst one frame at a time; a transport that can
+    coalesce builds its channel through {!of_length_prefixed_flow} instead. *)
 
 val of_datagram_socket :
   ?max_frame:int ->
@@ -30,11 +44,17 @@ val of_datagram_socket :
     for a connected socket) and received from any source, up to [max_frame]
     bytes (default 65536). *)
 
-val of_length_prefixed_flow : ?max_frame:int -> _ Eio.Flow.two_way -> t
+val of_length_prefixed_flow :
+  ?max_frame:int -> ?prefix_bytes:int -> _ Eio.Flow.two_way -> t
 (** [of_length_prefixed_flow flow] presents a byte-stream flow as a frame
-    channel by delimiting each frame with a 4-byte big-endian length prefix:
-    {!send} writes the length then the payload, and {!recv} reads one length
-    then exactly that many payload bytes.
+    channel by delimiting each frame with a big-endian length prefix of
+    [prefix_bytes] bytes (default 4): {!send} writes the length then the
+    payload, and {!recv} reads one length then exactly that many payload bytes.
+    Use [prefix_bytes:2] for a 16-bit prefix (e.g. DNS-over-TCP, a utun link).
+
+    {!send_batch} coalesces a burst into one [writev] -- each frame's prefix and
+    rope leaves back to back -- so a sender that produces frames in bursts pays
+    one syscall per burst (software GSO).
 
     {!recv} raises [End_of_file] when the stream closes at a frame boundary (or
     mid-frame), and [Invalid_argument] if a length prefix exceeds [max_frame]

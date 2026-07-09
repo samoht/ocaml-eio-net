@@ -83,12 +83,48 @@ let test_length_prefixed_over_limit () =
       Eio.Flow.close a);
   Alcotest.(check bool) "over-limit frame refused" true !raised
 
+(* send_batch coalesces a burst of frames into one writev, and the receiver
+   still reads them back as distinct, whole frames in order. *)
+let test_length_prefixed_batch () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  let sender = Eio_net.Frame.of_length_prefixed_flow a in
+  let receiver = Eio_net.Frame.of_length_prefixed_flow b in
+  let payloads = [ "one"; ""; String.make 500 'z'; "\x00last\x00" ] in
+  let got = ref [] in
+  Eio.Fiber.both
+    (fun () ->
+      sender.Eio_net.Frame.send_batch (List.map Rope.of_string payloads))
+    (fun () ->
+      got := List.map (fun _ -> receiver.Eio_net.Frame.recv ()) payloads);
+  Alcotest.(check (list string))
+    "batched frames arrive whole and in order" payloads !got
+
+(* A 2-byte prefix frames independently of the 4-byte default (utun / DNS). *)
+let test_length_prefixed_16bit () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  let sender = Eio_net.Frame.of_length_prefixed_flow ~prefix_bytes:2 a in
+  let receiver = Eio_net.Frame.of_length_prefixed_flow ~prefix_bytes:2 b in
+  let got = ref "" in
+  Eio.Fiber.both
+    (fun () -> send sender "sixteen-bit framed")
+    (fun () -> got := receiver.Eio_net.Frame.recv ());
+  Alcotest.(check string)
+    "16-bit-prefixed frame round-trips" "sixteen-bit framed" !got
+
 let suite =
   ( "frame",
     [
       Alcotest.test_case "in-memory pair round-trip" `Quick test_pair;
       Alcotest.test_case "length-prefixed round-trip" `Quick
         test_length_prefixed_roundtrip;
+      Alcotest.test_case "length-prefixed batch (GSO)" `Quick
+        test_length_prefixed_batch;
+      Alcotest.test_case "length-prefixed 16-bit prefix" `Quick
+        test_length_prefixed_16bit;
       Alcotest.test_case "length-prefixed end-of-stream" `Quick
         test_length_prefixed_eof;
       Alcotest.test_case "length-prefixed over-limit refused" `Quick
