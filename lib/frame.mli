@@ -9,15 +9,23 @@
 
 type t = {
   recv : unit -> string;
+  recv_slice : unit -> Bytesrw.Bytes.Slice.t;
   send : Rope.t -> unit;
   send_batch : Rope.t list -> unit;
 }
 (** A frame channel.
 
-    {!recv} returns one whole received frame. {!send} takes an outgoing frame as
-    a {!Rope.t} so a payload carried as a zero-copy rope leaf reaches the wire
-    through [writev] without being concatenated into a whole-frame string; a
-    sender that already has a string wraps it with [Rope.of_string] (O(1)).
+    {!recv} returns one whole received frame as a fresh string. {!recv_slice}
+    returns it as a view (offset + length into owned bytes) so a decode layer
+    strips its header by advancing the offset rather than copying -- the inbound
+    dual of {!send}'s rope. The view is valid only until the next receive
+    (bytesrw's slice contract), so a layer that retains the payload past that
+    must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
+
+    {!send} takes an outgoing frame as a {!Rope.t} so a payload carried as a
+    zero-copy rope leaf reaches the wire through [writev] without being
+    concatenated into a whole-frame string; a sender that already has a string
+    wraps it with [Rope.of_string] (O(1)).
 
     {!send_batch} sends a burst of frames, coalescing them into a single
     [writev] where the transport allows (software GSO) -- one syscall for the

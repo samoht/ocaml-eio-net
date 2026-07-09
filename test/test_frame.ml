@@ -115,10 +115,38 @@ let test_length_prefixed_16bit () =
   Alcotest.(check string)
     "16-bit-prefixed frame round-trips" "sixteen-bit framed" !got
 
+(* recv_slice hands the frame up as a view (offset + length into owned bytes),
+   the inbound dual of send's rope: a decode layer reads its header at the
+   slice's offset without copying the whole frame first. *)
+let test_recv_slice () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Eio_unix.Net.socketpair_stream ~sw () in
+  let sender = Eio_net.Frame.of_length_prefixed_flow a in
+  let receiver = Eio_net.Frame.of_length_prefixed_flow b in
+  let got = ref ("", "") in
+  Eio.Fiber.both
+    (fun () -> send sender "HDRpayload-bytes")
+    (fun () ->
+      let s = receiver.Eio_net.Frame.recv_slice () in
+      (* strip a 3-byte header at the slice's offset, no whole-frame String.sub *)
+      let hdr =
+        Bytes.sub_string
+          (Bytesrw.Bytes.Slice.bytes s)
+          (Bytesrw.Bytes.Slice.first s)
+          3
+      in
+      got := (hdr, Bytesrw.Bytes.Slice.to_string s));
+  Alcotest.(check (pair string string))
+    "header at offset, then whole frame"
+    ("HDR", "HDRpayload-bytes")
+    !got
+
 let suite =
   ( "frame",
     [
       Alcotest.test_case "in-memory pair round-trip" `Quick test_pair;
+      Alcotest.test_case "recv_slice ingress view" `Quick test_recv_slice;
       Alcotest.test_case "length-prefixed round-trip" `Quick
         test_length_prefixed_roundtrip;
       Alcotest.test_case "length-prefixed batch (GSO)" `Quick

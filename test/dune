@@ -8,5 +8,6 @@
   eio.unix
   eio_main
   cstruct
+  bytesrw
   nox-rope
   alcotest))

@@ -20,6 +20,7 @@
   eio
   cstruct
   fmt
+  bytesrw
   nox-rope
   (alcotest :with-test)
   (eio_main :with-test)))

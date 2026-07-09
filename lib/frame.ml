@@ -1,14 +1,29 @@
 type t = {
   recv : unit -> string;
+  recv_slice : unit -> Bytesrw.Bytes.Slice.t;
   send : Rope.t -> unit;
   send_batch : Rope.t list -> unit;
 }
 
 let pp ppf _ = Fmt.string ppf "<frame channel>"
 
+(* A frame's bytes as a view (offset + length into owned bytes) rather than a
+   fresh string, so a decode layer strips its header by advancing the offset
+   instead of copying. The view is valid until the next recv (bytesrw's slice
+   contract): a layer that retains the payload past that must copy it. An empty
+   frame yields eod. *)
+let slice_of_string s =
+  Bytesrw.Bytes.Slice.of_bytes_or_eod (Bytes.unsafe_of_string s)
+
 (* Default batch send: one frame at a time. A transport that can coalesce a
    burst into a single [writev] (software GSO) overrides this. *)
-let v ~recv ~send = { recv; send; send_batch = List.iter send }
+let v ~recv ~send =
+  {
+    recv;
+    recv_slice = (fun () -> slice_of_string (recv ()));
+    send;
+    send_batch = List.iter send;
+  }
 
 (* A rope's leaves map one-to-one onto iovec entries, so a payload carried as a
    zero-copy rope leaf reaches the wire through [writev] without being
@@ -17,9 +32,16 @@ let rope_cstructs rope = List.map Cstruct.of_string (Rope.to_strings rope)
 
 let of_datagram_socket ?(max_frame = 65536) ?dst socket =
   let buf = Cstruct.create max_frame in
+  (* One reused bytes buffer the ingress view points into. *)
+  let rx = Bytes.create max_frame in
   let recv () =
     let _src, n = Eio.Net.recv socket buf in
     Cstruct.to_string (Cstruct.sub buf 0 n)
+  in
+  let recv_slice () =
+    let _src, n = Eio.Net.recv socket buf in
+    Cstruct.blit_to_bytes buf 0 rx 0 n;
+    Bytesrw.Bytes.Slice.make_or_eod rx ~first:0 ~length:n
   in
   let send rope =
     let bufs = rope_cstructs rope in
@@ -29,7 +51,7 @@ let of_datagram_socket ?(max_frame = 65536) ?dst socket =
   in
   (* Each datagram is its own [send] syscall; a burst cannot be coalesced into
      one, so batching just loops. *)
-  { recv; send; send_batch = List.iter send }
+  { recv; recv_slice; send; send_batch = List.iter send }
 
 let of_length_prefixed_flow ?(max_frame = 1_048_576) ?(prefix_bytes = 4) flow =
   let buf_r = Eio.Buf_read.of_flow ~max_size:(max_frame + prefix_bytes) flow in
@@ -40,7 +62,7 @@ let of_length_prefixed_flow ?(max_frame = 1_048_576) ?(prefix_bytes = 4) flow =
     done;
     !n
   in
-  let recv () =
+  let take_frame () =
     let hdr = Eio.Buf_read.take prefix_bytes buf_r in
     let len = get_len hdr in
     if len > max_frame then
@@ -65,15 +87,22 @@ let of_length_prefixed_flow ?(max_frame = 1_048_576) ?(prefix_bytes = 4) flow =
     in
     if iovecs <> [] then Eio.Flow.write flow iovecs
   in
-  { recv; send = (fun rope -> send_batch [ rope ]); send_batch }
+  {
+    recv = take_frame;
+    recv_slice = (fun () -> slice_of_string (take_frame ()));
+    send = (fun rope -> send_batch [ rope ]);
+    send_batch;
+  }
 
 let pair () =
   let a_to_b = Eio.Stream.create max_int in
   let b_to_a = Eio.Stream.create max_int in
   let chan recv_stream send_stream =
+    let recv () = Eio.Stream.take recv_stream in
     let send r = Eio.Stream.add send_stream (Rope.to_string r) in
     {
-      recv = (fun () -> Eio.Stream.take recv_stream);
+      recv;
+      recv_slice = (fun () -> slice_of_string (recv ()));
       send;
       send_batch = List.iter send;
     }
