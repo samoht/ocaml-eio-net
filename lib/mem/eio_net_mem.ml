@@ -34,6 +34,13 @@ module Flow = struct
 
     let close t = shutdown t `All
     let read_methods = []
+
+    (* An in-memory pipe has no kernel socket, so options do not apply:
+       setsockopt is a no-op (best effort) and getsockopt is unsupported. *)
+    let setsockopt _ _ _ = ()
+
+    let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
+     fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
   end
 
   let handler = Eio.Net.Pi.stream_socket (module Impl)
@@ -85,6 +92,10 @@ module Listening_socket = struct
           Hashtbl.remove t.hub.listeners t.addr))
 
   let listening_addr t = t.addr
+  let setsockopt _ _ _ = ()
+
+  let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
+   fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
 end
 
 module Network = struct
