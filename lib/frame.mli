@@ -50,7 +50,12 @@ val of_datagram_socket :
 (** [of_datagram_socket ?max_frame ?dst socket] presents a datagram socket as a
     frame channel: each datagram is one frame. Frames are sent to [dst] (omit
     for a connected socket) and received from any source, up to [max_frame]
-    bytes (default 65536). *)
+    bytes (default 65536).
+
+    {!recv} raises [Invalid_argument] on a datagram longer than [max_frame]
+    rather than silently truncating it (the channel stays usable after the
+    refusal). A protocol that needs the source address of each datagram uses the
+    addressed {!Datagram} channel instead. *)
 
 val of_length_prefixed_flow :
   ?max_frame:int -> ?prefix_bytes:int -> _ Eio.Flow.two_way -> t

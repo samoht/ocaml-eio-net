@@ -30,28 +30,15 @@ let v ~recv ~send =
    concatenated into a whole-frame string. *)
 let rope_cstructs rope = List.map Cstruct.of_string (Rope.to_strings rope)
 
-let of_datagram_socket ?(max_frame = 65536) ?dst socket =
-  let buf = Cstruct.create max_frame in
-  (* One reused bytes buffer the ingress view points into. *)
-  let rx = Bytes.create max_frame in
-  let recv () =
-    let _src, n = Eio.Net.recv socket buf in
-    Cstruct.to_string (Cstruct.sub buf 0 n)
-  in
-  let recv_slice () =
-    let _src, n = Eio.Net.recv socket buf in
-    Cstruct.blit_to_bytes buf 0 rx 0 n;
-    Bytesrw.Bytes.Slice.make_or_eod rx ~first:0 ~length:n
-  in
-  let send rope =
-    let bufs = rope_cstructs rope in
-    match dst with
-    | Some dst -> Eio.Net.send socket ~dst bufs
-    | None -> Eio.Net.send socket bufs
-  in
-  (* Each datagram is its own [send] syscall; a burst cannot be coalesced into
-     one, so batching just loops. *)
-  { recv; recv_slice; send; send_batch = List.iter send }
+(* The addressed {!Datagram} channel owns the socket plumbing (and the refusal
+   of oversized datagrams); this carrier just drops the source address. Each
+   datagram is its own [send] syscall, so [v]'s one-at-a-time batching is
+   already the best a datagram socket can do. *)
+let of_datagram_socket ?max_frame ?dst socket =
+  let channel = Datagram.of_socket ?max_frame ?dst socket in
+  v
+    ~recv:(fun () -> snd (channel.Datagram.recv ()))
+    ~send:(channel.Datagram.send None)
 
 let of_length_prefixed_flow ?(max_frame = 1_048_576) ?(prefix_bytes = 4) flow =
   let buf_r = Eio.Buf_read.of_flow ~max_size:(max_frame + prefix_bytes) flow in

@@ -10,4 +10,5 @@
   cstruct
   bytesrw
   nox-rope
+  unix
   alcotest))

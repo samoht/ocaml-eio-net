@@ -1,1 +1,3 @@
-let () = Alcotest.run "eio-net" [ Test_eio_net_mem.suite; Test_frame.suite ]
+let () =
+  Alcotest.run "eio-net"
+    [ Test_eio_net_mem.suite; Test_frame.suite; Test_datagram.suite ]
