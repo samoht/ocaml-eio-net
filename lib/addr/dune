@@ -1,0 +1,7 @@
+; The Ipaddr <-> Eio address bridge, kept free of the carrier libraries above
+; so a unikernel guest that only needs to name an address links nothing else.
+
+(library
+ (name eio_addr)
+ (public_name eio-net.addr)
+ (libraries eio ipaddr))

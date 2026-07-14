@@ -21,6 +21,7 @@
   cstruct
   fmt
   bytesrw
+  ipaddr
   nox-rope
   (alcotest :with-test)
   (eio_main :with-test)))
