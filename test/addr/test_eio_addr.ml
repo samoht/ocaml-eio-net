@@ -57,7 +57,7 @@ let test_not_an_address () =
       ignore (Eio_addr.ipaddr (Eio.Net.Ipaddr.of_raw "flatsat-1")))
 
 let suite =
-  ( "addr",
+  ( "eio_addr",
     [
       Alcotest.test_case "roundtrip" `Quick test_roundtrip;
       Alcotest.test_case "octets" `Quick test_octets;
