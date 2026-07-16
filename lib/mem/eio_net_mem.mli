@@ -11,3 +11,14 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     TCP stream addresses are matched exactly. Host resolution maps ["localhost"]
     and ["127.0.0.1"] to IPv4 loopback for the requested service port. Unix
     stream addresses are also accepted directly by [listen] and [connect]. *)
+
+val pipe :
+  unit ->
+  [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
+  * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
+(** [pipe ()] is a connected pair of in-memory stream sockets: bytes written on
+    one are read on the other, and vice versa, preserving order. Unlike {!v} it
+    binds no address and needs no [listen]/[connect] handshake -- it is the bare
+    transport for a test (or a wrapper such as an adversarial flow) that just
+    needs two ends of a pipe. Blocking reads suspend the calling fiber until
+    data arrives, so both ends must run under an Eio event loop. *)

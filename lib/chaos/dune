@@ -1,0 +1,9 @@
+; eio-net.chaos: adversarial/chaos wrappers for Eio flows, datagram sockets,
+; and networks -- shared test infrastructure for fuzzing protocol adapters
+; over a socket that injects deterministic faults. Reuses eio-net.mem's
+; in-memory transport rather than reinventing it.
+
+(library
+ (name eio_net_chaos)
+ (public_name eio-net.chaos)
+ (libraries eio eio-net.mem cstruct fmt))

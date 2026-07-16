@@ -138,6 +138,7 @@ module Network = struct
 end
 
 let handler = Eio.Net.Pi.network (module Network)
+let pipe () = Flow.pair ()
 
 let v ~sw () =
   let hub =
