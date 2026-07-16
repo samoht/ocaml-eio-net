@@ -13,4 +13,5 @@
   bytesrw
   nox-rope
   unix
+  fmt
   alcotest))

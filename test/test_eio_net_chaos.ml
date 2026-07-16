@@ -266,7 +266,7 @@ let test_dgram_garble () =
    in-order stream. *)
 let run_seeded_dgram seed =
   Eio_mock.Backend.run @@ fun () ->
-  let payloads = List.init 30 (fun i -> Printf.sprintf "%02d" i) in
+  let payloads = List.init 30 (fun i -> Fmt.str "%02d" i) in
   let base = fake_dgram payloads in
   let sock =
     Datagram.wrap
@@ -278,7 +278,7 @@ let run_seeded_dgram seed =
 let test_dgram_seeded_deterministic () =
   let a = run_seeded_dgram 7 and b = run_seeded_dgram 7 in
   Alcotest.(check (list string)) "same seed, same datagram sequence" a b;
-  let identity = List.init 8 (fun i -> Printf.sprintf "%02d" i) in
+  let identity = List.init 8 (fun i -> Fmt.str "%02d" i) in
   Alcotest.(check bool) "faults perturbed the stream" true (a <> identity)
 
 (* --- Net faults ---------------------------------------------------------- *)
