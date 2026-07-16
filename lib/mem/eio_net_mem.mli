@@ -4,6 +4,16 @@
     code to talk through the normal {!Eio.Net} APIs without binding OS sockets.
     It supports stream sockets only. *)
 
+type Eio.Exn.Backend.t +=
+  | Closed
+        (** The backend code carried by the connection-reset a mem flow raises
+            when a write finds its send side closed (the peer has gone away, or
+            this end shut its own send). It makes that write an {!Eio.Io} error
+            of the same shape a real socket raises on write-after-reset, rather
+            than the bare [Failure] {!Eio.Buf_write} raises internally. A read
+            after close still raises [End_of_file], matching a real socket's
+            EOF. *)
+
 val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~sw ()] returns a network whose [listen] and [connect] operations are
     paired in memory.

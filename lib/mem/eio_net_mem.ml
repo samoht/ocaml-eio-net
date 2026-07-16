@@ -1,3 +1,21 @@
+(* The backend code carried by the connection-reset a mem flow raises when a
+   write finds its send side closed -- the peer has gone away, or this end shut
+   its own send. It makes that write an [Eio.Io] error of the same shape a real
+   socket raises on write-after-reset (ECONNRESET/EPIPE), rather than the bare
+   [Failure "cannot write to closed writer"] that [Eio.Buf_write] raises when
+   its writer is closed and that no adapter written against real sockets would
+   catch. *)
+type Eio.Exn.Backend.t += Closed
+
+let () =
+  Eio.Exn.Backend.register_pp (fun ppf -> function
+    | Closed ->
+        Format.pp_print_string ppf "Closed (eio-net.mem)";
+        true
+    | _ -> false)
+
+let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
+
 module Flow = struct
   module W = Eio.Buf_write
 
@@ -12,7 +30,12 @@ module Flow = struct
     type tag = [ `Generic ]
     type t = { to_peer : W.t; from_peer : W.t }
 
+    (* [W.cstruct] on a closed writer raises a bare [Failure]; a real socket
+       raises [Eio.Io (Connection_reset ...)] on write-after-reset. Detect the
+       closed send side up front ([is_closed] holds exactly when [W.cstruct]
+       would raise, and no write below suspends to race it) and translate. *)
     let single_write t bufs =
+      if W.is_closed t.to_peer then raise (reset_exn ());
       let bufs = takev (Cstruct.lenv bufs) bufs in
       List.iter (W.cstruct t.to_peer) bufs;
       Cstruct.lenv bufs
