@@ -66,10 +66,13 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
   int error = errno;
   caml_leave_blocking_section();
 
-  if (sent < 0 || (sent == 0 && error != EAGAIN && error != EWOULDBLOCK &&
-                   error != ENOBUFS)) {
-    errno = error;
-    uerror("sendmsg_batch", Nothing);
+  if (sent < 0) {
+    if (error == EAGAIN || error == EWOULDBLOCK || error == ENOBUFS)
+      sent = 0;
+    else {
+      errno = error;
+      uerror("sendmsg_batch", Nothing);
+    }
   }
   CAMLreturn(Val_int(sent));
 }
