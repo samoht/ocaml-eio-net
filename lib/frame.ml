@@ -1,5 +1,6 @@
 type t = {
   recv : unit -> string;
+  recv_batch : unit -> string list;
   recv_slice : unit -> Bytesrw.Bytes.Slice.t;
   send : Rope.t -> unit;
   send_batch : Rope.t list -> unit;
@@ -20,6 +21,7 @@ let slice_of_string s =
 let v ~recv ~send =
   {
     recv;
+    recv_batch = (fun () -> [ recv () ]);
     recv_slice = (fun () -> slice_of_string (recv ()));
     send;
     send_batch = List.iter send;
@@ -76,6 +78,7 @@ let of_length_prefixed_flow ?(max_frame = 1_048_576) ?(prefix_bytes = 4) flow =
   in
   {
     recv = take_frame;
+    recv_batch = (fun () -> [ take_frame () ]);
     recv_slice = (fun () -> slice_of_string (take_frame ()));
     send = (fun rope -> send_batch [ rope ]);
     send_batch;
@@ -89,6 +92,7 @@ let pair () =
     let send r = Eio.Stream.add send_stream (Rope.to_string r) in
     {
       recv;
+      recv_batch = (fun () -> [ recv () ]);
       recv_slice = (fun () -> slice_of_string (recv ()));
       send;
       send_batch = List.iter send;

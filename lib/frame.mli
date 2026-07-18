@@ -9,18 +9,21 @@
 
 type t = {
   recv : unit -> string;
+  recv_batch : unit -> string list;
   recv_slice : unit -> Bytesrw.Bytes.Slice.t;
   send : Rope.t -> unit;
   send_batch : Rope.t list -> unit;
 }
 (** A frame channel.
 
-    {!recv} returns one whole received frame as a fresh string. {!recv_slice}
-    returns it as a view (offset + length into owned bytes) so a decode layer
-    strips its header by advancing the offset rather than copying -- the inbound
-    dual of {!send}'s rope. The view is valid only until the next receive
-    (bytesrw's slice contract), so a layer that retains the payload past that
-    must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
+    {!recv} returns one whole received frame as a fresh string. {!recv_batch}
+    returns a non-empty bounded batch, using one multi-message system call where
+    the transport allows and otherwise returning [[recv ()]]. {!recv_slice}
+    returns one frame as a view (offset + length into owned bytes) so a decode
+    layer strips its header by advancing the offset rather than copying -- the
+    inbound dual of {!send}'s rope. The view is valid only until the next
+    receive (bytesrw's slice contract), so a layer that retains the payload past
+    that must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
 
     {!send} takes an outgoing frame as a {!Rope.t} so a payload carried as a
     zero-copy rope leaf reaches the wire through [writev] without being
@@ -39,8 +42,8 @@ val pp : t Fmt.t
 
 val v : recv:(unit -> string) -> send:(Rope.t -> unit) -> t
 (** [v ~recv ~send] is a frame channel from a receive and a send function.
-    {!send_batch} sends the burst one frame at a time; a transport that can
-    coalesce builds its channel through {!of_length_prefixed_flow} instead. *)
+    {!recv_batch} returns one frame and {!send_batch} sends the burst one frame
+    at a time; a transport that can batch overrides these operations. *)
 
 val of_datagram_socket :
   ?max_frame:int ->

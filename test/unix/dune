@@ -1,0 +1,4 @@
+(test
+ (name test)
+ (package eio-net)
+ (libraries eio-net eio-net.unix eio eio_main alcotest fmt nox-rope unix))

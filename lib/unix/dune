@@ -1,0 +1,7 @@
+(library
+ (name eio_net_unix)
+ (public_name eio-net.unix)
+ (libraries eio-net eio eio.unix cstruct nox-rope unix)
+ (foreign_stubs
+  (language c)
+  (names sendmsg_batch)))
