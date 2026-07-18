@@ -137,7 +137,19 @@ module Network = struct
   let connect t ~sw:_ addr =
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
-          Hashtbl.find_opt t.hub.listeners addr)
+          match Hashtbl.find_opt t.hub.listeners addr with
+          | Some _ as listener -> listener
+          | None ->
+              let wildcard =
+                match addr with
+                | `Tcp (ip, port) ->
+                    Some
+                      (Eio.Net.Ipaddr.fold ip
+                         ~v4:(fun _ -> `Tcp (Eio.Net.Ipaddr.V4.any, port))
+                         ~v6:(fun _ -> `Tcp (Eio.Net.Ipaddr.V6.any, port)))
+                | `Unix _ -> None
+              in
+              Option.bind wildcard (Hashtbl.find_opt t.hub.listeners))
     in
     match listener with
     | None -> invalid_arg "no in-memory listener bound"

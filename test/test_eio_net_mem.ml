@@ -29,6 +29,27 @@ let test_resolve_localhost () =
     [ `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) ]
     (Eio.Net.getaddrinfo_stream net "localhost" ~service:"80")
 
+let test_connect_to_wildcard_listener () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let listener =
+    Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net
+      (`Tcp (Eio.Net.Ipaddr.V4.any, 8081))
+  in
+  Eio.Fiber.both
+    (fun () ->
+      let flow, _ = Eio.Net.accept ~sw listener in
+      Eio.Flow.copy_string "ok" flow)
+    (fun () ->
+      let flow =
+        Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 8081))
+      in
+      let buf = Cstruct.create 2 in
+      Eio.Flow.read_exact flow buf;
+      Alcotest.(check string)
+        "wildcard accepted loopback" "ok" (Cstruct.to_string buf))
+
 (* A write to a mem flow whose peer has closed raises the same [Eio.Io]
    connection-reset a real socket raises on write-after-reset, not the bare
    [Failure] that [Eio.Buf_write] raises internally on a closed writer. That
@@ -84,6 +105,8 @@ let suite =
     [
       Alcotest.test_case "tcp roundtrip" `Quick test_tcp_roundtrip;
       Alcotest.test_case "localhost resolution" `Quick test_resolve_localhost;
+      Alcotest.test_case "connect to wildcard listener" `Quick
+        test_connect_to_wildcard_listener;
       Alcotest.test_case "write after peer close" `Quick
         test_write_after_peer_close;
       Alcotest.test_case "write after own shutdown" `Quick
