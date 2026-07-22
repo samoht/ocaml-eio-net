@@ -4,4 +4,4 @@
  (libraries eio-net eio eio.unix cstruct nox-rope unix)
  (foreign_stubs
   (language c)
-  (names sendmsg_batch)))
+  (names sendmsg_batch writev_offload)))
