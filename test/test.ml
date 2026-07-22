@@ -5,4 +5,5 @@ let () =
       Test_frame.suite;
       Test_datagram.suite;
       Test_eio_net_chaos.suite;
+      Test_relay.suite;
     ]

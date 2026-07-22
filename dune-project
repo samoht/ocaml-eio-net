@@ -20,6 +20,7 @@
   eio
   cstruct
   fmt
+  logs
   bytesrw
   ipaddr
   nox-rope
