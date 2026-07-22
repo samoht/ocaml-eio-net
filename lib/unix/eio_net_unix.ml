@@ -88,10 +88,15 @@ module Stream = struct
     in
     let rec attempt () =
       let wrote =
-        Eio_unix.Fd.use_exn "Eio_net_unix.Stream.offload_single_write" fd
-          (fun unix_fd ->
-            Eio_unix.run_in_systhread ~label:"eio-net-writev" (fun () ->
-                writev unix_fd iov))
+        try
+          Eio_unix.Fd.use_exn "Eio_net_unix.Stream.offload_single_write" fd
+            (fun unix_fd ->
+              Eio_unix.run_in_systhread ~label:"eio-net-writev" (fun () ->
+                  writev unix_fd iov))
+        with Unix.Unix_error (((EPIPE | ECONNRESET) as code), name, arg) ->
+          raise
+            (Eio.Net.err
+               (Connection_reset (Eio_unix.Unix_error (code, name, arg))))
       in
       if wrote >= 0 then wrote
       else begin
