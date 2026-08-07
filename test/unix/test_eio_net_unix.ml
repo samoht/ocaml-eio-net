@@ -48,6 +48,20 @@ let test_connected_datagram_backpressure () =
   Unix.close fa;
   Unix.close fb
 
+let test_connected_datagram_rejects_excessive_batch () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close fa;
+      Unix.close fb)
+    (fun () ->
+      Alcotest.check_raises "bounded native batch"
+        (Invalid_argument "Eio_net_unix.Frame: max_batch > 64") (fun () ->
+          ignore
+            (Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_batch:65 fa)))
+
 let suite =
   ( "eio_net_unix",
     [
@@ -55,4 +69,6 @@ let suite =
         test_connected_datagram_batch;
       Alcotest.test_case "connected datagram backpressure" `Quick
         test_connected_datagram_backpressure;
+      Alcotest.test_case "reject excessive datagram batch" `Quick
+        test_connected_datagram_rejects_excessive_batch;
     ] )
