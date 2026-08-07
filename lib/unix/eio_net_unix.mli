@@ -12,8 +12,9 @@ module Frame : sig
       owns [fd]. On Darwin, {!Eio_net.Frame.send_batch} uses [sendmsg_x] and
       {!Eio_net.Frame.recv_batch} uses [recvmsg_x] to transfer up to [max_batch]
       datagrams in one system call; other systems use ordered per-datagram
-      fallbacks. [max_frame] defaults to 65536 and [max_batch] to 32. Concurrent
-      sends or receives are not supported. *)
+      fallbacks. [max_frame] defaults to 65536 and [max_batch] to 32;
+      [max_batch] must not exceed 64. Concurrent sends or receives are not
+      supported. *)
 
   val widen_datagram_buffers : Unix.file_descr -> unit
   (** [widen_datagram_buffers fd] raises [SO_SNDBUF] to 2 MiB and [SO_RCVBUF] to

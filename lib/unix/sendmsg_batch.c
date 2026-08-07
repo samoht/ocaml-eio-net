@@ -10,6 +10,8 @@
 #include <caml/signals.h>
 #include <caml/unixsupport.h>
 
+#define OCAML_EIO_NET_MAX_BATCH 64
+
 #ifdef __APPLE__
 struct ocaml_msghdr_x {
   void *msg_name;
@@ -32,10 +34,15 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
                                            value vlengths, value vcount) {
   CAMLparam4(vfd, vbuffers, vlengths, vcount);
   int fd = Int_val(vfd);
-  int count = Int_val(vcount);
+  intnat count_arg = Long_val(vcount);
+  if (count_arg > OCAML_EIO_NET_MAX_BATCH ||
+      count_arg > (intnat)Wosize_val(vbuffers) ||
+      count_arg > (intnat)Wosize_val(vlengths))
+    caml_invalid_argument("Eio_net_unix.Frame: invalid send batch");
+  int count = (int)count_arg;
   if (count <= 0) CAMLreturn(Val_int(0));
 
-  struct iovec iov[count];
+  struct iovec iov[OCAML_EIO_NET_MAX_BATCH];
   for (int i = 0; i < count; i++) {
     value cstruct = Field(vbuffers, i);
     iov[i].iov_base =
@@ -47,7 +54,7 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
   caml_enter_blocking_section();
 #ifdef __APPLE__
   if (sendmsg_x != NULL) {
-    struct ocaml_msghdr_x messages[count];
+    struct ocaml_msghdr_x messages[OCAML_EIO_NET_MAX_BATCH];
     for (int i = 0; i < count; i++) {
       messages[i] = (struct ocaml_msghdr_x){0};
       messages[i].msg_iov = &iov[i];
@@ -82,12 +89,19 @@ CAMLprim value caml_eio_net_recvmsg_batch(value vfd, value vbuffers,
                                            value vcount) {
   CAMLparam5(vfd, vbuffers, vlengths, voffset, vcount);
   int fd = Int_val(vfd);
-  int offset = Int_val(voffset);
-  int count = Int_val(vcount);
+  intnat offset_arg = Long_val(voffset);
+  intnat count_arg = Long_val(vcount);
+  if (offset_arg < 0 || count_arg < 0 ||
+      count_arg > OCAML_EIO_NET_MAX_BATCH || offset_arg > count_arg ||
+      count_arg > (intnat)Wosize_val(vbuffers) ||
+      count_arg > (intnat)Wosize_val(vlengths))
+    caml_invalid_argument("Eio_net_unix.Frame: invalid receive batch");
+  int offset = (int)offset_arg;
+  int count = (int)count_arg;
   if (offset >= count) CAMLreturn(Val_int(0));
 
-  struct iovec iov[count];
-  size_t lengths[count];
+  struct iovec iov[OCAML_EIO_NET_MAX_BATCH];
+  size_t lengths[OCAML_EIO_NET_MAX_BATCH];
   for (int i = offset; i < count; i++) {
     value cstruct = Field(vbuffers, i);
     iov[i].iov_base =
@@ -100,7 +114,7 @@ CAMLprim value caml_eio_net_recvmsg_batch(value vfd, value vbuffers,
   caml_enter_blocking_section();
 #ifdef __APPLE__
   if (recvmsg_x != NULL) {
-    struct ocaml_msghdr_x messages[count - offset];
+    struct ocaml_msghdr_x messages[OCAML_EIO_NET_MAX_BATCH];
     for (int i = offset; i < count; i++) {
       messages[i - offset] = (struct ocaml_msghdr_x){0};
       messages[i - offset].msg_iov = &iov[i];

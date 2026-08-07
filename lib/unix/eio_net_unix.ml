@@ -1,4 +1,6 @@
 module Frame = struct
+  let max_batch_limit = 64
+
   external send_batch_raw :
     Unix.file_descr -> Cstruct.t array -> int array -> int -> int
     = "caml_eio_net_sendmsg_batch"
@@ -18,6 +20,8 @@ module Frame = struct
   let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
     if max_frame <= 0 then invalid_arg "Eio_net_unix.Frame: max_frame <= 0";
     if max_batch <= 0 then invalid_arg "Eio_net_unix.Frame: max_batch <= 0";
+    if max_batch > max_batch_limit then
+      invalid_arg "Eio_net_unix.Frame: max_batch > 64";
     let socket = Eio_unix.Net.import_socket_datagram ~sw ~close_unix:false fd in
     let recv_buf = Cstruct.create max_frame in
     let recv () =
