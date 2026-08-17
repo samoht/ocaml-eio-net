@@ -23,6 +23,16 @@ val tcp : Ipaddr.t -> int -> Eio.Net.Sockaddr.stream
 val udp : Ipaddr.t -> int -> Eio.Net.Sockaddr.datagram
 (** [udp a port] is the datagram address of [port] on [a]. *)
 
+val stream : _ Eio.Net.t -> host:string -> port:int -> Eio.Net.Sockaddr.stream
+(** [stream net ~host ~port] is the stream address of [port] on [host], where
+    [host] is either a literal IP address or a name [net] resolves. A name with
+    several addresses gives the first the resolver returns.
+
+    Raises [Invalid_argument] when [host] is neither a literal address nor a
+    name that resolves. Nothing else is caught: [Eio.Cancel.Cancelled] passes
+    through, so a fiber cancelled during the lookup unwinds instead of reporting
+    an unresolvable host. *)
+
 val of_stream : Eio.Net.Sockaddr.stream -> (Ipaddr.t * int) option
 (** [of_stream addr] is the address and port [addr] names, or [None] for a Unix
     socket, which names neither. *)

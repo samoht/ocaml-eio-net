@@ -1,4 +1,4 @@
 (test
  (name test)
  (package eio-net)
- (libraries eio-net.addr eio ipaddr alcotest))
+ (libraries eio-net.addr eio eio_main ipaddr alcotest))
