@@ -17,7 +17,7 @@
  (tags (org:blacksun network eio test))
  (depends
   (ocaml (>= 5.1))
-  eio
+  (eio (>= 1.5))
   cstruct
   fmt
   logs

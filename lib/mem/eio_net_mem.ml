@@ -134,7 +134,16 @@ module Network = struct
     Eio.Switch.on_release t.sw (fun () -> Eio.Resource.close socket);
     socket
 
-  let connect t ~sw:_ addr =
+  (* A connection here is a pair of in-memory queues, not a socket: there is
+     nothing to bind a local address to and nothing to set an option on, so a
+     caller asking for either is refused rather than quietly served a
+     connection that has neither. *)
+  let connect t ~bind_to ~options ~sw:_ addr =
+    if Option.is_some bind_to then
+      invalid_arg "eio-net.mem does not support binding a local address";
+    (match options with
+    | Eio.Net.Sockopt.[] -> ()
+    | _ -> invalid_arg "eio-net.mem does not support socket options");
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
           match Hashtbl.find_opt t.hub.listeners addr with

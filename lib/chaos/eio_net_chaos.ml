@@ -510,7 +510,12 @@ module Net = struct
   (* The base network captured as closures that already produce wrapped,
      [`Generic]-tagged sockets, so the provider modules stay monomorphic. *)
   type base = {
-    connect : sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> Flow.flow;
+    connect :
+      bind_to:Eio.Net.Sockaddr.stream option ->
+      options:Eio.Net.Sockopt.settings ->
+      sw:Eio.Switch.t ->
+      Eio.Net.Sockaddr.stream ->
+      Flow.flow;
     listen :
       reuse_addr:bool ->
       reuse_port:bool ->
@@ -581,7 +586,7 @@ module Net = struct
           t.connect_q := xs;
           x
 
-    let connect t ~sw addr =
+    let connect t ~bind_to ~options ~sw addr =
       match next_connect t with
       | Refuse -> raise (refused_exn ())
       | Timeout -> raise (timeout_exn ())
@@ -589,8 +594,8 @@ module Net = struct
           for _ = 1 to n do
             Eio.Fiber.yield ()
           done;
-          t.base.connect ~sw addr
-      | Open -> t.base.connect ~sw addr
+          t.base.connect ~bind_to ~options ~sw addr
+      | Open -> t.base.connect ~bind_to ~options ~sw addr
 
     let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
       let base = t.base.listen ~reuse_addr ~reuse_port ~backlog ~sw addr in
@@ -613,7 +618,9 @@ module Net = struct
   let handler = Eio.Net.Pi.network (module Network)
 
   let base_of ~flow (net : _ Eio.Net.t) =
-    let connect ~sw addr = Flow.wrap flow (Eio.Net.connect ~sw net addr) in
+    let connect ~bind_to ~options ~sw addr =
+      Flow.wrap flow (Eio.Net.connect ?bind_to ~options ~sw net addr)
+    in
     let listen ~reuse_addr ~reuse_port ~backlog ~sw addr =
       let l = Eio.Net.listen ~reuse_addr ~reuse_port ~backlog ~sw net addr in
       let accept ~sw =
