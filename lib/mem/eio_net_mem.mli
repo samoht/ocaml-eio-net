@@ -20,7 +20,16 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
 
     TCP stream addresses are matched exactly. Host resolution maps ["localhost"]
     and ["127.0.0.1"] to IPv4 loopback for the requested service port. Unix
-    stream addresses are also accepted directly by [listen] and [connect]. *)
+    stream addresses are also accepted directly by [listen] and [connect].
+
+    [connect] accepts, and ignores, the socket options whose effect these queues
+    already have: the ones asking that writes not be coalesced and that
+    acknowledgements not be delayed, neither of which happens here. It refuses
+    every other option, naming it, because ignoring one that would change what a
+    caller observes is a wrong answer with no symptom. A caller cannot tell an
+    ignored option from an applied one, so a test that must know an option took
+    effect needs a real socket. [bind_to] is refused: there is no local address
+    to bind. *)
 
 val pipe :
   unit ->

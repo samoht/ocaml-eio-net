@@ -1,4 +1,4 @@
 (library
  (name eio_net_mem)
  (public_name eio-net.mem)
- (libraries eio cstruct))
+ (libraries eio cstruct fmt))

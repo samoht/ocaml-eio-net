@@ -100,6 +100,55 @@ let test_read_after_peer_close () =
       Alcotest.failf "read after peer close raised %s" (Printexc.to_string e)
   | (_ : int) -> Alcotest.fail "read after peer close should reach EOF"
 
+(* A latency hint this transport already satisfies connects rather than
+   raising. conpool and happy-eyeballs pass TCP_NODELAY on every connect, so a
+   refusal here is a failed connect for every caller reaching a mem network
+   through an HTTP client. *)
+let test_connect_ignores_latency_hint () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8082) in
+  let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
+  Eio.Fiber.both
+    (fun () ->
+      let flow, _ = Eio.Net.accept ~sw listener in
+      Eio.Flow.copy_string "ok" flow)
+    (fun () ->
+      let flow =
+        Eio.Net.connect ~sw
+          ~options:Eio.Net.Sockopt.[ (TCP_NODELAY, true); (TCP_QUICKACK, true) ]
+          net addr
+      in
+      let buf = Cstruct.create 2 in
+      Eio.Flow.read_exact flow buf;
+      Alcotest.(check string)
+        "connected with hints set" "ok" (Cstruct.to_string buf))
+
+(* An option that would change what a caller observes is still refused, and
+   the refusal names it. Accepting this one silently would trade a loud wrong
+   answer for a quiet one: the connection would have no keepalive and nothing
+   would say so. *)
+let test_connect_refuses_semantic_option () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8083) in
+  let _listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
+  match
+    Eio.Net.connect ~sw
+      ~options:Eio.Net.Sockopt.[ (TCP_NODELAY, true); (SO_KEEPALIVE, true) ]
+      net addr
+  with
+  | exception Invalid_argument msg ->
+      Alcotest.(check string)
+        "refusal names the option"
+        "eio-net.mem does not support socket option SO_KEEPALIVE" msg
+  | exception e ->
+      Alcotest.failf "keepalive on a mem connect raised %s"
+        (Printexc.to_string e)
+  | _ -> Alcotest.fail "keepalive on a mem connect should be refused"
+
 let suite =
   ( "eio_net_mem",
     [
@@ -113,4 +162,8 @@ let suite =
         test_write_after_own_shutdown;
       Alcotest.test_case "read after peer close" `Quick
         test_read_after_peer_close;
+      Alcotest.test_case "connect ignores a latency hint" `Quick
+        test_connect_ignores_latency_hint;
+      Alcotest.test_case "connect refuses a semantic option" `Quick
+        test_connect_refuses_semantic_option;
     ] )
