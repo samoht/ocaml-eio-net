@@ -1,10 +1,3 @@
-(* The backend code carried by the connection-reset a mem flow raises when a
-   write finds its send side closed -- the peer has gone away, or this end shut
-   its own send. It makes that write an [Eio.Io] error of the same shape a real
-   socket raises on write-after-reset (ECONNRESET/EPIPE), rather than the bare
-   [Failure "cannot write to closed writer"] that [Eio.Buf_write] raises when
-   its writer is closed and that no adapter written against real sockets would
-   catch. *)
 type Eio.Exn.Backend.t += Closed
 
 let () =
@@ -30,10 +23,8 @@ module Flow = struct
     type tag = [ `Generic ]
     type t = { to_peer : W.t; from_peer : W.t }
 
-    (* [W.cstruct] on a closed writer raises a bare [Failure]; a real socket
-       raises [Eio.Io (Connection_reset ...)] on write-after-reset. Detect the
-       closed send side up front ([is_closed] holds exactly when [W.cstruct]
-       would raise, and no write below suspends to race it) and translate. *)
+    (* [W.cstruct] on a closed writer raises a bare [Failure]; translate it to
+       the reset a real socket raises. [is_closed] holds exactly when it would. *)
     let single_write t bufs =
       if W.is_closed t.to_peer then raise (reset_exn ());
       let bufs = takev (Cstruct.lenv bufs) bufs in
@@ -58,8 +49,6 @@ module Flow = struct
     let close t = shutdown t `All
     let read_methods = []
 
-    (* An in-memory pipe has no kernel socket, so options do not apply:
-       setsockopt is a no-op (best effort) and getsockopt is unsupported. *)
     let setsockopt _ _ _ = ()
 
     let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
@@ -134,44 +123,11 @@ module Network = struct
     Eio.Switch.on_release t.sw (fun () -> Eio.Resource.close socket);
     socket
 
-  (* WORKAROUND, standing until eio gains an advisory socket option.
-
-     [Eio.Net.Sockopt.settings] has one shape for every option, so a caller
-     has no way to say "set this if you can": a latency hint and a semantic
-     requirement are spelled identically. Callers that want the hint --
-     conpool and happy-eyeballs both pass [TCP_NODELAY] on every connect --
-     therefore make it mandatory for every backend they are handed, and a
-     backend that refuses whatever it cannot apply turns the hint into a
-     failed connect. That is what it did: 16 in-memory HTTP cases across
-     ocaml-stripe, ocaml-oci and ocaml-git died in [connect] on an option
-     that could not have changed a byte they exchanged.
-
-     The mechanism this substitutes for is an eio-level advisory option (or a
-     documented per-backend "unsupported options are ignored" contract).
-     Neither exists in eio 1.5, so the rule below stands here instead.
-
-     The rule is not "hints are tolerated". It is narrower: an option is
-     ignored only where these in-memory queues already provide what it asks
-     for, so ignoring it yields exactly the requested behaviour rather than
-     silently withholding it. [TCP_NODELAY] asks that a small write not wait
-     to be coalesced with the next one; nothing here coalesces, and a write is
-     readable by the peer as soon as it returns. [TCP_QUICKACK] asks that
-     acknowledgements not be delayed; there are no acknowledgements. Every
-     other option -- buffer sizes, keepalive, linger, cork, timeouts -- would
-     change what a caller can observe, and is still refused, now by name.
-
-     What this does not cover:
-
-     - A caller cannot distinguish "hint applied" from "hint ignored".
-       [connect] returns no report of what was set and [getsockopt] is
-       unsupported here, so code that must know an option took effect cannot
-       learn it from this backend.
-     - The list is an enumeration, not a blanket accept, and it is judged
-       against an in-memory pipe only. It says nothing about what any other
-       backend does with the same option.
-     - Post-connect [Eio.Net.setsockopt] on a mem socket remains a blanket
-       no-op (see [Flow.Impl.setsockopt] and [Listening_socket.setsockopt]):
-       it accepts, silently, options this refuses. *)
+  (* An option is ignored only where these queues already provide what it asks
+     for, so ignoring it yields the requested behaviour rather than withholding
+     it: [TCP_NODELAY] and [TCP_QUICKACK]. Every other option would change what
+     a caller observes and is refused by name; post-connect [setsockopt] on a
+     mem socket remains a blanket no-op. *)
   let ignored_hint : type a. a Eio.Net.Sockopt.t -> bool = function
     | Eio.Net.Sockopt.TCP_NODELAY -> true
     | Eio.Net.Sockopt.TCP_QUICKACK -> true
@@ -187,9 +143,8 @@ module Network = struct
             Eio.Net.Sockopt.pp opt;
         check_options rest
 
-  (* A connection here is a pair of in-memory queues, not a socket: there is
-     nothing to bind a local address to, so a caller asking for one is refused
-     rather than quietly served a connection that has none. *)
+  (* A connection is a pair of queues: there is no local address to bind, so a
+     caller asking for one is refused. *)
   let connect t ~bind_to ~options ~sw:_ addr =
     if Option.is_some bind_to then
       invalid_arg "eio-net.mem does not support binding a local address";

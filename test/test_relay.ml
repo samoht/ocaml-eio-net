@@ -1,13 +1,5 @@
-(* The relay's promises: bytes cross both ways, a finished direction reaches
-   the peer as a half-close, and one bad connection never takes the listener
-   down. Exercised over real loopback sockets because listening and accepting
-   is the part a mock flow cannot vouch for. *)
-
 let loopback port = `Tcp (Eio.Net.Ipaddr.V4.loopback, port)
 
-(* An echo server on an ephemeral port, reading to end-of-stream and writing
-   everything back -- the shape that only terminates if the relay propagates
-   the client's half-close. *)
 let echo_server ~sw ~net =
   let socket =
     Eio.Net.listen ~sw ~backlog:4 ~reuse_addr:true net (loopback 0)
@@ -63,8 +55,6 @@ let test_dial_failure_keeps_listening () =
   let net = Eio.Stdenv.net env in
   let upstream = echo_server ~sw ~net in
   let failures = ref 0 in
-  (* First relay points at a dead port: its connections fail and are reported.
-     The listener must survive to serve the second, healthy exchange. *)
   let dead =
     Eio_net.Relay.forward ~sw ~net
       ~on_error:(fun _ -> incr failures)
@@ -73,16 +63,13 @@ let test_dial_failure_keeps_listening () =
   (let flow = Eio.Net.connect ~sw net (loopback (port_of dead)) in
    Eio.Flow.copy_string "lost" flow;
    Eio.Flow.shutdown flow `Send;
-   (* Clean end-of-file or a reset, depending on whether the relay closed
-      before or after the client's bytes arrived; either way nothing comes
-      back. *)
+   (* Clean end-of-file or a reset; either way nothing comes back. *)
    let got =
      try Eio.Buf_read.of_flow ~max_size:1_000 flow |> Eio.Buf_read.take_all
      with Eio.Io (Eio.Net.E (Connection_reset _), _) -> ""
    in
    Alcotest.(check string) "nothing comes back from a dead upstream" "" got);
   Alcotest.(check bool) "the failure was reported" true (!failures >= 1);
-  (* Same listener, second connection: still accepting after the failure. *)
   let dead2 = Eio.Net.connect ~sw net (loopback (port_of dead)) in
   Eio.Flow.shutdown dead2 `Send;
   let healthy =

@@ -50,15 +50,11 @@ let test_connect_to_wildcard_listener () =
       Alcotest.(check string)
         "wildcard accepted loopback" "ok" (Cstruct.to_string buf))
 
-(* A write to a mem flow whose peer has closed raises the same [Eio.Io]
-   connection-reset a real socket raises on write-after-reset, not the bare
-   [Failure] that [Eio.Buf_write] raises internally on a closed writer. That
-   fidelity is what lets an adapter's best-effort [Eio.Io] catch behave the
-   same against the fake as against a real socket. *)
+(* A write to a mem flow whose peer has closed raises the [Eio.Io] reset a
+   real socket raises, not the internal [Failure]. *)
 let test_write_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe () in
-  (* The peer goes away, closing the client's send channel. *)
   Eio.Flow.close server;
   match Eio.Flow.single_write client [ Cstruct.of_string "ping" ] with
   | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
@@ -68,8 +64,6 @@ let test_write_after_peer_close () =
       Alcotest.failf "write to closed mem flow raised %s" (Printexc.to_string e)
   | (_ : int) -> Alcotest.fail "write to closed mem flow should raise"
 
-(* Closing this end's own send side also makes a subsequent write raise the
-   faithful reset (a real socket's EPIPE), not [Failure]. *)
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -82,8 +76,6 @@ let test_write_after_own_shutdown () =
       Alcotest.failf "write after own shutdown raised %s" (Printexc.to_string e)
   | (_ : int) -> Alcotest.fail "write after own shutdown should raise"
 
-(* A read after the peer closed returns end-of-file, matching a real socket:
-   any buffered bytes drain first, then [single_read] raises [End_of_file]. *)
 let test_read_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe () in
@@ -101,9 +93,7 @@ let test_read_after_peer_close () =
   | (_ : int) -> Alcotest.fail "read after peer close should reach EOF"
 
 (* A latency hint this transport already satisfies connects rather than
-   raising. conpool and happy-eyeballs pass TCP_NODELAY on every connect, so a
-   refusal here is a failed connect for every caller reaching a mem network
-   through an HTTP client. *)
+   raising. *)
 let test_connect_ignores_latency_hint () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -125,10 +115,6 @@ let test_connect_ignores_latency_hint () =
       Alcotest.(check string)
         "connected with hints set" "ok" (Cstruct.to_string buf))
 
-(* An option that would change what a caller observes is still refused, and
-   the refusal names it. Accepting this one silently would trade a loud wrong
-   answer for a quiet one: the connection would have no keepalive and nothing
-   would say so. *)
 let test_connect_refuses_semantic_option () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->

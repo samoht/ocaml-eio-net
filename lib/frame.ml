@@ -8,16 +8,9 @@ type t = {
 
 let pp ppf _ = Fmt.string ppf "<frame channel>"
 
-(* A frame's bytes as a view (offset + length into owned bytes) rather than a
-   fresh string, so a decode layer strips its header by advancing the offset
-   instead of copying. The view is valid until the next recv (bytesrw's slice
-   contract): a layer that retains the payload past that must copy it. An empty
-   frame yields eod. *)
 let slice_of_string s =
   Bytesrw.Bytes.Slice.of_bytes_or_eod (Bytes.unsafe_of_string s)
 
-(* Default batch send: one frame at a time. A transport that can coalesce a
-   burst into a single [writev] (software GSO) overrides this. *)
 let v ~recv ~send =
   {
     recv;
@@ -27,15 +20,8 @@ let v ~recv ~send =
     send_batch = List.iter send;
   }
 
-(* A rope's leaves map one-to-one onto iovec entries, so a payload carried as a
-   zero-copy rope leaf reaches the wire through [writev] without being
-   concatenated into a whole-frame string. *)
 let rope_cstructs rope = List.map Cstruct.of_string (Rope.to_strings rope)
 
-(* The addressed {!Datagram} channel owns the socket plumbing (and the refusal
-   of oversized datagrams); this carrier just drops the source address. Each
-   datagram is its own [send] syscall, so [v]'s one-at-a-time batching is
-   already the best a datagram socket can do. *)
 let of_datagram_socket ?max_frame ?dst socket =
   let channel = Datagram.of_socket ?max_frame ?dst socket in
   v
@@ -67,9 +53,6 @@ let of_length_prefixed_flow ?(max_frame = 1_048_576) ?(prefix_bytes = 4) flow =
     done;
     Cstruct.of_bytes hdr
   in
-  (* Software GSO: a whole burst of frames -- each its length prefix then its
-     rope leaves -- goes out in one [writev] rather than one syscall per
-     frame. *)
   let send_batch ropes =
     let iovecs =
       List.concat_map (fun rope -> prefix rope :: rope_cstructs rope) ropes

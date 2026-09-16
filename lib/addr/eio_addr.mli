@@ -1,14 +1,7 @@
-(** Eio socket addresses from {!Ipaddr} addresses.
+(** Eio socket addresses from {!Ipaddr} addresses, both ways.
 
-    Eio names an IP address by its raw octets and a socket by a polymorphic
-    variant; {!Ipaddr} names one by a parsed, comparable type. Every program
-    that reads an address from a config file, a boot flag or a protocol message
-    and then connects to it crosses that boundary. This is the crossing, in one
-    place, both ways.
-
-    Parsing the address itself is {!Ipaddr}'s own job: [Ipaddr.of_string], or
-    [Ipaddr.with_port_of_string ~default] for the [HOST:PORT] a boot flag
-    carries. *)
+    Parsing is {!Ipaddr}'s own job: [Ipaddr.of_string], or
+    [Ipaddr.with_port_of_string ~default] for a [HOST:PORT]. *)
 
 val ip : Ipaddr.t -> Eio.Net.Ipaddr.v4v6
 (** [ip a] is [a] as an Eio address. *)

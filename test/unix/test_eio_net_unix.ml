@@ -1,6 +1,5 @@
-(* Connected datagrams preserve one frame per datagram even when a batch spans
-   several system calls. The deliberately small cap exercises chunking and the
-   final partial batch without weakening the exact ordering assertion. *)
+(* A deliberately small batch cap exercises chunking and the final partial
+   batch without weakening the ordering assertion. *)
 let test_connected_datagram_batch () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -22,10 +21,9 @@ let test_connected_datagram_batch () =
   Unix.close fa;
   Unix.close fb
 
-(* A full Darwin datagram socket reports [ENOBUFS], rather than [EAGAIN], from
-   [sendmsg_x].  It is ordinary backpressure: yield to the receiver and retry,
-   preserving every datagram.  Small socket buffers make the condition
-   deterministic without making the test transfer much data. *)
+(* A full Darwin datagram socket reports [ENOBUFS], not [EAGAIN], from
+   [sendmsg_x]: ordinary backpressure, so yield and retry. Small socket buffers
+   make the condition deterministic. *)
 let test_connected_datagram_backpressure () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->

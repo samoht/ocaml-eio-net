@@ -1,6 +1,3 @@
-(* A backend error code for every fault this layer raises, so a
-   connection-reset or connection-refused it injects is an [Eio.Io] error
-   indistinguishable in shape from a real one. *)
 type Eio.Exn.Backend.t += Injected_fault
 
 let () =
@@ -17,8 +14,6 @@ let refused_exn () =
 
 let timeout_exn () = Eio.Net.err (Eio.Net.Connection_failure Eio.Net.Timeout)
 
-(* The first [len] bytes of an iovec list, dropping whole trailing buffers and
-   slicing the one the boundary falls in. *)
 let rec takev len = function
   | [] -> []
   | x :: xs ->
@@ -26,9 +21,6 @@ let rec takev len = function
       else if Cstruct.length x >= len then [ Cstruct.sub x 0 len ]
       else x :: takev (len - Cstruct.length x) xs
 
-(* Two decorrelated PRNG streams from one seed, so read faults and write faults
-   are each a pure function of the seed regardless of how reads and writes
-   interleave at runtime. *)
 let read_rng seed = Random.State.make [| seed; 0x5eed_1 |]
 let write_rng seed = Random.State.make [| seed; 0x5eed_2 |]
 let dgram_rng seed = Random.State.make [| seed; 0x5eed_3 |]
@@ -36,25 +28,14 @@ let dgram_rng seed = Random.State.make [| seed; 0x5eed_3 |]
 module Flow = struct
   type read =
     | Deliver of int
-      (* Hand up at most [n] buffered bytes on this read; [n <= 0] means all
-           that is buffered. This is the dribble/short-read fault. *)
     | Coalesce of int
-      (* Do [n] base reads, accumulate them into the buffer, then hand the
-           whole buffer up: several transport reads become one application
-           read. Stops early at end-of-file. *)
     | Stall of int
-      (* [Eio.Fiber.yield] [n] times, then deliver as [Deliver 0]. A
-           cooperative stall: the scheduler runs other fibers in between. *)
-    | Reset (* Raise a connection-reset instead of delivering. *)
+    | Reset
     | Eof
-  (* End the read direction: this and every later read raise [End_of_file]. *)
 
   type write =
     | Accept of int
-      (* Accept at most [n] of the offered bytes on this write; [n <= 0]
-           means all. This is the short-write fault. The accepted bytes do
-           reach the peer; the caller sees a short count and must retry. *)
-    | Fail (* Raise a connection-reset instead of writing. *)
+    | Fail
 
   module Schedule = struct
     type seeded = {
@@ -101,8 +82,6 @@ module Flow = struct
             s.reset_after
   end
 
-  (* A resolved fault source: the next fault for a read (given how many bytes
-     have been delivered so far) and for a write (given how many written). *)
   type driver = { read : delivered:int -> read; write : written:int -> write }
 
   let driver (s : Schedule.t) : driver =
@@ -195,7 +174,6 @@ module Flow = struct
       mutable recv_closed : bool;
     }
 
-    (* Pull one base read into [leftover]. Propagates [End_of_file]. *)
     let fill_one t =
       let scratch = Cstruct.create (max (Cstruct.length t.leftover) 0x4000) in
       let got = t.base.read scratch in
@@ -203,7 +181,6 @@ module Flow = struct
 
     let ensure_buffer t = if Cstruct.length t.leftover = 0 then fill_one t
 
-    (* Hand up at most [cap] buffered bytes into [dst] ([cap <= 0] = all). *)
     let deliver t dst ~cap =
       ensure_buffer t;
       let avail = Cstruct.length t.leftover in
@@ -282,18 +259,13 @@ end
 
 module Datagram = struct
   type fault =
-    | Pass (* Deliver the next datagram unchanged. *)
+    | Pass
     | Drop of int
-      (* Drop [n] datagrams from the base, then deliver the one after them. *)
-    | Dup (* Deliver the next datagram now and again on the following recv. *)
+    | Dup
     | Reorder
-      (* Hold the next datagram back and deliver the one after it first; the
-           held datagram surfaces on the following recv. *)
-    | Truncate of
-        int (* Deliver only the first [n] bytes of the next datagram. *)
-    | Garble of int (* Deliver [n] PRNG bytes in place of the next datagram. *)
+    | Truncate of int
+    | Garble of int
     | Delay of int
-  (* [Eio.Fiber.yield] [n] times, then deliver the next datagram. *)
 
   module Schedule = struct
     type seeded = {
@@ -398,13 +370,10 @@ module Datagram = struct
       mutable deferred : (Eio.Net.Sockaddr.datagram * string) option;
     }
 
-    (* One base datagram, snapshotted as a string so faults can hold, truncate,
-       or replace it. *)
     let recv_raw t buf =
       let addr, len = t.base.recv buf in
       (addr, Cstruct.to_string (Cstruct.sub buf 0 len))
 
-    (* Blit a (possibly fault-adjusted) datagram into the caller's buffer. *)
     let put buf addr data =
       let n = min (String.length data) (Cstruct.length buf) in
       Cstruct.blit_from_string data 0 buf 0 n;
@@ -453,8 +422,6 @@ module Datagram = struct
           put buf addr data
       | None -> apply t buf (t.driver.next ())
 
-    (* Send passes through: incoming-path faults model a lossy/hostile network
-       the receiver sees. *)
     let send t ?dst bufs = t.base.send ?dst bufs
     let shutdown t cmd = t.base.shutdown cmd
     let close t = t.base.close ()
@@ -550,9 +517,6 @@ module Net = struct
       mutable accepts : int;
     }
 
-    (* After [max_accepts] connections the server drops: the listener closes and
-       every further accept raises [End_of_file]. This is the keep-alive server
-       that serves N then goes away. *)
     let accept t ~sw =
       (match t.max_accepts with
       | Some m when t.accepts >= m ->
@@ -642,8 +606,6 @@ module Net = struct
       }
     in
     let datagram ~reuse_addr:_ ~reuse_port:_ ~sw:_ _addr =
-      (* The stream-oriented chaos network does not carry datagram sockets; a
-         datagram socket is made adversarial directly with {!Datagram.wrap}. *)
       invalid_arg "Eio_net_chaos.Net: datagram sockets are not wrapped here"
     in
     {

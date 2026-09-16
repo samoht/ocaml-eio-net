@@ -5,17 +5,13 @@ type t = {
 
 let pp ppf _ = Fmt.string ppf "<datagram channel>"
 
-(* A rope's leaves map one-to-one onto iovec entries, so a payload carried as a
-   zero-copy rope leaf reaches the wire through [writev] without being
-   concatenated into a whole-datagram string. *)
 let rope_cstructs rope = List.map Cstruct.of_string (Rope.to_strings rope)
 
 let of_socket ?(max_frame = 65536) ?dst socket =
   if max_frame <= 0 then
     Fmt.invalid_arg "Eio_net.Datagram: max_frame %d must be positive" max_frame;
-  (* One byte of headroom so a datagram longer than [max_frame] is
-     distinguishable from one exactly [max_frame] long: a datagram socket
-     reports a truncated receive as if it were complete. *)
+  (* One byte of headroom tells a datagram longer than [max_frame] from one
+     exactly [max_frame] long. *)
   let buf = Cstruct.create (max_frame + 1) in
   let recv () =
     let source, len = Eio.Net.recv socket buf in

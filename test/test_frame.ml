@@ -1,7 +1,5 @@
 let send frame rope = frame.Eio_net.Frame.send (Rope.of_string rope)
 
-(* A frame sent on one end of a pair arrives whole on the other, in both
-   directions, preserving frame boundaries (each recv is exactly one send). *)
 let test_pair () =
   Eio_main.run @@ fun _env ->
   let a, b = Eio_net.Frame.pair () in
@@ -21,9 +19,6 @@ let test_pair () =
     [ "first"; "second"; "reply" ]
     !got
 
-(* of_length_prefixed_flow frames a byte stream as [4-byte big-endian length]
-   [payload]: each recv returns exactly one sent frame, boundaries preserved
-   even when several frames share a read and a frame spans reads. *)
 let test_length_prefixed_roundtrip () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -39,7 +34,6 @@ let test_length_prefixed_roundtrip () =
   Alcotest.(check (list string))
     "frames arrive whole and in order" payloads !got
 
-(* A clean close at a frame boundary makes the next recv raise End_of_file. *)
 let test_length_prefixed_eof () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -64,8 +58,6 @@ let test_length_prefixed_eof () =
     (Some ("last", true))
     !got
 
-(* A length prefix over [max_frame] is refused before the payload is read, so a
-   hostile peer cannot force an unbounded allocation. *)
 let test_length_prefixed_over_limit () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -83,8 +75,6 @@ let test_length_prefixed_over_limit () =
       Eio.Flow.close a);
   Alcotest.(check bool) "over-limit frame refused" true !raised
 
-(* send_batch coalesces a burst of frames into one writev, and the receiver
-   still reads them back as distinct, whole frames in order. *)
 let test_length_prefixed_batch () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -101,7 +91,6 @@ let test_length_prefixed_batch () =
   Alcotest.(check (list string))
     "batched frames arrive whole and in order" payloads !got
 
-(* A 2-byte prefix frames independently of the 4-byte default (utun / DNS). *)
 let test_length_prefixed_16bit () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -115,9 +104,6 @@ let test_length_prefixed_16bit () =
   Alcotest.(check string)
     "16-bit-prefixed frame round-trips" "sixteen-bit framed" !got
 
-(* recv_slice hands the frame up as a view (offset + length into owned bytes),
-   the inbound dual of send's rope: a decode layer reads its header at the
-   slice's offset without copying the whole frame first. *)
 let test_recv_slice () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -129,7 +115,6 @@ let test_recv_slice () =
     (fun () -> send sender "HDRpayload-bytes")
     (fun () ->
       let s = receiver.Eio_net.Frame.recv_slice () in
-      (* strip a 3-byte header at the slice's offset, no whole-frame String.sub *)
       let hdr =
         Bytes.sub_string
           (Bytesrw.Bytes.Slice.bytes s)

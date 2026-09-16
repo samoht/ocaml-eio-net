@@ -8,8 +8,6 @@ let read1 flow =
   let n = Eio.Flow.single_read flow buf in
   Cstruct.to_string (Cstruct.sub buf 0 n)
 
-(* Read a flow to end-of-file, returning the size of every chunk delivered. The
-   chunking is what the read-side faults shape. *)
 let read_sizes flow =
   let buf = Cstruct.create 128 in
   let sizes = ref [] in
@@ -24,8 +22,6 @@ let is_io = function Eio.Io _ -> true | _ -> false
 
 (* --- Flow faults --------------------------------------------------------- *)
 
-(* A dribble schedule splits one buffered payload across several reads: the
-   scripted [Deliver 2; Deliver 3] hands up "ab" then "cde", the rest last. *)
 let test_flow_dribble () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -46,8 +42,6 @@ let test_flow_dribble () =
   Alcotest.(check (list string))
     "read split into scripted chunks" [ "ab"; "cde"; "f" ] !got
 
-(* Coalescing forces two distinct transport reads into one application read:
-   the peer writes "aa", yields, writes "bb"; [Coalesce 2] returns "aabb". *)
 let test_flow_coalesce () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -63,8 +57,6 @@ let test_flow_coalesce () =
     (fun () -> got := read1 server);
   Alcotest.(check string) "two writes coalesced into one read" "aabb" !got
 
-(* A stalled read yields the scheduler without delivering, letting a competing
-   fiber advance, then delivers. The data is buffered up front. *)
 let test_flow_stall () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -83,9 +75,6 @@ let test_flow_stall () =
   Alcotest.(check bool)
     "competitor advanced during the stall" true (!progress >= 1)
 
-(* A torn write accepts only the scripted prefix and then errors: the caller
-   sees a short count of 3, the peer receives exactly "abc", and the next
-   write raises a reset at the scripted point. *)
 let test_flow_torn_write () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -102,8 +91,6 @@ let test_flow_torn_write () =
   Alcotest.(check string) "peer received exactly the accepted bytes" "abc" !peer;
   Alcotest.(check bool) "second write raised a reset" true !raised
 
-(* A mid-stream reset: the first read delivers, the scripted [Reset] on the
-   second raises an Eio.Io error. *)
 let test_flow_reset () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -120,8 +107,6 @@ let test_flow_reset () =
   Alcotest.(check string) "first read delivers" "abc" !first;
   Alcotest.(check bool) "second read resets" true !reset
 
-(* A mid-stream end-of-file: the scripted [Eof] on the second read raises
-   End_of_file, and it stays ended. *)
 let test_flow_eof () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -138,9 +123,6 @@ let test_flow_eof () =
   Alcotest.(check string) "first read delivers" "abc" !first;
   Alcotest.(check bool) "second read ends the stream" true !ended
 
-(* Same seed, same fault sequence: a seeded dribble schedule chunks a fixed
-   payload identically across two independent runs, and it does split the
-   payload (some chunk is shorter than the whole). *)
 let run_seeded_flow seed =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -166,9 +148,7 @@ let test_flow_seeded_deterministic () =
 
 (* --- Datagram faults ----------------------------------------------------- *)
 
-(* A minimal in-memory datagram socket for hermetic datagram tests: [recv]
-   pops from a pre-filled inbound queue, [send] records outbound payloads.
-   mem deliberately has no datagram support, so the fake lives here. *)
+(* mem deliberately has no datagram support, so the fake lives here. *)
 module Fake_dgram = struct
   type tag = [ `Generic ]
 
@@ -198,8 +178,6 @@ end
 let fake_handler = Eio.Net.Pi.datagram_socket (module Fake_dgram)
 let loopback port = `Udp (Eio.Net.Ipaddr.V4.loopback, port)
 
-(* A fake datagram socket pre-filled with [payloads] (all from the same
-   loopback source), returned as an [Eio.Net.datagram_socket]. *)
 let fake_dgram payloads =
   let inbound = Eio.Stream.create max_int in
   List.iter (fun p -> Eio.Stream.add inbound (loopback 9000, p)) payloads;
@@ -214,7 +192,6 @@ let recv1 sock =
 
 let recv_n sock n = List.init n (fun _ -> recv1 sock)
 
-(* Drop as scripted: [Drop 1] consumes and discards "d0", then delivers "d1". *)
 let test_dgram_drop () =
   Eio_mock.Backend.run @@ fun () ->
   let base = fake_dgram [ "d0"; "d1"; "d2"; "d3" ] in
@@ -222,7 +199,6 @@ let test_dgram_drop () =
   Alcotest.(check (list string))
     "dropped datagram is skipped" [ "d1"; "d2"; "d3" ] (recv_n sock 3)
 
-(* Duplicate as scripted: [Dup] delivers "d0" now and again on the next recv. *)
 let test_dgram_dup () =
   Eio_mock.Backend.run @@ fun () ->
   let base = fake_dgram [ "d0"; "d1" ] in
@@ -230,8 +206,6 @@ let test_dgram_dup () =
   Alcotest.(check (list string))
     "datagram is delivered twice" [ "d0"; "d0"; "d1" ] (recv_n sock 3)
 
-(* Reorder as scripted: [Reorder] holds "d0" and delivers "d1" first; "d0"
-   surfaces on the following recv. *)
 let test_dgram_reorder () =
   Eio_mock.Backend.run @@ fun () ->
   let base = fake_dgram [ "d0"; "d1"; "d2" ] in
@@ -239,16 +213,12 @@ let test_dgram_reorder () =
   Alcotest.(check (list string))
     "datagrams arrive out of order" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
 
-(* Truncate as scripted: only the first 3 bytes of "hello" are delivered. *)
 let test_dgram_truncate () =
   Eio_mock.Backend.run @@ fun () ->
   let base = fake_dgram [ "hello" ] in
   let sock = Datagram.wrap (Datagram.Schedule.script [ Truncate 3 ]) base in
   Alcotest.(check string) "datagram truncated" "hel" (recv1 sock)
 
-(* Garble as scripted replaces the payload with seed-derived bytes: the same
-   script produces the same garbage on two wraps (deterministic), of the
-   scripted length, and not the original payload. *)
 let test_dgram_garble () =
   let one () =
     Eio_mock.Backend.run @@ fun () ->
@@ -261,9 +231,6 @@ let test_dgram_garble () =
   Alcotest.(check int) "garble has the scripted length" 4 (String.length a);
   Alcotest.(check bool) "garble differs from the original" true (a <> "hell")
 
-(* Same seed, same datagram fault sequence: a seeded lossy schedule delivers an
-   identical payload sequence across two runs, and it is not the untouched
-   in-order stream. *)
 let run_seeded_dgram seed =
   Eio_mock.Backend.run @@ fun () ->
   let payloads = List.init 30 (fun i -> Fmt.str "%02d" i) in
@@ -285,8 +252,6 @@ let test_dgram_seeded_deterministic () =
 
 let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)
 
-(* connect returns an adversarial flow: the per-flow dribble schedule applies
-   to the connected client flow, splitting the server's write. *)
 let test_net_connect_dribbles () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -310,7 +275,6 @@ let test_net_connect_dribbles () =
       got := [ a; b ]);
   Alcotest.(check (list string)) "connected flow dribbles" [ "ab"; "cd" ] !got
 
-(* A scripted connect fault refuses the connection with an Eio.Io error. *)
 let test_net_connect_refused () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -323,7 +287,6 @@ let test_net_connect_refused () =
   in
   Alcotest.(check bool) "connect refused" true refused
 
-(* A slow connect yields before completing, then returns a usable flow. *)
 let test_net_connect_slow () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -340,8 +303,6 @@ let test_net_connect_slow () =
       got := read1 flow);
   Alcotest.(check string) "slow connect still connects" "ok" !got
 
-(* A keep-alive-style listener drops after its accept budget: two accepts
-   succeed, the third raises End_of_file. *)
 let test_net_max_accepts () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->

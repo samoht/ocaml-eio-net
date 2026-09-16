@@ -1,11 +1,6 @@
-(* The Ipaddr <-> Eio crossing, both ways and both families. Eio names an
-   address by its raw octets, so a wrong conversion is not a type error -- it is
-   4 bytes where 16 belong, or a hostname where octets belong. *)
-
 let ip = Alcotest.testable Ipaddr.pp ( = )
 and eio_ip = Alcotest.testable Eio.Net.Ipaddr.pp ( = )
 
-(* Round-tripping an address through Eio's representation is the identity. *)
 let test_roundtrip () =
   let check s =
     let a = Ipaddr.of_string_exn s in
@@ -17,7 +12,6 @@ let test_roundtrip () =
   check "::1";
   check "2001:db8::dead:beef"
 
-(* An IPv4 address is four octets to Eio, an IPv6 one sixteen. *)
 let test_octets () =
   Alcotest.(check int)
     "IPv4 is four octets" 4
@@ -29,7 +23,6 @@ let test_octets () =
     "the loopback Eio names itself" Eio.Net.Ipaddr.V4.loopback
     (Eio_addr.ip (Ipaddr.of_string_exn "127.0.0.1"))
 
-(* Socket addresses carry the address and the port, and read back. *)
 let test_sockaddr () =
   let a = Ipaddr.of_string_exn "192.0.2.7" in
   Alcotest.(check (option (pair ip int)))
@@ -44,10 +37,6 @@ let test_sockaddr () =
     "a unix socket names no address" None
     (Eio_addr.of_stream (`Unix "/tmp/agent.sock"))
 
-(* Octets are not a name: Eio addresses are 4 or 16 raw bytes, so a hostname
-   handed to [Eio.Net.Ipaddr.of_raw] raises rather than becoming an address --
-   which is why a caller with a name in hand parses it ([Ipaddr.of_string]) or
-   resolves it ([Eio.Net.getaddrinfo]) before crossing. *)
 let test_not_an_address () =
   Alcotest.check_raises "a hostname is not an address"
     (Invalid_argument
@@ -56,8 +45,6 @@ let test_not_an_address () =
       ignore (Eio_addr.ip (Ipaddr.of_string_exn "10.0.0.1"));
       ignore (Eio_addr.ipaddr (Eio.Net.Ipaddr.of_raw "flatsat-1")))
 
-(* A literal address is its own answer: [stream] must not consult the resolver
-   for one, because a host that is already an address has nothing to look up. *)
 let test_stream_literal () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
@@ -72,10 +59,7 @@ let test_stream_literal () =
     (Some (a6, 9998))
     (Eio_addr.of_stream (Eio_addr.stream net ~host:"2001:db8::1" ~port:9998))
 
-(* RFC 6761 sec 6.4: the ".invalid" TLD is reserved and guaranteed not to
-   resolve, so a name under it is the one host every resolver refuses. A host
-   that is neither an address nor a name is [Invalid_argument] -- the caller
-   passed a bad argument, and no socket address exists to return. *)
+(* RFC 6761 sec 6.4: the ".invalid" TLD is reserved and does not resolve. *)
 let test_stream_unresolvable () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in

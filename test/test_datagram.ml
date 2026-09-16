@@ -1,6 +1,5 @@
-(* Two Unix-domain datagram sockets bound to paths in a fresh temporary
-   directory: bound (not socketpair) sockets, so each received datagram carries
-   the real source address the tests assert on. *)
+(* Bound (not socketpair) sockets, so each received datagram carries the real
+   source address the tests assert on. *)
 let with_bound_pair f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -20,8 +19,6 @@ let with_bound_pair f =
 let send channel dst payload =
   channel.Eio_net.Datagram.send dst (Rope.of_string payload)
 
-(* recv returns each datagram whole together with its source address, and a
-   reply sent to that returned source arrives back at the original sender. *)
 let test_source_round_trip () =
   with_bound_pair @@ fun ~addr_a ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
@@ -39,7 +36,6 @@ let test_source_round_trip () =
     "reply comes from the responder" true
     (Eio_net.Datagram.equal_addr reply_source addr_b)
 
-(* send None goes to the channel's configured destination. *)
 let test_default_destination () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket ~dst:addr_b sock_a in
@@ -48,8 +44,6 @@ let test_default_destination () =
   let _, payload = b.Eio_net.Datagram.recv () in
   Alcotest.(check string) "datagram reaches configured dst" "to-default" payload
 
-(* A datagram longer than max_frame is refused -- not silently truncated to a
-   plausible-looking short datagram -- and the channel keeps receiving. *)
 let test_oversized_refused () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
@@ -65,7 +59,6 @@ let test_oversized_refused () =
   let _, payload = b.Eio_net.Datagram.recv () in
   Alcotest.(check string) "channel survives the refusal" "8-bytes!" payload
 
-(* A frame channel over the same socket inherits the oversize refusal. *)
 let test_frame_carrier_refuses_oversize () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in

@@ -1,18 +1,9 @@
 (** Adversarial network capabilities for testing Eio protocol adapters.
 
-    A protocol adapter (an HTTP client, an h2 or QUIC stack, an SSH transport)
-    must behave under a hostile or degraded network: reads that dribble a byte
-    at a time, writes the peer only half-accepts, a connection that resets
-    mid-stream, datagrams that vanish or arrive twice or out of order. This
-    layer wraps an ordinary Eio flow, datagram socket, or {!Eio.Net.t} and
-    injects those faults on a deterministic, inspectable schedule, so an
-    adapter's fuzz test either pins an exact scenario or drives a seeded one and
-    replays it byte for byte.
-
-    Every fault is driven from a seed (or an explicit script), so the same
-    schedule produces the same fault sequence on every run -- including under
-    {!Eio_mock.Backend}, whose deadlock detector then serves as a liveness
-    oracle for the adapter under test. The in-memory transport is reused from
+    Wraps an ordinary Eio flow, datagram socket, or {!Eio.Net.t} and injects
+    read, write, datagram and connect faults on a deterministic, inspectable
+    schedule: a test either pins an exact scenario or drives a seeded one and
+    replays it byte for byte. The in-memory transport is reused from
     {!Eio_net_mem}; this layer only adds the adversarial behaviour. *)
 
 type Eio.Exn.Backend.t +=
