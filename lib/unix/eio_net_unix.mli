@@ -1,4 +1,4 @@
-(** Unix frame-channel adapters. *)
+(** Unix adapters for frame channels and stream writes. *)
 
 module Frame : sig
   val of_connected_datagram_fd :
@@ -29,7 +29,7 @@ module Stream : sig
       domain keeps running fibers while the kernel copies [bufs] into the socket
       buffer. Semantics match {!Eio.Flow.single_write}: the call returns after
       writing at least one byte, waiting for writability when the socket is
-      full, and may consume fewer bytes than offered -- including fewer buffers,
+      full, and may consume fewer bytes than offered, including fewer buffers,
       since one call passes at most 256 iovecs. *)
 
   val offload_writer : _ Eio.Resource.t -> (Cstruct.t list -> int) option

@@ -15,8 +15,8 @@ type Eio.Exn.Backend.t +=
             EOF. *)
 
 val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~sw ()] returns a network whose [listen] and [connect] operations are
-    paired in memory.
+(** [v ~sw ()] is a network whose [listen] and [connect] operations are paired
+    in memory.
 
     TCP stream addresses are matched exactly. Host resolution maps ["localhost"]
     and ["127.0.0.1"] to IPv4 loopback for the requested service port. Unix
@@ -37,7 +37,7 @@ val pipe :
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 (** [pipe ()] is a connected pair of in-memory stream sockets: bytes written on
     one are read on the other, and vice versa, preserving order. Unlike {!v} it
-    binds no address and needs no [listen]/[connect] handshake -- it is the bare
-    transport for a test (or a wrapper such as an adversarial flow) that just
+    binds no address and needs no [listen] and [connect] handshake: it is the
+    bare transport for a test, or a wrapper such as an adversarial flow, that
     needs two ends of a pipe. Blocking reads suspend the calling fiber until
     data arrives, so both ends must run under an Eio event loop. *)

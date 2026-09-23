@@ -1,11 +1,11 @@
 (** A frame channel: a bidirectional packet link where one {!recv} is one frame
     and one {!send} puts one frame on the wire.
 
-    This is the carrier that frame-based protocols read and write over -- CCSDS
-    transfer frames, AX.25, Ethernet -- independent of how the bytes actually
-    move: a netif, an Eio datagram socket, or an in-memory pipe. A protocol
-    codec layers over it by decoding what {!recv} returns and encoding into
-    {!send}; the channel itself is untyped bytes. *)
+    Frame-based protocols such as CCSDS transfer frames, AX.25 and Ethernet read
+    and write over it, independently of how the bytes move: a network interface,
+    an Eio datagram socket or an in-memory pipe. A protocol codec layers over it
+    by decoding what {!recv} returns and encoding into {!send}; the channel
+    itself is untyped bytes. *)
 
 type t = {
   recv : unit -> string;
@@ -16,14 +16,14 @@ type t = {
 }
 (** A frame channel.
 
-    {!recv} returns one whole received frame as a fresh string. {!recv_batch}
-    returns a non-empty bounded batch, using one multi-message system call where
-    the transport allows and otherwise returning [[recv ()]]. {!recv_slice}
-    returns one frame as a view (offset + length into owned bytes) so a decode
-    layer strips its header by advancing the offset rather than copying -- the
-    inbound dual of {!send}'s rope. The view is valid only until the next
-    receive (bytesrw's slice contract), so a layer that retains the payload past
-    that must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
+    {!recv} is one whole received frame as a fresh string. {!recv_batch} is a
+    non-empty bounded batch, read with one multi-message system call where the
+    transport allows and otherwise [[recv ()]]. {!recv_slice} is one frame as a
+    view (an offset and a length into owned bytes), so a decode layer strips its
+    header by advancing the offset rather than copying; it is the inbound
+    counterpart of {!send}'s rope. The view is valid only until the next receive
+    (bytesrw's slice contract), so a layer that retains the payload past that
+    must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
 
     {!send} takes an outgoing frame as a {!Rope.t} so a payload carried as a
     zero-copy rope leaf reaches the wire through [writev] without being
@@ -31,7 +31,7 @@ type t = {
     wraps it with [Rope.of_string] (O(1)).
 
     {!send_batch} sends a burst of frames, coalescing them into a single
-    [writev] where the transport allows (software GSO) -- one syscall for the
+    [writev] where the transport allows (software GSO): one system call for the
     whole burst instead of one per frame. A transport that cannot coalesce (a
     datagram socket, where each frame is its own datagram) falls back to sending
     them one at a time. *)
@@ -68,8 +68,8 @@ val of_length_prefixed_flow :
     payload, and {!recv} reads one length then exactly that many payload bytes.
     Use [prefix_bytes:2] for a 16-bit prefix (e.g. DNS-over-TCP, a utun link).
 
-    {!send_batch} coalesces a burst into one [writev] -- each frame's prefix and
-    rope leaves back to back -- so a sender that produces frames in bursts pays
+    {!send_batch} coalesces a burst into one [writev] (each frame's prefix and
+    rope leaves back to back) so a sender that produces frames in bursts pays
     one syscall per burst (software GSO).
 
     {!recv} raises [End_of_file] when the stream closes at a frame boundary (or

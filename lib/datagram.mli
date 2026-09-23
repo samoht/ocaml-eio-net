@@ -2,10 +2,10 @@
     with its source address, and one {!send} puts one datagram on the wire
     toward an explicit or the configured destination.
 
-    This is the carrier for datagram protocols that need the peer address -- a
-    UDP server that answers whoever wrote to it, a receiver that locks onto the
-    peer that opened an exchange. A protocol that does not care about addresses
-    uses the source-blind {!Frame} channel instead. *)
+    Datagram protocols that need the peer address use it: a UDP server that
+    answers whoever wrote to it, or a receiver that locks onto the peer that
+    opened an exchange. A protocol that does not care about addresses uses the
+    source-blind {!Frame} channel instead. *)
 
 type t = {
   recv : unit -> Eio.Net.Sockaddr.datagram * string;
@@ -13,8 +13,8 @@ type t = {
 }
 (** An addressed datagram channel.
 
-    {!recv} returns one whole received datagram as a fresh string, together with
-    the address it came from.
+    {!recv} is one whole received datagram as a fresh string, together with the
+    address it came from.
 
     [send (Some dst) rope] sends one datagram to [dst]; [send None rope] sends
     to the channel's configured destination (or the connected peer). The payload
