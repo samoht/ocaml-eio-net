@@ -135,6 +135,93 @@ let test_connect_refuses_semantic_option () =
         (Printexc.to_string e)
   | _ -> Alcotest.fail "keepalive on a mem connect should be refused"
 
+(* A connection made on a switch is closed when that switch finishes, as
+   [Eio.Net.connect] says of every socket: the server's end then reads EOF and a
+   write to the client that went away is a reset, rather than a read waiting on
+   a peer nobody holds any more. *)
+let test_connect_closes_at_switch_end () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8084) in
+  let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
+  Eio.Switch.run (fun csw -> ignore (Eio.Net.connect ~sw:csw net addr));
+  let flow, _ = Eio.Net.accept ~sw listener in
+  match Eio.Flow.single_write flow [ Cstruct.of_string "late" ] with
+  | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
+  | exception e ->
+      Alcotest.failf "a write to a finished client raised %s"
+        (Printexc.to_string e)
+  | (_ : int) ->
+      Alcotest.fail
+        "a write to a client whose switch finished was accepted: the client's \
+         end is still open"
+
+(* The two ends of one connection, used from two domains: a byte written in one
+   wakes the read suspended on it in the other. The reader runs in this domain
+   and the writer in a domain of its own. Each round the reader asks for one
+   byte and, beside the read, waits for the writer's word that the byte is
+   written. The writer wakes the read before it gives that word, and both wakes
+   join this domain's run queue in that order, so a read still suspended once
+   the word has arrived and the domain has run what was queued before it is a
+   wake-up that was lost. Each round the writer starts a different number of
+   spins after the reader asks, so the write falls at every point of the
+   reader's path from finding nothing to suspending. *)
+let test_a_write_in_another_domain_wakes_the_read () =
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let near, far = Eio_net_mem.pipe () in
+  let rounds = 4096 in
+  let turn = Atomic.make (-1) in
+  let over = Atomic.make false in
+  let written = Array.init rounds (fun _ -> Eio.Promise.create ()) in
+  let byte i = Char.chr (i land 0xff) in
+  let writer () =
+    let rec round i =
+      if i < rounds && not (Atomic.get over) then
+        if Atomic.get turn < i then begin
+          Domain.cpu_relax ();
+          round i
+        end
+        else begin
+          for _ = 1 to i land 63 do
+            Domain.cpu_relax ()
+          done;
+          Eio.Flow.write far [ Cstruct.of_string (String.make 1 (byte i)) ];
+          Eio.Promise.resolve (snd written.(i)) ();
+          round (i + 1)
+        end
+    in
+    round 0
+  in
+  let reader () =
+    Fun.protect ~finally:(fun () -> Atomic.set over true) @@ fun () ->
+    let buf = Cstruct.create 1 in
+    for i = 0 to rounds - 1 do
+      Atomic.set turn i;
+      match
+        Eio.Fiber.first
+          (fun () ->
+            ignore (Eio.Flow.single_read near buf : int);
+            `Read)
+          (fun () ->
+            Eio.Promise.await (fst written.(i));
+            Eio.Fiber.yield ();
+            `Written)
+      with
+      | `Read ->
+          Alcotest.(check char)
+            (Fmt.str "round %d reads its own byte" i)
+            (byte i) (Cstruct.get_char buf 0)
+      | `Written ->
+          Alcotest.failf
+            "round %d: the byte written in the other domain did not wake the \
+             read waiting for it"
+            i
+    done
+  in
+  Eio.Fiber.both reader (fun () -> Eio.Domain_manager.run domain_mgr writer)
+
 let suite =
   ( "eio_net_mem",
     [
@@ -152,4 +239,8 @@ let suite =
         test_connect_ignores_latency_hint;
       Alcotest.test_case "connect refuses a semantic option" `Quick
         test_connect_refuses_semantic_option;
+      Alcotest.test_case "connect closes at switch end" `Quick
+        test_connect_closes_at_switch_end;
+      Alcotest.test_case "a write in another domain wakes the read" `Quick
+        test_a_write_in_another_domain_wakes_the_read;
     ] )
