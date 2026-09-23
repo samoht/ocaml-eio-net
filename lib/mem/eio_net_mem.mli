@@ -9,14 +9,18 @@ type Eio.Exn.Backend.t +=
         (** The backend code carried by the connection-reset a mem flow raises
             when a write finds its send side closed (the peer has gone away, or
             this end shut its own send). It makes that write an {!Eio.Io} error
-            of the same shape a real socket raises on write-after-reset, rather
-            than the bare [Failure] {!Eio.Buf_write} raises internally. A read
-            after close still raises [End_of_file], matching a real socket's
-            EOF. *)
+            of the same shape a real socket raises on write-after-reset. A read
+            after close raises [End_of_file] once the bytes already written have
+            been read, matching a real socket's EOF. *)
 
 val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~sw ()] is a network whose [listen] and [connect] operations are paired
     in memory.
+
+    A connection is closed when the switch passed to [connect] finishes, so the
+    accepting end then reads EOF. The two ends of a connection may be used from
+    different domains: a write in one wakes a read waiting in the other. A write
+    never waits, since a connection holds whatever is written to it.
 
     TCP stream addresses are matched exactly. Host resolution maps ["localhost"]
     and ["127.0.0.1"] to IPv4 loopback for the requested service port. Unix
@@ -40,4 +44,5 @@ val pipe :
     binds no address and needs no [listen] and [connect] handshake: it is the
     bare transport for a test, or a wrapper such as an adversarial flow, that
     needs two ends of a pipe. Blocking reads suspend the calling fiber until
-    data arrives, so both ends must run under an Eio event loop. *)
+    data arrives, so both ends must run under an Eio event loop; the two ends
+    may be in different domains. *)

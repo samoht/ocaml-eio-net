@@ -9,46 +9,91 @@ let () =
 
 let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
 
+(* One direction of a connection: the bytes written and not yet read. Its two
+   ends may be used from two domains, so its state is guarded by a mutex and a
+   read that finds nothing waits on a condition it registers for before it looks,
+   which a write broadcasts after it has queued its bytes. A write never waits: a
+   pipe holds whatever has been written to it. *)
+module Pipe = struct
+  type t = {
+    mutex : Mutex.t;
+    queued : Cstruct.t Queue.t;
+    mutable head : int; (* Bytes of the first queued buffer already read. *)
+    mutable closed : bool;
+    readable : Eio.Condition.t;
+  }
+
+  let v () =
+    {
+      mutex = Mutex.create ();
+      queued = Queue.create ();
+      head = 0;
+      closed = false;
+      readable = Eio.Condition.create ();
+    }
+
+  (* The bytes are copied: the caller owns its buffers again once this returns. *)
+  let write t bufs =
+    let n =
+      Mutex.protect t.mutex @@ fun () ->
+      if t.closed then raise (reset_exn ());
+      List.iter
+        (fun b ->
+          if Cstruct.length b > 0 then
+            Queue.push (Cstruct.of_string (Cstruct.to_string b)) t.queued)
+        bufs;
+      Cstruct.lenv bufs
+    in
+    Eio.Condition.broadcast t.readable;
+    n
+
+  let rec take t dst got =
+    match Queue.peek_opt t.queued with
+    | Some src when got < Cstruct.length dst ->
+        let avail = Cstruct.length src - t.head in
+        let n = min avail (Cstruct.length dst - got) in
+        Cstruct.blit src t.head dst got n;
+        if n = avail then begin
+          ignore (Queue.pop t.queued : Cstruct.t);
+          t.head <- 0
+        end
+        else t.head <- t.head + n;
+        take t dst (got + n)
+    | _ -> got
+
+  (* What is queued drains before a closed pipe reads as EOF. *)
+  let read t dst =
+    Eio.Condition.loop_no_mutex t.readable @@ fun () ->
+    Mutex.protect t.mutex @@ fun () ->
+    if not (Queue.is_empty t.queued) then Some (take t dst 0)
+    else if t.closed then raise End_of_file
+    else None
+
+  let close t =
+    Mutex.protect t.mutex (fun () -> t.closed <- true);
+    Eio.Condition.broadcast t.readable
+end
+
 module Flow = struct
-  module W = Eio.Buf_write
-
-  let rec takev len = function
-    | [] -> []
-    | x :: xs ->
-        if len = 0 then []
-        else if Cstruct.length x >= len then [ Cstruct.sub x 0 len ]
-        else x :: takev (len - Cstruct.length x) xs
-
   module Impl = struct
     type tag = [ `Generic ]
-    type t = { to_peer : W.t; from_peer : W.t }
+    type t = { to_peer : Pipe.t; from_peer : Pipe.t }
 
-    (* [W.cstruct] on a closed writer raises a bare [Failure]; translate it to
-       the reset a real socket raises. [is_closed] holds exactly when it would. *)
-    let single_write t bufs =
-      if W.is_closed t.to_peer then raise (reset_exn ());
-      let bufs = takev (Cstruct.lenv bufs) bufs in
-      List.iter (W.cstruct t.to_peer) bufs;
-      Cstruct.lenv bufs
-
+    let single_write t bufs = Pipe.write t.to_peer bufs
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
 
     let single_read t buf =
-      let batch = W.await_batch t.from_peer in
-      let got, _ = Cstruct.fillv ~src:batch ~dst:buf in
-      W.shift t.from_peer got;
-      got
+      if Cstruct.length buf = 0 then 0 else Pipe.read t.from_peer buf
 
     let shutdown t = function
-      | `Send -> W.close t.to_peer
-      | `Receive -> W.close t.from_peer
+      | `Send -> Pipe.close t.to_peer
+      | `Receive -> Pipe.close t.from_peer
       | `All ->
-          W.close t.to_peer;
-          W.close t.from_peer
+          Pipe.close t.to_peer;
+          Pipe.close t.from_peer
 
     let close t = shutdown t `All
     let read_methods = []
-
     let setsockopt _ _ _ = ()
 
     let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
@@ -61,8 +106,8 @@ module Flow = struct
     Eio.Resource.T (Impl.{ from_peer; to_peer }, handler)
 
   let pair () =
-    let to_client = W.create 0x10000 in
-    let to_server = W.create 0x10000 in
+    let to_client = Pipe.v () in
+    let to_server = Pipe.v () in
     let client = v ~from_peer:to_client ~to_peer:to_server in
     let server = v ~from_peer:to_server ~to_peer:to_client in
     (client, server)
@@ -145,7 +190,7 @@ module Network = struct
 
   (* A connection is a pair of queues: there is no local address to bind, so a
      caller asking for one is refused. *)
-  let connect t ~bind_to ~options ~sw:_ addr =
+  let connect t ~bind_to ~options ~sw addr =
     if Option.is_some bind_to then
       invalid_arg "eio-net.mem does not support binding a local address";
     check_options options;
@@ -169,6 +214,7 @@ module Network = struct
     | None -> invalid_arg "no in-memory listener bound"
     | Some listener ->
         let client, server = Flow.pair () in
+        Eio.Switch.on_release sw (fun () -> Eio.Flow.close client);
         Eio.Stream.add listener.incoming (server, `Unix "in-memory-client");
         client
 
