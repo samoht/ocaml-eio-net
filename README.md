@@ -12,8 +12,11 @@ make this possible:
 
 - `Eio_net.Frame`: a bidirectional packet channel where one receive is one
   frame. CCSDS transfer frames, AX.25 and Ethernet codecs read and write over
-  it. Outgoing frames are ropes, so a payload reaches `writev` without being
-  copied into one string, and a burst can go out in one system call.
+  it. Outgoing frames are ropes (`Rope.t`), a sequence of byte slices read
+  as one byte string. `writev` takes an array of (pointer, length) pairs and
+  sends them in one system call, so a header and a payload held in separate
+  buffers reach the kernel without being copied into one string, and a burst
+  can go out in one system call.
 - `Eio_net.Datagram`: an addressed datagram channel that reports each
   datagram's source, for a UDP server that answers whoever wrote to it.
 - `Eio_net.Relay`: copies bytes between two flows in both directions, or
@@ -30,7 +33,10 @@ Four sub-libraries sit beside it:
   schedule that a test can print and replay.
 - `eio-net.unix`: a frame channel over a connected Unix datagram descriptor,
   batching sends and receives with `sendmsg_x` and `recvmsg_x` on Darwin, and a
-  vectored write that runs off the OCaml runtime lock.
+  vectored write that runs off the OCaml runtime lock. The runtime lock is
+  the per-domain lock a thread must hold to run OCaml code; a C call that
+  releases it lets the domain's other threads run while it blocks in the
+  kernel.
 - `eio-net.addr`: conversions between `Ipaddr` and Eio socket addresses, and
   host name resolution to a stream address.
 
