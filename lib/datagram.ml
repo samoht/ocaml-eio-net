@@ -4,7 +4,6 @@ type t = {
 }
 
 let pp ppf _ = Fmt.string ppf "<datagram channel>"
-
 let rope_cstructs rope = List.map Cstruct.of_string (Rope.to_strings rope)
 
 let of_socket ?(max_frame = 65536) ?dst socket =

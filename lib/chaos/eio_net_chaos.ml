@@ -26,16 +26,8 @@ let write_rng seed = Random.State.make [| seed; 0x5eed_2 |]
 let dgram_rng seed = Random.State.make [| seed; 0x5eed_3 |]
 
 module Flow = struct
-  type read =
-    | Deliver of int
-    | Coalesce of int
-    | Stall of int
-    | Reset
-    | Eof
-
-  type write =
-    | Accept of int
-    | Fail
+  type read = Deliver of int | Coalesce of int | Stall of int | Reset | Eof
+  type write = Accept of int | Fail
 
   module Schedule = struct
     type seeded = {
