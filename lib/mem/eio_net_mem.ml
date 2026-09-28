@@ -1,9 +1,12 @@
-type Eio.Exn.Backend.t += Closed
+type Eio.Exn.Backend.t += Closed | No_listener
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
     | Closed ->
         Format.pp_print_string ppf "Closed (eio-net.mem)";
+        true
+    | No_listener ->
+        Format.pp_print_string ppf "No listener bound (eio-net.mem)";
         true
     | _ -> false)
 
@@ -211,7 +214,7 @@ module Network = struct
               Option.bind wildcard (Hashtbl.find_opt t.hub.listeners))
     in
     match listener with
-    | None -> invalid_arg "no in-memory listener bound"
+    | None -> raise (Eio.Net.err (Connection_failure (Refused No_listener)))
     | Some listener ->
         let client, server = Flow.pair () in
         Eio.Switch.on_release sw (fun () -> Eio.Flow.close client);

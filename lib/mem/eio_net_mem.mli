@@ -12,6 +12,10 @@ type Eio.Exn.Backend.t +=
             of the same shape a real socket raises on write-after-reset. A read
             after close raises [End_of_file] once the bytes already written have
             been read, matching a real socket's EOF. *)
+  | No_listener
+        (** The backend code carried by the connection failure [connect] raises
+            when no listener is bound at the address, as a real socket raises
+            [Connection_failure (Refused _)]. *)
 
 val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~sw ()] is a network whose [listen] and [connect] operations are paired

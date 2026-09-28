@@ -60,8 +60,6 @@ let test_write_after_peer_close () =
   | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
   | exception Failure msg ->
       Alcotest.failf "write to closed mem flow leaked Failure %S" msg
-  | exception e ->
-      Alcotest.failf "write to closed mem flow raised %s" (Printexc.to_string e)
   | (_ : int) -> Alcotest.fail "write to closed mem flow should raise"
 
 let test_write_after_own_shutdown () =
@@ -72,8 +70,6 @@ let test_write_after_own_shutdown () =
   | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
   | exception Failure msg ->
       Alcotest.failf "write after own shutdown leaked Failure %S" msg
-  | exception e ->
-      Alcotest.failf "write after own shutdown raised %s" (Printexc.to_string e)
   | (_ : int) -> Alcotest.fail "write after own shutdown should raise"
 
 let test_read_after_peer_close () =
@@ -88,8 +84,6 @@ let test_read_after_peer_close () =
     (Cstruct.to_string (Cstruct.sub buf 0 n));
   match Eio.Flow.single_read server buf with
   | exception End_of_file -> ()
-  | exception e ->
-      Alcotest.failf "read after peer close raised %s" (Printexc.to_string e)
   | (_ : int) -> Alcotest.fail "read after peer close should reach EOF"
 
 (* A latency hint this transport already satisfies connects rather than
@@ -130,9 +124,6 @@ let test_connect_refuses_semantic_option () =
       Alcotest.(check string)
         "refusal names the option"
         "eio-net.mem does not support socket option SO_KEEPALIVE" msg
-  | exception e ->
-      Alcotest.failf "keepalive on a mem connect raised %s"
-        (Printexc.to_string e)
   | _ -> Alcotest.fail "keepalive on a mem connect should be refused"
 
 (* A connection made on a switch is closed when that switch finishes, as
@@ -149,9 +140,6 @@ let test_connect_closes_at_switch_end () =
   let flow, _ = Eio.Net.accept ~sw listener in
   match Eio.Flow.single_write flow [ Cstruct.of_string "late" ] with
   | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
-  | exception e ->
-      Alcotest.failf "a write to a finished client raised %s"
-        (Printexc.to_string e)
   | (_ : int) ->
       Alcotest.fail
         "a write to a client whose switch finished was accepted: the client's \
