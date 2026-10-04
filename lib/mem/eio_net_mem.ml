@@ -133,11 +133,36 @@ module Listening_socket = struct
     mutable closed : bool;
   }
 
+  (* The lowest port of the dynamic range (RFC 6335, section 6) that no
+     listener holds, at any address. *)
+  let free_port hub =
+    let held = Hashtbl.create (Hashtbl.length hub.listeners) in
+    Hashtbl.iter
+      (fun addr _ ->
+        match addr with
+        | `Tcp (_, port) -> Hashtbl.replace held port ()
+        | `Unix _ -> ())
+      hub.listeners;
+    let rec find port =
+      if port > 65535 then
+        failwith "eio-net.mem: every port of 49152-65535 has a listener"
+      else if Hashtbl.mem held port then find (port + 1)
+      else port
+    in
+    find 49152
+
   let v hub addr =
-    let t = { hub; addr; incoming = Eio.Stream.create 128; closed = false } in
     Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
-        Hashtbl.replace hub.listeners addr t);
-    t
+        let addr =
+          match addr with
+          | `Tcp (ip, 0) -> `Tcp (ip, free_port hub)
+          | addr -> addr
+        in
+        let t =
+          { hub; addr; incoming = Eio.Stream.create 128; closed = false }
+        in
+        Hashtbl.replace hub.listeners addr t;
+        t)
 
   let accept t ~sw =
     if t.closed then invalid_arg "accept on closed in-memory listener";

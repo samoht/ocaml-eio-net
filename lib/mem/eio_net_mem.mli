@@ -26,9 +26,12 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     different domains: a write in one wakes a read waiting in the other. A write
     never waits, since a connection holds whatever is written to it.
 
-    TCP stream addresses are matched exactly. Host resolution maps ["localhost"]
-    and ["127.0.0.1"] to IPv4 loopback for the requested service port. Unix
-    stream addresses are also accepted directly by [listen] and [connect].
+    TCP stream addresses are matched exactly. A [listen] on port [0] binds the
+    lowest port of the dynamic range, 49152-65535 (RFC 6335, section 6), that no
+    listener holds, as a socket's bind does, and [listening_addr] reports it.
+    Host resolution maps ["localhost"] and ["127.0.0.1"] to IPv4 loopback for
+    the requested service port. Unix stream addresses are also accepted directly
+    by [listen] and [connect].
 
     [connect] accepts, and ignores, the socket options whose effect these queues
     already have: the ones asking that writes not be coalesced and that
