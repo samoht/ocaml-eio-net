@@ -50,6 +50,52 @@ let test_connect_to_wildcard_listener () =
       Alcotest.(check string)
         "wildcard accepted loopback" "ok" (Cstruct.to_string buf))
 
+(* Port 0 asks the system to choose the port, as bind(2) does (ip(7),
+   "ip_local_port_range"): each listener on port 0 holds a port of the dynamic
+   range (RFC 6335, section 6) that no other listener holds, [listening_addr]
+   reports it, and a client reaches that listener there. *)
+let test_listen_on_port_zero () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let listen () =
+    Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let a = listen () in
+  let b = listen () in
+  let port listener =
+    match Eio.Net.listening_addr listener with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> Alcotest.fail "a TCP listener has a TCP address"
+  in
+  let pa = port a and pb = port b in
+  List.iter
+    (fun p ->
+      Alcotest.(check bool)
+        (Fmt.str "port %d is in 49152-65535" p)
+        true
+        (p >= 49152 && p <= 65535))
+    [ pa; pb ];
+  Alcotest.(check bool) "two listeners hold two ports" true (pa <> pb);
+  let reaches listener p msg =
+    Eio.Fiber.both
+      (fun () ->
+        let flow, _ = Eio.Net.accept ~sw listener in
+        Eio.Flow.copy_string msg flow)
+      (fun () ->
+        let flow =
+          Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, p))
+        in
+        let buf = Cstruct.create 1 in
+        Eio.Flow.read_exact flow buf;
+        Alcotest.(check string)
+          (Fmt.str "port %d reaches its listener" p)
+          msg (Cstruct.to_string buf))
+  in
+  reaches a pa "a";
+  reaches b pb "b"
+
 (* A write to a mem flow whose peer has closed raises the [Eio.Io] reset a
    real socket raises, not the internal [Failure]. *)
 let test_write_after_peer_close () =
@@ -217,6 +263,8 @@ let suite =
       Alcotest.test_case "localhost resolution" `Quick test_resolve_localhost;
       Alcotest.test_case "connect to wildcard listener" `Quick
         test_connect_to_wildcard_listener;
+      Alcotest.test_case "listen on port 0 binds a free port" `Quick
+        test_listen_on_port_zero;
       Alcotest.test_case "write after peer close" `Quick
         test_write_after_peer_close;
       Alcotest.test_case "write after own shutdown" `Quick
