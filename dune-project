@@ -14,8 +14,9 @@
 (package
  (name eio-net)
  (synopsis "Eio network backends and test helpers")
- (tags (org:blacksun network eio test))
+ (tags (org:blacksun network eio test hermetic:eio-boundary))
  (depends
+  hermetic
   (ocaml (>= 5.1))
   (eio (>= 1.5))
   cstruct

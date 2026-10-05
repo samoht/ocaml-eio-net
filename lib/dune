@@ -5,4 +5,6 @@
 (library
  (name eio_net)
  (public_name eio-net)
- (libraries eio cstruct fmt logs bytesrw nox-rope))
+ (libraries hermetic.eio eio cstruct fmt logs bytesrw nox-rope)
+ (flags
+  (:standard -open Hermetic_eio)))
