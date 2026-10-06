@@ -4,7 +4,14 @@ synopsis: "Eio network backends and test helpers"
 maintainer: ["Thomas Gazagnaire <thomas@gazagnaire.org>"]
 authors: ["Thomas Gazagnaire <thomas@gazagnaire.org>"]
 license: "ISC"
-tags: ["org:blacksun" "network" "eio" "test" "hermetic:eio-boundary"]
+tags: [
+  "org:blacksun"
+  "network"
+  "eio"
+  "test"
+  "hermetic:eio-boundary"
+  "area:networking"
+]
 homepage: "https://tangled.org/gazagnaire.org/ocaml-eio-net"
 bug-reports: "https://tangled.org/gazagnaire.org/ocaml-eio-net/issues"
 depends: [
