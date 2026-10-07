@@ -6,11 +6,11 @@ authors: ["Thomas Gazagnaire <thomas@gazagnaire.org>"]
 license: "ISC"
 tags: [
   "org:blacksun"
-  "network"
+  "network-programming"
   "eio"
   "test"
   "hermetic:eio-boundary"
-  "area:networking"
+  "area:10003039"
 ]
 homepage: "https://tangled.org/gazagnaire.org/ocaml-eio-net"
 bug-reports: "https://tangled.org/gazagnaire.org/ocaml-eio-net/issues"

@@ -14,7 +14,7 @@
 (package
  (name eio-net)
  (synopsis "Eio network backends and test helpers")
- (tags (org:blacksun network eio test hermetic:eio-boundary area:networking))
+ (tags (org:blacksun network-programming eio test hermetic:eio-boundary area:10003039))
  (depends
   hermetic
   (ocaml (>= 5.1))
