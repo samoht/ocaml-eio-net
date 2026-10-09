@@ -116,3 +116,9 @@ module Stream = struct
     | None -> None
     | Some fd -> Some (offload_single_write fd)
 end
+
+module Local = struct
+  let connect ~sw:_ ~net:_ _ =
+    failwith
+      "Eio_net_unix.Local.connect: connecting by a long path is not implemented"
+end

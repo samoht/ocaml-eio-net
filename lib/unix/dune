@@ -1,7 +1,7 @@
 (library
  (name eio_net_unix)
  (public_name eio-net.unix)
- (libraries hermetic.eio eio-net eio eio.unix cstruct nox-rope unix)
+ (libraries hermetic.eio eio-net eio eio.unix cstruct fpath nox-rope unix)
  (foreign_stubs
   (language c)
   (names sendmsg_batch writev_offload))

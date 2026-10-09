@@ -37,3 +37,22 @@ module Stream : sig
       descriptor, where [write] is {!offload_single_write} on it, and [None]
       otherwise. *)
 end
+
+(** Unix-domain stream sockets. *)
+module Local : sig
+  val connect :
+    sw:Eio.Switch.t ->
+    net:_ Eio.Net.t ->
+    Fpath.t ->
+    [ `Generic | `Unix ] Eio.Net.stream_socket_ty Eio.Resource.t
+  (** [connect ~sw ~net path] connects to the Unix-domain stream socket at
+      [path], whatever its length. A path that a socket address holds is
+      connected through [net]. A longer one is reached from its directory,
+      opened for the purpose: with [connectat(2)] on macOS and FreeBSD, and on
+      Linux through the short link [/proc/self/fd/<dir>/<name>], as Git's
+      unix-socket.c reaches it by changing directory; the working directory of
+      the process is never changed. Either way a failure is the {!Eio.Io} error
+      {!Eio.Net.connect} raises: a missing socket or directory is
+      [Eio.Fs.Not_found], a socket nobody listens on
+      [Eio.Net.Connection_failure (Refused _)]. *)
+end

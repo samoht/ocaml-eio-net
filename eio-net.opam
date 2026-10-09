@@ -24,6 +24,7 @@ depends: [
   "logs"
   "bytesrw"
   "ipaddr"
+  "fpath"
   "nox-rope"
   "alcotest" {with-test}
   "eio_main" {with-test}
