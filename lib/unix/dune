@@ -4,6 +4,6 @@
  (libraries hermetic.eio eio-net eio eio.unix cstruct fpath nox-rope unix)
  (foreign_stubs
   (language c)
-  (names sendmsg_batch writev_offload))
+  (names sendmsg_batch writev_offload local_connect))
  (flags
   (:standard -open Hermetic_eio)))

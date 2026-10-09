@@ -118,7 +118,43 @@ module Stream = struct
 end
 
 module Local = struct
-  let connect ~sw:_ ~net:_ _ =
-    failwith
-      "Eio_net_unix.Local.connect: connecting by a long path is not implemented"
+  external sun_path_size : unit -> int = "caml_eio_net_sun_path_size"
+
+  external connect_at : Unix.file_descr -> Unix.file_descr -> string -> unit
+    = "caml_eio_net_connect_at"
+
+  (* unix-socket.c, unix_sockaddr_init: a path an address holds is used as it
+     is, a longer one from its directory (local_connect.c). The connect
+     blocks only while the
+     listener's backlog is full, on a thread of the pool. *)
+  let connect_from_dir path =
+    let dir, name = Fpath.split_base path in
+    let sock = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    match
+      Eio_unix.run_in_systhread ~label:"local-connect" (fun () ->
+          let dir =
+            Unix.openfile (Fpath.to_string dir)
+              [ Unix.O_RDONLY; Unix.O_CLOEXEC ]
+              0
+          in
+          Fun.protect
+            ~finally:(fun () -> Unix.close dir)
+            (fun () -> connect_at dir sock (Fpath.to_string name)))
+    with
+    | () ->
+        Unix.set_nonblock sock;
+        sock
+    | exception Unix.Unix_error (e, fn, arg) ->
+        Unix.close sock;
+        raise (Eio_unix.Err.v e fn arg)
+
+  let connect ~sw ~net path =
+    let s = Fpath.to_string path in
+    if String.length s < sun_path_size () then
+      (Eio.Net.connect ~sw net (`Unix s)
+        :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
+    else
+      (Eio_unix.Net.import_socket_stream ~sw ~close_unix:true
+         (connect_from_dir path)
+        :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
 end
