@@ -158,3 +158,11 @@ module Local = struct
          (connect_from_dir path)
         :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
 end
+
+let connect_failure = function
+  | Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> Some `Refused
+  | Eio.Io
+      (Eio.Exn.X (Eio_unix.Unix_error ((ENETUNREACH | EHOSTUNREACH), _, _)), _)
+    ->
+      Some `Unreachable
+  | _ -> None
