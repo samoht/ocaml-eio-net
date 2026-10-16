@@ -120,6 +120,8 @@ end
 module Local = struct
   external sun_path_size : unit -> int = "caml_eio_net_sun_path_size"
 
+  let max_length = sun_path_size () - 1
+
   external connect_at : Unix.file_descr -> Unix.file_descr -> string -> unit
     = "caml_eio_net_connect_at"
 

@@ -40,6 +40,13 @@ end
 
 (** Unix-domain stream sockets. *)
 module Local : sig
+  val max_length : int
+  (** [max_length] is the longest path, in bytes, a Unix-domain socket address
+      holds: the size of [sun_path] less its terminating NUL, 103 on macOS and
+      107 on Linux. A program that binds a socket, which {!connect}'s detour
+      through the directory cannot help, is refused a longer path with
+      [ENAMETOOLONG]. *)
+
   val connect :
     sw:Eio.Switch.t ->
     net:_ Eio.Net.t ->
