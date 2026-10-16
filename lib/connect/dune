@@ -1,0 +1,10 @@
+; The classifier of a failed connect, kept apart from the carriers so a
+; connection library reads the one its platform's network registers and links
+; nothing else: a unikernel guest keeps the portable answer.
+
+(library
+ (name eio_net_connect)
+ (public_name eio-net.connect)
+ (libraries hermetic.eio eio fmt)
+ (flags
+  (:standard -open Hermetic_eio)))

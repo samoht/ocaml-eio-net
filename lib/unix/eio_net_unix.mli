@@ -71,4 +71,6 @@ val connect_failure : exn -> [ `Refused | `Unreachable ] option
       the host's own routing table, says no path to the peer exists. RFC 1122
       section 4.2.3.9 makes it a hard error for an attempt in SYN-SENT.
 
-    Pass it as the classifier of a connect that runs over a Unix network. *)
+    Linking this library registers it with {!Eio_net_connect.register}, so a
+    connect that asks {!Eio_net_connect.classify} over a Unix network uses it
+    with no argument. *)

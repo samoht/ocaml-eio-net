@@ -1,0 +1,4 @@
+(test
+ (name test)
+ (package eio-net)
+ (libraries eio-net.connect eio eio.unix alcotest fmt unix))

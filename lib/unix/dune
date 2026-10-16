@@ -1,7 +1,20 @@
+; Linked whole: its initialisation registers the Unix connect classifier, which
+; a program that never names Eio_net_unix still dials with.
+
 (library
  (name eio_net_unix)
  (public_name eio-net.unix)
- (libraries hermetic.eio eio-net eio eio.unix cstruct fpath nox-rope unix)
+ (libraries
+  hermetic.eio
+  eio-net
+  eio-net.connect
+  eio
+  eio.unix
+  cstruct
+  fpath
+  nox-rope
+  unix)
+ (library_flags (-linkall))
  (foreign_stubs
   (language c)
   (names sendmsg_batch writev_offload local_connect))
