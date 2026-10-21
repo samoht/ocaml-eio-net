@@ -256,6 +256,90 @@ let test_a_write_in_another_domain_wakes_the_read () =
   in
   Eio.Fiber.both reader (fun () -> Eio.Domain_manager.run domain_mgr writer)
 
+(* {1 Datagram sockets} *)
+
+let udp port : Eio.Net.Sockaddr.datagram =
+  `Udp (Eio.Net.Ipaddr.V4.loopback, port)
+
+let datagram_addr_equal (a : Eio.Net.Sockaddr.datagram)
+    (b : Eio.Net.Sockaddr.datagram) =
+  match (a, b) with
+  | `Udp (a_ip, a_port), `Udp (b_ip, b_port) ->
+      String.equal (a_ip :> string) (b_ip :> string) && Int.equal a_port b_port
+  | `Unix a, `Unix b -> String.equal a b
+  | `Udp _, `Unix _ | `Unix _, `Udp _ -> false
+
+let datagram_addr = Alcotest.testable Eio.Net.Sockaddr.pp datagram_addr_equal
+
+let recv_string sock =
+  let buf = Cstruct.create 2048 in
+  let src, n = Eio.Net.recv sock buf in
+  (src, Cstruct.to_string (Cstruct.sub buf 0 n))
+
+(* A datagram arrives whole with the address it was sent from, so a server
+   answers whoever wrote to it, as over UDP. The client binds no address of its
+   own and is given one. *)
+let test_datagram_roundtrip () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let server = Eio.Net.datagram_socket ~sw net (udp 9000) in
+  let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  Eio.Net.send client ~dst:(udp 9000) [ Cstruct.of_string "ping" ];
+  let src, got = recv_string server in
+  Alcotest.(check string) "server read" "ping" got;
+  Eio.Net.send server ~dst:src [ Cstruct.of_string "pong" ];
+  let src, got = recv_string client in
+  Alcotest.(check string) "client read" "pong" got;
+  Alcotest.check datagram_addr "the answer comes from the server" (udp 9000) src
+
+(* Datagrams from one socket to another arrive in the order they were sent,
+   and none is dropped however many are sent before the first is read: the
+   network is a queue, not a buffer of a fixed size. *)
+let test_datagrams_keep_order () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let server = Eio.Net.datagram_socket ~sw net (udp 9001) in
+  let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  let n = 1000 in
+  for i = 1 to n do
+    Eio.Net.send client ~dst:(udp 9001) [ Cstruct.of_string (string_of_int i) ]
+  done;
+  let got = List.init n (fun _ -> snd (recv_string server)) in
+  Alcotest.(check (list string))
+    "every datagram, in order"
+    (List.init n (fun i -> string_of_int (i + 1)))
+    got
+
+(* A datagram sent to an address no socket binds is lost, as UDP loses it,
+   and the sender is not told. *)
+let test_datagram_to_nobody_is_lost () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  Eio.Net.send client ~dst:(udp 9002) [ Cstruct.of_string "lost" ];
+  let server = Eio.Net.datagram_socket ~sw net (udp 9002) in
+  Eio.Net.send client ~dst:(udp 9002) [ Cstruct.of_string "kept" ];
+  Alcotest.(check string)
+    "only the later datagram" "kept"
+    (snd (recv_string server))
+
+(* A socket's address is free again once the switch it was made under ends. *)
+let test_datagram_address_freed_at_switch_end () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  Eio.Switch.run (fun inner ->
+      ignore (Eio.Net.datagram_socket ~sw:inner net (udp 9003)));
+  let again = Eio.Net.datagram_socket ~sw net (udp 9003) in
+  let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  Eio.Net.send client ~dst:(udp 9003) [ Cstruct.of_string "again" ];
+  Alcotest.(check string)
+    "the address binds again" "again"
+    (snd (recv_string again))
+
 let suite =
   ( "eio_net_mem",
     [
@@ -277,6 +361,13 @@ let suite =
         test_connect_refuses_semantic_option;
       Alcotest.test_case "connect closes at switch end" `Quick
         test_connect_closes_at_switch_end;
+      Alcotest.test_case "a datagram roundtrip" `Quick test_datagram_roundtrip;
+      Alcotest.test_case "datagrams keep their order" `Quick
+        test_datagrams_keep_order;
+      Alcotest.test_case "a datagram to nobody is lost" `Quick
+        test_datagram_to_nobody_is_lost;
+      Alcotest.test_case "a datagram address is freed at switch end" `Quick
+        test_datagram_address_freed_at_switch_end;
       Alcotest.test_case "a write in another domain wakes the read" `Quick
         test_a_write_in_another_domain_wakes_the_read;
     ] )
