@@ -81,6 +81,21 @@ let test_steady n () =
   done;
   Alcotest.(check int) "every write went through" (16 * each) !moved
 
+(* The time before the first move counts in no window: a transfer made a
+   window before it starts moving goes on, at the limit. *)
+let test_first_move n () =
+  let window = seconds n in
+  Eio_mock.Backend.run_full @@ fun env ->
+  let mono = env#mono_clock in
+  let p = Progress.v ~mono ~limit:100 ~window in
+  Eio.Time.Mono.sleep_span mono Mtime.Span.(2 * window);
+  let moved =
+    Progress.move p (fun () ->
+        Eio.Time.Mono.sleep_span mono (quarter window);
+        100 * n)
+  in
+  Alcotest.(check int) "the first move went through" (100 * n) moved
+
 let test_words () =
   Alcotest.(check string)
     "curl's words"
@@ -100,4 +115,5 @@ let suite =
     @ cases "a burst then silence ends at the second window"
         test_burst_then_silence
     @ cases "a peer at the limit goes on" test_steady
+    @ cases "the time before the first move counts in no window" test_first_move
     @ [ Alcotest.test_case "Too_slow in curl's words" `Quick test_words ] )
