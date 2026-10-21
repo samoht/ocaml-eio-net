@@ -5,7 +5,8 @@ type t = {
   sleep : Mtime.Span.t -> unit;
   limit : int;
   window : Mtime.Span.t;
-  mutable start : Mtime.t;
+  mutable start : Mtime.t option;
+      (* the current window's start, from the transfer's first move *)
   mutable moved : int;
 }
 
@@ -13,13 +14,12 @@ let v ~mono ~limit ~window =
   if limit <= 0 then invalid_arg "Progress.v: the limit is not positive";
   if Mtime.Span.equal window Mtime.Span.zero then
     invalid_arg "Progress.v: the window is zero";
-  let now () = Eio.Time.Mono.now mono in
   {
-    now;
+    now = (fun () -> Eio.Time.Mono.now mono);
     sleep = Eio.Time.Mono.sleep_span mono;
     limit;
     window;
-    start = now ();
+    start = None;
     moved = 0;
   }
 
@@ -29,36 +29,45 @@ let needed t =
   /. 1e9 *. float_of_int t.limit
 
 (* What is left of the current window, zero once it has ended. *)
-let left t =
-  let since = Mtime.span t.start (t.now ()) in
+let left t start =
+  let since = Mtime.span start (t.now ()) in
   if Mtime.Span.compare since t.window >= 0 then Mtime.Span.zero
   else Mtime.Span.abs_diff t.window since
 
 (* Judge the window if it has ended, and start the next. *)
-let judge t =
-  if Mtime.Span.equal (left t) Mtime.Span.zero then begin
+let judge t start =
+  if Mtime.Span.equal (left t start) Mtime.Span.zero then begin
     if float_of_int t.moved < needed t then
       raise (Too_slow { limit = t.limit; window = t.window });
-    t.start <- t.now ();
+    t.start <- Some (t.now ());
     t.moved <- 0
   end
 
+let start t =
+  match t.start with
+  | Some s -> s
+  | None ->
+      let s = t.now () in
+      t.start <- Some s;
+      s
+
 let move t f =
   let rec go () =
+    let start = start t in
     match
       Eio.Fiber.first
         ~combine:(fun a b -> match a with `Moved _ -> a | `Quiet -> b)
         (fun () -> `Moved (f ()))
         (fun () ->
-          t.sleep (left t);
+          t.sleep (left t start);
           `Quiet)
     with
     | `Moved n ->
         t.moved <- t.moved + n;
-        judge t;
+        judge t start;
         n
     | `Quiet ->
-        judge t;
+        judge t start;
         go ()
   in
   go ()
