@@ -183,9 +183,147 @@ module Listening_socket = struct
    fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
 end
 
+(* A datagram socket bound at [addr]: the datagrams sent to it and not yet
+   received, each with the address it came from. Like a pipe, its queue is
+   guarded by a mutex and holds whatever is sent, so a datagram is never
+   dropped or reordered on the way, and a send never waits. *)
+module Datagram_socket = struct
+  type tag = [ `Generic ]
+
+  type hub = {
+    sockets : (Eio.Net.Sockaddr.datagram, t) Hashtbl.t;
+    mutex : Mutex.t;
+  }
+
+  and t = {
+    hub : hub;
+    addr : Eio.Net.Sockaddr.datagram;
+    lock : Mutex.t;
+    queued : (Eio.Net.Sockaddr.datagram * string) Queue.t;
+    readable : Eio.Condition.t;
+    mutable closed : bool;
+  }
+
+  (* The lowest port of the dynamic range (RFC 6335, section 6) that no
+     datagram socket holds, at any address. *)
+  let free_port hub =
+    let held port =
+      Hashtbl.fold
+        (fun addr _ held ->
+          held || match addr with `Udp (_, p) -> p = port | `Unix _ -> false)
+        hub.sockets false
+    in
+    let rec find port =
+      if port > 65535 then
+        failwith "eio-net.mem: every port of 49152-65535 has a datagram socket"
+      else if held port then find (port + 1)
+      else port
+    in
+    find 49152
+
+  let v hub addr =
+    Mutex.protect hub.mutex @@ fun () ->
+    let addr : Eio.Net.Sockaddr.datagram =
+      match addr with
+      | `UdpV4 -> `Udp (Eio.Net.Ipaddr.V4.loopback, free_port hub)
+      | `UdpV6 -> `Udp (Eio.Net.Ipaddr.V6.loopback, free_port hub)
+      | `Udp (ip, 0) -> `Udp (ip, free_port hub)
+      | (`Udp _ | `Unix _) as addr -> addr
+    in
+    if Hashtbl.mem hub.sockets addr then
+      Fmt.invalid_arg "eio-net.mem: %a already has a datagram socket"
+        Eio.Net.Sockaddr.pp addr;
+    let t =
+      {
+        hub;
+        addr;
+        lock = Mutex.create ();
+        queued = Queue.create ();
+        readable = Eio.Condition.create ();
+        closed = false;
+      }
+    in
+    Hashtbl.replace hub.sockets addr t;
+    t
+
+  (* The socket bound at [addr], or at the wildcard address of its port. *)
+  let find hub (addr : Eio.Net.Sockaddr.datagram) =
+    Mutex.protect hub.mutex @@ fun () ->
+    match Hashtbl.find_opt hub.sockets addr with
+    | Some _ as found -> found
+    | None -> (
+        match addr with
+        | `Udp (ip, port) ->
+            let any =
+              Eio.Net.Ipaddr.fold ip
+                ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
+                ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
+            in
+            Hashtbl.find_opt hub.sockets (`Udp (any, port))
+        | `Unix _ -> None)
+
+  (* A datagram to an address no socket binds is lost, as UDP loses it, and
+     the sender is not told. *)
+  let send t ?dst bufs =
+    if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
+    let dst =
+      match dst with
+      | Some dst -> dst
+      | None -> invalid_arg "eio-net.mem: a datagram send needs a destination"
+    in
+    match find t.hub dst with
+    | None -> ()
+    | Some peer ->
+        let delivered =
+          Mutex.protect peer.lock @@ fun () ->
+          if not peer.closed then
+            Queue.push
+              (t.addr, Cstruct.to_string (Cstruct.concat bufs))
+              peer.queued;
+          not peer.closed
+        in
+        if delivered then Eio.Condition.broadcast peer.readable
+
+  (* A datagram longer than [buf] is cut to it, as a socket cuts it. *)
+  let recv t buf =
+    Eio.Condition.loop_no_mutex t.readable @@ fun () ->
+    Mutex.protect t.lock @@ fun () ->
+    if t.closed then invalid_arg "eio-net.mem: recv on a closed datagram socket"
+    else
+      match Queue.take_opt t.queued with
+      | None -> None
+      | Some (src, data) ->
+          let n = min (String.length data) (Cstruct.length buf) in
+          Cstruct.blit_from_string data 0 buf 0 n;
+          Some (src, n)
+
+  let close t =
+    let was_open =
+      Mutex.protect t.lock @@ fun () ->
+      let was_open = not t.closed in
+      t.closed <- true;
+      was_open
+    in
+    if was_open then begin
+      Mutex.protect t.hub.mutex (fun () -> Hashtbl.remove t.hub.sockets t.addr);
+      Eio.Condition.broadcast t.readable
+    end
+
+  let shutdown _ _ = ()
+  let setsockopt _ _ _ = ()
+
+  let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
+   fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
+end
+
 module Network = struct
   type tag = [ `Generic ]
-  type t = { sw : Eio.Switch.t; hub : Listening_socket.hub }
+
+  type t = {
+    sw : Eio.Switch.t;
+    hub : Listening_socket.hub;
+    datagrams : Datagram_socket.hub;
+  }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
 
@@ -246,8 +384,18 @@ module Network = struct
         Eio.Stream.add listener.incoming (server, `Unix "in-memory-client");
         client
 
-  let datagram_socket _ ~reuse_addr:_ ~reuse_port:_ ~sw:_ _ =
-    invalid_arg "eio-net.mem does not support datagram sockets"
+  let datagram_handler = Eio.Net.Pi.datagram_socket (module Datagram_socket)
+
+  (* One socket per address: there is no kernel to spread datagrams across
+     several, so [reuse_port] is refused. *)
+  let datagram_socket t ~reuse_addr:_ ~reuse_port ~sw addr =
+    if reuse_port then
+      invalid_arg "eio-net.mem does not support SO_REUSEPORT datagram sockets";
+    let socket =
+      Eio.Resource.T (Datagram_socket.v t.datagrams addr, datagram_handler)
+    in
+    Eio.Switch.on_release sw (fun () -> Eio.Resource.close socket);
+    socket
 
   let getaddrinfo _ ~service node =
     match int_of_string_opt service with
@@ -270,4 +418,7 @@ let v ~sw () =
       mutex = Eio.Mutex.create ();
     }
   in
-  Eio.Resource.T (Network.{ sw; hub }, handler)
+  let datagrams =
+    { Datagram_socket.sockets = Hashtbl.create 8; mutex = Mutex.create () }
+  in
+  Eio.Resource.T (Network.{ sw; hub; datagrams }, handler)

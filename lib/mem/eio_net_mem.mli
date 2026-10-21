@@ -1,8 +1,8 @@
-(** In-memory {!Eio.Net} stream network.
+(** In-memory {!Eio.Net} network.
 
     This backend is intended for hermetic tests that need client code and server
     code to talk through the normal {!Eio.Net} APIs without binding OS sockets.
-    It supports stream sockets only. *)
+    It supports stream sockets and datagram sockets. *)
 
 type Eio.Exn.Backend.t +=
   | Closed
@@ -40,7 +40,18 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     caller observes is a wrong answer with no symptom. A caller cannot tell an
     ignored option from an applied one, so a test that must know an option took
     effect needs a real socket. [bind_to] is refused: there is no local address
-    to bind. *)
+    to bind.
+
+    A [datagram_socket] binds its address, or for [`UdpV4], [`UdpV6] or port [0]
+    the lowest free port of the dynamic range on loopback, and refuses an
+    address already bound and [reuse_port]. A datagram sent to it arrives whole,
+    with the sender's address, after every datagram sent to it before: the
+    network never drops, cuts or reorders one, and a send never waits. One sent
+    to an address no socket binds, at its own address or the wildcard address of
+    its port, is lost, as UDP loses it. A [recv] into a buffer shorter than the
+    datagram gets its first bytes, as a socket does. The socket is closed, and
+    its address free again, when the switch passed to [datagram_socket]
+    finishes. *)
 
 val pipe :
   unit ->

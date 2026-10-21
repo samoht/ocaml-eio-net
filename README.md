@@ -24,9 +24,9 @@ make this possible:
 
 Four sub-libraries sit beside it:
 
-- `eio-net.mem`: an in-memory `Eio.Net.t` for stream sockets, and connected
-  in-memory pipes, so client and server code can talk through the normal
-  `Eio.Net` functions in a hermetic test.
+- `eio-net.mem`: an in-memory `Eio.Net.t` for stream and datagram sockets,
+  and connected in-memory pipes, so client and server code can talk through
+  the normal `Eio.Net` functions in a hermetic test.
 - `eio-net.chaos`: wrappers around a flow, a datagram socket or a network that
   inject faults (short reads and writes, stalls, resets, dropped, duplicated
   and reordered datagrams, refused connections) on a seeded or scripted
