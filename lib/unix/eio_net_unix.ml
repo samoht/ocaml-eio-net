@@ -159,6 +159,68 @@ module Local = struct
       (Eio_unix.Net.import_socket_stream ~sw ~close_unix:true
          (connect_from_dir path)
         :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
+
+  let eio f =
+    try f ()
+    with Unix.Unix_error (e, fn, arg) -> raise (Eio_unix.Err.v e fn arg)
+
+  let file_id p =
+    let s = Unix.LargeFile.lstat p in
+    (s.st_dev, s.st_ino)
+
+  (* bind(2) makes the socket's file with the modes the process's umask
+     leaves, so the mask is [lnot perm] for the call, as OpenSSH's ssh-agent
+     sets it. The lock keeps each bind under its own mask. *)
+  let umask = Eio.Mutex.create ()
+
+  let bind fd ~perm p =
+    Eio.Mutex.use_ro umask (fun () ->
+        let mask = Unix.umask (0o777 land lnot perm) in
+        Fun.protect
+          ~finally:(fun () -> ignore (Unix.umask mask))
+          (fun () -> Unix.bind fd (Unix.ADDR_UNIX p)))
+
+  let listen ~sw ~backlog ~perm path =
+    let p = Fpath.to_string path in
+    let fd, id =
+      eio @@ fun () ->
+      (match Unix.lstat p with
+      | { st_kind = S_SOCK; _ } -> Unix.unlink p
+      | _ -> ()
+      | exception Unix.Unix_error (ENOENT, _, _) -> ());
+      let fd = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+      match bind fd ~perm p with
+      | exception e ->
+          Unix.close fd;
+          raise e
+      | () -> (
+          match
+            let id = file_id p in
+            Unix.listen fd backlog;
+            Unix.set_nonblock fd;
+            id
+          with
+          | id -> (fd, id)
+          | exception e ->
+              Unix.close fd;
+              Unix.unlink p;
+              raise e)
+    in
+    let socket = Eio_unix.Net.import_socket_listening ~sw ~close_unix:true fd in
+    Eio.Switch.on_release sw (fun () ->
+        eio @@ fun () ->
+        match file_id p with
+        | id' -> if id' = id then Unix.unlink p
+        | exception Unix.Unix_error (ENOENT, _, _) -> ());
+    (socket :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t)
+end
+
+module Tcp = struct
+  let listen ?reuse_addr ?reuse_port ~sw ~backlog net ip port =
+    try
+      (Eio.Net.listen ?reuse_addr ?reuse_port ~sw ~backlog net (`Tcp (ip, port))
+        :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t)
+    with Unix.Unix_error (e, fn, arg) -> raise (Eio_unix.Err.v e fn arg)
 end
 
 let connect_failure = function

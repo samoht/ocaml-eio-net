@@ -64,6 +64,42 @@ module Local : sig
       is the {!Eio.Io} error {!Eio.Net.connect} raises: a missing socket or
       directory is [Eio.Fs.Not_found], a socket nobody listens on
       [Eio.Net.Connection_failure (Refused _)]. *)
+
+  val listen :
+    sw:Eio.Switch.t ->
+    backlog:int ->
+    perm:int ->
+    Fpath.t ->
+    [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t
+  (** [listen ~sw ~backlog ~perm path] is a stream socket listening at [path],
+      whose file bind(2) makes with the permission bits [perm] and no other, so
+      that no peer the mode refuses ever reaches it. The process's umask is
+      [lnot perm] for the duration of the bind alone, and calls are serialised;
+      a file another thread creates in that interval takes that mask. A socket
+      already at [path], left by a listener that has gone or not, is replaced;
+      any other file there is kept and the bind fails. Releasing [sw] closes the
+      socket and removes [path] while it is still that socket's file. A failure
+      is an {!Eio.Io} error, made by {!Eio_unix.Err.v}: a path longer than
+      {!max_length} is [ENAMETOOLONG] and a file in the way [EADDRINUSE],
+      unclassified. *)
+end
+
+(** TCP sockets. *)
+module Tcp : sig
+  val listen :
+    ?reuse_addr:bool ->
+    ?reuse_port:bool ->
+    sw:Eio.Switch.t ->
+    backlog:int ->
+    _ Eio.Net.t ->
+    Eio.Net.Ipaddr.v4v6 ->
+    int ->
+    [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t
+  (** [listen ~sw ~backlog net ip port] is {!Eio.Net.listen} on
+      [`Tcp (ip, port)], but a bind(2) or listen(2) that fails, which Eio's
+      POSIX backend raises as [Unix.Unix_error], is the {!Eio.Io} error
+      {!Eio_unix.Err.v} makes of it: a port in use is [EADDRINUSE],
+      unclassified. *)
 end
 
 val connect_failure : exn -> [ `Refused | `Unreachable ] option
