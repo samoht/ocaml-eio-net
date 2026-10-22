@@ -231,7 +231,7 @@ let test_local_listen_existing () =
         (Eio_net_unix.Local.listen ~sw ~backlog:4 ~perm:0o600 (Fpath.v stale));
       Alcotest.(check bool)
         "the stale socket replaced" true
-        (kind_perm stale = (Unix.S_SOCK, 0o600)));
+        (match kind_perm stale with Unix.S_SOCK, 0o600 -> true | _ -> false));
   let file = Filename.concat dir "file" in
   Out_channel.with_open_bin file (fun oc -> output_string oc "kept");
   (match

@@ -9,7 +9,7 @@ external connect_at : Unix.file_descr -> Unix.file_descr -> string -> unit
    is, a longer one from its directory (local_connect.c). The connect
    blocks only while the
    listener's backlog is full, on a thread of the pool. *)
-let connect_from_dir path =
+let connect_via_dir path =
   let dir, name = Fpath.split_base path in
   let sock = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   match
@@ -37,7 +37,7 @@ let connect ~sw ~net path =
       :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
   else
     (Eio_unix.Net.import_socket_stream ~sw ~close_unix:true
-       (connect_from_dir path)
+       (connect_via_dir path)
       :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
 
 let eio f =
