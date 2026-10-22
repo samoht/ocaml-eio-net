@@ -176,9 +176,136 @@ let test_local_max_length () =
     "one more byte is too long" true
     (bind (of_length (n + 1)) = Error Unix.ENAMETOOLONG)
 
+let kind_perm p =
+  let s = Unix.lstat p in
+  (s.st_kind, s.st_perm)
+
+(* Local.listen makes the socket's file with [perm]: the stat taken as it
+   returns reads [perm] under a process umask of 0o022, which would leave
+   0o640 of 0o660. Two modes, so a hard-coded 0o600 fails one of them. The
+   process's umask is the one it had, and the socket serves. *)
+let test_local_listen_perm () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let check perm =
+    let p = Filename.concat (Filename.temp_dir "perm" "") "s" in
+    let before = Unix.umask 0o022 in
+    Fun.protect
+      ~finally:(fun () -> ignore (Unix.umask before))
+      (fun () ->
+        Eio.Switch.run @@ fun sw ->
+        let listening =
+          Eio_net_unix.Local.listen ~sw ~backlog:4 ~perm (Fpath.v p)
+        in
+        let s = Unix.lstat p in
+        Alcotest.(check bool) "a socket" true (s.st_kind = Unix.S_SOCK);
+        Alcotest.(check int) (Fmt.str "mode %o" perm) perm s.st_perm;
+        Alcotest.(check int) "the umask restored" 0o022 (Unix.umask 0o022);
+        Eio.Fiber.both
+          (fun () ->
+            let flow, _ = Eio.Net.accept ~sw listening in
+            Eio.Flow.copy_string "served" flow;
+            Eio.Flow.close flow)
+          (fun () ->
+            let flow = Eio_net_unix.Local.connect ~sw ~net (Fpath.v p) in
+            Alcotest.(check string)
+              "served" "served"
+              (Eio.Buf_read.parse_exn ~max_size:64 Eio.Buf_read.take_all flow)));
+    Alcotest.(check bool) "removed on release" false (Sys.file_exists p)
+  in
+  check 0o600;
+  check 0o660
+
+(* A socket left at the path by a listener that has gone is replaced; a file
+   of any other kind is not, and the bind's EADDRINUSE is the Eio.Io error
+   Eio.Net.listen would raise, the file untouched. *)
+let test_local_listen_existing () =
+  Eio_main.run @@ fun _env ->
+  let dir = Filename.temp_dir "existing" "" in
+  let stale = Filename.concat dir "stale" in
+  let fd = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Unix.bind fd (Unix.ADDR_UNIX stale);
+  Unix.close fd;
+  Eio.Switch.run (fun sw ->
+      ignore
+        (Eio_net_unix.Local.listen ~sw ~backlog:4 ~perm:0o600 (Fpath.v stale));
+      Alcotest.(check bool)
+        "the stale socket replaced" true
+        (kind_perm stale = (Unix.S_SOCK, 0o600)));
+  let file = Filename.concat dir "file" in
+  Out_channel.with_open_bin file (fun oc -> output_string oc "kept");
+  (match
+     Eio.Switch.run (fun sw ->
+         Eio_net_unix.Local.listen ~sw ~backlog:4 ~perm:0o600 (Fpath.v file))
+   with
+  | _ -> Alcotest.failf "bound over the regular file %s" file
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ());
+  Alcotest.(check string)
+    "the file untouched" "kept"
+    (In_channel.with_open_bin file In_channel.input_all)
+
+(* A path no socket address holds is refused as ENAMETOOLONG, an Eio.Io
+   error, and leaves nothing at the path nor a changed umask. Releasing the
+   switch after another file took the socket's path leaves that file. *)
+let test_local_listen_errors () =
+  Eio_main.run @@ fun _env ->
+  let long = of_length (Eio_net_unix.Local.max_length + 1) in
+  let before = Unix.umask 0o022 in
+  Fun.protect
+    ~finally:(fun () -> ignore (Unix.umask before))
+    (fun () ->
+      (match
+         Eio.Switch.run (fun sw ->
+             Eio_net_unix.Local.listen ~sw ~backlog:4 ~perm:0o600 (Fpath.v long))
+       with
+      | _ -> Alcotest.failf "bound %s" long
+      | exception
+          Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENAMETOOLONG, _, _)), _)
+        ->
+          ());
+      Alcotest.(check bool) "nothing left" false (Sys.file_exists long);
+      Alcotest.(check int) "the umask restored" 0o022 (Unix.umask 0o022));
+  let p = Filename.concat (Filename.temp_dir "moved" "") "s" in
+  Eio.Switch.run (fun sw ->
+      ignore (Eio_net_unix.Local.listen ~sw ~backlog:4 ~perm:0o600 (Fpath.v p));
+      Unix.unlink p;
+      Out_channel.with_open_bin p (fun oc -> output_string oc "another"));
+  Alcotest.(check string)
+    "another file kept" "another"
+    (In_channel.with_open_bin p In_channel.input_all)
+
+(* A TCP address in use is the Eio.Io error EADDRINUSE, where Eio's POSIX
+   backend raises bind(2)'s Unix_error. *)
+let test_tcp_listen_in_use () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  Eio.Switch.run @@ fun sw ->
+  let ip = Eio.Net.Ipaddr.V4.loopback in
+  let first = Eio_net_unix.Tcp.listen ~sw ~backlog:4 net ip 0 in
+  let port =
+    match Eio.Net.listening_addr first with
+    | `Tcp (_, port) -> port
+    | a -> Alcotest.failf "bound to %a" Eio.Net.Sockaddr.pp a
+  in
+  match Eio_net_unix.Tcp.listen ~sw ~backlog:4 net ip port with
+  | _ -> Alcotest.failf "bound port %d twice" port
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ()
+
 let suite =
   ( "eio_net_unix",
     [
+      Alcotest.test_case "a local listener's mode, from its creation" `Quick
+        test_local_listen_perm;
+      Alcotest.test_case "a local listener over an existing file" `Quick
+        test_local_listen_existing;
+      Alcotest.test_case "a local listener refused, and released" `Quick
+        test_local_listen_errors;
+      Alcotest.test_case "a TCP listener on a port in use" `Quick
+        test_tcp_listen_in_use;
       Alcotest.test_case "the longest path an address holds" `Quick
         test_local_max_length;
       Alcotest.test_case "a local socket by a path of any length" `Quick
