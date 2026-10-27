@@ -127,9 +127,30 @@ let test_recv_slice () =
     ("HDR", "HDRpayload-bytes")
     !got
 
+let test_batch_refused_before_writing () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let writer, reader = Eio_unix.Net.socketpair_stream ~sw () in
+  let channel = Eio_net.Frame.of_length_prefixed_flow ~max_frame:16 writer in
+  let refused =
+    try
+      channel.Eio_net.Frame.send_batch
+        [ Rope.of_string "valid"; Rope.of_string (String.make 17 'x') ];
+      false
+    with Invalid_argument _ -> true
+  in
+  Eio.Flow.shutdown writer `Send;
+  let observed =
+    Eio.Buf_read.take_all (Eio.Buf_read.of_flow ~max_size:128 reader)
+  in
+  Alcotest.(check bool) "invalid batch is refused" true refused;
+  Alcotest.(check string) "invalid batch emits no prefix or body" "" observed
+
 let suite =
   ( "frame",
     [
+      Alcotest.test_case "invalid batch emits no bytes" `Quick
+        test_batch_refused_before_writing;
       Alcotest.test_case "in-memory pair round-trip" `Quick test_pair;
       Alcotest.test_case "recv_slice ingress view" `Quick test_recv_slice;
       Alcotest.test_case "length-prefixed round-trip" `Quick
