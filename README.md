@@ -3,6 +3,10 @@
 Network channels, relays and test backends for
 [Eio](https://github.com/ocaml-multicore/eio).
 
+The companion pure package [net-framing](Framing.md) owns bounded length-prefix
+encoding, incremental reads, EOF and write-failure state. The Eio frame adapter
+interprets that core; its `~framing` argument accepts `Framing.Config.t`.
+
 ## Overview
 
 A protocol implementation should not care whether its packets travel over a
@@ -60,7 +64,8 @@ $ opam install eio-net
 ## API
 
 The interfaces are documented in the `.mli` files under `lib/`: `frame.mli`,
-`datagram.mli` and `relay.mli` for the main library, and one directory per
+`datagram.mli` and `relay.mli` for the main library, `framing.mli` for the pure
+framing core, and one directory per
 sub-library.
 
 ## Licence

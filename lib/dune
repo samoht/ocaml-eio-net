@@ -5,6 +5,15 @@
 (library
  (name eio_net)
  (public_name eio-net)
- (libraries hermetic.eio eio cstruct fmt logs bytesrw mtime nox-rope)
+ (libraries
+  net-framing
+  hermetic.eio
+  eio
+  cstruct
+  fmt
+  logs
+  bytesrw
+  mtime
+  nox-rope)
  (flags
   (:standard -open Hermetic_eio)))

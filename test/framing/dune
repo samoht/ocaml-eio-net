@@ -1,0 +1,4 @@
+(test
+ (name test)
+ (package net-framing)
+ (libraries net-framing nox-rope alcotest))

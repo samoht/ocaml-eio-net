@@ -1,0 +1,10 @@
+{
+  "formats": [
+    "!H",
+    "!I"
+  ],
+  "implementation": "CPython",
+  "module": "struct",
+  "source": "https://docs.python.org/3.15/library/struct.html",
+  "version": "3.15.0"
+}

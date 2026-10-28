@@ -1,0 +1,3 @@
+(executable
+ (name measure)
+ (libraries eio-net eio eio.unix eio_main nox-rope mtime.clock.os fmt))

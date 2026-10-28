@@ -1,0 +1,13 @@
+(test
+ (name test)
+ (package net-framing)
+ (libraries net-framing fmt nox-csv nox-hex nox-rope alcotest)
+ (deps
+  (source_tree traces)
+  (source_tree scripts)))
+
+(rule
+ (alias regen-traces)
+ (deps
+  (alias traces/regen))
+ (action (progn)))

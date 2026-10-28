@@ -1,0 +1,13 @@
+(rule
+ (alias regen)
+ (mode promote)
+ (enabled_if
+  (= %{env:REGEN=0} 1))
+ (targets vectors.csv oracle.json)
+ (deps
+  (source_tree ../scripts))
+ (action
+  (setenv
+   VENV_DIR
+   .venv
+   (run bash ../scripts/generate.sh .))))

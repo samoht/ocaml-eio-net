@@ -1,0 +1,17 @@
+operation,length_field,length,prefix_hex
+encode,16,0,0000
+encode,16,1,0001
+encode,16,100,0064
+encode,16,1000,03e8
+encode,16,65535,ffff
+encode,32,0,00000000
+encode,32,1,00000001
+encode,32,100,00000064
+encode,32,1000,000003e8
+encode,32,65535,0000ffff
+encode,32,65536,00010000
+encode,32,1000000,000f4240
+refuse_encode,16,65536,
+refuse_declared,32,2147483647,7fffffff
+refuse_declared,32,2147483648,80000000
+refuse_declared,32,4294967295,ffffffff

@@ -62,7 +62,11 @@ let test_length_prefixed_over_limit () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
-  let receiver = Eio_net.Frame.of_length_prefixed_flow ~max_frame:16 b in
+  let receiver =
+    Eio_net.Frame.of_length_prefixed_flow
+      ~framing:(Framing.Config.v ~max_length:16 ())
+      b
+  in
   let raised = ref false in
   Eio.Fiber.both
     (fun () ->
@@ -71,7 +75,7 @@ let test_length_prefixed_over_limit () =
       Eio.Flow.write a [ Cstruct.of_bytes hdr ])
     (fun () ->
       (try ignore (receiver.Eio_net.Frame.recv ())
-       with Invalid_argument _ -> raised := true);
+       with Eio_net.Frame.Error _ -> raised := true);
       Eio.Flow.close a);
   Alcotest.(check bool) "over-limit frame refused" true !raised
 
@@ -95,8 +99,16 @@ let test_length_prefixed_16bit () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
-  let sender = Eio_net.Frame.of_length_prefixed_flow ~prefix_bytes:2 a in
-  let receiver = Eio_net.Frame.of_length_prefixed_flow ~prefix_bytes:2 b in
+  let sender =
+    Eio_net.Frame.of_length_prefixed_flow
+      ~framing:(Framing.Config.v ~length_field:Uint16_be ())
+      a
+  in
+  let receiver =
+    Eio_net.Frame.of_length_prefixed_flow
+      ~framing:(Framing.Config.v ~length_field:Uint16_be ())
+      b
+  in
   let got = ref "" in
   Eio.Fiber.both
     (fun () -> send sender "sixteen-bit framed")
@@ -131,13 +143,17 @@ let test_batch_refused_before_writing () =
   Eio_main.run @@ fun _ ->
   Eio.Switch.run @@ fun sw ->
   let writer, reader = Eio_unix.Net.socketpair_stream ~sw () in
-  let channel = Eio_net.Frame.of_length_prefixed_flow ~max_frame:16 writer in
+  let channel =
+    Eio_net.Frame.of_length_prefixed_flow
+      ~framing:(Framing.Config.v ~max_length:16 ())
+      writer
+  in
   let refused =
     try
       channel.Eio_net.Frame.send_batch
         [ Rope.of_string "valid"; Rope.of_string (String.make 17 'x') ];
       false
-    with Invalid_argument _ -> true
+    with Eio_net.Frame.Error _ -> true
   in
   Eio.Flow.shutdown writer `Send;
   let observed =
@@ -146,9 +162,118 @@ let test_batch_refused_before_writing () =
   Alcotest.(check bool) "invalid batch is refused" true refused;
   Alcotest.(check string) "invalid batch emits no prefix or body" "" observed
 
+let test_truncated_frames () =
+  List.iter
+    (fun (wire, expected) ->
+      Eio_main.run @@ fun _ ->
+      Eio.Switch.run @@ fun sw ->
+      let writer, reader = Eio_unix.Net.socketpair_stream ~sw () in
+      let frame = Eio_net.Frame.of_length_prefixed_flow reader in
+      Eio.Flow.write writer [ Cstruct.of_string wire ];
+      Eio.Flow.shutdown writer `Send;
+      Alcotest.check_raises "exact partial EOF" (Eio_net.Frame.Error expected)
+        (fun () -> ignore (frame.Eio_net.Frame.recv ())))
+    [
+      ( "\000\000",
+        Framing.Truncated { part = Prefix; expected = 4; received = 2 } );
+      ( "\000\000\000\003x",
+        Framing.Truncated { part = Payload; expected = 3; received = 1 } );
+    ]
+
+module Fragmented_flow = struct
+  type mode = Yield | Block of unit Eio.Promise.t * unit Eio.Promise.u
+  type t = { base : Eio.Flow.two_way_ty Eio.Resource.t; mode : mode }
+
+  let read_methods = []
+  let single_read t buffer = Eio.Flow.single_read t.base buffer
+
+  let rec single_write t = function
+    | [] -> 0
+    | first :: rest when Cstruct.length first = 0 -> single_write t rest
+    | first :: _ ->
+        let count = Eio.Flow.single_write t.base [ Cstruct.sub first 0 1 ] in
+        (match t.mode with
+        | Yield -> Eio.Fiber.yield ()
+        | Block (blocked, notify) ->
+            Eio.Promise.resolve notify ();
+            Eio.Promise.await blocked);
+        count
+
+  let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+  let shutdown t how = Eio.Flow.shutdown t.base how
+
+  let handler =
+    Eio.Flow.Pi.two_way
+      (module struct
+        type nonrec t = t
+
+        let read_methods = read_methods
+        let single_read = single_read
+        let single_write = single_write
+        let copy = copy
+        let shutdown = shutdown
+      end)
+
+  let wrap mode base =
+    Eio.Resource.T
+      ({ base :> Eio.Flow.two_way_ty Eio.Resource.t; mode }, handler)
+end
+
+let test_partial_write_cancelled () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let writer, reader = Eio_unix.Net.socketpair_stream ~sw () in
+  let started, notify = Eio.Promise.create () in
+  let blocked, _ = Eio.Promise.create () in
+  let flow = Fragmented_flow.wrap (Block (blocked, notify)) writer in
+  let channel = Eio_net.Frame.of_length_prefixed_flow flow in
+  Eio.Fiber.first
+    (fun () -> send channel "first")
+    (fun () -> Eio.Promise.await started);
+  Alcotest.check_raises "cancelled partial write cannot resume"
+    (Eio_net.Frame.Error Framing.Aborted) (fun () -> send channel "second");
+  Eio.Flow.shutdown writer `Send;
+  let wire =
+    Eio.Buf_read.take_all (Eio.Buf_read.of_flow ~max_size:128 reader)
+  in
+  Alcotest.(check string)
+    "only the first partial prefix reached peer" "\000" wire
+
+let test_concurrent_fragmented_writers () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let writer, reader = Eio_unix.Net.socketpair_stream ~sw () in
+  let sender =
+    Eio_net.Frame.of_length_prefixed_flow (Fragmented_flow.wrap Yield writer)
+  in
+  let receiver = Eio_net.Frame.of_length_prefixed_flow reader in
+  let got = ref [] in
+  Eio.Fiber.both
+    (fun () ->
+      Eio.Fiber.both
+        (fun () ->
+          sender.Eio_net.Frame.send_batch
+            (List.map Rope.of_string [ "a1"; "a2" ]))
+        (fun () ->
+          sender.Eio_net.Frame.send_batch
+            (List.map Rope.of_string [ "b1"; "b2" ])))
+    (fun () ->
+      for _ = 1 to 4 do
+        got := receiver.Eio_net.Frame.recv () :: !got
+      done);
+  let got = List.rev !got in
+  Alcotest.(check bool)
+    "whole batches survive byte-sized competing writes" true
+    (got = [ "a1"; "a2"; "b1"; "b2" ] || got = [ "b1"; "b2"; "a1"; "a2" ])
+
 let suite =
   ( "frame",
     [
+      Alcotest.test_case "truncated frame EOF" `Quick test_truncated_frames;
+      Alcotest.test_case "partial write cancellation" `Quick
+        test_partial_write_cancelled;
+      Alcotest.test_case "competing fragmented writers" `Quick
+        test_concurrent_fragmented_writers;
       Alcotest.test_case "invalid batch emits no bytes" `Quick
         test_batch_refused_before_writing;
       Alcotest.test_case "in-memory pair round-trip" `Quick test_pair;

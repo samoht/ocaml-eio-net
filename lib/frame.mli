@@ -60,22 +60,19 @@ val of_datagram_socket :
     refusal). A protocol that needs the source address of each datagram uses the
     addressed {!Datagram} channel instead. *)
 
+exception Error of Framing.error
+(** A pure framing refusal, including a partial prefix/payload at EOF or an
+    attempt to resume a write after failed/cancelled IO. *)
+
 val of_length_prefixed_flow :
-  ?max_frame:int -> ?prefix_bytes:int -> _ Eio.Flow.two_way -> t
-(** [of_length_prefixed_flow flow] presents a byte-stream flow as a frame
-    channel by delimiting each frame with a big-endian length prefix of
-    [prefix_bytes] bytes (default 4): {!send} writes the length then the
-    payload, and {!recv} reads one length then exactly that many payload bytes.
-    Use [prefix_bytes:2] for a 16-bit prefix (e.g. DNS-over-TCP, a utun link).
-
-    {!send_batch} coalesces a burst into one [writev] (each frame's prefix and
-    rope leaves back to back) so a sender that produces frames in bursts pays
-    one syscall per burst (software GSO).
-
-    {!recv} raises [End_of_file] when the stream closes at a frame boundary (or
-    mid-frame), and [Invalid_argument] if a length prefix exceeds [max_frame]
-    (default 1 MiB), so a hostile peer cannot force an unbounded read. A frame
-    may be empty. *)
+  ?framing:Framing.Config.t -> _ Eio.Flow.two_way -> t
+(** Interpret {!Framing.Decoder} and {!Framing.Encoder} over [flow]. The pure
+    default is an unsigned network-order uint32 length, up to 1 MiB. Every batch
+    is validated before any prefix or payload is written. Reads and writes are
+    independently serialised; a failed/cancelled write refuses future writes,
+    since a partial frame may already be on the wire. A clean boundary EOF
+    raises [End_of_file]; truncation and invalid lengths raise {!Error}.
+    Buffered input and pending frames obey the pure limits. *)
 
 val pair : unit -> t * t
 (** [pair ()] is two in-memory frame channels where a frame sent on one is

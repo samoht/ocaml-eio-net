@@ -28,42 +28,58 @@ let of_datagram_socket ?max_frame ?dst socket =
     ~recv:(fun () -> snd (channel.Datagram.recv ()))
     ~send:(channel.Datagram.send None)
 
-let of_length_prefixed_flow ?(max_frame = 1_048_576) ?(prefix_bytes = 4) flow =
-  let buf_r = Eio.Buf_read.of_flow ~max_size:(max_frame + prefix_bytes) flow in
-  let get_len s =
-    let n = ref 0 in
-    for i = 0 to prefix_bytes - 1 do
-      n := (!n lsl 8) lor Char.code s.[i]
-    done;
-    !n
+exception Error of Framing.error
+
+let of_length_prefixed_flow ?(framing = Framing.Config.v ()) flow =
+  let buffered =
+    Eio.Buf_read.of_flow ~max_size:(Framing.Config.buffer_size framing) flow
+  in
+  let decoder = ref (Framing.Decoder.v framing) in
+  let encoder = ref (Framing.Encoder.v framing) in
+  let read_lock = Eio.Mutex.create () and write_lock = Eio.Mutex.create () in
+  let observe needed =
+    match Eio.Buf_read.take needed buffered with
+    | bytes -> Framing.Decoder.Data bytes
+    | exception End_of_file ->
+        Framing.Decoder.Eof
+          (Eio.Buf_read.take (Eio.Buf_read.buffered_bytes buffered) buffered)
+    | exception exn ->
+        decoder := Framing.Decoder.handle !decoder Abort;
+        raise exn
   in
   let take_frame () =
-    let hdr = Eio.Buf_read.take prefix_bytes buf_r in
-    let len = get_len hdr in
-    if len > max_frame then
-      Fmt.invalid_arg "Eio_net.Frame: frame length %d out of range (max %d)" len
-        max_frame;
-    Eio.Buf_read.take len buf_r
+    Eio.Mutex.use_ro read_lock (fun () ->
+        let rec interpret () =
+          let state, event = Framing.Decoder.next_event !decoder in
+          decoder := state;
+          match event with
+          | Read needed ->
+              decoder := Framing.Decoder.handle !decoder (observe needed);
+              interpret ()
+          | Frame payload -> payload
+          | End_of_stream -> raise End_of_file
+          | Failed error -> raise (Error error)
+        in
+        interpret ())
   in
-  let prefix rope =
-    let hdr = Bytes.create prefix_bytes in
-    let len = Rope.length rope in
-    for i = 0 to prefix_bytes - 1 do
-      Bytes.set_uint8 hdr i ((len lsr (8 * (prefix_bytes - 1 - i))) land 0xff)
-    done;
-    Cstruct.of_bytes hdr
-  in
-  let send_batch ropes =
-    let iovecs =
-      List.concat_map (fun rope -> prefix rope :: rope_cstructs rope) ropes
-    in
-    if iovecs <> [] then Eio.Flow.write flow iovecs
+  let send_batch payloads =
+    Eio.Mutex.use_ro write_lock (fun () ->
+        let state, result = Framing.Encoder.outgoing !encoder payloads in
+        encoder := state;
+        match result with
+        | Result.Error error -> raise (Error error)
+        | Ok encoded -> (
+            match Eio.Flow.write flow (rope_cstructs encoded) with
+            | () -> encoder := Framing.Encoder.complete !encoder Sent
+            | exception exn ->
+                encoder := Framing.Encoder.complete !encoder Failed;
+                raise exn))
   in
   {
     recv = take_frame;
     recv_batch = (fun () -> [ take_frame () ]);
     recv_slice = (fun () -> slice_of_string (take_frame ()));
-    send = (fun rope -> send_batch [ rope ]);
+    send = (fun payload -> send_batch [ payload ]);
     send_batch;
   }
 
