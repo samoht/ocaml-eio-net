@@ -85,6 +85,43 @@ let test_dial_failure_keeps_listening () =
   in
   Alcotest.(check string) "relaying still works" "still up" back
 
+(* A relay declaring [max_connections] relays at most that many at once: a
+   client past it is accepted and waits, holding no upstream connection, until
+   a relayed one ends. The mock backend runs every fiber until it blocks, so
+   the upstream's count after the clients settle is all the relay dialled. *)
+let test_forward_holds_its_bound () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let dialled = ref 0 in
+  let upstream = Eio.Net.listen ~sw ~backlog:16 net (loopback 0) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let rec serve () =
+        Eio.Net.accept_fork ~sw upstream ~on_error:raise (fun flow _ ->
+            incr dialled;
+            Eio.Flow.copy flow flow);
+        serve ()
+      in
+      serve ());
+  let bound =
+    Eio_net.Relay.forward ~sw ~net ~max_connections:1 ~listen:(loopback 0)
+      ~connect:(Eio.Net.listening_addr upstream)
+      ()
+  in
+  let settle () =
+    for _ = 1 to 100 do
+      Eio.Fiber.yield ()
+    done
+  in
+  Eio.Switch.run (fun second ->
+      Eio.Switch.run (fun first ->
+          ignore (Eio.Net.connect ~sw:first net bound);
+          ignore (Eio.Net.connect ~sw:second net bound);
+          settle ();
+          Alcotest.(check int) "one client relayed of two" 1 !dialled);
+      settle ();
+      Alcotest.(check int) "the second once the first ended" 2 !dialled)
+
 let suite =
   ( "relay",
     [
@@ -93,4 +130,6 @@ let suite =
         test_forward_reports_port;
       Alcotest.test_case "dial failure keeps listening" `Quick
         test_dial_failure_keeps_listening;
+      Alcotest.test_case "forward holds its bound" `Quick
+        test_forward_holds_its_bound;
     ] )
