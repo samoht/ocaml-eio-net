@@ -211,3 +211,19 @@ module Net : sig
       ({!Eio_net_mem.v}): a self-contained adversarial network for tests that
       need no real sockets. *)
 end
+
+(** A listener's connection bound, as the peers it accepts see it. *)
+module Listener : sig
+  type net = [ `Generic ] Eio.Net.ty Eio.Resource.t
+
+  val accepted :
+    offered:int -> (net:net -> addr:Eio.Net.Sockaddr.stream -> unit) -> int
+  (** [accepted ~offered serve] runs [serve ~net ~addr] under
+      {!Eio_mock.Backend} on a network whose listener at [addr] has [offered]
+      connections waiting, each from a peer that opens it and never sends a
+      byte, and is how many of them [serve] accepted once every fiber is
+      blocked. A peer that sends nothing holds its connection for good, so the
+      count is what a listener lets that many silent peers make it hold. A
+      [serve] that returns fails the case: a listener serves until it is
+      stopped. *)
+end

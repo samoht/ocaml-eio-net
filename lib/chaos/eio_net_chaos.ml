@@ -622,3 +622,31 @@ module Net = struct
 
   let v ~sw schedule = wrap schedule (Eio_net_mem.v ~sw ())
 end
+
+module Listener = struct
+  type net = [ `Generic ] Eio.Net.ty Eio.Resource.t
+
+  let accepted ~offered serve =
+    let net = Eio_mock.Net.make "net" in
+    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
+    let listening =
+      Eio_mock.Net.listening_socket ~listening_addr:addr "listening"
+    in
+    Eio_mock.Net.on_listen net [ `Return listening ];
+    let silent, _ = Eio.Promise.create () in
+    let count = ref 0 in
+    let connection i =
+      `Run
+        (fun () ->
+          incr count;
+          let flow = Eio_mock.Flow.make (Fmt.str "peer%d" i) in
+          Eio_mock.Flow.on_read flow [ `Await silent ];
+          (flow, `Tcp (Eio.Net.Ipaddr.V4.loopback, 1024 + i)))
+    in
+    let no_more, _ = Eio.Promise.create () in
+    Eio_mock.Net.on_accept listening
+      (List.init offered connection @ [ `Await no_more ]);
+    match Eio_mock.Backend.run (fun () -> serve ~net:(net :> net) ~addr) with
+    | () -> Fmt.failwith "Listener.accepted: the listener returned"
+    | exception Eio_mock.Backend.Deadlock_detected -> !count
+end
