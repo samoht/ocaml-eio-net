@@ -33,46 +33,88 @@ let reading head received =
 
 let complete head = Atomic.set head.received None
 
-type held = { seq : int; head : head; mutable shed : bool }
+type held = { seq : int; loop : int; head : head; shed : bool Atomic.t }
 
-(* The loop's state: the connections it holds, by accept order, the condition
-   a connection's end signals, and whether [stop] has resolved. *)
+module Seq_map = Map.Make (Int)
+
+(* The connections every loop of the process holds, by accept order.
+   Descriptors are the process's, so their pressure on any loop sheds from all
+   of them. Loops may run on different domains, so the map is replaced by
+   compare-and-set and read as a snapshot; [ends] counts the connections ended,
+   so a loop waiting for one misses none that ends before it waits. *)
+type process = {
+  all : held Seq_map.t Atomic.t;
+  next : int Atomic.t;
+  ends : int Atomic.t;
+  any_ended : Eio.Condition.t;
+}
+
+let process =
+  {
+    all = Atomic.make Seq_map.empty;
+    next = Atomic.make 0;
+    ends = Atomic.make 0;
+    any_ended = Eio.Condition.create ();
+  }
+
+let rec update f =
+  let all = Atomic.get process.all in
+  if not (Atomic.compare_and_set process.all all (f all)) then update f
+
+(* A loop's state: its identity in [process], how many connections it holds,
+   which only its own fibers change, the condition one of their ends signals,
+   and whether [stop] has resolved. *)
 type loop = {
-  held : (int, held) Hashtbl.t;
+  id : int;
+  mutable count : int;
   ended : Eio.Condition.t;
   stopping : bool Atomic.t;
-  mutable next : int;
 }
 
 let shed c =
-  c.shed <- true;
+  Atomic.set c.shed true;
   c.head.shut ()
 
-(* The held connection whose head is incomplete and has made the least
-   progress, the older of two that made the same. *)
-let least_progressed loop =
-  Hashtbl.fold
+(* The connection held by a loop that [mine] accepts whose head is incomplete
+   and has made the least progress, the older of two that made the same. *)
+let least_progressed mine =
+  Seq_map.fold
     (fun _ c best ->
       match Atomic.get c.head.received with
       | None -> best
-      | Some _ when c.shed -> best
+      | Some _ when (not (mine c)) || Atomic.get c.shed -> best
       | Some received -> (
           let n = received () in
           match best with
           | Some (b, m) when m < n || (m = n && b.seq < c.seq) -> best
           | _ -> Some (c, n)))
-    loop.held None
+    (Atomic.get process.all) None
 
-(* Shed the least progressed incomplete head, if one is held, and wait for a
-   held connection to end. *)
+(* Every connection of [loop] is held: shed its least progressed incomplete
+   head, if it holds one, and wait for one of its connections to end. *)
 let free_a_slot loop =
-  Option.iter (fun (c, _) -> shed c) (least_progressed loop);
+  Option.iter
+    (fun (c, _) -> shed c)
+    (least_progressed (fun c -> c.loop = loop.id));
   Eio.Condition.await_no_mutex loop.ended
 
-(* Serve [flow] on a fiber of [sw], held in [loop] until it ends. *)
+(* No descriptor is left: shed the least progressed incomplete head of the
+   process, if one is held, and wait for a connection of any loop to end.
+   [false] when no loop holds one. *)
+let free_a_descriptor () =
+  let ends = Atomic.get process.ends in
+  if Seq_map.is_empty (Atomic.get process.all) then false
+  else begin
+    Option.iter (fun (c, _) -> shed c) (least_progressed (fun _ -> true));
+    Eio.Condition.loop_no_mutex process.any_ended (fun () ->
+        if Atomic.get process.ends = ends then None else Some ());
+    true
+  end
+
+(* Serve [flow] on a fiber of [sw], held in [loop] and [process] until it
+   ends. *)
 let fork loop ~sw ~on_error handler flow addr =
-  let seq = loop.next in
-  loop.next <- seq + 1;
+  let seq = Atomic.fetch_and_add process.next 1 in
   let shut () = try Eio.Flow.shutdown flow `All with Eio.Io _ -> () in
   let head =
     {
@@ -81,14 +123,18 @@ let fork loop ~sw ~on_error handler flow addr =
       shut;
     }
   in
-  let c = { seq; head; shed = false } in
+  let c = { seq; loop = loop.id; head; shed = Atomic.make false } in
   let ended () =
     Eio.Flow.close flow;
-    Hashtbl.remove loop.held seq;
-    Eio.Condition.broadcast loop.ended
+    update (Seq_map.remove seq);
+    loop.count <- loop.count - 1;
+    Atomic.incr process.ends;
+    Eio.Condition.broadcast loop.ended;
+    Eio.Condition.broadcast process.any_ended
   in
   let started = ref false in
-  Hashtbl.replace loop.held seq c;
+  update (Seq_map.add seq c);
+  loop.count <- loop.count + 1;
   Fun.protect ~finally:(fun () -> if not !started then ended ()) @@ fun () ->
   Eio.Fiber.fork ~sw (fun () ->
       started := true;
@@ -96,7 +142,7 @@ let fork loop ~sw ~on_error handler flow addr =
       match handler head flow addr with
       | () -> ()
       | exception ((Eio.Io _ | End_of_file) as e) ->
-          if not c.shed then
+          if not (Atomic.get c.shed) then
             on_error
               (Eio.Exn.add_context e "handling connection from %a"
                  Eio.Net.Sockaddr.pp addr))
@@ -106,10 +152,10 @@ let run ?stop ~max_connections ~on_error listening handler =
     Fmt.invalid_arg "Eio_net_accept.run: max_connections is %d" max_connections;
   let loop =
     {
-      held = Hashtbl.create 16;
+      id = Atomic.fetch_and_add process.next 1;
+      count = 0;
       ended = Eio.Condition.create ();
       stopping = Atomic.make false;
-      next = 0;
     }
   in
   (* The connections are forked on a switch of the loop's own, so they end
@@ -118,7 +164,7 @@ let run ?stop ~max_connections ~on_error listening handler =
   let rec accept () =
     match Eio.Net.accept ~sw listening with
     | flow, addr ->
-        while Hashtbl.length loop.held >= max_connections do
+        while loop.count >= max_connections do
           free_a_slot loop
         done;
         fork loop ~sw ~on_error handler flow addr;
@@ -127,12 +173,12 @@ let run ?stop ~max_connections ~on_error listening handler =
         let bt = Printexc.get_raw_backtrace () in
         match classify e with
         | Some `Aborted -> accept ()
-        | Some `Descriptors when Hashtbl.length loop.held > 0 ->
-            free_a_slot loop;
-            accept ()
         | Some `Descriptors ->
-            Eio.Exn.reraise_with_context e bt
-              "accepting, with no connection held to shed or wait for"
+            if free_a_descriptor () then accept ()
+            else
+              Eio.Exn.reraise_with_context e bt
+                "accepting, with no connection held by any loop to shed or \
+                 wait for"
         | None -> Printexc.raise_with_backtrace e bt)
   in
   match stop with
@@ -140,7 +186,9 @@ let run ?stop ~max_connections ~on_error listening handler =
   | Some stop ->
       let v = Eio.Fiber.first accept (fun () -> Eio.Promise.await stop) in
       Atomic.set loop.stopping true;
-      Hashtbl.fold (fun _ c acc -> c :: acc) loop.held []
-      |> List.iter (fun c ->
-          if Option.is_some (Atomic.get c.head.received) then shed c);
+      Seq_map.iter
+        (fun _ c ->
+          if c.loop = loop.id && Option.is_some (Atomic.get c.head.received)
+          then shed c)
+        (Atomic.get process.all);
       v

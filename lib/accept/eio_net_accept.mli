@@ -3,8 +3,10 @@
 
     {!run} accepts and serves connections within a declared bound and bounds by
     its state what peers can make it hold: under pressure it sheds the held
-    connection whose head is incomplete and has made the least progress. An
-    accept its peer aborted, or one with no descriptor left, leaves it whole.
+    connection whose head is incomplete and has made the least progress, among
+    its own when its bound is reached and among every loop of the process when
+    descriptors run out. An accept its peer aborted, or one with no descriptor
+    left, leaves it whole.
 
     Eio names a connection reset portably and reports the rest as a backend
     error, so the library that provides a platform's network registers the
@@ -49,17 +51,20 @@ val run :
     What peers can make it hold is bounded by its state. Each connection holds
     one descriptor, one fiber and what [handler] holds, and at most
     [max_connections] connections are held at once. The loop is under pressure
-    when every one of them is held and another peer connects, or when an accept
-    fails because the process or the system has no descriptor left
-    ({!classify}). Under pressure it sheds the held connection whose head is
-    incomplete and has made the least progress, the older of two that made the
-    same, and waits for a held connection to end before it serves the next: with
-    no incomplete head held, it waits for one that is being served. Choosing
-    costs a pass over the held connections. A connection is shed by shutting its
-    socket down, with no answer, so its reads end on whichever domain it runs.
-    An accept its peer aborted is followed by the next. An accept with no
-    descriptor left and no connection held raises its error, naming that none
-    was held to shed or wait for.
+    when every one of them is held and another peer connects: it sheds its held
+    connection whose head is incomplete and has made the least progress, the
+    older of two that made the same, and waits for one of its connections to end
+    before it serves the next; with no incomplete head held, it waits for one
+    that is being served. Descriptors are the process's, so when an accept fails
+    because the process or the system has no descriptor left ({!classify}) the
+    loop chooses the same way among the connections of every [run] of the
+    process, on any domain, and waits for any of them to end before it accepts
+    again. Choosing costs a pass over the connections the process's loops hold.
+    A connection is shed by shutting its socket down, with no answer, so its
+    reads end on whichever domain it runs. An accept its peer aborted is
+    followed by the next. An accept with no descriptor left while no loop of the
+    process holds a connection raises its error, naming that none was held to
+    shed or wait for.
 
     [on_error] receives each [Eio.Io] or [End_of_file] a connection's [handler]
     raises, a failure on its socket, with the peer's address in its context; a
