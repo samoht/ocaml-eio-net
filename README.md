@@ -43,11 +43,17 @@ Six sub-libraries sit beside it:
   kernel. It also lists the host's interface addresses with their prefixes
   (getifaddrs) and waits for the kernel to report a change to them. Linking
   it registers the Unix classifiers of a failed connect and a failed accept.
-- `eio-net.connect` and `eio-net.accept`: what a failed connect or accept
-  carries from the network, read by the classifier its platform's network
-  registers: a refused or unreachable peer, an accept its peer aborted, or no
-  descriptor left. A connection library or a listener asks them and works the
-  same over every network.
+- `eio-net.accept`: the accept loop a listener serves its connections with,
+  `Eio_net_accept.run`. It holds at most a declared number of connections
+  and, under pressure, sheds the one whose head (an HTTP request head, an SSH
+  handshake) is incomplete and has made the least progress; an accept its
+  peer aborted, or one with no descriptor left, leaves it serving. It reads
+  what a failed accept carries with the classifier its platform's network
+  registers, so it works the same over every network.
+- `eio-net.connect`: what a failed connect carries from the network, a
+  refused or unreachable peer, read by the classifier its platform's network
+  registers. A connection library asks it and works the same over every
+  network.
 - `eio-net.addr`: conversions between `Ipaddr` and Eio socket addresses, and
   host name resolution to a stream address.
 
