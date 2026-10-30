@@ -11,16 +11,16 @@ let splice a b = Eio.Fiber.both (fun () -> one_way a b) (fun () -> one_way b a)
 let default_on_error exn =
   Log.warn (fun m -> m "relay connection failed: %a" Fmt.exn exn)
 
-let forward ~sw ~net ?(on_error = default_on_error) ~listen ~connect () =
+let forward ~sw ~net ?(on_error = default_on_error) ~max_connections ~listen
+    ~connect () =
   let socket = Eio.Net.listen ~sw ~backlog:16 ~reuse_addr:true net listen in
   (* A daemon fiber: the listener must not hold the switch open once the
-     caller's own work ends. *)
-  let rec serve () : [ `Stop_daemon ] =
-    Eio.Net.accept_fork ~sw socket ~on_error (fun client _addr ->
-        Eio.Switch.run @@ fun conn_sw ->
-        let upstream = Eio.Net.connect ~sw:conn_sw net connect in
-        splice client upstream);
-    serve ()
-  in
-  Eio.Fiber.fork_daemon ~sw serve;
+     caller's own work ends. A relay has no head: it serves from the accept. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio_net_accept.run ~max_connections ~on_error socket
+        (fun head client _addr ->
+          Eio_net_accept.complete head;
+          Eio.Switch.run @@ fun conn_sw ->
+          let upstream = Eio.Net.connect ~sw:conn_sw net connect in
+          splice client upstream));
   Eio.Net.listening_addr socket

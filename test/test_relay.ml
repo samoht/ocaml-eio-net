@@ -28,7 +28,7 @@ let test_forward_echo () =
   let net = Eio.Stdenv.net env in
   let upstream = echo_server ~sw ~net in
   let bound =
-    Eio_net.Relay.forward ~sw ~net ~listen:(loopback 0)
+    Eio_net.Relay.forward ~sw ~net ~max_connections:4 ~listen:(loopback 0)
       ~connect:(loopback (port_of upstream))
       ()
   in
@@ -45,7 +45,8 @@ let test_forward_reports_port () =
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let bound =
-    Eio_net.Relay.forward ~sw ~net ~listen:(loopback 0) ~connect:(loopback 1) ()
+    Eio_net.Relay.forward ~sw ~net ~max_connections:4 ~listen:(loopback 0)
+      ~connect:(loopback 1) ()
   in
   Alcotest.(check bool) "a real port, not 0" true (port_of bound > 0)
 
@@ -56,7 +57,7 @@ let test_dial_failure_keeps_listening () =
   let upstream = echo_server ~sw ~net in
   let failures = ref 0 in
   let dead =
-    Eio_net.Relay.forward ~sw ~net
+    Eio_net.Relay.forward ~sw ~net ~max_connections:4
       ~on_error:(fun _ -> incr failures)
       ~listen:(loopback 0) ~connect:(loopback 1) ()
   in
@@ -73,7 +74,7 @@ let test_dial_failure_keeps_listening () =
   let dead2 = Eio.Net.connect ~sw net (loopback (port_of dead)) in
   Eio.Flow.shutdown dead2 `Send;
   let healthy =
-    Eio_net.Relay.forward ~sw ~net ~listen:(loopback 0)
+    Eio_net.Relay.forward ~sw ~net ~max_connections:4 ~listen:(loopback 0)
       ~connect:(loopback (port_of upstream))
       ()
   in

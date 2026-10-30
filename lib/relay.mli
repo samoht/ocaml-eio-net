@@ -17,16 +17,20 @@ val forward :
   sw:Eio.Switch.t ->
   net:_ Eio.Net.t ->
   ?on_error:(exn -> unit) ->
+  max_connections:int ->
   listen:Eio.Net.Sockaddr.stream ->
   connect:Eio.Net.Sockaddr.stream ->
   unit ->
   Eio.Net.Sockaddr.stream
-(** [forward ~sw ~net ~listen ~connect ()] listens on [listen] and, for every
-    accepted connection, dials [connect] and {!splice}s the two. It is the bound
-    address once listening (for a [listen] naming port 0, the port the system
-    chose), and it serves in fibers on [sw] until the switch ends.
+(** [forward ~sw ~net ~on_error ~max_connections ~listen ~connect ()] listens on
+    [listen] and, for every accepted connection, dials [connect] and {!splice}s
+    the two, in an {!Eio_net_accept.run} loop on [sw] that relays at most
+    [max_connections] connections at once: a client past them waits, holding no
+    upstream connection, until one ends. A relay serves from the accept, so it
+    sheds none. It is the bound address once listening (for a [listen] naming
+    port 0, the port the system chose), and it serves until [sw] ends.
 
-    A connection that fails (the dial refused, either side dropping mid-splice)
-    closes that connection's flows and is reported to [on_error] (default: a
-    warning on this module's log source); the listener itself keeps accepting.
-*)
+    A connection that fails on a socket (the dial refused, either side dropping
+    mid-splice) closes that connection's flows and is reported to [on_error]
+    (default: a warning on this module's log source); the listener itself keeps
+    accepting. *)

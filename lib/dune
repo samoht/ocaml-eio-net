@@ -8,6 +8,7 @@
  (libraries
   net-framing
   hermetic.eio
+  eio-net.accept
   eio
   cstruct
   fmt
