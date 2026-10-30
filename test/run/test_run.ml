@@ -34,7 +34,7 @@ module Scripted = struct
   let getsockopt t opt = Eio.Net.getsockopt t.inner opt
 end
 
-let scripted ~sw net failures =
+let scripted ?(addr = addr) ~sw net failures =
   let inner = Eio.Net.listen ~sw ~backlog:16 net addr in
   Eio.Resource.T
     ({ Scripted.inner; failures }, Eio.Net.Pi.listening_socket (module Scripted))
@@ -58,7 +58,7 @@ let line_server ?(served = ignore) head flow _addr =
   next ()
 
 (* A peer that sends [data], ends its side and reads the answer to its end. *)
-let exchange net data =
+let exchange ?(addr = addr) net data =
   Eio.Switch.run @@ fun sw ->
   let flow = Eio.Net.connect ~sw net addr in
   Eio.Flow.copy_string data flow;
@@ -67,7 +67,7 @@ let exchange net data =
 
 (* A peer that sends [data] and then nothing, and reads until its connection
    ends; [on_end] runs once it has. Any answer fails the case. *)
-let stall ~sw net data ~on_end =
+let stall ?(addr = addr) ~sw net data ~on_end =
   Eio.Fiber.fork ~sw (fun () ->
       Eio.Switch.run @@ fun csw ->
       let flow = Eio.Net.connect ~sw:csw net addr in
@@ -157,6 +157,53 @@ let pressure_sheds_the_least_progressed pressure n () =
             "the fresh peer is answered" "ok fresh\n" (exchange net "fresh\n");
           Alcotest.(check (list int))
             "the least progressed head, and no other, was shed"
+            [ n - 1 ]
+            (List.filter (fun i -> ended.(i)) (List.init n Fun.id));
+          check_no_error seen))
+
+(* Descriptors are the process's: [n] peers stall on one loop, peer [i] with
+   [n - i] bytes of its head, and an accept of another loop of the process,
+   which holds none, fails for lack of a descriptor (EMFILE). The second loop
+   sheds the first's least progressed head and no other, and answers a fresh
+   peer of its own. *)
+let descriptors_are_shared_across_loops n () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let seen, on_error = errors () in
+  let other = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5001) in
+  let pressed, press = Eio.Promise.create () in
+  let ended = Array.make n false in
+  let last_ended, last_ended_r = Eio.Promise.create () in
+  Eio.Switch.run (fun clients ->
+      Eio.Switch.run (fun scope ->
+          let first = scripted ~sw:scope net [] in
+          let second =
+            scripted ~addr:other ~sw:scope net [ (pressed, no_descriptor ()) ]
+          in
+          Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+              Eio_net_accept.run ~max_connections:(10 * n) ~on_error first
+                (line_server ?served:None));
+          Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+              Eio_net_accept.run ~max_connections:(10 * n) ~on_error second
+                (line_server ?served:None));
+          for i = 0 to n - 1 do
+            stall ~sw:clients net
+              (String.make (n - i) 'x')
+              ~on_end:(fun () ->
+                ended.(i) <- true;
+                if i = n - 1 then Eio.Promise.resolve last_ended_r ())
+          done;
+          settle n;
+          Eio.Promise.resolve press ();
+          Eio.Promise.await last_ended;
+          Alcotest.(check string)
+            "the second loop's fresh peer is answered" "ok fresh\n"
+            (exchange ~addr:other net "fresh\n");
+          Alcotest.(check string)
+            "the first loop serves on" "ok more\n" (exchange net "more\n");
+          Alcotest.(check (list int))
+            "the first loop's least progressed head, and no other, was shed"
             [ n - 1 ]
             (List.filter (fun i -> ended.(i)) (List.init n Fun.id));
           check_no_error seen))
@@ -304,6 +351,10 @@ let suite =
       Alcotest.test_case "no descriptor sheds the least progressed of 100"
         `Quick
         (pressure_sheds_the_least_progressed `Descriptors 100);
+      Alcotest.test_case "no descriptor on a second loop sheds of 10" `Quick
+        (descriptors_are_shared_across_loops 10);
+      Alcotest.test_case "no descriptor on a second loop sheds of 100" `Quick
+        (descriptors_are_shared_across_loops 100);
       Alcotest.test_case "no descriptor and none held raises" `Quick
         test_no_descriptor_and_none_held_raises;
       Alcotest.test_case "10 complete heads are not shed" `Quick
