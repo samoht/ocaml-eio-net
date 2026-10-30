@@ -6,6 +6,15 @@ external drain : Unix.file_descr -> bool = "caml_eio_net_interface_drain"
 
 type address = { interface : string; prefix : Ipaddr.Prefix.t; loopback : bool }
 
+module type S = sig
+  val addresses : unit -> address list
+
+  type watch
+
+  val watch : sw:Eio.Switch.t -> watch
+  val changed : watch -> unit
+end
+
 let prefix octets bits =
   if String.length octets = 4 then
     Ipaddr.V4 (Ipaddr.V4.Prefix.make bits (Ipaddr.V4.of_octets_exn octets))

@@ -9,29 +9,35 @@ type address = {
 }
 (** The type for one address an interface carries. *)
 
-val addresses : unit -> address list
-(** [addresses ()] is every IPv4 and IPv6 address of the host's interfaces, up
-    or down, in the order getifaddrs(3) lists them. An IPv6 link-local address
-    is the one the interface's link sees, with no scope embedded in it as a KAME
-    stack (macOS, the BSDs) embeds it.
+(** The type for a host's interface addresses and their changes: this module's,
+    or a stand-in's. *)
+module type S = sig
+  val addresses : unit -> address list
+  (** [addresses ()] is every IPv4 and IPv6 address of the host's interfaces, up
+      or down, in the order getifaddrs(3) lists them. An IPv6 link-local address
+      is the one the interface's link sees, with no scope embedded in it as a
+      KAME stack (macOS, the BSDs) embeds it.
 
-    @raise Unix.Unix_error if getifaddrs fails. *)
+      @raise Unix.Unix_error if getifaddrs fails. *)
 
-type watch
-(** The type for subscriptions to the host's address changes. *)
+  type watch
+  (** The type for subscriptions to the host's address changes. *)
 
-val watch : sw:Eio.Switch.t -> watch
-(** [watch ~sw] subscribes to the kernel's address-change notifications:
-    rtnetlink's [RTMGRP_IPV4_IFADDR] and [RTMGRP_IPV6_IFADDR] groups on Linux, a
-    [PF_ROUTE] socket elsewhere. Releasing [sw] closes it. A caller that reads
-    {!addresses} after opening the watch misses no change.
+  val watch : sw:Eio.Switch.t -> watch
+  (** [watch ~sw] subscribes to the kernel's address-change notifications:
+      rtnetlink's [RTMGRP_IPV4_IFADDR] and [RTMGRP_IPV6_IFADDR] groups on Linux,
+      a [PF_ROUTE] socket elsewhere. Releasing [sw] closes it. A caller that
+      reads {!addresses} after opening the watch misses no change.
 
-    @raise Unix.Unix_error if the socket cannot be opened. *)
+      @raise Unix.Unix_error if the socket cannot be opened. *)
 
-val changed : watch -> unit
-(** [changed w] waits until an address has been added to or removed from an
-    interface since the previous call returned, or since [w] opened. A
-    notification the kernel dropped because the socket's buffer was full counts
-    as a change. A routing socket also carries messages of no address, a route
-    learned for each new destination among them: each costs one read and returns
-    nothing. *)
+  val changed : watch -> unit
+  (** [changed w] waits until an address has been added to or removed from an
+      interface since the previous call returned, or since [w] opened. A
+      notification the kernel dropped because the socket's buffer was full
+      counts as a change. A routing socket also carries messages of no address,
+      a route learned for each new destination among them: each costs one read
+      and returns nothing. *)
+end
+
+include S
