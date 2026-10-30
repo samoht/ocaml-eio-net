@@ -1,0 +1,17 @@
+; Links eio-net.unix, whose initialisation registers the Unix accept
+; classifier the loop reads: no descriptor left (EMFILE) is one of its answers.
+
+(test
+ (name test)
+ (package eio-net)
+ (libraries
+  eio-net.accept
+  eio-net.unix
+  eio-net.mem
+  eio
+  eio.mock
+  eio.unix
+  alcotest
+  cstruct
+  fmt
+  unix))
