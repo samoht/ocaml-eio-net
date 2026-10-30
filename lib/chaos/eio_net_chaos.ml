@@ -639,7 +639,7 @@ module Listener = struct
       `Run
         (fun () ->
           incr count;
-          let flow = Eio_mock.Flow.make (Fmt.str "peer%d" i) in
+          let flow = Fmt.kstr Eio_mock.Flow.make "peer%d" i in
           Eio_mock.Flow.on_read flow [ `Await silent ];
           (flow, `Tcp (Eio.Net.Ipaddr.V4.loopback, 1024 + i)))
     in
