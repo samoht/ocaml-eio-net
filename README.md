@@ -26,7 +26,7 @@ make this possible:
 - `Eio_net.Relay`: copies bytes between two flows in both directions, or
   listens and forwards each accepted connection to another address.
 
-Four sub-libraries sit beside it:
+Six sub-libraries sit beside it:
 
 - `eio-net.mem`: an in-memory `Eio.Net.t` for stream and datagram sockets,
   and connected in-memory pipes, so client and server code can talk through
@@ -41,7 +41,13 @@ Four sub-libraries sit beside it:
   the per-domain lock a thread must hold to run OCaml code; a C call that
   releases it lets the domain's other threads run while it blocks in the
   kernel. It also lists the host's interface addresses with their prefixes
-  (getifaddrs) and waits for the kernel to report a change to them.
+  (getifaddrs) and waits for the kernel to report a change to them. Linking
+  it registers the Unix classifiers of a failed connect and a failed accept.
+- `eio-net.connect` and `eio-net.accept`: what a failed connect or accept
+  carries from the network, read by the classifier its platform's network
+  registers: a refused or unreachable peer, an accept its peer aborted, or no
+  descriptor left. A connection library or a listener asks them and works the
+  same over every network.
 - `eio-net.addr`: conversions between `Ipaddr` and Eio socket addresses, and
   host name resolution to a stream address.
 

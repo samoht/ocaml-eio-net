@@ -295,9 +295,31 @@ let test_tcp_listen_in_use () =
     ->
       ()
 
+(* Linking eio-net.unix registers its accept classifier: a peer that reset
+   its connection before the accept, and a process or system out of
+   descriptors, each leave the listener whole. *)
+let test_accept_failure_is_registered () =
+  let classify e = Eio_net_accept.classify (Eio_unix.Err.v e "accept" "") in
+  let answer = function
+    | Some `Aborted -> "aborted"
+    | Some `Descriptors -> "descriptors"
+    | None -> "none"
+  in
+  List.iter
+    (fun (e, want) ->
+      Alcotest.(check string) (Unix.error_message e) want (answer (classify e)))
+    [
+      (Unix.ECONNABORTED, "aborted");
+      (Unix.EMFILE, "descriptors");
+      (Unix.ENFILE, "descriptors");
+      (Unix.EBADF, "none");
+    ]
+
 let suite =
   ( "eio_net_unix",
     [
+      Alcotest.test_case "the accept classifier is registered" `Quick
+        test_accept_failure_is_registered;
       Alcotest.test_case "a local listener's mode, from its creation" `Quick
         test_local_listen_perm;
       Alcotest.test_case "a local listener over an existing file" `Quick

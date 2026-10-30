@@ -23,3 +23,16 @@ val connect_failure : exn -> [ `Refused | `Unreachable ] option
     Linking this library registers it with {!Eio_net_connect.register}, so a
     connect that asks {!Eio_net_connect.classify} over a Unix network uses it
     with no argument. *)
+
+val accept_failure : exn -> [ `Aborted | `Descriptors ] option
+(** [accept_failure exn] is the answer a failed {!Eio.Net.accept} raising [exn]
+    carries from the system, or [None] when it carries none:
+
+    - [`Aborted] for [Eio.Net.Connection_reset _], as Eio reports ECONNABORTED:
+      a connection its peer reset before it was accepted.
+    - [`Descriptors] for EMFILE and ENFILE: the process, or the system, has no
+      descriptor left for the connection.
+
+    Linking this library registers it with {!Eio_net_accept.register}, so a
+    listener that asks {!Eio_net_accept.classify} over a Unix network uses it
+    with no argument. *)

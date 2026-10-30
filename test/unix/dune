@@ -4,6 +4,7 @@
  (libraries
   eio-net
   eio-net.unix
+  eio-net.accept
   eio
   eio.unix
   eio_main

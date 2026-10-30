@@ -1,5 +1,6 @@
-; Linked whole: its initialisation registers the Unix connect classifier, which
-; a program that never names Eio_net_unix still dials with.
+; Linked whole: its initialisation registers the Unix connect and accept
+; classifiers, which a program that never names Eio_net_unix still dials and
+; listens with.
 
 (library
  (name eio_net_unix)
@@ -8,6 +9,7 @@
   hermetic.eio
   eio-net
   eio-net.connect
+  eio-net.accept
   eio
   eio.unix
   cstruct
