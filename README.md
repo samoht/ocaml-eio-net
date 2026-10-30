@@ -40,7 +40,8 @@ Four sub-libraries sit beside it:
   vectored write that runs off the OCaml runtime lock. The runtime lock is
   the per-domain lock a thread must hold to run OCaml code; a C call that
   releases it lets the domain's other threads run while it blocks in the
-  kernel.
+  kernel. It also lists the host's interface addresses with their prefixes
+  (getifaddrs) and waits for the kernel to report a change to them.
 - `eio-net.addr`: conversions between `Ipaddr` and Eio socket addresses, and
   host name resolution to a stream address.
 

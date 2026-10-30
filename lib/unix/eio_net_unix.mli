@@ -1,11 +1,12 @@
-(** Unix adapters for frame channels, stream writes and sockets. Each module is
-    a unit of its own, so that a unit naming one imports only the interfaces
-    that one names. *)
+(** Unix adapters for frame channels, stream writes, sockets and the host's
+    interface addresses. Each module is a unit of its own, so that a unit naming
+    one imports only the interfaces that one names. *)
 
 module Frame = Frame
 module Stream = Stream
 module Local = Local
 module Tcp = Tcp
+module Interface = Interface
 
 val connect_failure : exn -> [ `Refused | `Unreachable ] option
 (** [connect_failure exn] is the answer a failed {!Eio.Net.connect} raising

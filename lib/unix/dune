@@ -13,10 +13,11 @@
   cstruct
   fpath
   nox-rope
+  ipaddr
   unix)
  (library_flags (-linkall))
  (foreign_stubs
   (language c)
-  (names sendmsg_batch writev_offload local_connect))
+  (names sendmsg_batch writev_offload local_connect interface_stubs))
  (flags
   (:standard -open Hermetic_eio)))

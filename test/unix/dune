@@ -10,5 +10,6 @@
   alcotest
   fmt
   fpath
+  ipaddr
   nox-rope
   unix))

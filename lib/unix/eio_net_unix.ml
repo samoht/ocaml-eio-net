@@ -2,6 +2,7 @@ module Frame = Frame
 module Stream = Stream
 module Local = Local
 module Tcp = Tcp
+module Interface = Interface
 
 let connect_failure = function
   | Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> Some `Refused
