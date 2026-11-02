@@ -46,10 +46,15 @@ Seven sub-libraries sit beside it:
   releases it lets the domain's other threads run while it blocks in the
   kernel. `Interface` lists the host's interface addresses with their
   prefixes (getifaddrs) and waits for the kernel to report a change to them.
-  `Local` connects to a Unix-domain socket at a path of any length and
-  listens at one with the permission bits it is given, and `Tcp.listen`
-  reports a failed bind as an `Eio.Io` error. Linking it registers the Unix
-  classifiers of a failed connect and a failed accept.
+  `Local` connects to a Unix-domain socket through the network it is
+  handed, or at a path of any length through the directory capability that
+  holds it, and listens at one through that directory with the permission
+  bits it is given, and `Tcp.listen` reports a failed bind as an `Eio.Io`
+  error. Linking it registers the Unix classifiers of a failed connect and a
+  failed accept. It is the one library here compiled outside the `Hermetic`
+  prelude: it makes the host's sockets and descriptors with `Unix` and
+  `Eio_unix`, which the prelude refuses, and reaches files only through the
+  capabilities it is handed.
 - `eio-net.accept`: the accept loop a listener serves its connections with,
   `Eio_net_accept.run`. It holds at most a declared number of connections
   and, under pressure, sheds the one whose head (an HTTP request head, an SSH
