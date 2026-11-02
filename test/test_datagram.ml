@@ -48,18 +48,20 @@ let test_default_destination () =
   let _, payload = Eio_net.Datagram.recv b in
   Alcotest.(check string) "datagram reaches configured dst" "to-default" payload
 
+(* A datagram longer than [max_frame] is the peer's doing, not the caller's:
+   it is refused with an [Eio.Io] error, as a failed receive is. *)
+let too_long f =
+  match f () with _ -> false | exception Eio.Io (Eio.Exn.X _, _) -> true
+
 let test_oversized_refused () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
   let b = Eio_net.Datagram.of_socket ~max_frame:8 sock_b in
   send a ~dst:addr_b "exactly-9";
   send a ~dst:addr_b "8-bytes!";
-  let refused =
-    match Eio_net.Datagram.recv b with
-    | _ -> false
-    | exception Invalid_argument _ -> true
-  in
-  Alcotest.(check bool) "9-byte datagram refused at max_frame 8" true refused;
+  Alcotest.(check bool)
+    "9-byte datagram refused at max_frame 8" true
+    (too_long (fun () -> Eio_net.Datagram.recv b));
   let _, payload = Eio_net.Datagram.recv b in
   Alcotest.(check string) "channel survives the refusal" "8-bytes!" payload
 
@@ -68,12 +70,17 @@ let test_frame_carrier_refuses_oversize () =
   let a = Eio_net.Datagram.of_socket sock_a in
   let b = Eio_net.Frame.of_datagram_socket ~max_frame:4 sock_b in
   send a ~dst:addr_b "five!";
-  let refused =
-    match Eio_net.Frame.recv b with
-    | _ -> false
-    | exception Invalid_argument _ -> true
-  in
-  Alcotest.(check bool) "frame channel refuses oversized datagram" true refused
+  Alcotest.(check bool)
+    "recv refuses an oversized datagram" true
+    (too_long (fun () -> Eio_net.Frame.recv b));
+  send a ~dst:addr_b "five!";
+  Alcotest.(check bool)
+    "recv_batch refuses it" true
+    (too_long (fun () -> Eio_net.Frame.recv_batch b));
+  send a ~dst:addr_b "five!";
+  Alcotest.(check bool)
+    "recv_slice refuses it" true
+    (too_long (fun () -> Eio_net.Frame.recv_slice b))
 
 let test_equal_addr () =
   let ip raw = Eio.Net.Ipaddr.of_raw raw in
