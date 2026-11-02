@@ -154,6 +154,43 @@ let test_offload_write_refused () =
   | _ -> Alcotest.fail "a write to the read end of a pipe went through"
   | exception Eio.Io _ -> ()
 
+(* A connected UDP socket holds a datagram from its peer and the error an
+   ICMP port unreachable left when the peer had gone. A batch that receives
+   the datagram and then meets the error returns the datagram, and the next
+   receive reports the error: neither is lost, in whichever order the system
+   reports them. *)
+let test_connected_datagram_error_after_a_datagram () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let socket () =
+    let fd = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_DGRAM 0 in
+    Unix.bind fd (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+    fd
+  in
+  let fa = socket () and fb = socket () in
+  Unix.connect fa (Unix.getsockname fb);
+  Unix.connect fb (Unix.getsockname fa);
+  let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fa in
+  ignore (Unix.send_substring fb "kept" 0 4 [] : int);
+  Unix.close fb;
+  ignore (Unix.send_substring fa "lost" 0 4 [] : int);
+  Eio.Time.sleep env#clock 0.1;
+  let receive () =
+    match
+      Eio.Time.with_timeout_exn env#clock 1.0 (fun () ->
+          Eio_net.Frame.recv_batch a)
+    with
+    | frames -> frames
+    | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) ->
+        [ "refused" ]
+  in
+  let first = receive () in
+  let second = receive () in
+  Alcotest.(check (list string))
+    "the datagram and the error, in either order" [ "kept"; "refused" ]
+    (List.sort String.compare (first @ second));
+  Unix.close fa
+
 (* A datagram longer than [max_frame] is refused, as [Datagram.of_socket]
    refuses it, not delivered cut short as if it were whole. *)
 let test_connected_datagram_oversized () =
@@ -481,6 +518,8 @@ let suite =
         test_connected_datagram_send_refused;
       Alcotest.test_case "offloaded write refused" `Quick
         test_offload_write_refused;
+      Alcotest.test_case "connected datagram error after a datagram" `Quick
+        test_connected_datagram_error_after_a_datagram;
       Alcotest.test_case "connected datagram longer than max_frame" `Quick
         test_connected_datagram_oversized;
       Alcotest.test_case "connected datagram backpressure" `Quick
