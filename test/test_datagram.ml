@@ -1,20 +1,24 @@
 (* Bound (not socketpair) sockets, so each received datagram carries the real
-   source address the tests assert on. *)
+   source address the tests assert on. UDP on the loopback, not Unix-domain
+   sockets: eio_linux 1.6 refuses a send to a Unix-domain datagram address
+   with EINVAL, a bug of the backend, not of this library. *)
 let with_bound_pair f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let dir = Filename.temp_dir "eio-net-dgram" "" in
-  Fun.protect ~finally:(fun () ->
-      Array.iter
-        (fun name -> Unix.unlink (Filename.concat dir name))
-        (Sys.readdir dir);
-      Unix.rmdir dir)
-  @@ fun () ->
-  let addr_a = `Unix (Filename.concat dir "a.sock") in
-  let addr_b = `Unix (Filename.concat dir "b.sock") in
-  let sock_a = Eio.Net.datagram_socket ~sw env#net addr_a in
-  let sock_b = Eio.Net.datagram_socket ~sw env#net addr_b in
-  f ~addr_a ~addr_b ~sock_a ~sock_b
+  let bind () =
+    Eio.Net.datagram_socket ~sw env#net (`Udp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let sock_a = bind () and sock_b = bind () in
+  let addr sock =
+    match Eio_unix.Resource.fd_opt sock with
+    | None -> Alcotest.fail "a datagram socket with no descriptor"
+    | Some fd -> (
+        match Eio_unix.Fd.use_exn "getsockname" fd Unix.getsockname with
+        | Unix.ADDR_INET (ip, port) ->
+            `Udp (Eio_unix.Net.Ipaddr.of_unix ip, port)
+        | Unix.ADDR_UNIX _ -> Alcotest.fail "a UDP socket bound to a path")
+  in
+  f ~addr_a:(addr sock_a) ~addr_b:(addr sock_b) ~sock_a ~sock_b
 
 let send channel ?dst payload =
   Eio_net.Datagram.send channel ?dst [ Cstruct.of_string payload ]
