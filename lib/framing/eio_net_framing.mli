@@ -139,21 +139,33 @@ val read : Config.t -> Eio.Buf_read.t -> string
 
 (** {1:writing Writing} *)
 
-val encode : Config.t -> Cstruct.t list list -> (Cstruct.t list, error) result
-(** [encode c batch] is the frames of the payloads of [batch], in order, as one
-    list of buffers for a vectored write. A payload is the concatenation of its
-    buffers, and each payload follows its length prefix. The prefixes of the
-    batch share one new buffer; the payload buffers are not copied, so they must
-    not change until the result is written. An empty payload [[]] is a frame of
-    its prefix alone, and the empty batch is [Ok []].
+val encode :
+  ?prefixes:Cstruct.t ->
+  Config.t ->
+  Cstruct.t list list ->
+  (Cstruct.t list, error) result
+(** [encode ~prefixes c batch] is the frames of the payloads of [batch], in
+    order, as one list of buffers for a vectored write. A payload is the
+    concatenation of its buffers, and each payload follows its length prefix.
+    The prefixes of the batch share one buffer: [prefixes] if it holds at least
+    [Config.prefix_length c] bytes per payload, a new one otherwise (defaults to
+    a new one). Neither [prefixes] nor the payload buffers are copied, so none
+    of them may change until the result is written. An empty payload [[]] is a
+    frame of its prefix alone, and the empty batch is [Ok []].
 
     This is [Error (Invalid_length _)] for the first payload of [batch] whose
     length is outside the range of [c], and then no frame of [batch] is encoded.
 *)
 
-val write : Config.t -> _ Eio.Flow.sink -> Cstruct.t list list -> unit
-(** [write c sink batch] writes the frames of [encode c batch] to [sink] with
-    one {!Eio.Flow.write}. The empty batch writes nothing.
+val write :
+  ?prefixes:Cstruct.t ->
+  Config.t ->
+  _ Eio.Flow.sink ->
+  Cstruct.t list list ->
+  unit
+(** [write ~prefixes c sink batch] writes the frames of
+    [encode ~prefixes c batch] to [sink] with one {!Eio.Flow.write}. The empty
+    batch writes nothing.
 
     Raises [Error (Invalid_length _)] before writing anything if
     [encode c batch] is an error. An exception from [sink] propagates, and part

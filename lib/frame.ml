@@ -61,6 +61,11 @@ let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
   in
   let read_failure = ref None and write_failed = ref false in
   let read_lock = Eio.Mutex.create () and write_lock = Eio.Mutex.create () in
+  (* The prefixes of a batch of up to 16 frames, reused under the write lock:
+     each write is done with them before the next one starts. *)
+  let prefixes =
+    Cstruct.create (16 * Eio_net_framing.Config.prefix_length framing)
+  in
   let read_frame () =
     match !read_failure with
     | Some error -> raise (Eio_net_framing.Error error)
@@ -79,7 +84,7 @@ let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
   in
   let write_batch payloads =
     if !write_failed then raise (Eio_net_framing.Error Eio_net_framing.Aborted);
-    match Eio_net_framing.encode framing payloads with
+    match Eio_net_framing.encode ~prefixes framing payloads with
     | Error error -> raise (Eio_net_framing.Error error)
     | Ok [] -> ()
     | Ok buffers -> (

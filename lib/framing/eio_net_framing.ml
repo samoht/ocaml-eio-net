@@ -154,18 +154,21 @@ let rec layout config prefixes off = function
       let rest = layout config prefixes (off + size) batch in
       Cstruct.sub prefixes off size :: List.append payload rest
 
-let encode config batch =
+let encode ?prefixes config batch =
   match check config 0 batch with
   | Error _ as e -> e
   | Ok 0 -> Ok []
   | Ok frames ->
+      let size = frames * Config.prefix_length config in
       let prefixes =
-        Cstruct.create_unsafe (frames * Config.prefix_length config)
+        match prefixes with
+        | Some buf when Cstruct.length buf >= size -> buf
+        | Some _ | None -> Cstruct.create_unsafe size
       in
       Ok (layout config prefixes 0 batch)
 
-let write config sink batch =
-  match encode config batch with
+let write ?prefixes config sink batch =
+  match encode ?prefixes config batch with
   | Error e -> raise (Error e)
   | Ok [] -> ()
   | Ok buffers -> Eio.Flow.write sink buffers
