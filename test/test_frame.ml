@@ -1,4 +1,4 @@
-let send frame rope = frame.Eio_net.Frame.send [ Cstruct.of_string rope ]
+let send frame payload = frame.Eio_net.Frame.send [ Cstruct.of_string payload ]
 
 let test_pair () =
   Eio_main.run @@ fun _env ->

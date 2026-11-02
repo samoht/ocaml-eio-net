@@ -1,3 +1,5 @@
+open! Hermetic
+
 type Eio.Exn.Backend.t += Closed | No_listener
 
 let () =
