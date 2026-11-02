@@ -35,16 +35,83 @@ let test_connected_datagram_backpressure () =
   let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fa in
   let b = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fb in
   let count = 256 in
-  let payload = String.make 60000 'x' in
-  let frames = List.init count (fun _ -> [ Cstruct.of_string payload ]) in
-  let received = ref 0 in
+  (* Each payload is distinct, so a frame sent twice or overwritten by a later
+     one shows. *)
+  let payload i =
+    Fmt.str "%03d" i ^ String.make 60000 (Char.chr (65 + (i mod 26)))
+  in
+  let payloads = List.init count payload in
+  let frames = List.map (fun p -> [ Cstruct.of_string p ]) payloads in
+  let received = ref [] in
   Eio.Fiber.both
     (fun () -> a.Eio_net.Frame.send_batch frames)
     (fun () ->
-      while !received < count do
-        received := !received + List.length (b.Eio_net.Frame.recv_batch ())
+      while List.length !received < count do
+        received := List.rev_append (b.Eio_net.Frame.recv_batch ()) !received
       done);
-  Alcotest.(check int) "all backpressured datagrams arrive" count !received;
+  Alcotest.(check (list string))
+    "all backpressured datagrams arrive, in order and intact" payloads
+    (List.rev !received);
+  Unix.close fa;
+  Unix.close fb
+
+(* Each end sends while it receives, as a packet channel is used: a frame
+   waiting to go out is not overwritten by one coming in. *)
+let test_connected_datagram_duplex () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  List.iter
+    (fun fd ->
+      Unix.setsockopt_int fd Unix.SO_SNDBUF 65536;
+      Unix.setsockopt_int fd Unix.SO_RCVBUF 65536)
+    [ fa; fb ];
+  let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_batch:1 fa in
+  let b = Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_batch:1 fb in
+  let count = 200 in
+  let payloads side =
+    List.init count (fun i -> Fmt.str "%s-%03d%s" side i (String.make 8000 '.'))
+  in
+  let run self side =
+    let got = ref [] in
+    Eio.Fiber.both
+      (fun () ->
+        self.Eio_net.Frame.send_batch
+          (List.map (fun p -> [ Cstruct.of_string p ]) (payloads side)))
+      (fun () ->
+        while List.length !got < count do
+          got := List.rev_append (self.Eio_net.Frame.recv_batch ()) !got
+        done);
+    List.rev !got
+  in
+  let from_b = ref [] and from_a = ref [] in
+  Eio.Fiber.both (fun () -> from_b := run a "a") (fun () -> from_a := run b "b");
+  Alcotest.(check (list string)) "a receives what b sent" (payloads "b") !from_b;
+  Alcotest.(check (list string)) "b receives what a sent" (payloads "a") !from_a;
+  Unix.close fa;
+  Unix.close fb
+
+(* A datagram longer than [max_frame] is refused, as [Datagram.of_socket]
+   refuses it, not delivered cut short as if it were whole. *)
+let test_connected_datagram_oversized () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fa in
+  let b = Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_frame:8 fb in
+  let refused f =
+    match f () with _ -> false | exception Invalid_argument _ -> true
+  in
+  a.Eio_net.Frame.send [ Cstruct.of_string "123456789" ];
+  Alcotest.(check bool) "recv refuses it" true (refused b.Eio_net.Frame.recv);
+  a.Eio_net.Frame.send [ Cstruct.of_string "123456789" ];
+  Alcotest.(check bool)
+    "recv_batch refuses it" true
+    (refused b.Eio_net.Frame.recv_batch);
+  a.Eio_net.Frame.send [ Cstruct.of_string "12345678" ];
+  Alcotest.(check (list string))
+    "the channel stays usable" [ "12345678" ]
+    (b.Eio_net.Frame.recv_batch ());
   Unix.close fa;
   Unix.close fb
 
@@ -338,6 +405,10 @@ let suite =
         test_local_errors;
       Alcotest.test_case "connected datagram batch" `Quick
         test_connected_datagram_batch;
+      Alcotest.test_case "connected datagram duplex" `Quick
+        test_connected_datagram_duplex;
+      Alcotest.test_case "connected datagram longer than max_frame" `Quick
+        test_connected_datagram_oversized;
       Alcotest.test_case "connected datagram backpressure" `Quick
         test_connected_datagram_backpressure;
       Alcotest.test_case "reject excessive datagram batch" `Quick
