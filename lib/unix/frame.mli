@@ -23,7 +23,8 @@ val of_connected_datagram_fd :
     system refuses; either way, frames before it in the batch may have been
     sent.
 
-    One fiber at a time may send and one may receive; a send and a receive may
+    Fibers may send and receive at once: concurrent receives run one at a time,
+    and so do concurrent sends, a batch to its end, while a send and a receive
     run at the same time.
 
     Raises [Invalid_argument] if [max_frame] or [max_batch] is not positive, or

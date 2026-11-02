@@ -31,7 +31,8 @@ val of_socket :
     [max_frame] rather than silently truncating it: a datagram socket otherwise
     reports a truncated receive as if it were complete, and a short read is
     indistinguishable from a short datagram. The channel stays usable after the
-    refusal; the oversized datagram is consumed.
+    refusal; the oversized datagram is consumed. Concurrent receives run one at
+    a time, as they share one buffer; sends share nothing and run at once.
 
     Raises [Invalid_argument] if [max_frame] is not positive. *)
 

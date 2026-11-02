@@ -86,6 +86,14 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
     in
     chunks frames
   in
+  (* Receives share their buffers, and so do sends, which wait for the socket
+     with a batch half sent: each direction runs one call at a time. *)
+  let recv_lock = Eio.Mutex.create () and send_lock = Eio.Mutex.create () in
+  let recv () = Eio.Mutex.use_ro recv_lock recv in
+  let recv_batch () = Eio.Mutex.use_ro recv_lock recv_batch in
+  let send_batch frames =
+    Eio.Mutex.use_ro send_lock (fun () -> send_batch frames)
+  in
   Eio_net.Frame.v ~recv_batch ~send_batch ~recv
     ~send:(fun frame -> send_batch [ frame ])
     ()

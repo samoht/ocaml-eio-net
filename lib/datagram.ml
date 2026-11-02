@@ -22,7 +22,11 @@ let of_socket ?(max_frame = 65536) ?dst socket =
   (* One byte of headroom tells a datagram longer than [max_frame] from one
      exactly [max_frame] long. *)
   let buf = Cstruct.create (max_frame + 1) in
+  (* Receives share [buf], and a completion-based backend fills the buffer of
+     every receive it has submitted, so one runs at a time. *)
+  let lock = Eio.Mutex.create () in
   let recv () =
+    Eio.Mutex.use_ro lock @@ fun () ->
     let source, len = Eio.Net.recv socket buf in
     if len > max_frame then
       raise (Eio.Exn.create (Eio.Exn.X (Too_long { max = max_frame })));
