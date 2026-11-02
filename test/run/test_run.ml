@@ -161,11 +161,11 @@ let pressure_sheds_the_least_progressed pressure n () =
             (List.filter (fun i -> ended.(i)) (List.init n Fun.id));
           check_no_error seen))
 
-(* Descriptors are the process's: [n] peers stall on one loop, peer [i] with
-   [n - i] bytes of its head, and an accept of another loop of the process,
-   which holds none, fails for lack of a descriptor (EMFILE). The second loop
-   sheds the first's least progressed head and no other, and answers a fresh
-   peer of its own. *)
+(* Loops handed one pool share their descriptors' pressure: [n] peers stall
+   on one loop, peer [i] with [n - i] bytes of its head, and an accept of
+   another loop of the pool, which holds none, fails for lack of a descriptor
+   (EMFILE). The second loop sheds the first's least progressed head and no
+   other, and answers a fresh peer of its own. *)
 let descriptors_are_shared_across_loops n () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -175,6 +175,7 @@ let descriptors_are_shared_across_loops n () =
   let pressed, press = Eio.Promise.create () in
   let ended = Array.make n false in
   let last_ended, last_ended_r = Eio.Promise.create () in
+  let pool = Eio_net_accept.pool () in
   Eio.Switch.run (fun clients ->
       Eio.Switch.run (fun scope ->
           let first = scripted ~sw:scope net [] in
@@ -182,11 +183,11 @@ let descriptors_are_shared_across_loops n () =
             scripted ~addr:other ~sw:scope net [ (pressed, no_descriptor ()) ]
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net_accept.run ~max_connections:(10 * n) ~on_error first
+              Eio_net_accept.run ~pool ~max_connections:(10 * n) ~on_error first
                 (line_server ?served:None));
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net_accept.run ~max_connections:(10 * n) ~on_error second
-                (line_server ?served:None));
+              Eio_net_accept.run ~pool ~max_connections:(10 * n) ~on_error
+                second (line_server ?served:None));
           for i = 0 to n - 1 do
             stall ~sw:clients net
               (String.make (n - i) 'x')
@@ -206,6 +207,53 @@ let descriptors_are_shared_across_loops n () =
             "the first loop's least progressed head, and no other, was shed"
             [ n - 1 ]
             (List.filter (fun i -> ended.(i)) (List.init n Fun.id));
+          check_no_error seen))
+
+(* A loop sheds only the connections of the loops it shares a pool with. [n]
+   peers stall on one loop, and an accept of another loop, with a pool of its
+   own, fails for lack of a descriptor (EMFILE), as any listener can claim of
+   its accept. That loop holds no connection to shed or wait for, so it raises
+   the accept's error, and the first loop's peers are all still held. *)
+let descriptors_are_not_shared_without_a_pool n () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let seen, on_error = errors () in
+  let other = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5001) in
+  let ended = ref 0 in
+  Eio.Switch.run (fun clients ->
+      Eio.Switch.run (fun scope ->
+          let first = scripted ~sw:scope net [] in
+          let second =
+            scripted ~addr:other ~sw:scope net
+              [ (Eio.Promise.create_resolved (), no_descriptor ()) ]
+          in
+          Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+              Eio_net_accept.run ~max_connections:(10 * n) ~on_error first
+                (line_server ?served:None));
+          for i = 0 to n - 1 do
+            stall ~sw:clients net
+              (String.make (n - i) 'x')
+              ~on_end:(fun () -> incr ended)
+          done;
+          settle n;
+          let second =
+            Eio.Fiber.fork_promise ~sw:scope (fun () ->
+                Eio_net_accept.run ~max_connections:(10 * n) ~on_error second
+                  (line_server ?served:None))
+          in
+          settle n;
+          (match Eio.Promise.peek second with
+          | Some (Error (Eio.Io _ as e)) ->
+              Alcotest.(check bool)
+                "the accept's error is raised" true
+                (Eio_net_accept.classify e = Some `Descriptors)
+          | Some (Error e) -> raise e
+          | Some (Ok ()) -> Alcotest.fail "the second loop returned"
+          | None -> Alcotest.fail "the second loop waits on the first's peers");
+          Alcotest.(check int) "no peer of the first loop is shed" 0 !ended;
+          Alcotest.(check string)
+            "the first loop serves on" "ok more\n" (exchange net "more\n");
           check_no_error seen))
 
 (* With no descriptor left and no connection held there is nothing to shed or
@@ -446,6 +494,10 @@ let suite =
         (descriptors_are_shared_across_loops 10);
       Alcotest.test_case "no descriptor on a second loop sheds of 100" `Quick
         (descriptors_are_shared_across_loops 100);
+      Alcotest.test_case "no descriptor sheds no other pool's of 10" `Quick
+        (descriptors_are_not_shared_without_a_pool 10);
+      Alcotest.test_case "no descriptor sheds no other pool's of 100" `Quick
+        (descriptors_are_not_shared_without_a_pool 100);
       Alcotest.test_case "no descriptor and none held raises" `Quick
         test_no_descriptor_and_none_held_raises;
       Alcotest.test_case "10 complete heads are not shed" `Quick
