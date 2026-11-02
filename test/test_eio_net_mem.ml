@@ -258,6 +258,41 @@ let test_connect_refuses_semantic_option () =
         "eio-net.mem does not support socket option SO_KEEPALIVE" msg
   | _ -> Alcotest.fail "keepalive on a mem connect should be refused"
 
+(* [setsockopt] follows [connect]'s rule: the options whose effect the queues
+   already have are accepted on a connection and on a listener, and every
+   other one is refused by name, rather than ignored. A datagram socket has no
+   such option, and refuses them all. *)
+let test_setsockopt_follows_the_connect_rule () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let refused what set opt =
+    match set () with
+    | exception Invalid_argument msg ->
+        Alcotest.(check string)
+          (what ^ ": the refusal names the option")
+          (Fmt.str "eio-net.mem does not support socket option %s" opt)
+          msg
+    | () -> Alcotest.failf "%s: %s was accepted and ignored" what opt
+  in
+  let flow, _ = Eio_net_mem.pipe () in
+  Eio.Net.setsockopt flow Eio.Net.Sockopt.TCP_NODELAY true;
+  Eio.Net.setsockopt flow Eio.Net.Sockopt.TCP_QUICKACK true;
+  refused "a connection"
+    (fun () -> Eio.Net.setsockopt flow Eio.Net.Sockopt.SO_KEEPALIVE true)
+    "SO_KEEPALIVE";
+  let listener =
+    Eio.Net.listen ~sw ~backlog:1 net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 8088))
+  in
+  Eio.Net.setsockopt listener Eio.Net.Sockopt.TCP_NODELAY true;
+  refused "a listener"
+    (fun () -> Eio.Net.setsockopt listener Eio.Net.Sockopt.SO_RCVBUF 4096)
+    "SO_RCVBUF";
+  let datagram = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  refused "a datagram socket"
+    (fun () -> Eio.Net.setsockopt datagram Eio.Net.Sockopt.TCP_NODELAY true)
+    "TCP_NODELAY"
+
 (* A connection made on a switch is closed when that switch finishes, as
    [Eio.Net.connect] says of every socket: the server's end then reads EOF and a
    write to the client that went away is a reset, rather than a read waiting on
@@ -453,6 +488,8 @@ let suite =
         test_connect_ignores_latency_hint;
       Alcotest.test_case "connect refuses a semantic option" `Quick
         test_connect_refuses_semantic_option;
+      Alcotest.test_case "setsockopt follows the connect rule" `Quick
+        test_setsockopt_follows_the_connect_rule;
       Alcotest.test_case "connect closes at switch end" `Quick
         test_connect_closes_at_switch_end;
       Alcotest.test_case "a datagram roundtrip" `Quick test_datagram_roundtrip;
