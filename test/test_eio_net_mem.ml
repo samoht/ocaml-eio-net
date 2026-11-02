@@ -377,6 +377,72 @@ let test_a_write_in_another_domain_wakes_the_read () =
   in
   Eio.Fiber.both reader (fun () -> Eio.Domain_manager.run domain_mgr writer)
 
+(* A connection waiting to be accepted when its listener closes is closed with
+   it: its client reads end-of-file rather than wait for good. *)
+let test_a_closed_listener_closes_its_queue () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8089) in
+  let client =
+    Eio.Switch.run (fun lsw ->
+        ignore (Eio.Net.listen ~sw:lsw ~backlog:4 net addr);
+        Eio.Net.connect ~sw net addr)
+  in
+  match Eio.Flow.single_read client (Cstruct.create 1) with
+  | exception End_of_file -> ()
+  | (_ : int) -> Alcotest.fail "a queued connection read a byte"
+
+(* A connect waiting for room in a full queue when the listener closes is
+   refused, as a connect to a closed port is, and so is a later one. *)
+let test_a_closed_listener_refuses_connects () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8090) in
+  let refused () =
+    match Eio.Net.connect ~sw net addr with
+    | exception
+        Eio.Io
+          (Eio.Net.E (Connection_failure (Refused Eio_net_mem.No_listener)), _)
+      ->
+        true
+    | (_ : _ Eio.Net.stream_socket) -> false
+  in
+  let waiting = ref None in
+  Eio.Switch.run (fun lsw ->
+      let listener = Eio.Net.listen ~sw:lsw ~backlog:4 net addr in
+      for _ = 1 to 128 do
+        ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket)
+      done;
+      Eio.Fiber.fork ~sw (fun () -> waiting := Some (refused ()));
+      Eio.Resource.close listener);
+  Eio.Fiber.yield ();
+  Alcotest.(check (option bool)) "the waiting connect" (Some true) !waiting;
+  Alcotest.(check bool) "a later connect" true (refused ())
+
+(* A connection releases its switch once it is closed: nothing of it stays
+   reachable from the switch, however many a long-lived switch opens. *)
+let test_a_closed_connection_leaves_its_switch () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8091) in
+  let listener = Eio.Net.listen ~sw ~backlog:4 net addr in
+  let held = Weak.create 2 in
+  let () =
+    let client = Eio.Net.connect ~sw net addr in
+    let server, _ = Eio.Net.accept ~sw listener in
+    Weak.set held 0 (Some (Obj.repr client));
+    Weak.set held 1 (Some (Obj.repr server));
+    Eio.Flow.close client;
+    Eio.Flow.close server
+  in
+  Gc.full_major ();
+  Alcotest.(check (list bool))
+    "neither end is held" [ false; false ]
+    [ Weak.check held 0; Weak.check held 1 ]
+
 (* {1 Datagram sockets} *)
 
 let udp port : Eio.Net.Sockaddr.datagram =
@@ -461,6 +527,31 @@ let test_datagram_address_freed_at_switch_end () =
     "the address binds again" "again"
     (snd (recv_string again))
 
+(* A datagram socket at an address another holds is refused as a listen is,
+   with the [Eio.Io] error {!Eio_net_mem.Address_in_use}; the wildcard address
+   of a port overlaps every address of it. *)
+let test_datagram_address_in_use () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let in_use addr =
+    match Eio.Net.datagram_socket ~sw net addr with
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> true
+    | (_ : _ Eio.Net.datagram_socket) -> false
+  in
+  ignore (Eio.Net.datagram_socket ~sw net (udp 9004));
+  Alcotest.(check bool) "the same address" true (in_use (udp 9004));
+  Alcotest.(check bool)
+    "the wildcard address of its port" true
+    (in_use (`Udp (Eio.Net.Ipaddr.V4.any, 9004)));
+  ignore (Eio.Net.datagram_socket ~sw net (`Udp (Eio.Net.Ipaddr.V4.any, 9005)));
+  Alcotest.(check bool)
+    "an address of a wildcard's port" true
+    (in_use (udp 9005));
+  Alcotest.(check bool)
+    "the same port of the other family" false
+    (in_use (`Udp (Eio.Net.Ipaddr.V6.loopback, 9005)))
+
 let suite =
   ( "eio_net_mem",
     [
@@ -499,6 +590,14 @@ let suite =
         test_datagram_to_nobody_is_lost;
       Alcotest.test_case "a datagram address is freed at switch end" `Quick
         test_datagram_address_freed_at_switch_end;
+      Alcotest.test_case "a datagram address in use" `Quick
+        test_datagram_address_in_use;
+      Alcotest.test_case "a closed listener closes its queue" `Quick
+        test_a_closed_listener_closes_its_queue;
+      Alcotest.test_case "a closed listener refuses connects" `Quick
+        test_a_closed_listener_refuses_connects;
+      Alcotest.test_case "a closed connection leaves its switch" `Quick
+        test_a_closed_connection_leaves_its_switch;
       Alcotest.test_case "a write in another domain wakes the read" `Quick
         test_a_write_in_another_domain_wakes_the_read;
     ] )
