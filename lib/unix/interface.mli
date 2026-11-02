@@ -5,7 +5,7 @@ type address = {
   prefix : Ipaddr.Prefix.t;
       (** The address with its on-link prefix length, as [192.0.2.7/24]: the
           interface's netmask, or the full length where it has none. *)
-  loopback : bool;  (** Whether the interface is a loopback one. *)
+  loopback : bool;  (** [true] iff the interface is a loopback interface. *)
 }
 (** The type for one address an interface carries. *)
 
@@ -18,7 +18,7 @@ module type S = sig
       is the one the interface's link sees, with no scope embedded in it as a
       KAME stack (macOS, the BSDs) embeds it.
 
-      @raise Unix.Unix_error if getifaddrs fails. *)
+      Raises [Unix.Unix_error] if getifaddrs(3) fails. *)
 
   type watch
   (** The type for subscriptions to the host's address changes. *)
@@ -29,7 +29,7 @@ module type S = sig
       a [PF_ROUTE] socket elsewhere. Releasing [sw] closes it. A caller that
       reads {!addresses} after opening the watch misses no change.
 
-      @raise Unix.Unix_error if the socket cannot be opened. *)
+      Raises [Unix.Unix_error] if the socket cannot be opened. *)
 
   val changed : watch -> unit
   (** [changed w] waits until an address has been added to or removed from an

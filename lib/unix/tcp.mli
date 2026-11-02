@@ -9,7 +9,9 @@ val listen :
   Eio.Net.Ipaddr.v4v6 ->
   int ->
   [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t
-(** [listen ~sw ~backlog net ip port] is {!Eio.Net.listen} on [`Tcp (ip, port)],
-    but a bind(2) or listen(2) that fails, which Eio's POSIX backend raises as
-    [Unix.Unix_error], is the {!Eio.Io} error {!Eio_unix.Err.v} makes of it: a
-    port in use is [EADDRINUSE], unclassified. *)
+(** [listen ~reuse_addr ~reuse_port ~sw ~backlog net ip port] is
+    {!Eio.Net.listen} on [`Tcp (ip, port)], with [reuse_addr] and [reuse_port]
+    (each defaults to [false]) as it takes them, but a bind(2) or listen(2) that
+    fails, which Eio's POSIX backend raises as [Unix.Unix_error], is the
+    {!Eio.Io} error {!Eio_unix.Err.v} makes of it: a port in use is
+    [EADDRINUSE], unclassified. *)
