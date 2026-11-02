@@ -16,11 +16,12 @@ val of_connected_datagram_fd :
     {!Eio_net.Frame.recv_batch} uses [recvmsg_x] to transfer up to [max_batch]
     datagrams (defaults to [32]) in one system call; other systems send and
     receive them one at a time, in order. A received datagram longer than
-    [max_frame] raises [Invalid_argument] and drops the datagrams received in
-    the same batch; the channel stays usable. Sends copy each frame into a
-    buffer of [max_frame] bytes and raise [Invalid_argument] on a longer one,
-    and [Unix.Unix_error] on a send the system refuses; either way, frames
-    before it in the batch may have been sent.
+    [max_frame] raises the {!Eio.Io} error {!Eio_net.Datagram.Too_long} and
+    drops the datagrams received in the same batch; the channel stays usable.
+    Sends copy each frame into a buffer of [max_frame] bytes and raise
+    [Invalid_argument] on a longer one, and [Unix.Unix_error] on a send the
+    system refuses; either way, frames before it in the batch may have been
+    sent.
 
     One fiber at a time may send and one may receive; a send and a receive may
     run at the same time.

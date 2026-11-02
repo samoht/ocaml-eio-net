@@ -100,7 +100,10 @@ let test_connected_datagram_oversized () =
   let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fa in
   let b = Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_frame:8 fb in
   let refused f =
-    match f () with _ -> false | exception Eio.Io (Eio.Exn.X _, _) -> true
+    match f () with
+    | _ -> false
+    | exception Eio.Io (Eio.Exn.X (Eio_net.Datagram.Too_long { max = 8 }), _) ->
+        true
   in
   Eio_net.Frame.send a [ Cstruct.of_string "123456789" ];
   Alcotest.(check bool)

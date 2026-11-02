@@ -44,11 +44,11 @@ val of_datagram_socket :
     (defaults to [65536]). {!send_batch} sends its frames one datagram at a
     time.
 
-    {!recv}, {!recv_batch} and {!recv_slice} raise [Invalid_argument] on a
-    datagram longer than [max_frame] rather than silently truncating it; the
-    oversized datagram is consumed and the channel stays usable. A protocol that
-    needs the source address of each datagram uses the addressed {!Datagram}
-    channel instead.
+    {!recv}, {!recv_batch} and {!recv_slice} raise the {!Eio.Io} error
+    {!Datagram.Too_long} on a datagram longer than [max_frame] rather than
+    silently truncating it; the oversized datagram is consumed and the channel
+    stays usable. A protocol that needs the source address of each datagram uses
+    the addressed {!Datagram} channel instead.
 
     Raises [Invalid_argument] if [max_frame] is not positive. *)
 

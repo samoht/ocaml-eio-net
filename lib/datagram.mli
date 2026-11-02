@@ -10,6 +10,13 @@
 type t
 (** The type for addressed datagram channels. *)
 
+type Eio.Exn.Backend.t +=
+  | Too_long of { max : int }
+        (** The backend error of the unclassified {!Eio.Io} error a receive
+            raises on a datagram longer than [max] bytes, the channel's
+            [max_frame]: a peer sent it, so it is an I/O failure, not a
+            programming error. *)
+
 val of_socket :
   ?max_frame:int ->
   ?dst:Eio.Net.Sockaddr.datagram ->
@@ -20,9 +27,9 @@ val of_socket :
     (defaults to [65536]); {!send} without [~dst] sends to [dst] (omit it for a
     connected socket).
 
-    {!recv} raises [Invalid_argument] on a datagram longer than [max_frame]
-    rather than silently truncating it: a datagram socket otherwise reports a
-    truncated receive as if it were complete, and a short read is
+    {!recv} raises the {!Eio.Io} error {!Too_long} on a datagram longer than
+    [max_frame] rather than silently truncating it: a datagram socket otherwise
+    reports a truncated receive as if it were complete, and a short read is
     indistinguishable from a short datagram. The channel stays usable after the
     refusal; the oversized datagram is consumed.
 

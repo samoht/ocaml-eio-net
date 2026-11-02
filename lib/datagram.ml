@@ -1,5 +1,14 @@
 open! Hermetic
 
+type Eio.Exn.Backend.t += Too_long of { max : int }
+
+let () =
+  Eio.Exn.Backend.register_pp (fun ppf -> function
+    | Too_long { max } ->
+        Fmt.pf ppf "Too_long (a datagram longer than %d bytes, eio-net)" max;
+        true
+    | _ -> false)
+
 type t = {
   recv : unit -> Eio.Net.Sockaddr.datagram * string;
   send : Eio.Net.Sockaddr.datagram option -> Cstruct.t list -> unit;
@@ -16,8 +25,7 @@ let of_socket ?(max_frame = 65536) ?dst socket =
   let recv () =
     let source, len = Eio.Net.recv socket buf in
     if len > max_frame then
-      Fmt.invalid_arg "Eio_net.Datagram: datagram exceeds max_frame (%d bytes)"
-        max_frame;
+      raise (Eio.Exn.create (Eio.Exn.X (Too_long { max = max_frame })));
     (source, Cstruct.to_string (Cstruct.sub buf 0 len))
   in
   let send destination bufs =

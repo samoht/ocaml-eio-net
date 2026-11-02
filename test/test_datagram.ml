@@ -50,8 +50,12 @@ let test_default_destination () =
 
 (* A datagram longer than [max_frame] is the peer's doing, not the caller's:
    it is refused with an [Eio.Io] error, as a failed receive is. *)
-let too_long f =
-  match f () with _ -> false | exception Eio.Io (Eio.Exn.X _, _) -> true
+let too_long ?(max = 8) f =
+  match f () with
+  | _ -> false
+  | exception Eio.Io (Eio.Exn.X (Eio_net.Datagram.Too_long e), _) ->
+      Alcotest.(check int) "the bound it names" max e.max;
+      true
 
 let test_oversized_refused () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
@@ -72,15 +76,22 @@ let test_frame_carrier_refuses_oversize () =
   send a ~dst:addr_b "five!";
   Alcotest.(check bool)
     "recv refuses an oversized datagram" true
-    (too_long (fun () -> Eio_net.Frame.recv b));
+    (too_long ~max:4 (fun () -> Eio_net.Frame.recv b));
   send a ~dst:addr_b "five!";
   Alcotest.(check bool)
     "recv_batch refuses it" true
-    (too_long (fun () -> Eio_net.Frame.recv_batch b));
+    (too_long ~max:4 (fun () -> Eio_net.Frame.recv_batch b));
   send a ~dst:addr_b "five!";
   Alcotest.(check bool)
     "recv_slice refuses it" true
-    (too_long (fun () -> Eio_net.Frame.recv_slice b))
+    (too_long ~max:4 (fun () -> Eio_net.Frame.recv_slice b))
+
+let test_too_long_prints () =
+  Alcotest.(check string)
+    "the printed error"
+    "Eio.Io Too_long (a datagram longer than 8 bytes, eio-net)"
+    (Printexc.to_string
+       (Eio.Exn.create (Eio.Exn.X (Eio_net.Datagram.Too_long { max = 8 }))))
 
 let test_equal_addr () =
   let ip raw = Eio.Net.Ipaddr.of_raw raw in
@@ -116,5 +127,6 @@ let suite =
         test_oversized_refused;
       Alcotest.test_case "frame carrier refuses oversize" `Quick
         test_frame_carrier_refuses_oversize;
+      Alcotest.test_case "Too_long prints its bound" `Quick test_too_long_prints;
       Alcotest.test_case "address equality" `Quick test_equal_addr;
     ] )

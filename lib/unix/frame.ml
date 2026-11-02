@@ -27,8 +27,9 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
      exactly [max_frame] long. *)
   let check len =
     if len > max_frame then
-      Fmt.invalid_arg
-        "Eio_net_unix.Frame: datagram exceeds max_frame (%d bytes)" max_frame
+      raise
+        (Eio.Exn.create
+           (Eio.Exn.X (Eio_net.Datagram.Too_long { max = max_frame })))
   in
   let recv_buf = Cstruct.create (max_frame + 1) in
   let recv () =
