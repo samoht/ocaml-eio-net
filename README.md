@@ -12,14 +12,20 @@ make this possible:
 
 - `Eio_net.Frame`: a bidirectional packet channel where one receive is one
   frame. CCSDS transfer frames, AX.25 and Ethernet codecs read and write over
-  it. An outgoing frame is a list of buffers, as `Eio.Flow.write` takes. The
-  buffers go to `writev` as they are, so a header and a payload held in
-  separate buffers reach the kernel without being copied into one, and a
-  burst can go out in one system call.
+  it. An outgoing frame is a list of buffers, as `Eio.Flow.write` takes. Over
+  a length-prefixed flow or an Eio datagram socket the buffers go to `writev`
+  as they are, so a header and a payload held in separate buffers reach the
+  kernel without being copied into one, and a burst can go out in one system
+  call. The in-memory pair copies each frame, and so does the `eio-net.unix`
+  channel, into its batch buffers.
 - `Eio_net.Datagram`: an addressed datagram channel that reports each
   datagram's source, for a UDP server that answers whoever wrote to it.
 - `Eio_net.Relay`: copies bytes between two flows in both directions, or
   listens and forwards each accepted connection to another address.
+- `Eio_net.Progress`: bounds a transfer by its progress, as curl's low-speed
+  check does: a window of reads and writes that moves fewer than a stated
+  number of bytes a second ends it, and a stalled peer costs at most two
+  windows.
 
 Seven sub-libraries sit beside it:
 
@@ -38,16 +44,20 @@ Seven sub-libraries sit beside it:
   vectored write that runs off the OCaml runtime lock. The runtime lock is
   the per-domain lock a thread must hold to run OCaml code; a C call that
   releases it lets the domain's other threads run while it blocks in the
-  kernel. It also lists the host's interface addresses with their prefixes
-  (getifaddrs) and waits for the kernel to report a change to them. Linking
-  it registers the Unix classifiers of a failed connect and a failed accept.
+  kernel. `Interface` lists the host's interface addresses with their
+  prefixes (getifaddrs) and waits for the kernel to report a change to them.
+  `Local` connects to a Unix-domain socket at a path of any length and
+  listens at one with the permission bits it is given, and `Tcp.listen`
+  reports a failed bind as an `Eio.Io` error. Linking it registers the Unix
+  classifiers of a failed connect and a failed accept.
 - `eio-net.accept`: the accept loop a listener serves its connections with,
   `Eio_net_accept.run`. It holds at most a declared number of connections
   and, under pressure, sheds the one whose head (an HTTP request head, an SSH
   handshake) is incomplete and has made the least progress; an accept its
   peer aborted, or one with no descriptor left, leaves it serving. With no
   descriptor left it sheds among the connections of every loop of the
-  process, since descriptors are the process's. It reads
+  process, since descriptors are the process's. A connection that fails,
+  whatever its peer did, is reported and ends alone. It reads
   what a failed accept carries with the classifier its platform's network
   registers, so it works the same over every network.
 - `eio-net.connect`: what a failed connect carries from the network, a

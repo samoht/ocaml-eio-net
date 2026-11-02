@@ -5,7 +5,14 @@
     Datagram protocols that need the peer address use it: a UDP server that
     answers whoever wrote to it, or a receiver that locks onto the peer that
     opened an exchange. A protocol that does not care about addresses uses the
-    source-blind {!Frame} channel instead. *)
+    source-blind {!Frame} channel instead.
+
+    {b Errors and ownership.} A receive or a send raises the {!Eio.Io} error of
+    the socket, {!Too_long} among them for a datagram longer than the channel
+    takes, and never [End_of_file], since a datagram socket has no end. A
+    cancellation passes through. A channel does not own its socket: it never
+    closes it, closing it is the caller's, and a receive or send after that
+    raises what the socket raises. *)
 
 type t
 (** The type for addressed datagram channels. *)

@@ -5,7 +5,22 @@
     and write over it, independently of how the bytes move: a network interface,
     an Eio datagram socket or an in-memory pipe. A protocol codec layers over it
     by decoding what {!recv} returns and encoding into {!send}; the channel
-    itself is untyped bytes. *)
+    itself is untyped bytes.
+
+    {b Errors and ownership.} What a receive raises depends on the transport:
+    over a datagram socket, the {!Eio.Io} error of a failed receive, the
+    {!Datagram.Too_long} one among them, and never [End_of_file], since a
+    datagram socket has no end; over a length-prefixed flow, [End_of_file] at
+    the end of input at a frame boundary, [Eio_net_framing.Error] for a frame
+    the input cuts short or a length out of range, and the {!Eio.Io} error of
+    the flow; over a {!pair}, nothing, since a pair has no end-of-file: a
+    receive waits until a frame arrives, and a fiber waiting on a peer that has
+    gone is cancelled to end it. A send raises the {!Eio.Io} error of the
+    transport, and over a length-prefixed flow [Eio_net_framing.Error] as
+    {!of_length_prefixed_flow} says. A cancellation passes through every
+    transport. A channel does not own its flow or socket: it never closes it,
+    closing it is the caller's, and a receive or send after that raises what the
+    flow or socket raises. *)
 
 type t
 (** The type for frame channels. *)
@@ -110,8 +125,11 @@ val send : t -> Cstruct.t list -> unit
 (** [send c bufs] sends one frame on [c], the concatenation of [bufs], as
     [Eio.Flow.write] takes its buffers. A transport that writes vectors hands
     [bufs] to [writev] as they are, so a frame held in several buffers is not
-    copied into one; a sender with a string [s] passes [[Cstruct.of_string s]].
-    The buffers must not change until [send] returns. *)
+    copied into one: a length-prefixed flow over a socket and an Eio datagram
+    socket do, while a {!pair} copies each frame, and so does
+    [Eio_net_unix.Frame], into its batch buffers. A sender with a string [s]
+    passes [[Cstruct.of_string s]]. The buffers must not change until [send]
+    returns. *)
 
 val send_batch : t -> Cstruct.t list list -> unit
 (** [send_batch c frames] sends the frames of [frames] on [c], in order, each

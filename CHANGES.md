@@ -10,7 +10,9 @@ Initial release.
   datagram socket, a length-prefixed flow or an in-memory pair. A
   length-prefixed flow refuses further reads after a failure inside a frame,
   and further writes after a failed write. An outgoing frame is a list of
-  buffers, written with `writev` without being copied into one.
+  buffers, which a length-prefixed flow and an Eio datagram socket write with
+  `writev` without copying them into one; the in-memory pair and
+  `eio-net.unix` copy each frame.
 - `Eio_net.Datagram`, an addressed datagram channel, and `Eio_net.Relay`,
   which copies bytes between two flows.
 - `Eio_net.Progress`, a transfer bounded by its progress, as curl's
@@ -20,5 +22,7 @@ Initial release.
   network.
 - `eio-net.mem` and `eio-net.chaos`, an in-memory network and a wrapper that
   injects faults, for tests; `eio-net.unix`, batched sends and receives on
-  POSIX sockets; `eio-net.addr`, `Eio_net_addr`, conversions between
-  `Ipaddr` and Eio addresses.
+  POSIX sockets, a vectored write off the runtime lock, the host's interface
+  addresses and their changes, Unix-domain sockets at paths of any length,
+  and a TCP listen that reports a failed bind as `Eio.Io`; `eio-net.addr`,
+  `Eio_net_addr`, conversions between `Ipaddr` and Eio addresses.
