@@ -4,9 +4,10 @@
     {!run} accepts and serves connections within a declared bound and bounds by
     its state what peers can make it hold: under pressure it sheds the held
     connection whose head is incomplete and has made the least progress, among
-    its own when its bound is reached and among every loop of the process when
-    descriptors run out. An accept its peer aborted, or one with no descriptor
-    left, leaves it whole.
+    its own when its bound is reached and among every loop of its {!type-pool}
+    when descriptors run out. An accept its peer aborted, or one with no
+    descriptor left, leaves it whole. A loop sheds the connections of another
+    only when both were handed the same pool.
 
     Eio names a connection reset portably and reports the rest as a backend
     error, so the library that provides a platform's network registers the
@@ -33,9 +34,19 @@ val complete : head -> unit
 (** [complete head] says [head] is complete: its connection is being served, and
     pressure does not shed it until it is {!reading} again. *)
 
+type pool
+(** The type for a set of loops that share their descriptors: when an accept of
+    one finds none left, it sheds among the connections of them all. *)
+
+val pool : unit -> pool
+(** [pool ()] is a new pool, with no loop. Handing it to several {!run}s, on any
+    domains, lets each free a descriptor held by another; a loop can shed only
+    the connections of its own pool, whatever its listener's accept raises. *)
+
 val run :
   ?stop:'a Eio.Promise.t ->
   ?on_error:(exn -> unit) ->
+  ?pool:pool ->
   max_connections:int ->
   [> 'tag Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   (head ->
@@ -43,10 +54,11 @@ val run :
   Eio.Net.Sockaddr.stream ->
   unit) ->
   'a
-(** [run ~stop ~on_error ~max_connections socket handler] accepts connections on
-    [socket] and serves each with [handler h flow addr] in a fiber of its own,
-    where [h] is the connection's {!type-head}, [flow] its socket and [addr] its
-    peer's address. [flow] is closed when [handler] returns.
+(** [run ~stop ~on_error ~pool ~max_connections socket handler] accepts
+    connections on [socket] and serves each with [handler h flow addr] in a
+    fiber of its own, where [h] is the connection's {!type-head}, [flow] its
+    socket and [addr] its peer's address. [flow] is closed when [handler]
+    returns.
 
     What peers can make it hold is bounded by its state. Each connection holds
     one descriptor, one fiber and what [handler] holds, and at most
@@ -55,16 +67,16 @@ val run :
     connection whose head is incomplete and has made the least progress, the
     older of two that made the same, and waits for one of its connections to end
     before it serves the next; with no incomplete head held, it waits for one
-    that is being served. Descriptors are the process's, so when an accept fails
-    because the process or the system has no descriptor left ({!classify}) the
-    loop chooses the same way among the connections of every [run] of the
-    process, on any domain, and waits for any of them to end before it accepts
-    again. Choosing costs a pass over the connections the process's loops hold.
-    A connection is shed by shutting its socket down, with no answer, so its
-    reads end on whichever domain it runs. An accept its peer aborted is
-    followed by the next. An accept with no descriptor left while no loop of the
-    process holds a connection raises its error, naming that none was held to
-    shed or wait for. Any other failed accept raises its error.
+    that is being served. When an accept fails because the process or the system
+    has no descriptor left ({!classify}) the loop chooses the same way among the
+    connections of every [run] of [pool] (defaults to a new pool of this loop
+    alone), on any domain, and waits for any of them to end before it accepts
+    again. Choosing costs a pass over the connections the pool's loops hold. A
+    connection is shed by shutting its socket down, with no answer, so its reads
+    end on whichever domain it runs. An accept its peer aborted is followed by
+    the next. An accept with no descriptor left while no loop of [pool] holds a
+    connection raises its error, naming that none was held to shed or wait for.
+    Any other failed accept raises its error.
 
     [on_error] (defaults to logging a warning on the [eio-net.accept] log
     source) receives each exception a connection's [handler] raises but

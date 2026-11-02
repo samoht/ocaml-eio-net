@@ -55,11 +55,11 @@ Seven sub-libraries sit beside it:
   and, under pressure, sheds the one whose head (an HTTP request head, an SSH
   handshake) is incomplete and has made the least progress; an accept its
   peer aborted, or one with no descriptor left, leaves it serving. With no
-  descriptor left it sheds among the connections of every loop of the
-  process, since descriptors are the process's. A connection that fails,
-  whatever its peer did, is reported and ends alone. It reads
-  what a failed accept carries with the classifier its platform's network
-  registers, so it works the same over every network.
+  descriptor left it sheds among the connections of every loop handed the
+  same pool, and of no other. A connection that fails, whatever its peer
+  did, is reported and ends alone. It reads what a failed accept carries
+  with the classifier its platform's network registers, so it works the same
+  over every network.
 - `eio-net.connect`: what a failed connect carries from the network, a
   refused or unreachable peer, read by the classifier its platform's network
   registers. A connection library asks it and works the same over every
