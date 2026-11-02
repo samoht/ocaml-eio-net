@@ -1,6 +1,6 @@
 open! Hermetic
 
-type Eio.Exn.Backend.t += Closed | No_listener
+type Eio.Exn.Backend.t += Closed | No_listener | Address_in_use
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -9,6 +9,9 @@ let () =
         true
     | No_listener ->
         Format.pp_print_string ppf "No listener bound (eio-net.mem)";
+        true
+    | Address_in_use ->
+        Format.pp_print_string ppf "Address in use (eio-net.mem)";
         true
     | _ -> false)
 
@@ -133,6 +136,7 @@ module Listening_socket = struct
       (tag Eio.Net.stream_socket_ty Eio.Resource.t * Eio.Net.Sockaddr.stream)
       Eio.Stream.t;
     mutable closed : bool;
+    mutable hooks : Eio.Switch.hook list;
   }
 
   (* The lowest port of the dynamic range (RFC 6335, section 6) that no
@@ -146,25 +150,76 @@ module Listening_socket = struct
         | `Unix _ -> ())
       hub.listeners;
     let rec find port =
-      if port > 65535 then
-        failwith "eio-net.mem: every port of 49152-65535 has a listener"
+      if port > 65535 then None
       else if Hashtbl.mem held port then find (port + 1)
-      else port
+      else Some port
     in
     find 49152
 
-  let v hub addr =
-    Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
-        let addr =
-          match addr with
-          | `Tcp (ip, 0) -> `Tcp (ip, free_port hub)
-          | addr -> addr
+  let any ip =
+    Eio.Net.Ipaddr.fold ip
+      ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
+      ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
+
+  (* Two TCP addresses of one port overlap when they are equal or one is the
+     wildcard address of the other's family, as bind(2) on Linux has it. *)
+  let overlaps (a : Eio.Net.Sockaddr.stream) (b : Eio.Net.Sockaddr.stream) =
+    let same (x : Eio.Net.Ipaddr.v4v6) (y : Eio.Net.Ipaddr.v4v6) =
+      String.equal (x :> string) (y :> string)
+    in
+    match (a, b) with
+    | `Tcp (ip, port), `Tcp (ip', port') ->
+        port = port'
+        && same (any ip) (any ip')
+        && (same ip ip' || same ip (any ip) || same ip' (any ip'))
+    | `Unix path, `Unix path' -> String.equal path path'
+    | `Tcp _, `Unix _ | `Unix _, `Tcp _ -> false
+
+  let in_use hub addr =
+    Hashtbl.fold
+      (fun held _ in_use -> in_use || overlaps addr held)
+      hub.listeners false
+
+  (* A Unix-domain path is taken over with [reuse_addr], as Eio's POSIX backend
+     removes the socket file there before it binds; the listener that held it
+     stays open, unreachable. *)
+  let bind hub ~reuse_addr addr =
+    let addr =
+      match addr with
+      | `Tcp (ip, 0) -> Option.map (fun port -> `Tcp (ip, port)) (free_port hub)
+      | addr -> Some addr
+    in
+    match addr with
+    | None -> Error `No_port
+    | Some addr ->
+        let taken_over =
+          match addr with `Unix _ -> reuse_addr | `Tcp _ -> false
         in
-        let t =
-          { hub; addr; incoming = Eio.Stream.create 128; closed = false }
-        in
-        Hashtbl.replace hub.listeners addr t;
-        t)
+        if (not taken_over) && in_use hub addr then Error `In_use
+        else
+          let t =
+            {
+              hub;
+              addr;
+              incoming = Eio.Stream.create 128;
+              closed = false;
+              hooks = [];
+            }
+          in
+          Hashtbl.replace hub.listeners addr t;
+          Ok t
+
+  (* The refusals are raised once the mutex is released, which an exception
+     inside it would poison. *)
+  let v hub ~reuse_addr addr =
+    match
+      Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
+          bind hub ~reuse_addr addr)
+    with
+    | Ok t -> t
+    | Error `In_use -> raise (Eio.Exn.create (Eio.Exn.X Address_in_use))
+    | Error `No_port ->
+        failwith "eio-net.mem: every port of 49152-65535 has a listener"
 
   let accept t ~sw =
     if t.closed then invalid_arg "accept on closed in-memory listener";
@@ -175,8 +230,13 @@ module Listening_socket = struct
   let close t =
     if not t.closed then (
       t.closed <- true;
+      List.iter Eio.Switch.remove_hook t.hooks;
+      t.hooks <- [];
+      (* A path taken over is its new listener's to free. *)
       Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
-          Hashtbl.remove t.hub.listeners t.addr))
+          match Hashtbl.find_opt t.hub.listeners t.addr with
+          | Some held when held == t -> Hashtbl.remove t.hub.listeners t.addr
+          | Some _ | None -> ()))
 
   let listening_addr t = t.addr
   let setsockopt _ _ _ = ()
@@ -329,11 +389,20 @@ module Network = struct
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
 
-  let listen t ~reuse_addr:_ ~reuse_port:_ ~backlog:_ ~sw:_ addr =
-    let socket =
-      Eio.Resource.T (Listening_socket.v t.hub addr, listening_handler)
-    in
-    Eio.Switch.on_release t.sw (fun () -> Eio.Resource.close socket);
+  (* One listener per address: there is no kernel to spread connections
+     across several, so [reuse_port] is refused. A listener is closed by
+     whichever of [sw] and the network's switch finishes first. *)
+  let listen t ~reuse_addr ~reuse_port ~backlog:_ ~sw addr =
+    if reuse_port then
+      invalid_arg "eio-net.mem does not support SO_REUSEPORT listeners";
+    Eio.Switch.check sw;
+    let listener = Listening_socket.v t.hub ~reuse_addr addr in
+    let socket = Eio.Resource.T (listener, listening_handler) in
+    let close () = Eio.Resource.close socket in
+    listener.hooks <-
+      List.map
+        (fun sw -> Eio.Switch.on_release_cancellable sw close)
+        (if sw == t.sw then [ sw ] else [ sw; t.sw ]);
     socket
 
   (* An option is ignored only where these queues already provide what it asks

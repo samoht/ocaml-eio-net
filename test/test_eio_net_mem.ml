@@ -96,11 +96,11 @@ let test_listen_on_port_zero () =
   reaches a pa "a";
   reaches b pb "b"
 
-(* A listen at an address a listener holds is refused with an Eio.Io error
-   carrying a backend code, the shape of the EADDRINUSE that
-   Eio_net_unix.Tcp.listen raises over a real network; the listener there keeps
-   the address. A wildcard address and another address of the same port
-   overlap, as they do for bind(2). *)
+(* A listen at an address a listener holds is refused with the Eio.Io error
+   Address_in_use, unclassified as the EADDRINUSE that Eio_net_unix.Tcp.listen
+   raises over a real network is; the listener there keeps the address. A
+   wildcard address and another address of the same port overlap, as they do
+   for bind(2). *)
 let test_listen_on_an_address_in_use () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -109,7 +109,7 @@ let test_listen_on_an_address_in_use () =
   let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
   let in_use addr =
     match Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr with
-    | exception Eio.Io (Eio.Exn.X _, _) -> ()
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
     | _ -> Alcotest.failf "listened twice at %a" Eio.Net.Sockaddr.pp addr
   in
   in_use addr;
@@ -155,7 +155,7 @@ let test_listen_on_a_unix_path_in_use () =
   let addr = `Unix "/tmp/in-use.sock" in
   ignore (Eio.Net.listen ~sw ~backlog:1 net addr);
   (match Eio.Net.listen ~sw ~backlog:1 net addr with
-  | exception Eio.Io (Eio.Exn.X _, _) -> ()
+  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
   | _ -> Alcotest.fail "listened twice at a Unix path");
   let second = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
   Eio.Fiber.both

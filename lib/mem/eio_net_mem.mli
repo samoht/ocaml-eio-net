@@ -16,6 +16,10 @@ type Eio.Exn.Backend.t +=
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at the address, as a real socket raises
             [Connection_failure (Refused _)]. *)
+  | Address_in_use
+        (** The backend code of the unclassified {!Eio.Io} error [listen] raises
+            at an address a listener holds, where a real socket's bind fails
+            with [EADDRINUSE], which Eio also leaves unclassified. *)
 
 val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~sw ()] is a network whose [listen] and [connect] operations are paired
@@ -30,15 +34,21 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     [0] binds the lowest port of the dynamic range, 49152-65535 (RFC 6335,
     section 6), that no listener holds, as a socket's bind does, and
     [listening_addr] reports it; it raises [Failure] if every port of the range
-    is held. A [listen] at an address a listener holds takes the address over
-    from it. A listener is closed when the switch passed to {!v} finishes,
-    whatever switch [listen] is given. A [connect] reaches the listener at its
-    address, or at the wildcard address of its port, and waits while [128]
-    connections wait to be accepted there; with no listener it raises the
-    connection failure that {!No_listener} marks. An accepted connection's peer
-    address is [`Unix "in-memory-client"]. Host resolution maps ["localhost"]
-    and ["127.0.0.1"] with a numeric service to IPv4 loopback at that port, and
-    any other host or service to no address.
+    is held. A [listen] at an address a listener holds raises the error that
+    {!Address_in_use} marks; a TCP address overlaps an address of the same port
+    that is equal to it or is the wildcard address of its family, as bind(2) has
+    it on Linux. With [reuse_addr], a [listen] at a Unix-domain path takes the
+    path over instead, as Eio's POSIX backend removes the socket file there
+    before it binds: the listener that held it stays open, and no [connect]
+    reaches it. A [listen] with [reuse_port] raises [Invalid_argument]. A
+    listener is closed, and its address free again, when it is closed or when
+    the switch passed to [listen] or to {!v} finishes. A [connect] reaches the
+    listener at its address, or at the wildcard address of its port, and waits
+    while [128] connections wait to be accepted there; with no listener it
+    raises the connection failure that {!No_listener} marks. An accepted
+    connection's peer address is [`Unix "in-memory-client"]. Host resolution
+    maps ["localhost"] and ["127.0.0.1"] with a numeric service to IPv4 loopback
+    at that port, and any other host or service to no address.
 
     [connect] accepts, and ignores, the socket options whose effect these queues
     already have: the ones asking that writes not be coalesced and that
