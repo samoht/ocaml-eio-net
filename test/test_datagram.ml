@@ -1,7 +1,7 @@
 (* Bound (not socketpair) sockets, so each received datagram carries the real
    source address the tests assert on. UDP on the loopback, not Unix-domain
    sockets: eio_linux 1.6 refuses a send to a Unix-domain datagram address
-   with EINVAL, a bug of the backend, not of this library. *)
+   with EINVAL (ocaml-multicore/eio#963). *)
 let with_bound_pair f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
