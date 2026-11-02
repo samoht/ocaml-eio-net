@@ -23,6 +23,21 @@ let rec takev len = function
       else if Cstruct.length x >= len then [ Cstruct.sub x 0 len ]
       else x :: takev (len - Cstruct.length x) xs
 
+(* Formatters of the arguments of a printed schedule, which reads as the call
+   that builds it: a negative number is parenthesised, as an argument must be,
+   and a float is printed with the fewest digits that read back as it. *)
+let pp_int ppf n = if n < 0 then Fmt.pf ppf "(%d)" n else Fmt.int ppf n
+
+let pp_float ppf x =
+  let rec shortest digits =
+    let s = Printf.sprintf "%.*g" digits x in
+    if digits >= 17 || Float.equal (float_of_string s) x then s
+    else shortest (digits + 1)
+  in
+  let s = shortest 1 in
+  if x < 0. then Fmt.pf ppf "(%s)" s else Fmt.string ppf s
+
+let pp_list pp_v ppf l = Fmt.pf ppf "[%a]" Fmt.(list ~sep:(any "; ") pp_v) l
 let read_rng seed = Random.State.make [| seed; 0x5eed_1 |]
 let write_rng seed = Random.State.make [| seed; 0x5eed_2 |]
 let dgram_rng seed = Random.State.make [| seed; 0x5eed_3 |]
@@ -63,17 +78,34 @@ module Flow = struct
           fail_write_after;
         }
 
+    let pp_read ppf = function
+      | Deliver n -> Fmt.pf ppf "Deliver %a" pp_int n
+      | Coalesce n -> Fmt.pf ppf "Coalesce %a" pp_int n
+      | Stall n -> Fmt.pf ppf "Stall %a" pp_int n
+      | Reset -> Fmt.string ppf "Reset"
+      | Eof -> Fmt.string ppf "Eof"
+
+    let pp_write ppf = function
+      | Accept n -> Fmt.pf ppf "Accept %a" pp_int n
+      | Fail -> Fmt.string ppf "Fail"
+
+    let pp_after name ppf = function
+      | None -> ()
+      | Some n -> Fmt.pf ppf " ~%s:%a" name pp_int n
+
     let pp ppf = function
-      | Pass -> Fmt.string ppf "pass"
+      | Pass -> Fmt.string ppf "none"
       | Script { reads; writes } ->
-          Fmt.pf ppf "script(reads=%d,writes=%d)" (List.length reads)
-            (List.length writes)
+          Fmt.pf ppf "script ~reads:%a ~writes:%a ()" (pp_list pp_read) reads
+            (pp_list pp_write) writes
       | Seeded s ->
           Fmt.pf ppf
-            "seeded(seed=%d,dribble=%d,stall=%d,short_write=%d,reset_after=%a)"
-            s.seed s.dribble s.stall s.short_write
-            Fmt.(option ~none:(any "-") int)
-            s.reset_after
+            "seeded ~dribble:%a ~stall:%a ~short_write:%a%a ~reset_kind:%s%a %a"
+            pp_int s.dribble pp_int s.stall pp_int s.short_write
+            (pp_after "reset_after") s.reset_after
+            (match s.reset_kind with `Reset -> "`Reset" | `Eof -> "`Eof")
+            (pp_after "fail_write_after")
+            s.fail_write_after pp_int s.seed
   end
 
   type driver = { read : delivered:int -> read; write : written:int -> write }
@@ -288,14 +320,32 @@ module Datagram = struct
 
     let seeded ?(loss = 0.) ?(dup = 0.) ?(reorder = 0.) ?(truncate = 0.)
         ?(garble = 0.) ?(delay = 0) seed =
+      let sum = loss +. dup +. reorder +. truncate +. garble in
+      if sum > 1. then
+        Fmt.invalid_arg
+          "Eio_net_chaos.Datagram.Schedule.seeded: the probabilities sum to %g"
+          sum;
       Seeded { seed; loss; dup; reorder; truncate; garble; delay }
 
+    let pp_fault ppf (fault : fault) =
+      match fault with
+      | Pass -> Fmt.string ppf "Pass"
+      | Drop n -> Fmt.pf ppf "Drop %a" pp_int n
+      | Dup -> Fmt.string ppf "Dup"
+      | Reorder -> Fmt.string ppf "Reorder"
+      | Truncate n -> Fmt.pf ppf "Truncate %a" pp_int n
+      | Garble n -> Fmt.pf ppf "Garble %a" pp_int n
+      | Delay n -> Fmt.pf ppf "Delay %a" pp_int n
+
     let pp ppf = function
-      | Pass -> Fmt.string ppf "pass"
-      | Script events -> Fmt.pf ppf "script(%d)" (List.length events)
+      | Pass -> Fmt.string ppf "none"
+      | Script events -> Fmt.pf ppf "script %a" (pp_list pp_fault) events
       | Seeded s ->
-          Fmt.pf ppf "seeded(seed=%d,loss=%g,dup=%g,reorder=%g)" s.seed s.loss
-            s.dup s.reorder
+          Fmt.pf ppf
+            "seeded ~loss:%a ~dup:%a ~reorder:%a ~truncate:%a ~garble:%a \
+             ~delay:%a %a"
+            pp_float s.loss pp_float s.dup pp_float s.reorder pp_float
+            s.truncate pp_float s.garble pp_int s.delay pp_int s.seed
   end
 
   type driver = { next : unit -> fault; rng : Random.State.t }
@@ -470,10 +520,16 @@ module Net = struct
         max_accepts;
       }
 
+    let pp_connect ppf = function
+      | Open -> Fmt.string ppf "Open"
+      | Refuse -> Fmt.string ppf "Refuse"
+      | Timeout -> Fmt.string ppf "Timeout"
+      | Slow n -> Fmt.pf ppf "Slow %a" pp_int n
+
     let pp ppf t =
-      Fmt.pf ppf "net(flow=%a,connect=%d,max_accepts=%a)" Flow.Schedule.pp
-        t.flow (List.length t.connect)
-        Fmt.(option ~none:(any "-") int)
+      Fmt.pf ppf "v ~flow:(%a) ~connect:%a%a ()" Flow.Schedule.pp t.flow
+        (pp_list pp_connect) t.connect
+        (Flow.Schedule.pp_after "max_accepts")
         t.max_accepts
   end
 
@@ -632,32 +688,4 @@ module Net = struct
     Eio.Resource.T (state, handler)
 
   let v ~sw schedule = wrap schedule (Eio_net_mem.v ~sw ())
-end
-
-module Listener = struct
-  type net = [ `Generic ] Eio.Net.ty Eio.Resource.t
-
-  let accepted ~offered serve =
-    let net = Eio_mock.Net.make "net" in
-    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
-    let listening =
-      Eio_mock.Net.listening_socket ~listening_addr:addr "listening"
-    in
-    Eio_mock.Net.on_listen net [ `Return listening ];
-    let silent, _ = Eio.Promise.create () in
-    let count = ref 0 in
-    let connection i =
-      `Run
-        (fun () ->
-          incr count;
-          let flow = Fmt.kstr Eio_mock.Flow.make "peer%d" i in
-          Eio_mock.Flow.on_read flow [ `Await silent ];
-          (flow, `Tcp (Eio.Net.Ipaddr.V4.loopback, 1024 + i)))
-    in
-    let no_more, _ = Eio.Promise.create () in
-    Eio_mock.Net.on_accept listening
-      (List.init offered connection @ [ `Await no_more ]);
-    match Eio_mock.Backend.run (fun () -> serve ~net:(net :> net) ~addr) with
-    | () -> Fmt.failwith "Listener.accepted: the listener returned"
-    | exception Eio_mock.Backend.Deadlock_detected -> !count
 end

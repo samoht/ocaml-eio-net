@@ -6,4 +6,4 @@
 (library
  (name eio_net_chaos)
  (public_name eio-net.chaos)
- (libraries hermetic eio eio.mock eio-net.mem cstruct fmt))
+ (libraries hermetic eio eio-net.mem cstruct fmt))

@@ -358,7 +358,14 @@ let test_schedules_print_every_parameter () =
      ~delay:3 7"
     Datagram.Schedule.pp
     (Datagram.Schedule.seeded ~loss:0.1 ~dup:0.2 ~reorder:0.05 ~truncate:0.15
-       ~garble:0.3 ~delay:3 7)
+       ~garble:0.3 ~delay:3 7);
+  check "a network schedule"
+    "v ~flow:(seeded ~dribble:4 ~stall:0 ~short_write:0 ~reset_kind:`Reset 9) \
+     ~connect:[Refuse; Timeout; Slow 2; Open] ~max_accepts:3 ()"
+    Net.Schedule.pp
+    (Net.Schedule.seeded ~dribble:4
+       ~connect:Net.[ Refuse; Timeout; Slow 2; Open ]
+       ~max_accepts:3 9)
 
 (* Probabilities past [1.] in all describe no distribution. *)
 let test_dgram_seeded_refuses_odds_past_one () =

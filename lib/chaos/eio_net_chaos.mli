@@ -43,9 +43,9 @@ module Flow : sig
     | Fail  (** Raise a connection-reset instead of writing. *)
 
   (** A flow's fault schedule: pass-through, an exact per-call script, or a
-      seeded generator. {!Schedule.pp} prints its kind and parameters, so a test
-      can report what it pinned or fuzzed. Each flow a schedule wraps runs it
-      from its start. *)
+      seeded generator. {!Schedule.pp} prints the call that builds it, so a test
+      can report what it pinned or fuzzed and a reader rebuild it. Each flow a
+      schedule wraps runs it from its start. *)
   module Schedule : sig
     type t
     (** The type for flow fault schedules. *)
@@ -85,9 +85,12 @@ module Flow : sig
         reads and writes interleave. *)
 
     val pp : t Fmt.t
-    (** [pp] formats a schedule as its kind, with the number of reads and writes
-        of a script, or the [seed], [dribble], [stall], [short_write] and
-        [reset_after] of a seeded schedule. *)
+    (** [pp] formats a schedule as the call that builds it, every parameter
+        given: [none], [script ~reads:[...] ~writes:[...] ()] with each fault,
+        or
+        [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
+         ~fail_write_after seed] with [reset_after] and [fail_write_after] left
+        out when they are never. *)
   end
 
   type flow = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
@@ -162,13 +165,16 @@ module Datagram : sig
         dropped, duplicated, reordered, truncated to fewer than [8] bytes, or
         replaced with fewer than [16] garbled bytes; otherwise, with even odds
         when [delay] (defaults to [0]) is positive, the receive stalls [1] to
-        [delay] scheduler turns, and else it passes through. The probabilities
-        must not sum to more than [1.]. *)
+        [delay] scheduler turns, and else it passes through.
+
+        Raises [Invalid_argument] if [loss], [dup], [reorder], [truncate] and
+        [garble] sum to more than [1.]. *)
 
     val pp : t Fmt.t
-    (** [pp] formats a schedule as its kind, with the number of faults of a
-        script, or the [seed], [loss], [dup] and [reorder] of a seeded schedule.
-    *)
+    (** [pp] formats a schedule as the call that builds it, every parameter
+        given: [none], [script [...]] with each fault, or
+        [seeded ~loss ~dup ~reorder ~truncate ~garble ~delay seed], each
+        probability with the fewest digits that read back as it. *)
   end
 
   type socket = [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t
@@ -229,8 +235,10 @@ module Net : sig
         {!Flow.Schedule.seeded} schedule of [seed] and the flow arguments. *)
 
     val pp : t Fmt.t
-    (** [pp] formats a schedule as its flow schedule, the number of its connect
-        faults and its accept bound. *)
+    (** [pp] formats a schedule as the call that builds it:
+        [v ~flow:(...) ~connect:[...] ~max_accepts ()], with the flow schedule
+        as {!Flow.Schedule.pp} prints it and [max_accepts] left out when there
+        is no bound. *)
   end
 
   type t = [ `Generic ] Eio.Net.ty Eio.Resource.t
@@ -248,22 +256,4 @@ module Net : sig
   (** [v ~sw schedule] is {!wrap} over a fresh in-memory network
       ({!Eio_net_mem.v}): a self-contained adversarial network for tests that
       need no real sockets. *)
-end
-
-(** A listener's connection bound, as the peers it accepts see it. *)
-module Listener : sig
-  type net = [ `Generic ] Eio.Net.ty Eio.Resource.t
-  (** The type for the network {!accepted} serves on. *)
-
-  val accepted :
-    offered:int -> (net:net -> addr:Eio.Net.Sockaddr.stream -> unit) -> int
-  (** [accepted ~offered serve] runs [serve ~net ~addr] under
-      {!Eio_mock.Backend} on a network whose listener at [addr] has [offered]
-      connections waiting, each from a peer that opens it and never sends a
-      byte, and is how many of them [serve] accepted once every fiber is
-      blocked. A peer that sends nothing holds its connection for good, so the
-      count is what a listener lets that many silent peers make it hold.
-
-      Raises [Failure] if [serve] returns, since a listener serves until it is
-      stopped. An exception from [serve] propagates. *)
 end
