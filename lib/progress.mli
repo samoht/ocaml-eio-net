@@ -19,7 +19,9 @@ exception
     window : Mtime.Span.t;  (** The length of its windows. *)
   }
 (** Raised when a window ended with fewer than [limit] bytes a second moved over
-    [window]. *)
+    [window]. Its registered printer words it as curl does:
+    ["Operation too slow. Less than LIMIT bytes/sec transferred the last SECONDS
+     seconds"]. *)
 
 val v : mono:_ Eio.Time.Mono.t -> limit:int -> window:Mtime.Span.t -> t
 (** [v ~mono ~limit ~window] is a transfer timed on [mono] whose windows last
@@ -32,7 +34,9 @@ val move : t -> (unit -> int) -> int
     [t]. It waits no later than the end of the current window to judge it, and
     if [f] has not returned by then, it cancels [f]: a window with too few bytes
     raises {!Too_slow}, and otherwise [f] is called again in the next window.
-    Bytes [f] moved as the window ended count. An exception from [f] propagates.
+    Bytes [f] moved as the window ended count. Fibers may move in [t] at once,
+    as a reader and a writer of one flow do: their bytes count in the same
+    windows, and each window is judged once. An exception from [f] propagates.
 *)
 
 val reader : t -> Bytesrw.Bytes.Reader.t -> Bytesrw.Bytes.Reader.t
@@ -41,9 +45,3 @@ val reader : t -> Bytesrw.Bytes.Reader.t -> Bytesrw.Bytes.Reader.t
 val flow : t -> _ Eio.Flow.two_way -> Eio.Flow.two_way_ty Eio.Resource.t
 (** [flow t f] is [f], each read and each write a {!move} in [t]. A shutdown
     passes through to [f]. *)
-
-val pp_too_slow : (int * Mtime.Span.t) Fmt.t
-(** [pp_too_slow] formats the [limit] and [window] of a {!Too_slow} as curl
-    words it:
-    ["Operation too slow. Less than LIMIT bytes/sec transferred the last SECONDS
-     seconds"]. *)

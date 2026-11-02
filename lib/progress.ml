@@ -2,6 +2,17 @@ open! Hermetic
 
 exception Too_slow of { limit : int; window : Mtime.Span.t }
 
+let () =
+  Printexc.register_printer @@ function
+  | Too_slow { limit; window } ->
+      Some
+        (Fmt.str
+           "Operation too slow. Less than %d bytes/sec transferred the last %g \
+            seconds"
+           limit
+           (Int64.to_float (Mtime.Span.to_uint64_ns window) /. 1e9))
+  | _ -> None
+
 type t = {
   now : unit -> Mtime.t;
   sleep : Mtime.Span.t -> unit;
@@ -36,14 +47,20 @@ let left t start =
   if Mtime.Span.compare since t.window >= 0 then Mtime.Span.zero
   else Mtime.Span.abs_diff t.window since
 
-(* Judge the window if it has ended, and start the next. *)
+(* Judge the window that started at [start] if it has ended, and start the
+   next. Moves of several fibers share [t], so the window may have been judged
+   and replaced by another's move already: it is then not judged again, and
+   the caller goes on in the current one. *)
 let judge t start =
-  if Mtime.Span.equal (left t start) Mtime.Span.zero then begin
-    if float_of_int t.moved < needed t then
-      raise (Too_slow { limit = t.limit; window = t.window });
-    t.start <- Some (t.now ());
-    t.moved <- 0
-  end
+  match t.start with
+  | Some current
+    when Mtime.equal current start
+         && Mtime.Span.equal (left t start) Mtime.Span.zero ->
+      if float_of_int t.moved < needed t then
+        raise (Too_slow { limit = t.limit; window = t.window });
+      t.start <- Some (t.now ());
+      t.moved <- 0
+  | Some _ | None -> ()
 
 let start t =
   match t.start with
@@ -102,9 +119,3 @@ let flow t (f : _ Eio.Flow.two_way) =
     let shutdown inner how = Eio.Flow.shutdown inner how
   end in
   Eio.Resource.T (f, Eio.Flow.Pi.two_way (module Flow))
-
-let pp_too_slow ppf (limit, window) =
-  Fmt.pf ppf
-    "Operation too slow. Less than %d bytes/sec transferred the last %g seconds"
-    limit
-    (Int64.to_float (Mtime.Span.to_uint64_ns window) /. 1e9)
