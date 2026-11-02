@@ -6,6 +6,8 @@
  (package eio-net)
  (libraries
   eio-net.accept
+  eio-net
+  eio-net.framing
   eio-net.unix
   eio-net.mem
   eio

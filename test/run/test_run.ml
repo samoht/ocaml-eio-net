@@ -276,9 +276,41 @@ let test_a_failed_connection_leaves_the_loop () =
     "the next peer is answered" "ok fresh\n" (exchange net "fresh\n");
   Alcotest.(check int) "the failure is reported" 1 (List.length !seen)
 
-(* Any other exception of a connection is a defect: it ends the loop, which
-   raises it. *)
-let test_a_defect_ends_the_loop () =
+(* A peer that sends a length prefix past the bound makes its connection's
+   handler raise [Eio_net_framing.Error]: the error is reported to [on_error]
+   with the others, and the loop serves the next peer. *)
+let test_a_malformed_peer_leaves_the_loop () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let seen = ref [] in
+  let on_error e = seen := e :: !seen in
+  let handler head flow _ =
+    Eio_net_accept.complete head;
+    let channel = Eio_net.Frame.of_length_prefixed_flow flow in
+    let frame = Eio_net.Frame.recv channel in
+    Eio_net.Frame.send channel [ Cstruct.of_string ("ok " ^ frame) ]
+  in
+  Eio.Switch.run @@ fun scope ->
+  let listening = scripted ~sw:scope net [] in
+  Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+      Eio_net_accept.run ~max_connections:4 ~on_error listening handler);
+  Alcotest.(check string)
+    "the malformed peer is not answered" ""
+    (exchange net "\255\255\255\255");
+  Alcotest.(check string)
+    "the next peer is answered" "\000\000\000\008ok fresh"
+    (exchange net "\000\000\000\005fresh");
+  match !seen with
+  | [ Eio_net_framing.Error (Invalid_length _) ] -> ()
+  | errors ->
+      Alcotest.failf "expected one framing error, got [%a]"
+        Fmt.(list ~sep:semi exn)
+        errors
+
+(* [on_error] may raise to stop: the exception ends the loop, which raises
+   it. *)
+let test_on_error_raising_ends_the_loop () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
@@ -287,12 +319,37 @@ let test_a_defect_ends_the_loop () =
     Eio.Switch.run @@ fun scope ->
     let listening = scripted ~sw:scope net [] in
     Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-        Eio_net_accept.run ~max_connections:4 ~on_error:ignore listening
+        Eio_net_accept.run ~max_connections:4 ~on_error:raise listening
           (line_server ~served));
     ignore (exchange net "boom\n" : string)
   with
   | () -> Alcotest.fail "the loop went on"
   | exception Failure msg -> Alcotest.(check string) "the defect" "boom" msg
+
+(* A connection served when [stop] resolves is shed as it next reads a head,
+   and the failure of its shut socket is not reported. *)
+let test_a_connection_shed_after_stop_is_not_reported () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let seen, on_error = errors () in
+  let stop, stop_r = Eio.Promise.create () in
+  let release, release_r = Eio.Promise.create () in
+  Eio.Switch.run (fun scope ->
+      let listening = scripted ~sw:scope net [] in
+      Eio.Fiber.fork ~sw:scope (fun () ->
+          Eio_net_accept.run ~stop ~max_connections:4 ~on_error listening
+            (fun head flow _ ->
+              Eio_net_accept.complete head;
+              Eio.Promise.await release;
+              Eio_net_accept.reading head (fun () -> 0);
+              Eio.Flow.copy_string "late\n" flow));
+      let (_ : _ Eio.Net.stream_socket) = Eio.Net.connect ~sw:scope net addr in
+      settle 1;
+      Eio.Promise.resolve stop_r ();
+      settle 1;
+      Eio.Promise.resolve release_r ());
+  check_no_error seen
 
 (* Once [stop] resolves the loop accepts no more, sheds each connection whose
    head is incomplete, at once or when it next reads a head, and returns
@@ -363,8 +420,12 @@ let suite =
         (complete_heads_are_not_shed 100);
       Alcotest.test_case "a failed connection leaves the loop" `Quick
         test_a_failed_connection_leaves_the_loop;
-      Alcotest.test_case "a defect ends the loop" `Quick
-        test_a_defect_ends_the_loop;
+      Alcotest.test_case "a malformed peer leaves the loop" `Quick
+        test_a_malformed_peer_leaves_the_loop;
+      Alcotest.test_case "on_error raising ends the loop" `Quick
+        test_on_error_raising_ends_the_loop;
+      Alcotest.test_case "a connection shed after stop is not reported" `Quick
+        test_a_connection_shed_after_stop_is_not_reported;
       Alcotest.test_case "stop sheds the incomplete heads" `Quick
         test_stop_sheds_incomplete_heads;
     ] )
