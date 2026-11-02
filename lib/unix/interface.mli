@@ -18,7 +18,8 @@ module type S = sig
       is the one the interface's link sees, with no scope embedded in it as a
       KAME stack (macOS, the BSDs) embeds it.
 
-      Raises [Unix.Unix_error] if getifaddrs(3) fails. *)
+      Raises the {!Eio.Io} error {!Eio_unix.Err.v} makes of a failed
+      getifaddrs(3). *)
 
   type watch
   (** The type for subscriptions to the host's address changes. *)
@@ -29,7 +30,8 @@ module type S = sig
       a [PF_ROUTE] socket elsewhere. Releasing [sw] closes it. A caller that
       reads {!addresses} after opening the watch misses no change.
 
-      Raises [Unix.Unix_error] if the socket cannot be opened. *)
+      Raises the {!Eio.Io} error {!Eio_unix.Err.v} makes of a failure to open
+      the socket. *)
 
   val changed : watch -> unit
   (** [changed w] waits until an address has been added to or removed from an
@@ -37,7 +39,8 @@ module type S = sig
       notification the kernel dropped because the socket's buffer was full
       counts as a change. A routing socket also carries messages of no address,
       a route learned for each new destination among them: each costs one read
-      and returns nothing. *)
+      and returns nothing. A failed read raises the {!Eio.Io} error
+      {!Eio_unix.Err.v} makes of it. *)
 end
 
 include S

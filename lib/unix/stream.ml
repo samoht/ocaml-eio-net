@@ -18,10 +18,8 @@ let offload_single_write fd bufs =
           (fun unix_fd ->
             Eio_unix.run_in_systhread ~label:"eio-net-writev" (fun () ->
                 writev unix_fd iov))
-      with Unix.Unix_error (((EPIPE | ECONNRESET) as code), name, arg) ->
-        raise
-          (Eio.Net.err
-             (Connection_reset (Eio_unix.Unix_error (code, name, arg))))
+      with Unix.Unix_error (code, name, arg) ->
+        raise (Eio_unix.Err.v code name arg)
     in
     if wrote >= 0 then wrote
     else begin

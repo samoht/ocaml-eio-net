@@ -7,9 +7,9 @@ val offload_single_write : Eio_unix.Fd.t -> Cstruct.t list -> int
     Semantics match {!Eio.Flow.single_write}: the call returns after writing at
     least one byte, waiting for writability when the socket is full, and may
     consume fewer bytes than offered, including fewer buffers, since one call
-    passes at most 256 iovecs. A peer that has gone (EPIPE, ECONNRESET) raises
-    [Eio.Net.Connection_reset] as an {!Eio.Io} error, and any other failure
-    raises [Unix.Unix_error]. *)
+    passes at most 256 iovecs. A failure is the {!Eio.Io} error
+    {!Eio_unix.Err.v} makes of it, as Eio's own sockets raise it: a peer that
+    has gone (EPIPE, ECONNRESET) is [Eio.Net.Connection_reset]. *)
 
 val offload_writer : _ Eio.Resource.t -> (Cstruct.t list -> int) option
 (** [offload_writer flow] is [Some write] when [flow] exposes an OS file

@@ -8,6 +8,11 @@ external recv_batch_raw :
   Unix.file_descr -> Cstruct.t array -> int array -> int -> int -> int
   = "caml_eio_net_recvmsg_batch"
 
+(* [eio f x] is [f x], a failure of the system the {!Eio.Io} error Eio's own
+   sockets raise for it. *)
+let eio f x =
+  try f x with Unix.Unix_error (e, fn, arg) -> raise (Eio_unix.Err.v e fn arg)
+
 let widen_datagram_buffers fd =
   let send = 2 * 1024 * 1024 in
   let recv = send * 2 in
@@ -21,7 +26,7 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
     invalid_arg "Eio_net_unix.Frame: max_batch > 64";
   (* Eio waits for a descriptor to be ready only when an operation on it would
      block; a blocking one would stall every fiber of the domain instead. *)
-  Unix.set_nonblock fd;
+  eio Unix.set_nonblock fd;
   let socket = Eio_unix.Net.import_socket_datagram ~sw ~close_unix:false fd in
   (* One byte of headroom tells a datagram longer than [max_frame] from one
      exactly [max_frame] long. *)
@@ -46,7 +51,7 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
   let recv_batch () =
     let _source, first_len = Eio.Net.recv socket recv_buffers.(0) in
     recv_lengths.(0) <- first_len;
-    let extra = recv_batch_raw fd recv_buffers recv_lengths 1 max_batch in
+    let extra = eio (recv_batch_raw fd recv_buffers recv_lengths 1) max_batch in
     for i = 0 to extra do
       check recv_lengths.(i)
     done;
@@ -71,7 +76,9 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
      writable while it accepts none. *)
   let rec send_prepared first count =
     if first < count then begin
-      let sent = send_batch_raw fd send_buffers send_lengths first count in
+      let sent =
+        eio (send_batch_raw fd send_buffers send_lengths first) count
+      in
       if sent = 0 then Eio_unix.await_writable fd;
       send_prepared (first + sent) count
     end

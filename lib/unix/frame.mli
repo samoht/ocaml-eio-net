@@ -19,9 +19,10 @@ val of_connected_datagram_fd :
     [max_frame] raises the {!Eio.Io} error {!Eio_net.Datagram.Too_long} and
     drops the datagrams received in the same batch; the channel stays usable.
     Sends copy each frame into a buffer of [max_frame] bytes and raise
-    [Invalid_argument] on a longer one, and [Unix.Unix_error] on a send the
-    system refuses; either way, frames before it in the batch may have been
-    sent.
+    [Invalid_argument] on a longer one, and on a send the system refuses the
+    {!Eio.Io} error {!Eio_unix.Err.v} makes of it; either way, frames before it
+    in the batch may have been sent. A receive the system refuses raises that
+    {!Eio.Io} error too.
 
     Fibers may send and receive at once: concurrent receives run one at a time,
     and so do concurrent sends, a batch to its end, while a send and a receive

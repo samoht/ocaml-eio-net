@@ -4,6 +4,9 @@ external addresses_raw : unit -> (string * string * int * bool) list
 external watch_raw : unit -> Unix.file_descr = "caml_eio_net_interface_watch"
 external drain : Unix.file_descr -> bool = "caml_eio_net_interface_drain"
 
+let eio f x =
+  try f x with Unix.Unix_error (e, fn, arg) -> raise (Eio_unix.Err.v e fn arg)
+
 type address = { interface : string; prefix : Ipaddr.Prefix.t; loopback : bool }
 
 module type S = sig
@@ -24,17 +27,17 @@ let addresses () =
   List.rev_map
     (fun (interface, octets, bits, loopback) ->
       { interface; prefix = prefix octets bits; loopback })
-    (addresses_raw ())
+    (eio addresses_raw ())
 
 type watch = Eio_unix.Fd.t
 
 let watch ~sw =
-  Eio_unix.Fd.of_unix ~sw ~blocking:false ~close_unix:true (watch_raw ())
+  Eio_unix.Fd.of_unix ~sw ~blocking:false ~close_unix:true (eio watch_raw ())
 
 let rec changed watch =
   let changed_now =
     Eio_unix.Fd.use_exn "Eio_net_unix.Interface.changed" watch (fun fd ->
         Eio_unix.await_readable fd;
-        drain fd)
+        eio drain fd)
   in
   if not changed_now then changed watch
