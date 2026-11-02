@@ -16,11 +16,10 @@ make this possible:
 
 - `Eio_net.Frame`: a bidirectional packet channel where one receive is one
   frame. CCSDS transfer frames, AX.25 and Ethernet codecs read and write over
-  it. Outgoing frames are ropes (`Rope.t`), a sequence of byte slices read
-  as one byte string. `writev` takes an array of (pointer, length) pairs and
-  sends them in one system call, so a header and a payload held in separate
-  buffers reach the kernel without being copied into one string, and a burst
-  can go out in one system call.
+  it. An outgoing frame is a list of buffers, as `Eio.Flow.write` takes. The
+  buffers go to `writev` as they are, so a header and a payload held in
+  separate buffers reach the kernel without being copied into one, and a
+  burst can go out in one system call.
 - `Eio_net.Datagram`: an addressed datagram channel that reports each
   datagram's source, for a UDP server that answers whoever wrote to it.
 - `Eio_net.Relay`: copies bytes between two flows in both directions, or
@@ -63,16 +62,6 @@ Six sub-libraries sit beside it:
 
 <!-- $MDX skip -->
 ```sh
-$ opam install eio-net
-```
-
-If opam cannot find the package, it may not yet be released in the public
-`opam-repository`. Add the overlay repository, then install it:
-
-<!-- $MDX skip -->
-```sh
-$ opam repo add samoht https://tangled.org/gazagnaire.org/opam-overlay.git
-$ opam update
 $ opam install eio-net
 ```
 

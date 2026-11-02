@@ -4,30 +4,22 @@ synopsis: "Eio network backends and test helpers"
 maintainer: ["Thomas Gazagnaire <thomas@gazagnaire.org>"]
 authors: ["Thomas Gazagnaire <thomas@gazagnaire.org>"]
 license: "ISC"
-tags: [
-  "org:blacksun"
-  "network-programming"
-  "eio"
-  "test"
-  "hermetic:eio-boundary"
-  "area:10003039"
-]
-homepage: "https://tangled.org/gazagnaire.org/ocaml-eio-net"
-bug-reports: "https://tangled.org/gazagnaire.org/ocaml-eio-net/issues"
+tags: ["eio" "network" "test"]
+homepage: "https://github.com/samoht/ocaml-eio-net"
+bug-reports: "https://github.com/samoht/ocaml-eio-net/issues"
 depends: [
   "dune" {>= "3.21"}
-  "hermetic"
-  "net-framing"
-  "ocaml" {>= "5.1"}
-  "eio" {>= "1.5"}
-  "cstruct"
+  "hermetic" {>= "0.1.0"}
+  "net-framing" {= version}
+  "ocaml" {>= "5.3"}
+  "eio" {>= "1.6"}
+  "cstruct" {>= "6.0.0"}
   "fmt"
   "logs"
   "bytesrw"
   "mtime"
   "ipaddr"
   "fpath"
-  "nox-rope"
   "alcotest" {with-test}
   "eio_main" {with-test}
   "odoc" {with-doc}
@@ -46,9 +38,5 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://tangled.org/gazagnaire.org/ocaml-eio-net"
+dev-repo: "git+https://github.com/samoht/ocaml-eio-net.git"
 x-maintenance-intent: ["(latest)"]
-pin-depends: [
-  ["bytesrw.0.4.0" "git+https://github.com/samoht/bytesrw.git#78a099ab812d4be0b564e27757ae0401fb525d0f"]
-  ["cstruct.6.2.0" "git+https://github.com/samoht/ocaml-cstruct.git#d1e1f46bd0711d301a613411ef325160c0d8b21c"]
-]

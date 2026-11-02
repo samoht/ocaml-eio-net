@@ -10,40 +10,38 @@
 (authors "Thomas Gazagnaire <thomas@gazagnaire.org>")
 (maintainers "Thomas Gazagnaire <thomas@gazagnaire.org>")
 
-(source (tangled gazagnaire.org/ocaml-eio-net))
+(source (github samoht/ocaml-eio-net))
 
 (package
  (name net-framing)
  (synopsis "Pure bounded length-prefixed framing")
  (description "IO-free network-order framing with bounded incremental decoding and atomic batch validation.")
- (tags (org:blacksun network-programming area:10003039))
+ (tags (network framing))
  (depends
   (ocaml (>= 4.14))
   fmt
-  wire
-  nox-rope
+  (wire (>= 1.3.0))
+  (cstruct (>= 6.0.0))
   (alcotest :with-test)
   (alcobar :with-test)
-  (nox-csv :with-test)
-  (nox-hex :with-test)
+  (ohex :with-test)
   (mdx :with-test)))
 
 (package
  (name eio-net)
  (synopsis "Eio network backends and test helpers")
- (tags (org:blacksun network-programming eio test hermetic:eio-boundary area:10003039))
+ (tags (eio network test))
  (depends
-  hermetic
-  net-framing
-  (ocaml (>= 5.1))
-  (eio (>= 1.5))
-  cstruct
+  (hermetic (>= 0.1.0))
+  (net-framing (= :version))
+  (ocaml (>= 5.3))
+  (eio (>= 1.6))
+  (cstruct (>= 6.0.0))
   fmt
   logs
   bytesrw
   mtime
   ipaddr
   fpath
-  nox-rope
   (alcotest :with-test)
   (eio_main :with-test)))
