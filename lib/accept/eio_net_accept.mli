@@ -66,10 +66,14 @@ val run :
     process holds a connection raises its error, naming that none was held to
     shed or wait for. Any other failed accept raises its error.
 
-    [on_error] receives each [Eio.Io] or [End_of_file] a connection's [handler]
-    raises, a failure on its socket, with the peer's address in its context; a
-    shed connection's is ignored, and the loop goes on serving the others. Any
-    other exception is a defect: it ends the loop, which raises it.
+    [on_error] receives each exception a connection's [handler] raises but
+    [Eio.Cancel.Cancelled], with the peer's address in its context when it is an
+    [Eio.Io], and the loop goes on serving the others: a failure on the socket,
+    and an error the peer caused, as a malformed frame ([Eio_net_framing.Error])
+    or a stalled transfer ([Eio_net.Progress.Too_slow]), end that connection
+    alone. A shed connection's is ignored. An exception [on_error] raises ends
+    the loop, which raises it: [~on_error:raise] makes every failed connection
+    end it.
 
     Its connections end with it. Without [stop] it returns only by raising. Once
     [stop] resolves it accepts no more, sheds each connection whose head is

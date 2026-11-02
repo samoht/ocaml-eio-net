@@ -22,20 +22,26 @@ let register ~name f =
    head received so far and is [None] once the head is complete. A connection
    may run on another domain than its loop's (an executor pool), so what it
    sets is atomic, and shedding shuts its socket down, which ends its reads on
-   any domain, rather than cancelling its fiber. *)
+   any domain, rather than cancelling its fiber. [shed] marks a connection
+   shed, so the failure its shut socket causes is not reported. *)
 type head = {
   received : (unit -> int) option Atomic.t;
   stopping : bool Atomic.t;
+  shed : bool Atomic.t;
   shut : unit -> unit;
 }
 
+let shed head =
+  Atomic.set head.shed true;
+  head.shut ()
+
 let reading head received =
   Atomic.set head.received (Some received);
-  if Atomic.get head.stopping then head.shut ()
+  if Atomic.get head.stopping then shed head
 
 let complete head = Atomic.set head.received None
 
-type held = { seq : int; loop : int; head : head; shed : bool Atomic.t }
+type held = { seq : int; loop : int; head : head }
 
 module Seq_map = Map.Make (Int)
 
@@ -73,10 +79,6 @@ type loop = {
   stopping : bool Atomic.t;
 }
 
-let shed c =
-  Atomic.set c.shed true;
-  c.head.shut ()
-
 (* The connection held by a loop that [mine] accepts whose head is incomplete
    and has made the least progress, the older of two that made the same. *)
 let least_progressed mine =
@@ -84,7 +86,7 @@ let least_progressed mine =
     (fun _ c best ->
       match Atomic.get c.head.received with
       | None -> best
-      | Some _ when (not (mine c)) || Atomic.get c.shed -> best
+      | Some _ when (not (mine c)) || Atomic.get c.head.shed -> best
       | Some received -> (
           let n = received () in
           match best with
@@ -96,7 +98,7 @@ let least_progressed mine =
    head, if it holds one, and wait for one of its connections to end. *)
 let free_a_slot loop =
   Option.iter
-    (fun (c, _) -> shed c)
+    (fun (c, _) -> shed c.head)
     (least_progressed (fun c -> c.loop = loop.id));
   Eio.Condition.await_no_mutex loop.ended
 
@@ -107,7 +109,7 @@ let free_a_descriptor () =
   let ends = Atomic.get process.ends in
   if Seq_map.is_empty (Atomic.get process.all) then false
   else begin
-    Option.iter (fun (c, _) -> shed c) (least_progressed (fun _ -> true));
+    Option.iter (fun (c, _) -> shed c.head) (least_progressed (fun _ -> true));
     Eio.Condition.loop_no_mutex process.any_ended (fun () ->
         if Atomic.get process.ends = ends then None else Some ());
     true
@@ -122,10 +124,11 @@ let fork loop ~sw ~on_error handler flow addr =
     {
       received = Atomic.make (Some (fun () -> 0));
       stopping = loop.stopping;
+      shed = Atomic.make false;
       shut;
     }
   in
-  let c = { seq; loop = loop.id; head; shed = Atomic.make false } in
+  let c = { seq; loop = loop.id; head } in
   let ended () =
     Eio.Flow.close flow;
     update (Seq_map.remove seq);
@@ -143,8 +146,9 @@ let fork loop ~sw ~on_error handler flow addr =
       Fun.protect ~finally:ended @@ fun () ->
       match handler head flow addr with
       | () -> ()
-      | exception ((Eio.Io _ | End_of_file) as e) ->
-          if not (Atomic.get c.shed) then
+      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+      | exception e ->
+          if not (Atomic.get head.shed) then
             on_error
               (Eio.Exn.add_context e "handling connection from %a"
                  Eio.Net.Sockaddr.pp addr))
@@ -191,6 +195,6 @@ let run ?stop ~max_connections ~on_error listening handler =
       Seq_map.iter
         (fun _ c ->
           if c.loop = loop.id && Option.is_some (Atomic.get c.head.received)
-          then shed c)
+          then shed c.head)
         (Atomic.get process.all);
       v
