@@ -1,7 +1,7 @@
 (test
  (name test)
- (package net-framing)
- (libraries net-framing cstruct fmt ohex alcotest)
+ (package eio-net)
+ (libraries eio-net.framing eio cstruct fmt ohex alcotest)
  (deps
   (source_tree traces)
   (source_tree scripts)))

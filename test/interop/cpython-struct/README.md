@@ -1,6 +1,6 @@
 # CPython framing vectors
 
-Committed vectors compare `net-framing` with CPython 3.15.0's public
+Committed vectors compare `eio-net.framing` with CPython 3.15.0's public
 [`struct`](https://docs.python.org/3.15/library/struct.html) API: `!H` and `!I`
 encode unsigned 16-bit and 32-bit network-order lengths. The generator calls
 that API; it does not contain a second length encoder.

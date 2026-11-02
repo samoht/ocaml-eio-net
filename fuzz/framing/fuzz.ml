@@ -1,1 +1,1 @@
-let () = Alcobar.run "net-framing" [ Fuzz_framing.suite ]
+let () = Alcobar.run "eio-net.framing" [ Fuzz_framing.suite ]

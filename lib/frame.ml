@@ -36,53 +36,61 @@ let of_datagram_socket ?max_frame ?dst socket =
     ~recv:(fun () -> snd (channel.Datagram.recv ()))
     ~send:(channel.Datagram.send None)
 
-exception Error of Framing.error
+(* [locked m f x] is [Eio.Mutex.use_ro m (fun () -> f x)] without allocating
+   the closure. *)
+let locked mutex f x =
+  Eio.Mutex.lock mutex;
+  match f x with
+  | v ->
+      Eio.Mutex.unlock mutex;
+      v
+  | exception exn ->
+      Eio.Mutex.unlock mutex;
+      raise exn
 
-let of_length_prefixed_flow ?(framing = Framing.Config.v ()) flow =
-  let buffered =
-    Eio.Buf_read.of_flow ~max_size:(Framing.Config.buffer_size framing) flow
+(* A read that fails after consuming part of a frame leaves the reader inside
+   it, and a write that fails may leave part of a batch on the wire: in either
+   case the direction refuses further use rather than resynchronise on the
+   middle of a frame. A refused batch writes nothing, so it leaves the stream
+   usable. *)
+let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
+  let reader =
+    Eio.Buf_read.of_flow
+      ~max_size:(Eio_net_framing.Config.buffer_size framing)
+      flow
   in
-  let decoder = ref (Framing.Decoder.v framing) in
-  let encoder = ref (Framing.Encoder.v framing) in
+  let read_failure = ref None and write_failed = ref false in
   let read_lock = Eio.Mutex.create () and write_lock = Eio.Mutex.create () in
-  let observe needed =
-    match Eio.Buf_read.take needed buffered with
-    | bytes -> Framing.Decoder.Data bytes
-    | exception End_of_file ->
-        Framing.Decoder.Eof
-          (Eio.Buf_read.take (Eio.Buf_read.buffered_bytes buffered) buffered)
-    | exception exn ->
-        decoder := Framing.Decoder.handle !decoder Abort;
-        raise exn
+  let read_frame () =
+    match !read_failure with
+    | Some error -> raise (Eio_net_framing.Error error)
+    | None -> (
+        let consumed = Eio.Buf_read.consumed_bytes reader in
+        match Eio_net_framing.read framing reader with
+        | payload -> payload
+        | exception (Eio_net_framing.Error error as exn) ->
+            read_failure := Some error;
+            raise exn
+        | exception End_of_file -> raise End_of_file
+        | exception exn ->
+            if Eio.Buf_read.consumed_bytes reader <> consumed then
+              read_failure := Some Eio_net_framing.Aborted;
+            raise exn)
   in
-  let take_frame () =
-    Eio.Mutex.use_ro read_lock (fun () ->
-        let rec interpret () =
-          let state, event = Framing.Decoder.next_event !decoder in
-          decoder := state;
-          match event with
-          | Read needed ->
-              decoder := Framing.Decoder.handle !decoder (observe needed);
-              interpret ()
-          | Frame payload -> payload
-          | End_of_stream -> raise End_of_file
-          | Failed error -> raise (Error error)
-        in
-        interpret ())
+  let write_batch payloads =
+    if !write_failed then raise (Eio_net_framing.Error Eio_net_framing.Aborted);
+    match Eio_net_framing.encode framing payloads with
+    | Error error -> raise (Eio_net_framing.Error error)
+    | Ok [] -> ()
+    | Ok buffers -> (
+        match Eio.Flow.write flow buffers with
+        | () -> ()
+        | exception exn ->
+            write_failed := true;
+            raise exn)
   in
-  let send_batch payloads =
-    Eio.Mutex.use_ro write_lock (fun () ->
-        let state, result = Framing.Encoder.outgoing !encoder payloads in
-        encoder := state;
-        match result with
-        | Result.Error error -> raise (Error error)
-        | Ok encoded -> (
-            match Eio.Flow.write flow encoded with
-            | () -> encoder := Framing.Encoder.complete !encoder Sent
-            | exception exn ->
-                encoder := Framing.Encoder.complete !encoder Failed;
-                raise exn))
-  in
+  let take_frame () = locked read_lock read_frame () in
+  let send_batch payloads = locked write_lock write_batch payloads in
   {
     recv = take_frame;
     recv_batch = (fun () -> [ take_frame () ]);

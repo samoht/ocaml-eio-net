@@ -62,19 +62,29 @@ val of_datagram_socket :
     refusal). A protocol that needs the source address of each datagram uses the
     addressed {!Datagram} channel instead. *)
 
-exception Error of Framing.error
-(** A pure framing refusal, including a partial prefix/payload at EOF or an
-    attempt to resume a write after failed/cancelled IO. *)
-
 val of_length_prefixed_flow :
-  ?framing:Framing.Config.t -> _ Eio.Flow.two_way -> t
-(** Interpret {!Framing.Decoder} and {!Framing.Encoder} over [flow]. The pure
-    default is an unsigned network-order uint32 length, up to 1 MiB. Every batch
-    is validated before any prefix or payload is written. Reads and writes are
-    independently serialised; a failed/cancelled write refuses future writes,
-    since a partial frame may already be on the wire. A clean boundary EOF
-    raises [End_of_file]; truncation and invalid lengths raise {!Error}.
-    Buffered input and pending frames obey the pure limits. *)
+  ?framing:Eio_net_framing.Config.t -> _ Eio.Flow.two_way -> t
+(** [of_length_prefixed_flow ~framing flow] presents a byte stream as a frame
+    channel: each frame is a length prefix and a payload, as {!Eio_net_framing}
+    reads and writes them with [framing] (defaults to
+    [Eio_net_framing.Config.v ()]: a uint32 network-order length, payloads up to
+    1 MiB). It buffers at most {!Eio_net_framing.Config.buffer_size} bytes of
+    input. Receives are serialised among themselves, and so are sends, so a
+    batch reaches the wire whole even when fibers send concurrently.
+
+    {!recv} raises [End_of_file] at the end of input at a frame boundary, and
+    [Eio_net_framing.Error] if the input ends inside a frame ([Truncated _]) or
+    a prefix declares a length outside the range of [framing]
+    ([Invalid_length _]). After such an error, or any exception that interrupts
+    a frame after part of it was consumed (a cancellation), every later receive
+    raises [Eio_net_framing.Error] with that error, or [Aborted] for another
+    exception, rather than read the middle of a frame as a prefix.
+
+    {!send} and {!send_batch} write a batch with one [Eio.Flow.write]. They
+    raise [Eio_net_framing.Error (Invalid_length _)] before writing anything if
+    a payload's length is outside the range of [framing], and the channel stays
+    usable. Once a write has raised, part of a frame may be on the wire, so
+    every later send raises [Eio_net_framing.Error Aborted]. *)
 
 val pair : unit -> t * t
 (** [pair ()] is two in-memory frame channels where a frame sent on one is

@@ -25,29 +25,55 @@ let vectors input =
   | "operation,length_field,length,prefix_hex" :: lines -> List.map vector lines
   | _ -> failwith "vectors.csv: unexpected header"
 
+module Framing = Eio_net_framing
+
+(* A source that hands out its chunks one at a time, so the reader sees the
+   prefix before any payload byte. *)
+module Chunked = struct
+  type t = string list ref
+
+  let read_methods = []
+
+  let single_read t dst =
+    match !t with
+    | [] -> raise End_of_file
+    | chunk :: rest ->
+        let length = min (Cstruct.length dst) (String.length chunk) in
+        Cstruct.blit_from_string chunk 0 dst 0 length;
+        t :=
+          if length = String.length chunk then rest
+          else String.sub chunk length (String.length chunk - length) :: rest;
+        length
+
+  let reader config chunks =
+    Eio.Buf_read.of_flow
+      ~max_size:(Framing.Config.buffer_size config)
+      (Eio.Resource.T
+         ( ref (List.filter (( <> ) "") chunks),
+           Eio.Flow.Pi.source
+             (module struct
+               type nonrec t = t
+
+               let read_methods = read_methods
+               let single_read = single_read
+             end) ))
+end
+
 let assert_frame config prefix payload =
-  let state = Framing.Decoder.handle (Framing.Decoder.v config) (Data prefix) in
-  let state, event = Framing.Decoder.next_event state in
-  let state, event =
-    match event with
-    | Read length ->
-        Alcotest.(check int)
-          "oracle payload length requested" (String.length payload) length;
-        Framing.Decoder.next_event (Framing.Decoder.handle state (Data payload))
-    | event -> (state, event)
-  in
-  match event with
-  | Frame received ->
-      Alcotest.(check string) "oracle payload delivered" payload received;
-      Alcotest.(check int)
-        "oracle frame drained" 0
-        (Framing.Decoder.pending_bytes state)
-  | _ -> Alcotest.fail "oracle frame was not delivered"
+  let r = Chunked.reader config [ prefix; payload ] in
+  Alcotest.(check string)
+    "oracle payload delivered" payload (Framing.read config r);
+  Alcotest.(check int)
+    "oracle frame consumed"
+    (String.length prefix + String.length payload)
+    (Eio.Buf_read.consumed_bytes r);
+  Alcotest.check_raises "oracle frame drained" End_of_file (fun () ->
+      ignore (Framing.read config r))
 
 let check_encode config vector =
   let prefix = Ohex.decode vector.prefix_hex in
   let payload = String.make (Int64.to_int vector.length) 'x' in
-  (match Framing.encode config [ Cstruct.of_string payload ] with
+  (match Framing.encode config [ [ Cstruct.of_string payload ] ] with
   | Ok frame ->
       Alcotest.(check string)
         "Python struct bytes" (prefix ^ payload) (Cstruct.copyv frame)
@@ -55,16 +81,16 @@ let check_encode config vector =
   assert_frame config prefix payload
 
 let check_refuse_declared config vector =
-  let state =
-    Framing.Decoder.handle (Framing.Decoder.v config)
-      (Data (Ohex.decode vector.prefix_hex))
-  in
-  let _, event = Framing.Decoder.next_event state in
-  match event with
-  | Failed (Invalid_length { length; _ }) ->
+  let prefix = Ohex.decode vector.prefix_hex in
+  let r = Chunked.reader config [ prefix; "payload" ] in
+  match Framing.read config r with
+  | _ -> Alcotest.fail "hostile oracle length was accepted"
+  | exception Framing.Error (Invalid_length { length; _ }) ->
       Alcotest.(check int64)
-        "unsigned oracle length stays exact" vector.length length
-  | _ -> Alcotest.fail "hostile oracle length requested payload bytes"
+        "unsigned oracle length stays exact" vector.length length;
+      Alcotest.(check int)
+        "hostile oracle length requested no payload byte" 0
+        (Eio.Buf_read.buffered_bytes r)
 
 let check vector () =
   let length_field =
@@ -79,7 +105,9 @@ let check vector () =
   | "refuse_encode" ->
       let result =
         Framing.encode config
-          [ Cstruct.of_string (String.make (Int64.to_int vector.length) 'x') ]
+          [
+            [ Cstruct.of_string (String.make (Int64.to_int vector.length) 'x') ];
+          ]
       in
       Alcotest.(check bool)
         "Python struct overflow is refused" true (Result.is_error result)

@@ -3,6 +3,6 @@
   (flags :standard %{dune-warnings})))
 
 (mdx
- (package net-framing)
- (files Framing.md)
- (libraries net-framing cstruct))
+ (package eio-net)
+ (files README.md)
+ (libraries eio-net.framing eio cstruct))

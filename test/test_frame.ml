@@ -64,7 +64,7 @@ let test_length_prefixed_over_limit () =
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
   let receiver =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Framing.Config.v ~max_length:16 ())
+      ~framing:(Eio_net_framing.Config.v ~max_length:16 ())
       b
   in
   let raised = ref false in
@@ -75,7 +75,7 @@ let test_length_prefixed_over_limit () =
       Eio.Flow.write a [ Cstruct.of_bytes hdr ])
     (fun () ->
       (try ignore (receiver.Eio_net.Frame.recv ())
-       with Eio_net.Frame.Error _ -> raised := true);
+       with Eio_net_framing.Error _ -> raised := true);
       Eio.Flow.close a);
   Alcotest.(check bool) "over-limit frame refused" true !raised
 
@@ -102,12 +102,12 @@ let test_length_prefixed_16bit () =
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
   let sender =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Framing.Config.v ~length_field:Uint16_be ())
+      ~framing:(Eio_net_framing.Config.v ~length_field:Uint16_be ())
       a
   in
   let receiver =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Framing.Config.v ~length_field:Uint16_be ())
+      ~framing:(Eio_net_framing.Config.v ~length_field:Uint16_be ())
       b
   in
   let got = ref "" in
@@ -146,7 +146,7 @@ let test_batch_refused_before_writing () =
   let writer, reader = Eio_unix.Net.socketpair_stream ~sw () in
   let channel =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Framing.Config.v ~max_length:16 ())
+      ~framing:(Eio_net_framing.Config.v ~max_length:16 ())
       writer
   in
   let refused =
@@ -157,7 +157,7 @@ let test_batch_refused_before_writing () =
           [ Cstruct.of_string (String.make 17 'x') ];
         ];
       false
-    with Eio_net.Frame.Error _ -> true
+    with Eio_net_framing.Error _ -> true
   in
   Eio.Flow.shutdown writer `Send;
   let observed =
@@ -175,13 +175,15 @@ let test_truncated_frames () =
       let frame = Eio_net.Frame.of_length_prefixed_flow reader in
       Eio.Flow.write writer [ Cstruct.of_string wire ];
       Eio.Flow.shutdown writer `Send;
-      Alcotest.check_raises "exact partial EOF" (Eio_net.Frame.Error expected)
+      Alcotest.check_raises "exact partial EOF" (Eio_net_framing.Error expected)
         (fun () -> ignore (frame.Eio_net.Frame.recv ())))
     [
       ( "\000\000",
-        Framing.Truncated { part = Prefix; expected = 4; received = 2 } );
+        Eio_net_framing.Truncated { part = Prefix; expected = 4; received = 2 }
+      );
       ( "\000\000\000\003x",
-        Framing.Truncated { part = Payload; expected = 3; received = 1 } );
+        Eio_net_framing.Truncated { part = Payload; expected = 3; received = 1 }
+      );
     ]
 
 module Fragmented_flow = struct
@@ -235,7 +237,8 @@ let test_partial_write_cancelled () =
     (fun () -> send channel "first")
     (fun () -> Eio.Promise.await started);
   Alcotest.check_raises "cancelled partial write cannot resume"
-    (Eio_net.Frame.Error Framing.Aborted) (fun () -> send channel "second");
+    (Eio_net_framing.Error Eio_net_framing.Aborted) (fun () ->
+      send channel "second");
   Eio.Flow.shutdown writer `Send;
   let wire =
     Eio.Buf_read.take_all (Eio.Buf_read.of_flow ~max_size:128 reader)

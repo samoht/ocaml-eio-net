@@ -2,7 +2,7 @@
  (name test)
  (package eio-net)
  (libraries
-  net-framing
+  eio-net.framing
   eio-net
   eio-net.mem
   eio-net.chaos

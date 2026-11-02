@@ -6,8 +6,8 @@
  (name eio_net)
  (public_name eio-net)
  (libraries
-  net-framing
   hermetic
+  eio-net.framing
   eio-net.accept
   eio
   cstruct

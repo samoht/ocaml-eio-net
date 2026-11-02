@@ -1,10 +1,10 @@
 (executable
  (name fuzz)
- (libraries net-framing cstruct alcobar fmt))
+ (libraries eio-net eio-net.framing eio eio.mock cstruct alcobar fmt))
 
 (rule
  (alias runtest)
- (package net-framing)
+ (package eio-net)
  (enabled_if
   (<> %{profile} afl))
  (deps fuzz.exe)
@@ -13,14 +13,14 @@
 
 (rule
  (alias chaos)
- (package net-framing)
+ (package eio-net)
  (deps fuzz.exe)
  (action
   (run %{exe:fuzz.exe} --repeat 5000 --budget 0 --timeout 120)))
 
 (rule
  (alias fuzz)
- (package net-framing)
+ (package eio-net)
  (enabled_if
   (= %{profile} afl))
  (deps fuzz.exe)
