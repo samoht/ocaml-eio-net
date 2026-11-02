@@ -1,13 +1,35 @@
 (** The host's network interface addresses, and their changes. *)
 
-type address = {
-  interface : string;  (** The interface's name, as [en0] or [eth0]. *)
-  prefix : Ipaddr.Prefix.t;
-      (** The address with its on-link prefix length, as [192.0.2.7/24]: the
-          interface's netmask, or the full length where it has none. *)
-  loopback : bool;  (** [true] iff the interface is a loopback interface. *)
-}
-(** The type for one address an interface carries. *)
+(** Interface addresses. *)
+module Address : sig
+  type t
+  (** The type for one address an interface carries. *)
+
+  val v : interface:string -> prefix:Ipaddr.Prefix.t -> loopback:bool -> t
+  (** [v ~interface ~prefix ~loopback] is the address [prefix] of the interface
+      named [interface], a loopback interface iff [loopback] is [true]. *)
+
+  val interface : t -> string
+  (** [interface a] is the name of [a]'s interface, as [en0] or [eth0]. *)
+
+  val prefix : t -> Ipaddr.Prefix.t
+  (** [prefix a] is [a] with its on-link prefix length, as [192.0.2.7/24]: the
+      interface's netmask, or the full length where it has none. *)
+
+  val is_loopback : t -> bool
+  (** [is_loopback a] is [true] iff [a]'s interface is a loopback interface. *)
+
+  val equal : t -> t -> bool
+  (** [equal a0 a1] is [true] iff [a0] and [a1] have equal interfaces, prefixes
+      and loopback flags. *)
+
+  val pp : t Fmt.t
+  (** [pp] formats an address as its interface and prefix, as [lo0 127.0.0.1/8].
+  *)
+end
+
+type address = Address.t
+(** See {!Address.t}. *)
 
 (** The type for a host's interface addresses and their changes: this module's,
     or a stand-in's. *)

@@ -7,7 +7,23 @@ external drain : Unix.file_descr -> bool = "caml_eio_net_interface_drain"
 let eio f x =
   try f x with Unix.Unix_error (e, fn, arg) -> raise (Eio_unix.Err.v e fn arg)
 
-type address = { interface : string; prefix : Ipaddr.Prefix.t; loopback : bool }
+module Address = struct
+  type t = { interface : string; prefix : Ipaddr.Prefix.t; loopback : bool }
+
+  let v ~interface ~prefix ~loopback = { interface; prefix; loopback }
+  let interface a = a.interface
+  let prefix a = a.prefix
+  let is_loopback a = a.loopback
+
+  let equal a0 a1 =
+    String.equal a0.interface a1.interface
+    && Ipaddr.Prefix.compare a0.prefix a1.prefix = 0
+    && Bool.equal a0.loopback a1.loopback
+
+  let pp ppf a = Fmt.pf ppf "%s %a" a.interface Ipaddr.Prefix.pp a.prefix
+end
+
+type address = Address.t
 
 module type S = sig
   val addresses : unit -> address list
@@ -26,7 +42,7 @@ let prefix octets bits =
 let addresses () =
   List.rev_map
     (fun (interface, octets, bits, loopback) ->
-      { interface; prefix = prefix octets bits; loopback })
+      Address.v ~interface ~prefix:(prefix octets bits) ~loopback)
     (eio addresses_raw ())
 
 type watch = Eio_unix.Fd.t
