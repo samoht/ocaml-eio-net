@@ -64,29 +64,32 @@ val run :
     reads end on whichever domain it runs. An accept its peer aborted is
     followed by the next. An accept with no descriptor left while no loop of the
     process holds a connection raises its error, naming that none was held to
-    shed or wait for.
+    shed or wait for. Any other failed accept raises its error.
 
     [on_error] receives each [Eio.Io] or [End_of_file] a connection's [handler]
     raises, a failure on its socket, with the peer's address in its context; a
     shed connection's is ignored, and the loop goes on serving the others. Any
     other exception is a defect: it ends the loop, which raises it.
 
-    Its connections end with it. Without [stop] it does not return. Once [stop]
-    resolves it accepts no more, sheds each connection whose head is incomplete,
-    at once or when it next says {!reading}, and returns [stop]'s value once the
-    others have ended.
+    Its connections end with it. Without [stop] it returns only by raising. Once
+    [stop] resolves it accepts no more, sheds each connection whose head is
+    incomplete, at once or when it next says {!reading}, and returns [stop]'s
+    value once the others have ended.
 
     Raises [Invalid_argument] if [max_connections] is less than [1]. *)
 
 (** {1:failures Failed accepts} *)
 
-type answer = [ `Aborted | `Descriptors ]
+type answer =
+  [ `Aborted
+    (** The peer aborted the connection before it was accepted: ECONNABORTED,
+        which Eio reports as [Eio.Net.Connection_reset]. It asks for the next
+        accept. *)
+  | `Descriptors
+    (** The process or the system has no descriptor left for the connection:
+        EMFILE or ENFILE. It asks for a descriptor to be freed first. *) ]
 (** The type for the answers from the system that end one accept and leave the
-    listener whole: the connection was aborted by its peer before it was
-    accepted (ECONNABORTED, which Eio reports as [Eio.Net.Connection_reset]), or
-    the process or the system has no descriptor left for it (EMFILE, ENFILE).
-    The first asks for the next accept; the second for a descriptor freed first.
-*)
+    listener whole. *)
 
 val classify : exn -> answer option
 (** [classify exn] is the answer the exception [exn] of a failed accept carries,
