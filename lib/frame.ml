@@ -19,22 +19,35 @@ let view s =
 
 let copy s = Bytesrw.Bytes.Slice.of_bytes_or_eod (Bytes.of_string s)
 
-let make ~slice ~recv ~send =
-  {
-    recv;
-    recv_batch = (fun () -> [ recv () ]);
-    recv_slice = (fun () -> slice (recv ()));
-    send;
-    send_batch = List.iter send;
-  }
+(* [make ~slice] is [v] with [slice] as the default slice of a received
+   frame: [view] for the transports of this module, [copy] for a caller's. *)
+let make ?recv_batch ?recv_slice ?send_batch ~slice ~recv ~send () =
+  let recv_batch =
+    match recv_batch with Some f -> f | None -> fun () -> [ recv () ]
+  in
+  let recv_slice =
+    match recv_slice with Some f -> f | None -> fun () -> slice (recv ())
+  in
+  let send_batch =
+    match send_batch with Some f -> f | None -> List.iter send
+  in
+  { recv; recv_batch; recv_slice; send; send_batch }
 
-let v ~recv ~send = make ~slice:copy ~recv ~send
+let v ?recv_batch ?recv_slice ?send_batch ~recv ~send () =
+  make ?recv_batch ?recv_slice ?send_batch ~slice:copy ~recv ~send ()
+
+let recv t = t.recv ()
+let recv_batch t = t.recv_batch ()
+let recv_slice t = t.recv_slice ()
+let send t bufs = t.send bufs
+let send_batch t frames = t.send_batch frames
 
 let of_datagram_socket ?max_frame ?dst socket =
   let channel = Datagram.of_socket ?max_frame ?dst socket in
   make ~slice:view
     ~recv:(fun () -> snd (channel.Datagram.recv ()))
     ~send:(channel.Datagram.send None)
+    ()
 
 (* [locked m f x] is [Eio.Mutex.use_ro m (fun () -> f x)] without allocating
    the closure. *)
@@ -98,13 +111,9 @@ let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
   in
   let take_frame () = locked read_lock read_frame () in
   let send_batch payloads = locked write_lock write_batch payloads in
-  {
-    recv = take_frame;
-    recv_batch = (fun () -> [ take_frame () ]);
-    recv_slice = (fun () -> view (take_frame ()));
-    send = (fun payload -> send_batch [ payload ]);
-    send_batch;
-  }
+  make ~send_batch ~slice:view ~recv:take_frame
+    ~send:(fun payload -> send_batch [ payload ])
+    ()
 
 let pair () =
   let a_to_b = Eio.Stream.create max_int in
@@ -112,12 +121,6 @@ let pair () =
   let chan recv_stream send_stream =
     let recv () = Eio.Stream.take recv_stream in
     let send bufs = Eio.Stream.add send_stream (Cstruct.copyv bufs) in
-    {
-      recv;
-      recv_batch = (fun () -> [ recv () ]);
-      recv_slice = (fun () -> view (recv ()));
-      send;
-      send_batch = List.iter send;
-    }
+    make ~slice:view ~recv ~send ()
   in
   (chan b_to_a a_to_b, chan a_to_b b_to_a)

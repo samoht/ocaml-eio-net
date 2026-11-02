@@ -7,45 +7,31 @@
     by decoding what {!recv} returns and encoding into {!send}; the channel
     itself is untyped bytes. *)
 
-type t = {
-  recv : unit -> string;
-  recv_batch : unit -> string list;
-  recv_slice : unit -> Bytesrw.Bytes.Slice.t;
-  send : Cstruct.t list -> unit;
-  send_batch : Cstruct.t list list -> unit;
-}
-(** A frame channel.
+type t
+(** The type for frame channels. *)
 
-    {!recv} is one whole received frame as a fresh string. {!recv_batch} is a
-    non-empty bounded batch, read with one multi-message system call where the
-    transport allows and otherwise [[recv ()]]. {!recv_slice} is one frame as a
-    view (an offset and a length into owned bytes), so a decode layer strips its
-    header by advancing the offset rather than copying; it is the inbound
-    counterpart of {!send}'s buffers. The view is valid only until the next
-    receive (bytesrw's slice contract), so a layer that retains the payload past
-    that must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
+(** {1:channels Channels} *)
 
-    {!send} takes an outgoing frame as a list of buffers, as [Eio.Flow.write]
-    does, and the frame is their concatenation. A transport that writes vectors
-    hands the buffers to [writev] as they are, so a frame held in several
-    buffers is not copied into one; a sender with a string passes
-    [[Cstruct.of_string s]]. The buffers must not change until {!send} returns.
+val v :
+  ?recv_batch:(unit -> string list) ->
+  ?recv_slice:(unit -> Bytesrw.Bytes.Slice.t) ->
+  ?send_batch:(Cstruct.t list list -> unit) ->
+  recv:(unit -> string) ->
+  send:(Cstruct.t list -> unit) ->
+  unit ->
+  t
+(** [v ~recv_batch ~recv_slice ~send_batch ~recv ~send ()] is a frame channel
+    whose {!recv} calls [recv], whose {!send} calls [send], and with:
+    - {!recv_batch} calling [recv_batch] (defaults to [[recv ()]], one frame).
+    - {!recv_slice} calling [recv_slice] (defaults to a slice of a copy of
+      [recv ()], since the string [recv] returns may be held elsewhere).
+    - {!send_batch} calling [send_batch] (defaults to sending the frames one at
+      a time with [send]).
 
-    {!send_batch} sends a burst of frames, coalescing them into a single
-    [writev] where the transport allows (software GSO): one system call for the
-    whole burst instead of one per frame. A transport that cannot coalesce (a
-    datagram socket, where each frame is its own datagram) falls back to sending
-    them one at a time. *)
-
-val pp : t Fmt.t
-(** [pp] prints an opaque placeholder: a frame channel is an I/O handle with no
-    inspectable state. *)
-
-val v : recv:(unit -> string) -> send:(Cstruct.t list -> unit) -> t
-(** [v ~recv ~send] is a frame channel from a receive and a send function.
-    {!recv_batch} returns one frame, {!recv_slice} a copy of it, and
-    {!send_batch} sends the burst one frame at a time; a transport that can
-    batch overrides these operations. *)
+    A transport that can batch, or that owns the bytes it receives, passes the
+    optional functions. They must keep the contracts of {!recv_batch} and
+    {!recv_slice}: a batch is non-empty, a slice stays valid until the next
+    receive, and the slice of an empty frame is {!Bytesrw.Bytes.Slice.eod}. *)
 
 val of_datagram_socket :
   ?max_frame:int ->
@@ -91,3 +77,45 @@ val pair : unit -> t * t
     received on the other, and vice versa. For hermetic tests of a frame
     protocol without binding a socket. Blocking {!recv} suspends the calling
     fiber until a frame arrives, so both ends must run under {!Eio_main.run}. *)
+
+(** {1:receiving Receiving} *)
+
+val recv : t -> string
+(** [recv c] is the next whole frame received on [c], as a fresh string. *)
+
+val recv_batch : t -> string list
+(** [recv_batch c] is a non-empty bounded batch of the next frames received on
+    [c], in order, read with one multi-message system call where the transport
+    allows. Otherwise it is [[recv c]]. *)
+
+val recv_slice : t -> Bytesrw.Bytes.Slice.t
+(** [recv_slice c] is the next frame received on [c] as a view: an offset and a
+    length into owned bytes, so a decode layer strips its header by advancing
+    the offset rather than copying. It is the inbound counterpart of {!send}'s
+    buffers. The slice is {{!Bytesrw.Bytes.Slice.validity}valid} only until the
+    next receive on [c], so a layer that retains the payload past that must copy
+    it. An empty frame is {!Bytesrw.Bytes.Slice.eod}. *)
+
+(** {1:sending Sending} *)
+
+val send : t -> Cstruct.t list -> unit
+(** [send c bufs] sends one frame on [c], the concatenation of [bufs], as
+    [Eio.Flow.write] takes its buffers. A transport that writes vectors hands
+    [bufs] to [writev] as they are, so a frame held in several buffers is not
+    copied into one; a sender with a string [s] passes [[Cstruct.of_string s]].
+    The buffers must not change until [send] returns. *)
+
+val send_batch : t -> Cstruct.t list list -> unit
+(** [send_batch c frames] sends the burst [frames] on [c], in order, each frame
+    the concatenation of its buffers as with {!send}. It coalesces them into a
+    single [writev] where the transport allows (software GSO): one system call
+    for the whole burst instead of one per frame. A transport that cannot
+    coalesce (a datagram socket, where each frame is its own datagram) sends
+    them one at a time. If [frames] is empty, nothing is sent. The buffers must
+    not change until [send_batch] returns. *)
+
+(** {1:fmt Formatting} *)
+
+val pp : t Fmt.t
+(** [pp] prints an opaque placeholder: a frame channel is an I/O handle with no
+    inspectable state. *)

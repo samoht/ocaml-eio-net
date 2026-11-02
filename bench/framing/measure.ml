@@ -52,11 +52,11 @@ let socket count size =
   Eio.Fiber.both
     (fun () ->
       for _ = 1 to count do
-        sender.Eio_net.Frame.send frame
+        Eio_net.Frame.send sender frame
       done)
     (fun () ->
       for _ = 1 to count do
-        if not (String.equal payload (receiver.Eio_net.Frame.recv ())) then
+        if not (String.equal payload (Eio_net.Frame.recv receiver)) then
           failwith "framing measurement changed or lost the payload"
       done);
   report "socket" count size clock allocated
@@ -74,7 +74,7 @@ let recv count size =
   let allocated = Gc.allocated_bytes () in
   let clock = Mtime_clock.counter () in
   for _ = 1 to count do
-    if String.length (receiver.Eio_net.Frame.recv ()) <> size then
+    if String.length (Eio_net.Frame.recv receiver) <> size then
       failwith "framing measurement changed or lost the payload"
   done;
   report "recv" count size clock allocated
@@ -86,7 +86,7 @@ let send count size =
   let allocated = Gc.allocated_bytes () in
   let clock = Mtime_clock.counter () in
   for _ = 1 to count do
-    sender.Eio_net.Frame.send frame
+    Eio_net.Frame.send sender frame
   done;
   report "send" count size clock allocated
 

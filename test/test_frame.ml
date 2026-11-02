@@ -1,4 +1,4 @@
-let send frame payload = frame.Eio_net.Frame.send [ Cstruct.of_string payload ]
+let send frame payload = Eio_net.Frame.send frame [ Cstruct.of_string payload ]
 
 let test_pair () =
   Eio_main.run @@ fun _env ->
@@ -10,9 +10,9 @@ let test_pair () =
       send a "second";
       send b "reply")
     (fun () ->
-      let f1 = b.Eio_net.Frame.recv () in
-      let f2 = b.Eio_net.Frame.recv () in
-      let r = a.Eio_net.Frame.recv () in
+      let f1 = Eio_net.Frame.recv b in
+      let f2 = Eio_net.Frame.recv b in
+      let r = Eio_net.Frame.recv a in
       got := [ f1; f2; r ]);
   Alcotest.(check (list string))
     "frames arrive whole and in order"
@@ -29,8 +29,7 @@ let test_length_prefixed_roundtrip () =
   let got = ref [] in
   Eio.Fiber.both
     (fun () -> List.iter (send sender) payloads)
-    (fun () ->
-      got := List.map (fun _ -> receiver.Eio_net.Frame.recv ()) payloads);
+    (fun () -> got := List.map (fun _ -> Eio_net.Frame.recv receiver) payloads);
   Alcotest.(check (list string))
     "frames arrive whole and in order" payloads !got
 
@@ -46,9 +45,9 @@ let test_length_prefixed_eof () =
       send sender "last";
       Eio.Flow.close a)
     (fun () ->
-      let first = receiver.Eio_net.Frame.recv () in
+      let first = Eio_net.Frame.recv receiver in
       let ended =
-        match receiver.Eio_net.Frame.recv () with
+        match Eio_net.Frame.recv receiver with
         | _ -> false
         | exception End_of_file -> true
       in
@@ -74,7 +73,7 @@ let test_length_prefixed_over_limit () =
       Bytes.set_int32_be hdr 0 1000l;
       Eio.Flow.write a [ Cstruct.of_bytes hdr ])
     (fun () ->
-      (try ignore (receiver.Eio_net.Frame.recv ())
+      (try ignore (Eio_net.Frame.recv receiver)
        with Eio_net_framing.Error _ -> raised := true);
       Eio.Flow.close a);
   Alcotest.(check bool) "over-limit frame refused" true !raised
@@ -89,10 +88,9 @@ let test_length_prefixed_batch () =
   let got = ref [] in
   Eio.Fiber.both
     (fun () ->
-      sender.Eio_net.Frame.send_batch
+      Eio_net.Frame.send_batch sender
         (List.map (fun s -> [ Cstruct.of_string s ]) payloads))
-    (fun () ->
-      got := List.map (fun _ -> receiver.Eio_net.Frame.recv ()) payloads);
+    (fun () -> got := List.map (fun _ -> Eio_net.Frame.recv receiver) payloads);
   Alcotest.(check (list string))
     "batched frames arrive whole and in order" payloads !got
 
@@ -113,7 +111,7 @@ let test_length_prefixed_16bit () =
   let got = ref "" in
   Eio.Fiber.both
     (fun () -> send sender "sixteen-bit framed")
-    (fun () -> got := receiver.Eio_net.Frame.recv ());
+    (fun () -> got := Eio_net.Frame.recv receiver);
   Alcotest.(check string)
     "16-bit-prefixed frame round-trips" "sixteen-bit framed" !got
 
@@ -127,7 +125,7 @@ let test_recv_slice () =
   Eio.Fiber.both
     (fun () -> send sender "HDRpayload-bytes")
     (fun () ->
-      let s = receiver.Eio_net.Frame.recv_slice () in
+      let s = Eio_net.Frame.recv_slice receiver in
       let hdr =
         Bytes.sub_string
           (Bytesrw.Bytes.Slice.bytes s)
@@ -140,6 +138,51 @@ let test_recv_slice () =
     ("HDR", "HDRpayload-bytes")
     !got
 
+(* A caller's channel gets one-frame batches and a slice it may write
+   through without changing the string its [recv] returned. *)
+let test_v_defaults () =
+  let held = "frame" in
+  let sent = ref [] in
+  let channel =
+    Eio_net.Frame.v
+      ~recv:(fun () -> held)
+      ~send:(fun bufs -> sent := Cstruct.copyv bufs :: !sent)
+      ()
+  in
+  Alcotest.(check (list string))
+    "recv_batch is one frame" [ "frame" ]
+    (Eio_net.Frame.recv_batch channel);
+  let slice = Eio_net.Frame.recv_slice channel in
+  Bytes.set
+    (Bytesrw.Bytes.Slice.bytes slice)
+    (Bytesrw.Bytes.Slice.first slice)
+    'F';
+  Alcotest.(check string) "the slice is a copy" "frame" held;
+  Eio_net.Frame.send_batch channel
+    [ [ Cstruct.of_string "a" ]; [ Cstruct.of_string "b" ] ];
+  Alcotest.(check (list string))
+    "send_batch sends one frame at a time" [ "a"; "b" ] (List.rev !sent)
+
+let test_v_overrides () =
+  let batches = ref 0 in
+  let channel =
+    Eio_net.Frame.v
+      ~recv_batch:(fun () -> [ "x"; "y" ])
+      ~recv_slice:(fun () -> Bytesrw.Bytes.Slice.of_string "slice")
+      ~send_batch:(fun _ -> incr batches)
+      ~recv:(fun () -> "frame")
+      ~send:(fun _ -> Alcotest.fail "send called for a batch")
+      ()
+  in
+  Alcotest.(check (list string))
+    "recv_batch is the caller's" [ "x"; "y" ]
+    (Eio_net.Frame.recv_batch channel);
+  Alcotest.(check string)
+    "recv_slice is the caller's" "slice"
+    (Bytesrw.Bytes.Slice.to_string (Eio_net.Frame.recv_slice channel));
+  Eio_net.Frame.send_batch channel [ [ Cstruct.of_string "a" ] ];
+  Alcotest.(check int) "send_batch is the caller's" 1 !batches
+
 let test_batch_refused_before_writing () =
   Eio_main.run @@ fun _ ->
   Eio.Switch.run @@ fun sw ->
@@ -151,7 +194,7 @@ let test_batch_refused_before_writing () =
   in
   let refused =
     try
-      channel.Eio_net.Frame.send_batch
+      Eio_net.Frame.send_batch channel
         [
           [ Cstruct.of_string "valid" ];
           [ Cstruct.of_string (String.make 17 'x') ];
@@ -176,7 +219,7 @@ let test_truncated_frames () =
       Eio.Flow.write writer [ Cstruct.of_string wire ];
       Eio.Flow.shutdown writer `Send;
       Alcotest.check_raises "exact partial EOF" (Eio_net_framing.Error expected)
-        (fun () -> ignore (frame.Eio_net.Frame.recv ())))
+        (fun () -> ignore (Eio_net.Frame.recv frame)))
     [
       ( "\000\000",
         Eio_net_framing.Truncated { part = Prefix; expected = 4; received = 2 }
@@ -259,14 +302,14 @@ let test_concurrent_fragmented_writers () =
     (fun () ->
       Eio.Fiber.both
         (fun () ->
-          sender.Eio_net.Frame.send_batch
+          Eio_net.Frame.send_batch sender
             (List.map (fun s -> [ Cstruct.of_string s ]) [ "a1"; "a2" ]))
         (fun () ->
-          sender.Eio_net.Frame.send_batch
+          Eio_net.Frame.send_batch sender
             (List.map (fun s -> [ Cstruct.of_string s ]) [ "b1"; "b2" ])))
     (fun () ->
       for _ = 1 to 4 do
-        got := receiver.Eio_net.Frame.recv () :: !got
+        got := Eio_net.Frame.recv receiver :: !got
       done);
   let got = List.rev !got in
   Alcotest.(check bool)
@@ -323,9 +366,9 @@ let test_sticky_read_error () =
   let channel = Eio_net.Frame.of_length_prefixed_flow flow in
   let refusal = Eio_net_framing.Error (invalid_length 0xffff_ffffL) in
   Alcotest.check_raises "hostile length refused" refusal (fun () ->
-      ignore (channel.recv ()));
+      ignore (Eio_net.Frame.recv channel));
   Alcotest.check_raises "the refusal is sticky" refusal (fun () ->
-      ignore (channel.recv ()));
+      ignore (Eio_net.Frame.recv channel));
   let _, flow = Scripted_flow.v [ Some "\000\000\000\003x"; None ] in
   let channel = Eio_net.Frame.of_length_prefixed_flow flow in
   let truncated =
@@ -333,25 +376,26 @@ let test_sticky_read_error () =
       (Truncated { part = Payload; expected = 3; received = 1 })
   in
   Alcotest.check_raises "truncated payload" truncated (fun () ->
-      ignore (channel.recv ()));
+      ignore (Eio_net.Frame.recv channel));
   Alcotest.check_raises "truncation is sticky, not a clean end" truncated
-    (fun () -> ignore (channel.recv ()))
+    (fun () -> ignore (Eio_net.Frame.recv channel))
 
 let test_cancelled_read () =
   Eio_mock.Backend.run @@ fun () ->
   let script, flow = Scripted_flow.v [ Some "\000\000\000\005ab" ] in
   let channel = Eio_net.Frame.of_length_prefixed_flow flow in
-  Eio.Fiber.first (fun () -> ignore (channel.recv ())) (fun () -> ());
+  Eio.Fiber.first (fun () -> ignore (Eio_net.Frame.recv channel)) (fun () -> ());
   List.iter (Eio.Stream.add script.input) [ Some "cde"; None ];
   Alcotest.check_raises "a receive cancelled inside a payload aborts"
-    (Eio_net_framing.Error Aborted) (fun () -> ignore (channel.recv ()));
+    (Eio_net_framing.Error Aborted) (fun () ->
+      ignore (Eio_net.Frame.recv channel));
   let script, flow = Scripted_flow.v [] in
   let channel = Eio_net.Frame.of_length_prefixed_flow flow in
-  Eio.Fiber.first (fun () -> ignore (channel.recv ())) (fun () -> ());
+  Eio.Fiber.first (fun () -> ignore (Eio_net.Frame.recv channel)) (fun () -> ());
   List.iter (Eio.Stream.add script.input) [ Some "\000\000\000\002ok"; None ];
   Alcotest.(check string)
     "a receive cancelled before a frame leaves the stream usable" "ok"
-    (channel.recv ())
+    (Eio_net.Frame.recv channel)
 
 let test_refused_batch_usable () =
   Eio_mock.Backend.run @@ fun () ->
@@ -362,7 +406,7 @@ let test_refused_batch_usable () =
     (Eio_net_framing.Error
        (Invalid_length { length = 5L; minimum = 0; maximum = 4 }))
     (fun () ->
-      channel.send_batch
+      Eio_net.Frame.send_batch channel
         [ [ Cstruct.of_string "ok" ]; [ Cstruct.of_string "large" ] ]);
   Alcotest.(check string) "nothing written" "" (Buffer.contents script.output);
   send channel "next";
@@ -386,6 +430,8 @@ let suite =
         test_batch_refused_before_writing;
       Alcotest.test_case "in-memory pair round-trip" `Quick test_pair;
       Alcotest.test_case "recv_slice ingress view" `Quick test_recv_slice;
+      Alcotest.test_case "v defaults" `Quick test_v_defaults;
+      Alcotest.test_case "v overrides" `Quick test_v_overrides;
       Alcotest.test_case "length-prefixed round-trip" `Quick
         test_length_prefixed_roundtrip;
       Alcotest.test_case "length-prefixed batch (GSO)" `Quick

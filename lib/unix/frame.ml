@@ -85,5 +85,6 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
     in
     chunks frames
   in
-  let base = Eio_net.Frame.v ~recv ~send:(fun frame -> send_batch [ frame ]) in
-  { base with Eio_net.Frame.recv_batch; send_batch }
+  Eio_net.Frame.v ~recv_batch ~send_batch ~recv
+    ~send:(fun frame -> send_batch [ frame ])
+    ()

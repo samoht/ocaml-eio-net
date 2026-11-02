@@ -168,10 +168,10 @@ let failed_writer sixteen budget payload =
     Eio_net.Frame.of_length_prefixed_flow ~framing
       (Eio.Resource.T (flow, Failing_flow.handler))
   in
-  (match channel.send [ Cstruct.of_string payload ] with
+  (match Eio_net.Frame.send channel [ Cstruct.of_string payload ] with
   | () -> fail "a write with too small a budget succeeded"
   | exception Failure _ -> ());
-  (match channel.send [ Cstruct.of_string "later" ] with
+  (match Eio_net.Frame.send channel [ Cstruct.of_string "later" ] with
   | () -> fail "a failed stream resumed"
   | exception Framing.Error Aborted -> ()
   | exception _ -> fail "a failed stream did not report Aborted");

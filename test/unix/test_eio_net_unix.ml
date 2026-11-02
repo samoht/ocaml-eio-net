@@ -10,12 +10,12 @@ let test_connected_datagram_batch () =
   let got = ref [] in
   Eio.Fiber.both
     (fun () ->
-      a.Eio_net.Frame.send_batch
+      Eio_net.Frame.send_batch a
         (List.map (fun s -> [ Cstruct.of_string s ]) payloads))
     (fun () ->
       let rec receive acc =
         if List.length acc = List.length payloads then List.rev acc
-        else receive (List.rev_append (b.Eio_net.Frame.recv_batch ()) acc)
+        else receive (List.rev_append (Eio_net.Frame.recv_batch b) acc)
       in
       got := receive []);
   Alcotest.(check (list string))
@@ -44,10 +44,10 @@ let test_connected_datagram_backpressure () =
   let frames = List.map (fun p -> [ Cstruct.of_string p ]) payloads in
   let received = ref [] in
   Eio.Fiber.both
-    (fun () -> a.Eio_net.Frame.send_batch frames)
+    (fun () -> Eio_net.Frame.send_batch a frames)
     (fun () ->
       while List.length !received < count do
-        received := List.rev_append (b.Eio_net.Frame.recv_batch ()) !received
+        received := List.rev_append (Eio_net.Frame.recv_batch b) !received
       done);
   Alcotest.(check (list string))
     "all backpressured datagrams arrive, in order and intact" payloads
@@ -76,11 +76,11 @@ let test_connected_datagram_duplex () =
     let got = ref [] in
     Eio.Fiber.both
       (fun () ->
-        self.Eio_net.Frame.send_batch
+        Eio_net.Frame.send_batch self
           (List.map (fun p -> [ Cstruct.of_string p ]) (payloads side)))
       (fun () ->
         while List.length !got < count do
-          got := List.rev_append (self.Eio_net.Frame.recv_batch ()) !got
+          got := List.rev_append (Eio_net.Frame.recv_batch self) !got
         done);
     List.rev !got
   in
@@ -102,16 +102,18 @@ let test_connected_datagram_oversized () =
   let refused f =
     match f () with _ -> false | exception Invalid_argument _ -> true
   in
-  a.Eio_net.Frame.send [ Cstruct.of_string "123456789" ];
-  Alcotest.(check bool) "recv refuses it" true (refused b.Eio_net.Frame.recv);
-  a.Eio_net.Frame.send [ Cstruct.of_string "123456789" ];
+  Eio_net.Frame.send a [ Cstruct.of_string "123456789" ];
+  Alcotest.(check bool)
+    "recv refuses it" true
+    (refused (fun () -> Eio_net.Frame.recv b));
+  Eio_net.Frame.send a [ Cstruct.of_string "123456789" ];
   Alcotest.(check bool)
     "recv_batch refuses it" true
-    (refused b.Eio_net.Frame.recv_batch);
-  a.Eio_net.Frame.send [ Cstruct.of_string "12345678" ];
+    (refused (fun () -> Eio_net.Frame.recv_batch b));
+  Eio_net.Frame.send a [ Cstruct.of_string "12345678" ];
   Alcotest.(check (list string))
     "the channel stays usable" [ "12345678" ]
-    (b.Eio_net.Frame.recv_batch ());
+    (Eio_net.Frame.recv_batch b);
   Unix.close fa;
   Unix.close fb
 

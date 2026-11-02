@@ -65,7 +65,7 @@ let test_frame_carrier_refuses_oversize () =
   let b = Eio_net.Frame.of_datagram_socket ~max_frame:4 sock_b in
   send a (Some addr_b) "five!";
   let refused =
-    match b.Eio_net.Frame.recv () with
+    match Eio_net.Frame.recv b with
     | _ -> false
     | exception Invalid_argument _ -> true
   in
