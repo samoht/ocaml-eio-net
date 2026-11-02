@@ -127,6 +127,33 @@ let test_connected_datagram_concurrent_senders () =
   Unix.close fa;
   Unix.close fb
 
+(* A send the system refuses, to a peer that has closed its end, is an
+   [Eio.Io] error, as Eio's own sockets raise it. *)
+let test_connected_datagram_send_refused () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fa in
+  Unix.close fb;
+  (match Eio_net.Frame.send a [ Cstruct.of_string "to no one" ] with
+  | () -> Alcotest.fail "a send to a closed peer went through"
+  | exception Eio.Io _ -> ());
+  Unix.close fa
+
+(* A write the system refuses is an [Eio.Io] error: the read end of a pipe
+   takes no write (EBADF). *)
+let test_offload_write_refused () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let r, w = Unix.pipe ~cloexec:true () in
+  let fd = Eio_unix.Fd.of_unix ~sw ~blocking:false ~close_unix:true r in
+  Unix.close w;
+  match
+    Eio_net_unix.Stream.offload_single_write fd [ Cstruct.of_string "x" ]
+  with
+  | _ -> Alcotest.fail "a write to the read end of a pipe went through"
+  | exception Eio.Io _ -> ()
+
 (* A datagram longer than [max_frame] is refused, as [Datagram.of_socket]
    refuses it, not delivered cut short as if it were whole. *)
 let test_connected_datagram_oversized () =
@@ -450,6 +477,10 @@ let suite =
         test_connected_datagram_duplex;
       Alcotest.test_case "connected datagram concurrent senders" `Quick
         test_connected_datagram_concurrent_senders;
+      Alcotest.test_case "connected datagram send refused" `Quick
+        test_connected_datagram_send_refused;
+      Alcotest.test_case "offloaded write refused" `Quick
+        test_offload_write_refused;
       Alcotest.test_case "connected datagram longer than max_frame" `Quick
         test_connected_datagram_oversized;
       Alcotest.test_case "connected datagram backpressure" `Quick
