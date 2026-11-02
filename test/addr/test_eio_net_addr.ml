@@ -53,24 +53,27 @@ let test_stream_literal () =
   Alcotest.(check (option (pair ip int)))
     "a literal IPv4 host"
     (Some (a, 9997))
-    (Eio_net_addr.of_stream
-       (Eio_net_addr.stream net ~host:"192.0.2.7" ~port:9997));
+    (Result.to_option (Eio_net_addr.stream net ~host:"192.0.2.7" ~port:9997)
+    |> Fun.flip Option.bind Eio_net_addr.of_stream);
   let a6 = Ipaddr.of_string_exn "2001:db8::1" in
   Alcotest.(check (option (pair ip int)))
     "a literal IPv6 host"
     (Some (a6, 9998))
-    (Eio_net_addr.of_stream
-       (Eio_net_addr.stream net ~host:"2001:db8::1" ~port:9998))
+    (Result.to_option (Eio_net_addr.stream net ~host:"2001:db8::1" ~port:9998)
+    |> Fun.flip Option.bind Eio_net_addr.of_stream)
 
 (* RFC 6761 sec 6.4: the ".invalid" TLD is reserved and does not resolve. *)
 let test_stream_unresolvable () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   match Eio_net_addr.stream net ~host:"flatsat-1.invalid" ~port:9997 with
-  | addr ->
+  | Ok addr ->
       Alcotest.failf "an unresolvable host produced an address: %a"
         Eio.Net.Sockaddr.pp addr
-  | exception Invalid_argument _ -> ()
+  | Error (`Msg msg) ->
+      Alcotest.(check bool)
+        "the error names the host" true
+        (String.starts_with ~prefix:"cannot resolve \"flatsat-1.invalid\": " msg)
 
 let suite =
   ( "eio_net_addr",
