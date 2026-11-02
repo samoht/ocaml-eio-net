@@ -116,7 +116,7 @@ module Datagram : sig
     | Pass  (** Deliver the next datagram unchanged. *)
     | Drop of int
         (** Drop [n] datagrams from the base, then deliver the one after them.
-            [n] must not be negative. *)
+            {!Schedule.script} refuses a negative [n]. *)
     | Dup  (** Deliver the next datagram now and again on the following recv. *)
     | Reorder
         (** Hold the next datagram back and deliver the one after it first; the
@@ -142,7 +142,10 @@ module Datagram : sig
     (** [script events] injects the [i]th element of [events] on the [i]th
         receive that takes a datagram from the base, and passes through once
         [events] is exhausted. A datagram held back by {!Dup} or {!Reorder} is
-        delivered on the receive after, with no fault. *)
+        delivered on the receive after, with no fault.
+
+        Raises [Invalid_argument] if [events] has a {!Drop} of a negative count.
+    *)
 
     val seeded :
       ?loss:float ->

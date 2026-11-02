@@ -275,7 +275,16 @@ module Datagram = struct
     type t = Pass | Script of fault list | Seeded of seeded
 
     let none = Pass
-    let script events = Script events
+
+    let script events =
+      List.iter
+        (function
+          | Drop n when n < 0 ->
+              Fmt.invalid_arg
+                "Eio_net_chaos.Datagram.Schedule.script: Drop %d is negative" n
+          | _ -> ())
+        events;
+      Script events
 
     let seeded ?(loss = 0.) ?(dup = 0.) ?(reorder = 0.) ?(truncate = 0.)
         ?(garble = 0.) ?(delay = 0) seed =
