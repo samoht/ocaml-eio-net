@@ -102,13 +102,13 @@ module Config : sig
       accepts. It is the [~max_size] to give {!Eio.Buf_read.of_flow} for
       {!read}. *)
 
-  val pp : t Fmt.t
-  (** [pp] formats a configuration as its length field and its range, as in
-      [uint32be length:0-1048576]. *)
-
   val equal : t -> t -> bool
   (** [equal c0 c1] is [true] iff [c0] and [c1] have the same length field and
       range. *)
+
+  val pp : t Fmt.t
+  (** [pp] formats a configuration as its length field and its range, as in
+      [uint32be length:0-1048576]. *)
 end
 
 (** {1:reading Reading} *)
