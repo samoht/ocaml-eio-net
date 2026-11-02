@@ -329,6 +329,43 @@ let test_net_max_accepts () =
       with End_of_file -> dropped := true);
   Alcotest.(check bool) "listener drops past its accept budget" true !dropped
 
+(* A printed schedule is the call that builds it, every parameter included. *)
+let test_schedules_print_every_parameter () =
+  let check what expected pp v =
+    Alcotest.(check string) what expected (Fmt.str "%a" pp v)
+  in
+  check "a flow script"
+    "script ~reads:[Deliver 3; Coalesce 2; Stall 1; Reset; Eof] \
+     ~writes:[Accept 2; Fail] ()"
+    Flow.Schedule.pp
+    (Flow.Schedule.script
+       ~reads:Flow.[ Deliver 3; Coalesce 2; Stall 1; Reset; Eof ]
+       ~writes:Flow.[ Accept 2; Fail ]
+       ());
+  check "a seeded flow"
+    "seeded ~dribble:4 ~stall:2 ~short_write:3 ~reset_after:10 \
+     ~reset_kind:`Eof ~fail_write_after:20 1234"
+    Flow.Schedule.pp
+    (Flow.Schedule.seeded ~dribble:4 ~stall:2 ~short_write:3 ~reset_after:10
+       ~reset_kind:`Eof ~fail_write_after:20 1234);
+  check "a datagram script"
+    "script [Pass; Drop 2; Dup; Reorder; Truncate (-1); Garble 4; Delay 5]"
+    Datagram.Schedule.pp
+    (Datagram.Schedule.script
+       Datagram.[ Pass; Drop 2; Dup; Reorder; Truncate (-1); Garble 4; Delay 5 ]);
+  check "a seeded datagram schedule"
+    "seeded ~loss:0.1 ~dup:0.2 ~reorder:0.05 ~truncate:0.15 ~garble:0.3 \
+     ~delay:3 7"
+    Datagram.Schedule.pp
+    (Datagram.Schedule.seeded ~loss:0.1 ~dup:0.2 ~reorder:0.05 ~truncate:0.15
+       ~garble:0.3 ~delay:3 7)
+
+(* Probabilities past [1.] in all describe no distribution. *)
+let test_dgram_seeded_refuses_odds_past_one () =
+  match Datagram.Schedule.seeded ~loss:0.6 ~dup:0.5 7 with
+  | exception Invalid_argument _ -> ()
+  | _ -> Alcotest.fail "odds summing to 1.1 were accepted"
+
 let suite =
   ( "eio_net_chaos",
     [
@@ -353,4 +390,8 @@ let suite =
       Alcotest.test_case "net connect refused" `Quick test_net_connect_refused;
       Alcotest.test_case "net connect slow" `Quick test_net_connect_slow;
       Alcotest.test_case "net max accepts" `Quick test_net_max_accepts;
+      Alcotest.test_case "schedules print every parameter" `Quick
+        test_schedules_print_every_parameter;
+      Alcotest.test_case "datagram seeded refuses odds past one" `Quick
+        test_dgram_seeded_refuses_odds_past_one;
     ] )
