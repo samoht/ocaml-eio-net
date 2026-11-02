@@ -86,6 +86,54 @@ let test_frame_carrier_refuses_oversize () =
     "recv_slice refuses it" true
     (too_long ~max:4 (fun () -> Eio_net.Frame.recv_slice b))
 
+(* A socket whose receive writes a datagram into the buffer and yields before
+   it returns, as a completion-based backend (eio_linux's io_uring) does: the
+   kernel fills the buffer of each submitted receive, and its fiber reads the
+   buffer when it next runs. *)
+module Completing = struct
+  type tag = [ `Generic ]
+  type t = string Queue.t
+
+  let recv t buf =
+    let datagram = Queue.pop t in
+    Cstruct.blit_from_string datagram 0 buf 0 (String.length datagram);
+    Eio.Fiber.yield ();
+    (`Udp (Eio.Net.Ipaddr.V4.loopback, 9), String.length datagram)
+
+  let send _ ?dst:_ _ = ()
+  let close _ = ()
+  let shutdown _ _ = ()
+  let setsockopt _ _ _ = ()
+
+  let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
+   fun _ _ -> invalid_arg "getsockopt"
+end
+
+let completing datagrams =
+  Eio.Resource.T
+    ( Queue.of_seq (List.to_seq datagrams),
+      Eio.Net.Pi.datagram_socket (module Completing) )
+
+(* Two fibers receive at once: each gets a datagram of its own, whole. *)
+let test_concurrent_receives () =
+  Eio_mock.Backend.run @@ fun () ->
+  let channel = Eio_net.Datagram.of_socket (completing [ "first"; "second" ]) in
+  let frames =
+    Eio_net.Frame.of_datagram_socket (completing [ "third"; "fourth" ])
+  in
+  let got = Array.make 4 "" in
+  Eio.Fiber.all
+    [
+      (fun () -> got.(0) <- snd (Eio_net.Datagram.recv channel));
+      (fun () -> got.(1) <- snd (Eio_net.Datagram.recv channel));
+      (fun () -> got.(2) <- Eio_net.Frame.recv frames);
+      (fun () -> got.(3) <- Eio_net.Frame.recv frames);
+    ];
+  Alcotest.(check (list string))
+    "each receive its own datagram"
+    [ "first"; "second"; "third"; "fourth" ]
+    (Array.to_list got)
+
 let test_too_long_prints () =
   Alcotest.(check string)
     "the printed error"
@@ -127,6 +175,7 @@ let suite =
         test_oversized_refused;
       Alcotest.test_case "frame carrier refuses oversize" `Quick
         test_frame_carrier_refuses_oversize;
+      Alcotest.test_case "concurrent receives" `Quick test_concurrent_receives;
       Alcotest.test_case "Too_long prints its bound" `Quick test_too_long_prints;
       Alcotest.test_case "address equality" `Quick test_equal_addr;
     ] )

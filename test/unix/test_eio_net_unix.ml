@@ -91,6 +91,42 @@ let test_connected_datagram_duplex () =
   Unix.close fa;
   Unix.close fb
 
+(* Two fibers send batches on one channel at once while the socket pushes
+   back: each frame arrives once and intact, each fiber's in its order. *)
+let test_connected_datagram_concurrent_senders () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  Unix.setsockopt_int fa Unix.SO_SNDBUF 65536;
+  Unix.setsockopt_int fb Unix.SO_RCVBUF 65536;
+  let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_batch:4 fa in
+  let b = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fb in
+  let count = 100 in
+  let payloads side =
+    List.init count (fun i -> Fmt.str "%s-%03d%s" side i (String.make 8000 '.'))
+  in
+  let send side () =
+    Eio_net.Frame.send_batch a
+      (List.map (fun p -> [ Cstruct.of_string p ]) (payloads side))
+  in
+  let got = ref [] in
+  Eio.Fiber.all
+    [
+      send "x";
+      send "y";
+      (fun () ->
+        while List.length !got < 2 * count do
+          got := List.rev_append (Eio_net.Frame.recv_batch b) !got
+        done);
+    ];
+  let from side =
+    List.filter (fun p -> String.starts_with ~prefix:side p) (List.rev !got)
+  in
+  Alcotest.(check (list string)) "x's frames" (payloads "x") (from "x-");
+  Alcotest.(check (list string)) "y's frames" (payloads "y") (from "y-");
+  Unix.close fa;
+  Unix.close fb
+
 (* A datagram longer than [max_frame] is refused, as [Datagram.of_socket]
    refuses it, not delivered cut short as if it were whole. *)
 let test_connected_datagram_oversized () =
@@ -412,6 +448,8 @@ let suite =
         test_connected_datagram_batch;
       Alcotest.test_case "connected datagram duplex" `Quick
         test_connected_datagram_duplex;
+      Alcotest.test_case "connected datagram concurrent senders" `Quick
+        test_connected_datagram_concurrent_senders;
       Alcotest.test_case "connected datagram longer than max_frame" `Quick
         test_connected_datagram_oversized;
       Alcotest.test_case "connected datagram backpressure" `Quick
