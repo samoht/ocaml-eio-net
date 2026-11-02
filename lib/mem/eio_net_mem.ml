@@ -17,6 +17,23 @@ let () =
 
 let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
 
+let any ip =
+  Eio.Net.Ipaddr.fold ip
+    ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
+    ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
+
+(* Two IP addresses of one port overlap when they are equal or one is the
+   wildcard address of the other's family, as bind(2) on Linux has it. *)
+let ip_overlaps (ip, port) (ip', port') =
+  let same (x : Eio.Net.Ipaddr.v4v6) (y : Eio.Net.Ipaddr.v4v6) =
+    String.equal (x :> string) (y :> string)
+  in
+  port = port'
+  && same (any ip) (any ip')
+  && (same ip ip' || same ip (any ip) || same ip' (any ip'))
+
+let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
+
 (* A stream option is ignored only where the queues already provide what it
    asks for, so ignoring it yields the requested behaviour rather than
    withholding it: [TCP_NODELAY] and [TCP_QUICKACK]. Every other option would
@@ -103,7 +120,14 @@ end
 module Flow = struct
   module Impl = struct
     type tag = [ `Generic ]
-    type t = { to_peer : Pipe.t; from_peer : Pipe.t }
+
+    (* [release] is the hook that closes the flow when the switch it was
+       opened under finishes, removed once the flow is closed. *)
+    type t = {
+      to_peer : Pipe.t;
+      from_peer : Pipe.t;
+      mutable release : Eio.Switch.hook;
+    }
 
     let single_write t bufs = Pipe.write t.to_peer bufs
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
@@ -118,7 +142,11 @@ module Flow = struct
           Pipe.close t.to_peer;
           Pipe.close t.from_peer
 
-    let close t = shutdown t `All
+    let close t =
+      Eio.Switch.remove_hook t.release;
+      t.release <- Eio.Switch.null_hook;
+      shutdown t `All
+
     let read_methods = []
     let setsockopt _ opt _ = Sockopt.stream opt
 
@@ -128,8 +156,11 @@ module Flow = struct
 
   let handler = Eio.Net.Pi.stream_socket (module Impl)
 
+  type t = Impl.t * Impl.tag Eio.Net.stream_socket_ty Eio.Resource.t
+
   let v ~from_peer ~to_peer =
-    Eio.Resource.T (Impl.{ from_peer; to_peer }, handler)
+    let impl = Impl.{ from_peer; to_peer; release = Eio.Switch.null_hook } in
+    (impl, Eio.Resource.T (impl, handler))
 
   let pair () =
     let to_client = Pipe.v () in
@@ -137,6 +168,14 @@ module Flow = struct
     let client = v ~from_peer:to_client ~to_peer:to_server in
     let server = v ~from_peer:to_server ~to_peer:to_client in
     (client, server)
+
+  (* Closes [flow] when [sw] finishes, unless it is closed first. *)
+  let close_with sw ((impl, flow) : t) =
+    impl.Impl.release <-
+      Eio.Switch.on_release_cancellable sw (fun () -> Eio.Flow.close flow);
+    flow
+
+  let close ((_, flow) : t) = Eio.Flow.close flow
 end
 
 module Listening_socket = struct
@@ -150,10 +189,8 @@ module Listening_socket = struct
   and t = {
     hub : hub;
     addr : Eio.Net.Sockaddr.stream;
-    incoming :
-      (tag Eio.Net.stream_socket_ty Eio.Resource.t * Eio.Net.Sockaddr.stream)
-      Eio.Stream.t;
-    mutable closed : bool;
+    incoming : (Flow.t * Eio.Net.Sockaddr.stream) Eio.Stream.t;
+    closed : bool Atomic.t;
     mutable hooks : Eio.Switch.hook list;
   }
 
@@ -174,22 +211,9 @@ module Listening_socket = struct
     in
     find 49152
 
-  let any ip =
-    Eio.Net.Ipaddr.fold ip
-      ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
-      ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
-
-  (* Two TCP addresses of one port overlap when they are equal or one is the
-     wildcard address of the other's family, as bind(2) on Linux has it. *)
   let overlaps (a : Eio.Net.Sockaddr.stream) (b : Eio.Net.Sockaddr.stream) =
-    let same (x : Eio.Net.Ipaddr.v4v6) (y : Eio.Net.Ipaddr.v4v6) =
-      String.equal (x :> string) (y :> string)
-    in
     match (a, b) with
-    | `Tcp (ip, port), `Tcp (ip', port') ->
-        port = port'
-        && same (any ip) (any ip')
-        && (same ip ip' || same ip (any ip) || same ip' (any ip'))
+    | `Tcp a, `Tcp b -> ip_overlaps a b
     | `Unix path, `Unix path' -> String.equal path path'
     | `Tcp _, `Unix _ | `Unix _, `Tcp _ -> false
 
@@ -220,7 +244,7 @@ module Listening_socket = struct
               hub;
               addr;
               incoming = Eio.Stream.create 128;
-              closed = false;
+              closed = Atomic.make false;
               hooks = [];
             }
           in
@@ -235,26 +259,37 @@ module Listening_socket = struct
           bind hub ~reuse_addr addr)
     with
     | Ok t -> t
-    | Error `In_use -> raise (Eio.Exn.create (Eio.Exn.X Address_in_use))
+    | Error `In_use -> raise (address_in_use ())
     | Error `No_port ->
         failwith "eio-net.mem: every port of 49152-65535 has a listener"
 
   let accept t ~sw =
-    if t.closed then invalid_arg "accept on closed in-memory listener";
+    if Atomic.get t.closed then
+      invalid_arg "accept on closed in-memory listener";
     let flow, client_addr = Eio.Stream.take t.incoming in
-    Eio.Switch.on_release sw (fun () -> Eio.Flow.close flow);
-    (flow, client_addr)
+    (Flow.close_with sw flow, client_addr)
 
+  (* The connections waiting to be accepted are closed with the listener, so
+     their clients read end-of-file. A connect that queues one after this is
+     refused ([Network.connect]). *)
   let close t =
-    if not t.closed then (
-      t.closed <- true;
+    if not (Atomic.exchange t.closed true) then begin
       List.iter Eio.Switch.remove_hook t.hooks;
       t.hooks <- [];
       (* A path taken over is its new listener's to free. *)
       Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
           match Hashtbl.find_opt t.hub.listeners t.addr with
           | Some held when held == t -> Hashtbl.remove t.hub.listeners t.addr
-          | Some _ | None -> ()))
+          | Some _ | None -> ());
+      let rec drain () =
+        match Eio.Stream.take_nonblocking t.incoming with
+        | Some (flow, _) ->
+            Flow.close flow;
+            drain ()
+        | None -> ()
+      in
+      drain ()
+    end
 
   let listening_addr t = t.addr
   let setsockopt _ opt _ = Sockopt.stream opt
@@ -282,6 +317,7 @@ module Datagram_socket = struct
     queued : (Eio.Net.Sockaddr.datagram * string) Queue.t;
     readable : Eio.Condition.t;
     mutable closed : bool;
+    mutable release : Eio.Switch.hook;
   }
 
   (* The lowest port of the dynamic range (RFC 6335, section 6) that no
@@ -301,6 +337,12 @@ module Datagram_socket = struct
     in
     find 49152
 
+  let overlaps (a : Eio.Net.Sockaddr.datagram) (b : Eio.Net.Sockaddr.datagram) =
+    match (a, b) with
+    | `Udp a, `Udp b -> ip_overlaps a b
+    | `Unix path, `Unix path' -> String.equal path path'
+    | `Udp _, `Unix _ | `Unix _, `Udp _ -> false
+
   let v hub addr =
     Mutex.protect hub.mutex @@ fun () ->
     let addr : Eio.Net.Sockaddr.datagram =
@@ -310,9 +352,11 @@ module Datagram_socket = struct
       | `Udp (ip, 0) -> `Udp (ip, free_port hub)
       | (`Udp _ | `Unix _) as addr -> addr
     in
-    if Hashtbl.mem hub.sockets addr then
-      Fmt.invalid_arg "eio-net.mem: %a already has a datagram socket"
-        Eio.Net.Sockaddr.pp addr;
+    if
+      Hashtbl.fold
+        (fun held _ in_use -> in_use || overlaps addr held)
+        hub.sockets false
+    then raise (address_in_use ());
     let t =
       {
         hub;
@@ -321,6 +365,7 @@ module Datagram_socket = struct
         queued = Queue.create ();
         readable = Eio.Condition.create ();
         closed = false;
+        release = Eio.Switch.null_hook;
       }
     in
     Hashtbl.replace hub.sockets addr t;
@@ -333,13 +378,7 @@ module Datagram_socket = struct
     | Some _ as found -> found
     | None -> (
         match addr with
-        | `Udp (ip, port) ->
-            let any =
-              Eio.Net.Ipaddr.fold ip
-                ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
-                ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
-            in
-            Hashtbl.find_opt hub.sockets (`Udp (any, port))
+        | `Udp (ip, port) -> Hashtbl.find_opt hub.sockets (`Udp (any ip, port))
         | `Unix _ -> None)
 
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
@@ -385,6 +424,8 @@ module Datagram_socket = struct
       was_open
     in
     if was_open then begin
+      Eio.Switch.remove_hook t.release;
+      t.release <- Eio.Switch.null_hook;
       Mutex.protect t.hub.mutex (fun () -> Hashtbl.remove t.hub.sockets t.addr);
       Eio.Condition.broadcast t.readable
     end
@@ -442,22 +483,28 @@ module Network = struct
           | None ->
               let wildcard =
                 match addr with
-                | `Tcp (ip, port) ->
-                    Some
-                      (Eio.Net.Ipaddr.fold ip
-                         ~v4:(fun _ -> `Tcp (Eio.Net.Ipaddr.V4.any, port))
-                         ~v6:(fun _ -> `Tcp (Eio.Net.Ipaddr.V6.any, port)))
+                | `Tcp (ip, port) -> Some (`Tcp (any ip, port))
                 | `Unix _ -> None
               in
               Option.bind wildcard (Hashtbl.find_opt t.hub.listeners))
     in
+    let refused () =
+      raise (Eio.Net.err (Connection_failure (Refused No_listener)))
+    in
     match listener with
-    | None -> raise (Eio.Net.err (Connection_failure (Refused No_listener)))
+    | None -> refused ()
+    | Some listener when Atomic.get listener.closed -> refused ()
     | Some listener ->
         let client, server = Flow.pair () in
-        Eio.Switch.on_release sw (fun () -> Eio.Flow.close client);
         Eio.Stream.add listener.incoming (server, `Unix "in-memory-client");
-        client
+        (* The listener closed while the connection waited for room: its
+           queue was closed before this connection joined it. *)
+        if Atomic.get listener.closed then begin
+          Flow.close server;
+          Flow.close client;
+          refused ()
+        end;
+        Flow.close_with sw client
 
   let datagram_handler = Eio.Net.Pi.datagram_socket (module Datagram_socket)
 
@@ -466,10 +513,10 @@ module Network = struct
   let datagram_socket t ~reuse_addr:_ ~reuse_port ~sw addr =
     if reuse_port then
       invalid_arg "eio-net.mem does not support SO_REUSEPORT datagram sockets";
-    let socket =
-      Eio.Resource.T (Datagram_socket.v t.datagrams addr, datagram_handler)
-    in
-    Eio.Switch.on_release sw (fun () -> Eio.Resource.close socket);
+    let datagram = Datagram_socket.v t.datagrams addr in
+    let socket = Eio.Resource.T (datagram, datagram_handler) in
+    datagram.release <-
+      Eio.Switch.on_release_cancellable sw (fun () -> Eio.Resource.close socket);
     socket
 
   let getaddrinfo _ ~service node =
@@ -484,7 +531,10 @@ module Network = struct
 end
 
 let handler = Eio.Net.Pi.network (module Network)
-let pipe () = Flow.pair ()
+
+let pipe () =
+  let (_, client), (_, server) = Flow.pair () in
+  (client, server)
 
 let v ~sw () =
   let hub =

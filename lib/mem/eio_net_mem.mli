@@ -14,12 +14,14 @@ type Eio.Exn.Backend.t +=
             been read, matching a real socket's EOF. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
-            when no listener is bound at the address, as a real socket raises
+            when no listener is bound at the address, or the listener closes
+            while the connection waits for it, as a real socket raises
             [Connection_failure (Refused _)]. *)
   | Address_in_use
         (** The backend code of the unclassified {!Eio.Io} error [listen] raises
-            at an address a listener holds, where a real socket's bind fails
-            with [EADDRINUSE], which Eio also leaves unclassified. *)
+            at an address a listener holds, and [datagram_socket] at one a
+            datagram socket holds, where a real socket's bind fails with
+            [EADDRINUSE], which Eio also leaves unclassified. *)
 
 val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~sw ()] is a network whose [listen] and [connect] operations are paired
@@ -42,13 +44,17 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     before it binds: the listener that held it stays open, and no [connect]
     reaches it. A [listen] with [reuse_port] raises [Invalid_argument]. A
     listener is closed, and its address free again, when it is closed or when
-    the switch passed to [listen] or to {!v} finishes. A [connect] reaches the
-    listener at its address, or at the wildcard address of its port, and waits
-    while [128] connections wait to be accepted there; with no listener it
-    raises the connection failure that {!No_listener} marks. An accepted
-    connection's peer address is [`Unix "in-memory-client"]. Host resolution
-    maps ["localhost"] and ["127.0.0.1"] with a numeric service to IPv4 loopback
-    at that port, and any other host or service to no address.
+    the switch passed to [listen] or to {!v} finishes; the connections waiting
+    to be accepted are closed with it, so their clients read end-of-file. A
+    [connect] reaches the listener at its address, or at the wildcard address of
+    its port, and waits while [128] connections wait to be accepted there; with
+    no listener, or one that closes while it waits, it raises the connection
+    failure that {!No_listener} marks, as a connect to a closed port is refused.
+    An accepted connection is closed when it is closed or when the switch passed
+    to [accept] finishes. An accepted connection's peer address is
+    [`Unix "in-memory-client"]. Host resolution maps ["localhost"] and
+    ["127.0.0.1"] with a numeric service to IPv4 loopback at that port, and any
+    other host or service to no address.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and
@@ -62,19 +68,21 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     [Invalid_argument]: there is no local address to bind. [getsockopt] raises
     [Invalid_argument] on every socket.
 
-    A [datagram_socket] binds the address it is given: for [`UdpV4] and [`UdpV6]
-    the loopback address at the lowest port of the dynamic range that no
-    datagram socket holds, and for port [0] that port at its IP address. It
-    refuses an address already bound, and [reuse_port], with [Invalid_argument].
-    A datagram sent to it arrives whole, with the sender's address, after every
-    datagram sent to it before: the network never drops, cuts or reorders one,
-    and a send never waits. One sent to an address no socket binds, at its own
-    address or the wildcard address of its port, is lost, as UDP loses it. A
-    send without a destination raises [Invalid_argument], since no socket is
-    connected. A [recv] into a buffer shorter than the datagram gets its first
-    bytes, as a socket does. The socket is closed, and its address free again,
-    when the switch passed to [datagram_socket] finishes; a send or a receive on
-    it then raises [Invalid_argument]. *)
+    A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
+    bind the loopback address of their family, and an address with port [0]
+    binds its IP address, each at the lowest port of the dynamic range that no
+    datagram socket holds. An address that overlaps one a datagram socket holds,
+    by the rule [listen] follows, raises the error that {!Address_in_use} marks;
+    [reuse_port] raises [Invalid_argument]. A datagram sent to it arrives whole,
+    with the sender's address, after every datagram sent to it before: the
+    network never drops, cuts or reorders one, and a send never waits. One sent
+    to an address no socket binds, at its own address or the wildcard address of
+    its port, is lost, as UDP loses it. A send without a destination raises
+    [Invalid_argument], since no socket is connected. A [recv] into a buffer
+    shorter than the datagram gets its first bytes, as a socket does. The socket
+    is closed, and its address free again, when the switch passed to
+    [datagram_socket] finishes; a send or a receive on it then raises
+    [Invalid_argument]. *)
 
 val pipe :
   unit ->
