@@ -26,32 +26,43 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     different domains: a write in one wakes a read waiting in the other. A write
     never waits, since a connection holds whatever is written to it.
 
-    TCP stream addresses are matched exactly. A [listen] on port [0] binds the
-    lowest port of the dynamic range, 49152-65535 (RFC 6335, section 6), that no
-    listener holds, as a socket's bind does, and [listening_addr] reports it.
-    Host resolution maps ["localhost"] and ["127.0.0.1"] to IPv4 loopback for
-    the requested service port. Unix stream addresses are also accepted directly
-    by [listen] and [connect].
+    A [listen] binds the TCP or Unix stream address it is given. One on TCP port
+    [0] binds the lowest port of the dynamic range, 49152-65535 (RFC 6335,
+    section 6), that no listener holds, as a socket's bind does, and
+    [listening_addr] reports it; it raises [Failure] if every port of the range
+    is held. A [listen] at an address a listener holds takes the address over
+    from it. A listener is closed when the switch passed to {!v} finishes,
+    whatever switch [listen] is given. A [connect] reaches the listener at its
+    address, or at the wildcard address of its port, and waits while [128]
+    connections wait to be accepted there; with no listener it raises the
+    connection failure that {!No_listener} marks. An accepted connection's peer
+    address is [`Unix "in-memory-client"]. Host resolution maps ["localhost"]
+    and ["127.0.0.1"] with a numeric service to IPv4 loopback at that port, and
+    any other host or service to no address.
 
     [connect] accepts, and ignores, the socket options whose effect these queues
     already have: the ones asking that writes not be coalesced and that
     acknowledgements not be delayed, neither of which happens here. It refuses
-    every other option, naming it, because ignoring one that would change what a
-    caller observes is a wrong answer with no symptom. A caller cannot tell an
-    ignored option from an applied one, so a test that must know an option took
-    effect needs a real socket. [bind_to] is refused: there is no local address
-    to bind.
+    every other option with [Invalid_argument], naming it, because ignoring one
+    that would change what a caller observes is a wrong answer with no symptom.
+    A caller cannot tell an ignored option from an applied one, so a test that
+    must know an option took effect needs a real socket. [bind_to] is refused
+    with [Invalid_argument]: there is no local address to bind. On a socket,
+    [setsockopt] does nothing and [getsockopt] raises [Invalid_argument].
 
-    A [datagram_socket] binds its address, or for [`UdpV4], [`UdpV6] or port [0]
-    the lowest free port of the dynamic range on loopback, and refuses an
-    address already bound and [reuse_port]. A datagram sent to it arrives whole,
-    with the sender's address, after every datagram sent to it before: the
-    network never drops, cuts or reorders one, and a send never waits. One sent
-    to an address no socket binds, at its own address or the wildcard address of
-    its port, is lost, as UDP loses it. A [recv] into a buffer shorter than the
-    datagram gets its first bytes, as a socket does. The socket is closed, and
-    its address free again, when the switch passed to [datagram_socket]
-    finishes. *)
+    A [datagram_socket] binds the address it is given: for [`UdpV4] and [`UdpV6]
+    the loopback address at the lowest port of the dynamic range that no
+    datagram socket holds, and for port [0] that port at its IP address. It
+    refuses an address already bound, and [reuse_port], with [Invalid_argument].
+    A datagram sent to it arrives whole, with the sender's address, after every
+    datagram sent to it before: the network never drops, cuts or reorders one,
+    and a send never waits. One sent to an address no socket binds, at its own
+    address or the wildcard address of its port, is lost, as UDP loses it. A
+    send without a destination raises [Invalid_argument], since no socket is
+    connected. A [recv] into a buffer shorter than the datagram gets its first
+    bytes, as a socket does. The socket is closed, and its address free again,
+    when the switch passed to [datagram_socket] finishes; a send or a receive on
+    it then raises [Invalid_argument]. *)
 
 val pipe :
   unit ->
@@ -63,4 +74,4 @@ val pipe :
     bare transport for a test, or a wrapper such as an adversarial flow, that
     needs two ends of a pipe. Blocking reads suspend the calling fiber until
     data arrives, so both ends must run under an Eio event loop; the two ends
-    may be in different domains. *)
+    may be in different domains. No switch closes them: the caller does. *)
