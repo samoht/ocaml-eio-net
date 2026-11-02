@@ -96,6 +96,92 @@ let test_listen_on_port_zero () =
   reaches a pa "a";
   reaches b pb "b"
 
+(* A listen at an address a listener holds is refused with an Eio.Io error
+   carrying a backend code, the shape of the EADDRINUSE that
+   Eio_net_unix.Tcp.listen raises over a real network; the listener there keeps
+   the address. A wildcard address and another address of the same port
+   overlap, as they do for bind(2). *)
+let test_listen_on_an_address_in_use () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8085) in
+  let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
+  let in_use addr =
+    match Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr with
+    | exception Eio.Io (Eio.Exn.X _, _) -> ()
+    | _ -> Alcotest.failf "listened twice at %a" Eio.Net.Sockaddr.pp addr
+  in
+  in_use addr;
+  in_use (`Tcp (Eio.Net.Ipaddr.V4.any, 8085));
+  Eio.Fiber.both
+    (fun () ->
+      let flow, _ = Eio.Net.accept ~sw listener in
+      Eio.Flow.copy_string "first" flow)
+    (fun () ->
+      let flow = Eio.Net.connect ~sw net addr in
+      let buf = Cstruct.create 5 in
+      Eio.Flow.read_exact flow buf;
+      Alcotest.(check string)
+        "the first listener keeps the address" "first" (Cstruct.to_string buf))
+
+(* A listener frees its address when it is closed, and when the switch passed
+   to [listen] finishes: a connect there is then refused, and a new listen
+   binds it. *)
+let test_listener_frees_its_address () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8086) in
+  let refused () =
+    match Eio.Net.connect ~sw net addr with
+    | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> ()
+    | _ -> Alcotest.fail "a connect reached a listener that is gone"
+  in
+  Eio.Resource.close (Eio.Net.listen ~sw ~backlog:1 net addr);
+  refused ();
+  Eio.Switch.run (fun inner ->
+      ignore (Eio.Net.listen ~sw:inner ~backlog:1 net addr));
+  refused ();
+  ignore (Eio.Net.listen ~sw ~backlog:1 net addr)
+
+(* A Unix-domain path a listener holds is refused, unless the new listen asks
+   for [reuse_addr]: Eio's POSIX backend then removes the socket file and binds
+   a new one there, so connects reach the new listener. *)
+let test_listen_on_a_unix_path_in_use () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Unix "/tmp/in-use.sock" in
+  ignore (Eio.Net.listen ~sw ~backlog:1 net addr);
+  (match Eio.Net.listen ~sw ~backlog:1 net addr with
+  | exception Eio.Io (Eio.Exn.X _, _) -> ()
+  | _ -> Alcotest.fail "listened twice at a Unix path");
+  let second = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
+  Eio.Fiber.both
+    (fun () ->
+      let flow, _ = Eio.Net.accept ~sw second in
+      Eio.Flow.copy_string "second" flow)
+    (fun () ->
+      let flow = Eio.Net.connect ~sw net addr in
+      let buf = Cstruct.create 6 in
+      Eio.Flow.read_exact flow buf;
+      Alcotest.(check string)
+        "the path reaches the new listener" "second" (Cstruct.to_string buf))
+
+(* Several listeners at one address would need a kernel to spread connections
+   across them, so [reuse_port] is refused, as for datagram sockets. *)
+let test_listen_refuses_reuse_port () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  match
+    Eio.Net.listen ~sw ~backlog:1 ~reuse_port:true net
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 8087))
+  with
+  | exception Invalid_argument _ -> ()
+  | _ -> Alcotest.fail "a listen with reuse_port was accepted"
+
 (* A write to a mem flow whose peer has closed raises the [Eio.Io] reset a
    real socket raises, not the internal [Failure]. *)
 let test_write_after_peer_close () =
@@ -349,6 +435,14 @@ let suite =
         test_connect_to_wildcard_listener;
       Alcotest.test_case "listen on port 0 binds a free port" `Quick
         test_listen_on_port_zero;
+      Alcotest.test_case "listen on an address in use" `Quick
+        test_listen_on_an_address_in_use;
+      Alcotest.test_case "a listener frees its address" `Quick
+        test_listener_frees_its_address;
+      Alcotest.test_case "listen on a Unix path in use" `Quick
+        test_listen_on_a_unix_path_in_use;
+      Alcotest.test_case "listen refuses reuse_port" `Quick
+        test_listen_refuses_reuse_port;
       Alcotest.test_case "write after peer close" `Quick
         test_write_after_peer_close;
       Alcotest.test_case "write after own shutdown" `Quick
