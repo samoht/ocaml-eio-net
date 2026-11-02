@@ -12,5 +12,5 @@
   fmt
   fpath
   ipaddr
-  nox-rope
+  cstruct
   unix))

@@ -59,12 +59,16 @@ module Config : sig
   (** Structural equality of configurations. *)
 end
 
-val encode : Config.t -> Rope.t -> (Rope.t, error) result
-(** Validate and prepend the unsigned length without copying payload leaves. *)
+val encode : Config.t -> Cstruct.t list -> (Cstruct.t list, error) result
+(** [encode config payload] is [payload] behind its unsigned length, or the
+    error that refuses its length. The payload's buffers are not copied: the
+    frame is a new buffer holding the prefix, followed by them. *)
 
-val encode_batch : Config.t -> Rope.t list -> (Rope.t, error) result
-(** Validate every frame before returning any encoded batch. Failure emits no
-    bytes, and does not consume or change any supplied payload. *)
+val encode_batch :
+  Config.t -> Cstruct.t list list -> (Cstruct.t list, error) result
+(** [encode_batch config payloads] is the frames of [payloads], in order, as
+    {!encode} makes them, or the error of the first payload refused. Every frame
+    is validated before any is returned, so a failure emits no bytes. *)
 
 module Decoder : sig
   type t
@@ -105,7 +109,7 @@ module Encoder : sig
   val v : Config.t -> t
   (** Start a fresh framed-stream direction. *)
 
-  val outgoing : t -> Rope.t list -> t * (Rope.t, error) result
+  val outgoing : t -> Cstruct.t list list -> t * (Cstruct.t list, error) result
   (** Prepare one validated batch. Only one may be outstanding; rejection leaves
       the current state unchanged. *)
 

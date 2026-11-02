@@ -5,15 +5,25 @@ type vector = {
   prefix_hex : string;
 }
 
-let codec =
-  Csv.Row.(
-    obj (fun operation length_field length prefix_hex ->
-        { operation; length_field; length; prefix_hex })
-    |> col "operation" Csv.Field.string ~enc:(fun v -> v.operation)
-    |> col "length_field" Csv.Field.int ~enc:(fun v -> v.length_field)
-    |> col "length" Csv.Field.int64 ~enc:(fun v -> v.length)
-    |> col "prefix_hex" Csv.Field.string ~enc:(fun v -> v.prefix_hex)
-    |> finish)
+(* One vector per CRLF-terminated line after the header: four comma-separated
+   fields, none of them quoted. *)
+let vector line =
+  match String.split_on_char ',' line with
+  | [ operation; length_field; length; prefix_hex ] ->
+      {
+        operation;
+        length_field = int_of_string length_field;
+        length = Int64.of_string length;
+        prefix_hex;
+      }
+  | _ -> Fmt.failwith "malformed vector: %S" line
+
+let vectors input =
+  match
+    List.map String.trim (String.split_on_char '\n' (String.trim input))
+  with
+  | "operation,length_field,length,prefix_hex" :: lines -> List.map vector lines
+  | _ -> failwith "vectors.csv: unexpected header"
 
 let assert_frame config prefix payload =
   let state = Framing.Decoder.handle (Framing.Decoder.v config) (Data prefix) in
@@ -35,19 +45,19 @@ let assert_frame config prefix payload =
   | _ -> Alcotest.fail "oracle frame was not delivered"
 
 let check_encode config vector =
-  let prefix = Hex.decode vector.prefix_hex in
+  let prefix = Ohex.decode vector.prefix_hex in
   let payload = String.make (Int64.to_int vector.length) 'x' in
-  (match Framing.encode config (Rope.of_string payload) with
+  (match Framing.encode config [ Cstruct.of_string payload ] with
   | Ok frame ->
       Alcotest.(check string)
-        "Python struct bytes" (prefix ^ payload) (Rope.to_string frame)
+        "Python struct bytes" (prefix ^ payload) (Cstruct.copyv frame)
   | Error error -> Alcotest.failf "%a" Framing.pp_error error);
   assert_frame config prefix payload
 
 let check_refuse_declared config vector =
   let state =
     Framing.Decoder.handle (Framing.Decoder.v config)
-      (Data (Hex.decode vector.prefix_hex))
+      (Data (Ohex.decode vector.prefix_hex))
   in
   let _, event = Framing.Decoder.next_event state in
   match event with
@@ -69,7 +79,7 @@ let check vector () =
   | "refuse_encode" ->
       let result =
         Framing.encode config
-          (Rope.of_string (String.make (Int64.to_int vector.length) 'x'))
+          [ Cstruct.of_string (String.make (Int64.to_int vector.length) 'x') ]
       in
       Alcotest.(check bool)
         "Python struct overflow is refused" true (Result.is_error result)
@@ -80,7 +90,7 @@ let () =
   let input =
     In_channel.with_open_bin "traces/vectors.csv" In_channel.input_all
   in
-  let vectors = Csv.of_string_exn ~max_rows:32 ~max_cols:4 codec input in
+  let vectors = vectors input in
   Alcotest.run "framing-python"
     [
       ( "struct",

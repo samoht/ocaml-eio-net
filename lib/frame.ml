@@ -1,15 +1,19 @@
+open! Hermetic
+
 type t = {
   recv : unit -> string;
   recv_batch : unit -> string list;
   recv_slice : unit -> Bytesrw.Bytes.Slice.t;
-  send : Rope.t -> unit;
-  send_batch : Rope.t list -> unit;
+  send : Cstruct.t list -> unit;
+  send_batch : Cstruct.t list list -> unit;
 }
 
 let pp ppf _ = Fmt.string ppf "<frame channel>"
 
+(* A received frame is viewed in place, not copied: a slice a reader hands out
+   is read-only to its consumer, so the string is never written through it. *)
 let slice_of_string s =
-  Bytesrw.Bytes.Slice.of_bytes_or_eod (Bytes.unsafe_of_string s)
+  Bytesrw.Bytes.Slice.of_bytes_or_eod (Stdlib_original.Bytes.unsafe_of_string s)
 
 let v ~recv ~send =
   {
@@ -19,8 +23,6 @@ let v ~recv ~send =
     send;
     send_batch = List.iter send;
   }
-
-let rope_cstructs rope = List.map Cstruct.of_string (Rope.to_strings rope)
 
 let of_datagram_socket ?max_frame ?dst socket =
   let channel = Datagram.of_socket ?max_frame ?dst socket in
@@ -69,7 +71,7 @@ let of_length_prefixed_flow ?(framing = Framing.Config.v ()) flow =
         match result with
         | Result.Error error -> raise (Error error)
         | Ok encoded -> (
-            match Eio.Flow.write flow (rope_cstructs encoded) with
+            match Eio.Flow.write flow encoded with
             | () -> encoder := Framing.Encoder.complete !encoder Sent
             | exception exn ->
                 encoder := Framing.Encoder.complete !encoder Failed;
@@ -88,7 +90,7 @@ let pair () =
   let b_to_a = Eio.Stream.create max_int in
   let chan recv_stream send_stream =
     let recv () = Eio.Stream.take recv_stream in
-    let send r = Eio.Stream.add send_stream (Rope.to_string r) in
+    let send bufs = Eio.Stream.add send_stream (Cstruct.copyv bufs) in
     {
       recv;
       recv_batch = (fun () -> [ recv () ]);

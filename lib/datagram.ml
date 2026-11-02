@@ -1,10 +1,11 @@
+open! Hermetic
+
 type t = {
   recv : unit -> Eio.Net.Sockaddr.datagram * string;
-  send : Eio.Net.Sockaddr.datagram option -> Rope.t -> unit;
+  send : Eio.Net.Sockaddr.datagram option -> Cstruct.t list -> unit;
 }
 
 let pp ppf _ = Fmt.string ppf "<datagram channel>"
-let rope_cstructs rope = List.map Cstruct.of_string (Rope.to_strings rope)
 
 let of_socket ?(max_frame = 65536) ?dst socket =
   if max_frame <= 0 then
@@ -19,8 +20,7 @@ let of_socket ?(max_frame = 65536) ?dst socket =
         max_frame;
     (source, Cstruct.to_string (Cstruct.sub buf 0 len))
   in
-  let send destination rope =
-    let bufs = rope_cstructs rope in
+  let send destination bufs =
     match (destination, dst) with
     | Some dst, _ | None, Some dst -> Eio.Net.send socket ~dst bufs
     | None, None -> Eio.Net.send socket bufs

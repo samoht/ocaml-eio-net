@@ -7,14 +7,11 @@
  (public_name eio-net)
  (libraries
   net-framing
-  hermetic.eio
+  hermetic
   eio-net.accept
   eio
   cstruct
   fmt
   logs
   bytesrw
-  mtime
-  nox-rope)
- (flags
-  (:standard -open Hermetic_eio)))
+  mtime))

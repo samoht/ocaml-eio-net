@@ -23,7 +23,7 @@ semantics belong to the protocol above framing.
 ```ocaml
 # let framing = Framing.Config.v ~length_field:Uint16_be ~max_length:8 ();;
 val framing : Framing.Config.t = <abstr>
-# Framing.encode framing (Rope.of_string "abc") |> Result.map Rope.to_string;;
+# Framing.encode framing [ Cstruct.of_string "abc" ] |> Result.map Cstruct.copyv;;
 - : (string, Framing.error) result = Ok "\000\003abc"
 # let decoder = Framing.Decoder.v framing;;
 val decoder : Framing.Decoder.t = <abstr>

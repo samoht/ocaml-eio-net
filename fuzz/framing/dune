@@ -1,6 +1,6 @@
 (executable
  (name fuzz)
- (libraries net-framing nox-rope alcobar fmt))
+ (libraries net-framing cstruct alcobar fmt))
 
 (rule
  (alias runtest)

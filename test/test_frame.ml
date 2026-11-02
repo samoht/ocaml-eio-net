@@ -1,4 +1,4 @@
-let send frame rope = frame.Eio_net.Frame.send (Rope.of_string rope)
+let send frame rope = frame.Eio_net.Frame.send [ Cstruct.of_string rope ]
 
 let test_pair () =
   Eio_main.run @@ fun _env ->
@@ -89,7 +89,8 @@ let test_length_prefixed_batch () =
   let got = ref [] in
   Eio.Fiber.both
     (fun () ->
-      sender.Eio_net.Frame.send_batch (List.map Rope.of_string payloads))
+      sender.Eio_net.Frame.send_batch
+        (List.map (fun s -> [ Cstruct.of_string s ]) payloads))
     (fun () ->
       got := List.map (fun _ -> receiver.Eio_net.Frame.recv ()) payloads);
   Alcotest.(check (list string))
@@ -151,7 +152,10 @@ let test_batch_refused_before_writing () =
   let refused =
     try
       channel.Eio_net.Frame.send_batch
-        [ Rope.of_string "valid"; Rope.of_string (String.make 17 'x') ];
+        [
+          [ Cstruct.of_string "valid" ];
+          [ Cstruct.of_string (String.make 17 'x') ];
+        ];
       false
     with Eio_net.Frame.Error _ -> true
   in
@@ -253,10 +257,10 @@ let test_concurrent_fragmented_writers () =
       Eio.Fiber.both
         (fun () ->
           sender.Eio_net.Frame.send_batch
-            (List.map Rope.of_string [ "a1"; "a2" ]))
+            (List.map (fun s -> [ Cstruct.of_string s ]) [ "a1"; "a2" ]))
         (fun () ->
           sender.Eio_net.Frame.send_batch
-            (List.map Rope.of_string [ "b1"; "b2" ])))
+            (List.map (fun s -> [ Cstruct.of_string s ]) [ "b1"; "b2" ])))
     (fun () ->
       for _ = 1 to 4 do
         got := receiver.Eio_net.Frame.recv () :: !got

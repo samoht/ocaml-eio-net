@@ -5,13 +5,13 @@ let run count size =
   let sender = Eio_net.Frame.of_length_prefixed_flow writer in
   let receiver = Eio_net.Frame.of_length_prefixed_flow reader in
   let payload = String.make size 'x' in
-  let rope = Rope.of_string payload in
+  let frame = [ Cstruct.of_string payload ] in
   let allocated = Gc.allocated_bytes () in
   let clock = Mtime_clock.counter () in
   Eio.Fiber.both
     (fun () ->
       for _ = 1 to count do
-        sender.Eio_net.Frame.send rope
+        sender.Eio_net.Frame.send frame
       done)
     (fun () ->
       for _ = 1 to count do

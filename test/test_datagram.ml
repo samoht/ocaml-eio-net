@@ -17,7 +17,7 @@ let with_bound_pair f =
   f ~addr_a ~addr_b ~sock_a ~sock_b
 
 let send channel dst payload =
-  channel.Eio_net.Datagram.send dst (Rope.of_string payload)
+  channel.Eio_net.Datagram.send dst [ Cstruct.of_string payload ]
 
 let test_source_round_trip () =
   with_bound_pair @@ fun ~addr_a ~addr_b ~sock_a ~sock_b ->

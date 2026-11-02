@@ -1,8 +1,8 @@
 let error = Alcotest.testable Framing.pp_error Framing.equal_error
 
 let encoded config payload =
-  match Framing.encode config (Rope.of_string payload) with
-  | Ok bytes -> Rope.to_string bytes
+  match Framing.encode config [ Cstruct.of_string payload ] with
+  | Ok bytes -> Cstruct.copyv bytes
   | Error error -> Alcotest.failf "%a" Framing.pp_error error
 
 let rec feed state bytes frames =
@@ -35,11 +35,11 @@ let test_vectors () =
       in
       let batch =
         Framing.encode_batch config
-          [ Rope.empty; Rope.of_string "abc"; Rope.of_string "xyz" ]
+          [ []; [ Cstruct.of_string "abc" ]; [ Cstruct.of_string "xyz" ] ]
       in
       Alcotest.(check (result string error))
         "batch retains frame order and boundaries" (Ok wire)
-        (Result.map Rope.to_string batch);
+        (Result.map Cstruct.copyv batch);
       let state = ref (Framing.Decoder.v config) and frames = ref [] in
       String.iter
         (fun byte ->
@@ -112,12 +112,12 @@ let test_encoder_lifecycle () =
   let writer = Framing.Encoder.v config in
   let writer, result =
     Framing.Encoder.outgoing writer
-      [ Rope.of_string "ok"; Rope.of_string "large" ]
+      [ [ Cstruct.of_string "ok" ]; [ Cstruct.of_string "large" ] ]
   in
   Alcotest.(check bool)
     "whole invalid batch refused" true (Result.is_error result);
   let writer, result =
-    Framing.Encoder.outgoing writer [ Rope.of_string "ok" ]
+    Framing.Encoder.outgoing writer [ [ Cstruct.of_string "ok" ] ]
   in
   Alcotest.(check bool)
     "refusal leaves writer usable" true (Result.is_ok result);
@@ -125,14 +125,16 @@ let test_encoder_lifecycle () =
     "one write accounts encoded bytes" 6
     (Framing.Encoder.pending_bytes writer);
   let writer, result =
-    Framing.Encoder.outgoing writer [ Rope.of_string "next" ]
+    Framing.Encoder.outgoing writer [ [ Cstruct.of_string "next" ] ]
   in
   Alcotest.(check (result unit error))
     "no overlapping write" (Error Busy)
     (Result.map (fun _ -> ()) result);
   let writer = Framing.Encoder.complete writer Failed in
   let writer = Framing.Encoder.complete writer Sent in
-  let _, result = Framing.Encoder.outgoing writer [ Rope.of_string "next" ] in
+  let _, result =
+    Framing.Encoder.outgoing writer [ [ Cstruct.of_string "next" ] ]
+  in
   Alcotest.(check (result unit error))
     "failed write cannot resume" (Error Aborted)
     (Result.map (fun _ -> ()) result)
@@ -148,7 +150,8 @@ let test_boundaries () =
     (String.length (encoded config payload));
   Alcotest.(check bool)
     "uint16 does not wrap" true
-    (Result.is_error (Framing.encode config (Rope.of_string (payload ^ "x"))));
+    (Result.is_error
+       (Framing.encode config [ Cstruct.of_string (payload ^ "x") ]));
   let config = Framing.Config.v ~max_length:0 () in
   let state, frames = feed (Framing.Decoder.v config) (encoded config "") [] in
   Alcotest.(check (list string)) "zero-only framing drains" [ "" ] frames;
@@ -159,24 +162,21 @@ let test_boundaries () =
     "empty clean EOF" true
     (match event with End_of_stream -> true | _ -> false)
 
-let test_virtual_payload () =
-  let rec grow payload =
-    if Rope.length payload > max_int / 4 then payload
-    else grow (Rope.concat payload payload)
-  in
-  let payload = grow (Rope.of_string "x") in
+let test_oversized_in_batch () =
+  let config = Framing.Config.v () in
+  let payload = [ Cstruct.create (Framing.Config.max_length config + 1) ] in
   let writer, result =
-    Framing.Encoder.outgoing
-      (Framing.Encoder.v (Framing.Config.v ()))
-      [ Rope.of_string "valid"; payload ]
+    Framing.Encoder.outgoing (Framing.Encoder.v config)
+      [ [ Cstruct.of_string "valid" ]; payload ]
   in
   Alcotest.(check bool)
-    "shared virtual payload refused before traversal" true
-    (Result.is_error result);
+    "an oversized frame refuses the batch" true (Result.is_error result);
   Alcotest.(check int)
     "invalid batch retains no encoded payload" 0
     (Framing.Encoder.pending_bytes writer);
-  let _, result = Framing.Encoder.outgoing writer [ Rope.of_string "next" ] in
+  let _, result =
+    Framing.Encoder.outgoing writer [ [ Cstruct.of_string "next" ] ]
+  in
   Alcotest.(check bool)
     "large refusal leaves writer usable" true (Result.is_ok result)
 
@@ -195,6 +195,6 @@ let suite =
         test_encoder_lifecycle;
       Alcotest.test_case "uint16 and empty frame boundaries" `Quick
         test_boundaries;
-      Alcotest.test_case "shared virtual payload preflight" `Quick
-        test_virtual_payload;
+      Alcotest.test_case "an oversized frame refuses its batch" `Quick
+        test_oversized_in_batch;
     ] )

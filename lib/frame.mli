@@ -11,8 +11,8 @@ type t = {
   recv : unit -> string;
   recv_batch : unit -> string list;
   recv_slice : unit -> Bytesrw.Bytes.Slice.t;
-  send : Rope.t -> unit;
-  send_batch : Rope.t list -> unit;
+  send : Cstruct.t list -> unit;
+  send_batch : Cstruct.t list list -> unit;
 }
 (** A frame channel.
 
@@ -21,14 +21,15 @@ type t = {
     transport allows and otherwise [[recv ()]]. {!recv_slice} is one frame as a
     view (an offset and a length into owned bytes), so a decode layer strips its
     header by advancing the offset rather than copying; it is the inbound
-    counterpart of {!send}'s rope. The view is valid only until the next receive
-    (bytesrw's slice contract), so a layer that retains the payload past that
-    must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
+    counterpart of {!send}'s buffers. The view is valid only until the next
+    receive (bytesrw's slice contract), so a layer that retains the payload past
+    that must copy it; an empty frame yields {!Bytesrw.Bytes.Slice.eod}.
 
-    {!send} takes an outgoing frame as a {!Rope.t} so a payload carried as a
-    zero-copy rope leaf reaches the wire through [writev] without being
-    concatenated into a whole-frame string; a sender that already has a string
-    wraps it with [Rope.of_string] (O(1)).
+    {!send} takes an outgoing frame as a list of buffers, as [Eio.Flow.write]
+    does, and the frame is their concatenation. A transport that writes vectors
+    hands the buffers to [writev] as they are, so a frame held in several
+    buffers is not copied into one; a sender with a string passes
+    [[Cstruct.of_string s]]. The buffers must not change until {!send} returns.
 
     {!send_batch} sends a burst of frames, coalescing them into a single
     [writev] where the transport allows (software GSO): one system call for the
@@ -40,7 +41,7 @@ val pp : t Fmt.t
 (** [pp] prints an opaque placeholder: a frame channel is an I/O handle with no
     inspectable state. *)
 
-val v : recv:(unit -> string) -> send:(Rope.t -> unit) -> t
+val v : recv:(unit -> string) -> send:(Cstruct.t list -> unit) -> t
 (** [v ~recv ~send] is a frame channel from a receive and a send function.
     {!recv_batch} returns one frame and {!send_batch} sends the burst one frame
     at a time; a transport that can batch overrides these operations. *)

@@ -1,4 +1,4 @@
 (library
  (name framing)
  (public_name net-framing)
- (libraries fmt wire nox-rope))
+ (libraries fmt wire cstruct))

@@ -1,7 +1,7 @@
 (test
  (name test)
  (package net-framing)
- (libraries net-framing fmt nox-csv nox-hex nox-rope alcotest)
+ (libraries net-framing cstruct fmt ohex alcotest)
  (deps
   (source_tree traces)
   (source_tree scripts)))

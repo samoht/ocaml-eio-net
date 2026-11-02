@@ -6,7 +6,6 @@
  (name eio_net_unix)
  (public_name eio-net.unix)
  (libraries
-  hermetic.eio
   eio-net
   eio-net.connect
   eio-net.accept
@@ -14,12 +13,9 @@
   eio.unix
   cstruct
   fpath
-  nox-rope
   ipaddr
   unix)
  (library_flags (-linkall))
  (foreign_stubs
   (language c)
-  (names sendmsg_batch writev_offload local_connect interface_stubs))
- (flags
-  (:standard -open Hermetic_eio)))
+  (names sendmsg_batch writev_offload local_connect interface_stubs)))

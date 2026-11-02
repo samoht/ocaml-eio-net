@@ -87,7 +87,7 @@ let check_length config length =
   else Ok (Int64.to_int length)
 
 let encode config payload =
-  match check_length config (Int64.of_int (Rope.length payload)) with
+  match check_length config (Int64.of_int (Cstruct.lenv payload)) with
   | Error error -> Error error
   | Ok length ->
       let prefix =
@@ -95,7 +95,7 @@ let encode config payload =
           (Prefix.get (Config.length_field config))
           (Int64.of_int length)
       in
-      Ok (Rope.concat (Rope.of_string prefix) payload)
+      Ok (Cstruct.of_string prefix :: payload)
 
 let encode_batch config payloads =
   let rec encode_all acc = function
@@ -107,7 +107,7 @@ let encode_batch config payloads =
   in
   match encode_all [] payloads with
   | Error error -> Error error
-  | Ok frames -> Ok (List.fold_left Rope.concat Rope.empty frames)
+  | Ok frames -> Ok (List.concat frames)
 
 module Decoder = struct
   type input = Data of string | Eof of string | Abort
@@ -116,7 +116,8 @@ module Decoder = struct
 
   type phase =
     | Prefix of string
-    | Payload of { length : int; data : Rope.t }
+    (* [chunks] are the bytes received so far, the latest first. *)
+    | Payload of { length : int; received : int; chunks : string list }
     | Ready of string * after
     | Ended
     | Broken of error
@@ -128,13 +129,13 @@ module Decoder = struct
   let pending_bytes t =
     match t.phase with
     | Prefix bytes | Ready (bytes, _) -> String.length bytes
-    | Payload { data; _ } -> Rope.length data
+    | Payload { received; _ } -> received
     | Ended | Broken _ -> 0
 
   let requested t =
     match t.phase with
     | Prefix bytes -> Config.prefix_length t.config - String.length bytes
-    | Payload { length; data } -> length - Rope.length data
+    | Payload { length; received; _ } -> length - received
     | Ready _ | Ended | Broken _ -> 0
 
   let fail t error =
@@ -154,7 +155,8 @@ module Decoder = struct
     match check_length t.config length with
     | Error error -> fail t error
     | Ok 0 -> { t with phase = Ready ("", Continue) }
-    | Ok length -> { t with phase = Payload { length; data = Rope.empty } }
+    | Ok length ->
+        { t with phase = Payload { length; received = 0; chunks = [] } }
 
   let feed t bytes =
     let length = String.length bytes in
@@ -168,14 +170,17 @@ module Decoder = struct
           if String.length bytes = Config.prefix_length t.config then
             prefix t bytes
           else { t with phase = Prefix bytes }
-      | Payload { length; data } ->
-          if Rope.length data = 0 && String.length bytes = length then
-            { t with phase = Ready (bytes, Continue) }
-          else
-            let data = Rope.append data bytes in
-            if Rope.length data = length then
-              { t with phase = Ready (Rope.to_string data, Continue) }
-            else { t with phase = Payload { length; data } }
+      | Payload { length; received; chunks } ->
+          let received = received + String.length bytes in
+          let chunks = bytes :: chunks in
+          if received = length then
+            let frame =
+              match chunks with
+              | [ bytes ] -> bytes
+              | chunks -> String.concat "" (List.rev chunks)
+            in
+            { t with phase = Ready (frame, Continue) }
+          else { t with phase = Payload { length; received; chunks } }
       | Ready _ | Ended | Broken _ -> t
 
   let eof t =
@@ -189,10 +194,8 @@ module Decoder = struct
                expected = Config.prefix_length t.config;
                received = String.length bytes;
              })
-    | Payload { length; data } ->
-        fail t
-          (Truncated
-             { part = Payload; expected = length; received = Rope.length data })
+    | Payload { length; received; _ } ->
+        fail t (Truncated { part = Payload; expected = length; received })
     | Ready (frame, Continue) -> { t with phase = Ready (frame, End_after) }
     | Ready (_, (End_after | Fail_after _)) -> t
     | Ended | Broken _ -> t
@@ -234,7 +237,7 @@ module Encoder = struct
     | Idle -> (
         match encode_batch t.config payloads with
         | Error error -> (t, Error error)
-        | Ok bytes -> ({ t with phase = Writing (Rope.length bytes) }, Ok bytes)
+        | Ok bytes -> ({ t with phase = Writing (Cstruct.lenv bytes) }, Ok bytes)
         )
 
   let complete t completion =

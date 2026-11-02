@@ -52,7 +52,8 @@ let fair_delivery sixteen quantum batches =
         List.for_all (fun payload -> String.length payload <= maximum) batch
       in
       let next, result =
-        Framing.Encoder.outgoing !writer (List.map Rope.of_string batch)
+        Framing.Encoder.outgoing !writer
+          (List.map (fun s -> [ Cstruct.of_string s ]) batch)
       in
       writer := next;
       match result with
@@ -63,7 +64,7 @@ let fair_delivery sixteen quantum batches =
       | Ok _ when not admissible -> fail "oversized batch reached the stream"
       | Ok wire ->
           let state, frames =
-            drain config !reader (Rope.to_string wire) (1 + (quantum mod 31)) []
+            drain config !reader (Cstruct.copyv wire) (1 + (quantum mod 31)) []
           in
           reader := state;
           expected := !expected @ batch;
@@ -119,7 +120,8 @@ let cancelled_writer sixteen payload =
   let config = Framing.Config.v ~length_field:(field sixteen) () in
   let writer = Framing.Encoder.v config in
   let writer, result =
-    Framing.Encoder.outgoing writer [ Rope.of_string (bounded 1000 payload) ]
+    Framing.Encoder.outgoing writer
+      [ [ Cstruct.of_string (bounded 1000 payload) ] ]
   in
   match result with
   | Error error -> failf "%a" Framing.pp_error error
@@ -127,7 +129,7 @@ let cancelled_writer sixteen payload =
       let writer = Framing.Encoder.complete writer Failed in
       let writer = Framing.Encoder.complete writer Sent in
       let _, result =
-        Framing.Encoder.outgoing writer [ Rope.of_string "later" ]
+        Framing.Encoder.outgoing writer [ [ Cstruct.of_string "later" ] ]
       in
       (match result with
       | Error Framing.Aborted -> ()

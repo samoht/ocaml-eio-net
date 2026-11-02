@@ -9,17 +9,18 @@
 
 type t = {
   recv : unit -> Eio.Net.Sockaddr.datagram * string;
-  send : Eio.Net.Sockaddr.datagram option -> Rope.t -> unit;
+  send : Eio.Net.Sockaddr.datagram option -> Cstruct.t list -> unit;
 }
 (** An addressed datagram channel.
 
     {!recv} is one whole received datagram as a fresh string, together with the
     address it came from.
 
-    [send (Some dst) rope] sends one datagram to [dst]; [send None rope] sends
-    to the channel's configured destination (or the connected peer). The payload
-    travels as a {!Rope.t} so a zero-copy rope leaf reaches the wire through
-    [writev] without being concatenated into a whole-datagram string. *)
+    [send (Some dst) bufs] sends the concatenation of [bufs] as one datagram to
+    [dst]; [send None bufs] sends it to the channel's configured destination (or
+    the connected peer). The buffers go to the socket as they are, one vector
+    each, so a datagram held in several buffers is not copied into one. They
+    must not change until [send] returns. *)
 
 val pp : t Fmt.t
 (** [pp] prints an opaque placeholder: a datagram channel is an I/O handle with

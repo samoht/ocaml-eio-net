@@ -9,7 +9,9 @@ let test_connected_datagram_batch () =
   let payloads = List.init 17 (fun i -> Fmt.str "frame-%02d" i) in
   let got = ref [] in
   Eio.Fiber.both
-    (fun () -> a.Eio_net.Frame.send_batch (List.map Rope.of_string payloads))
+    (fun () ->
+      a.Eio_net.Frame.send_batch
+        (List.map (fun s -> [ Cstruct.of_string s ]) payloads))
     (fun () ->
       let rec receive acc =
         if List.length acc = List.length payloads then List.rev acc
@@ -34,7 +36,7 @@ let test_connected_datagram_backpressure () =
   let b = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fb in
   let count = 256 in
   let payload = String.make 60000 'x' in
-  let frames = List.init count (fun _ -> Rope.of_string payload) in
+  let frames = List.init count (fun _ -> [ Cstruct.of_string payload ]) in
   let received = ref 0 in
   Eio.Fiber.both
     (fun () -> a.Eio_net.Frame.send_batch frames)

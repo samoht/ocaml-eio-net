@@ -5,4 +5,4 @@
 (mdx
  (package net-framing)
  (files Framing.md)
- (libraries net-framing nox-rope))
+ (libraries net-framing cstruct))

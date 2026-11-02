@@ -12,7 +12,6 @@
   eio_main
   cstruct
   bytesrw
-  nox-rope
   unix
   fmt
   mtime

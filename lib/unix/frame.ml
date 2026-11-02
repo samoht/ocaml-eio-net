@@ -39,10 +39,10 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
     | [] -> (index, [])
     | _ when index = max_batch -> (index, frames)
     | frame :: rest ->
-        let len = Rope.length frame in
+        let len = Cstruct.lenv frame in
         if len > max_frame then
           invalid_arg "Eio_net_unix.Frame: frame exceeds max_frame";
-        ignore (Rope.blit_to_cstruct frame buffers.(index));
+        ignore (Cstruct.fillv ~src:frame ~dst:buffers.(index));
         lengths.(index) <- len;
         copy_frames rest (index + 1)
   in
