@@ -15,6 +15,7 @@ type Eio.Exn.Backend.t +=
 (** Adversarial stream flows: dribbled and coalesced reads, stalls, short
     writes, and a mid-stream reset or end-of-file. *)
 module Flow : sig
+  (** The type for the fault injected on one read. *)
   type read =
     | Deliver of int
         (** Hand up at most [n] buffered bytes on this read ([n <= 0] means all
@@ -33,6 +34,7 @@ module Flow : sig
         (** End the read direction: this read and every later one raise
             [End_of_file]. *)
 
+  (** The type for the fault injected on one write. *)
   type write =
     | Accept of int
         (** Accept at most [n] of the offered bytes on this write ([n <= 0]
@@ -41,18 +43,21 @@ module Flow : sig
     | Fail  (** Raise a connection-reset instead of writing. *)
 
   (** A flow's fault schedule: pass-through, an exact per-call script, or a
-      seeded generator. The value is inspectable ({!Schedule.pp}) so a test can
-      print exactly what it pinned or fuzzed. *)
+      seeded generator. {!Schedule.pp} prints its kind and parameters, so a test
+      can report what it pinned or fuzzed. Each flow a schedule wraps runs it
+      from its start. *)
   module Schedule : sig
     type t
+    (** The type for flow fault schedules. *)
 
     val none : t
     (** [none] injects no faults: reads and writes pass straight through. *)
 
     val script : ?reads:read list -> ?writes:write list -> unit -> t
-    (** [script ~reads ~writes ()] uses [reads.(i)] on the [i]th read and
-        [writes.(i)] on the [i]th write, passing through once a list is
-        exhausted. This pins an exact scenario. *)
+    (** [script ~reads ~writes ()] injects the [i]th element of [reads]
+        (defaults to [[]]) on the [i]th read and the [i]th element of [writes]
+        (defaults to [[]]) on the [i]th write of at least one byte, and passes
+        through once a list is exhausted. *)
 
     val seeded :
       ?dribble:int ->
@@ -63,22 +68,31 @@ module Flow : sig
       ?fail_write_after:int ->
       int ->
       t
-    (** [seeded seed] derives faults from [seed]. Each read is capped at
-        [1..dribble] bytes (default: uncapped) or, with probability driven by
-        the seed, stalled [1..stall] scheduler turns. Each write is capped at
-        [1..short_write] bytes. After [reset_after] delivered bytes the next
-        read faults ([reset_kind], default [`Reset]); after [fail_write_after]
-        written bytes the next write raises a reset. Read faults and write
-        faults each depend only on [seed], not on how reads and writes
-        interleave. *)
+    (** [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
+         ~fail_write_after seed] derives faults from [seed]:
+        - Each read is, with even odds when [stall] (defaults to [0]) is
+          positive, a {!Stall} of [1] to [stall] scheduler turns, and otherwise
+          a {!Deliver} of [1] to [dribble] bytes (defaults to [0], uncapped).
+        - Each write is an {!Accept} of [1] to [short_write] bytes (defaults to
+          [0], uncapped).
+        - The first read once [reset_after] bytes (defaults to never) have been
+          delivered is a [reset_kind] (defaults to [`Reset]) fault: {!Reset} for
+          [`Reset] and {!Eof} for [`Eof].
+        - The first write once [fail_write_after] bytes (defaults to never) have
+          been written is a {!Fail}.
+
+        Read faults and write faults each depend only on [seed], not on how
+        reads and writes interleave. *)
 
     val pp : t Fmt.t
-    (** [pp] prints the schedule's kind and parameters. *)
+    (** [pp] formats a schedule as its kind, with the number of reads and writes
+        of a script, or the [seed], [dribble], [stall], [short_write] and
+        [reset_after] of a seeded schedule. *)
   end
 
   type flow = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-  (** A wrapped stream socket, usable anywhere a {!Eio.Flow.two_way} or
-      {!Eio.Net.stream_socket} is expected. *)
+  (** The type for wrapped stream sockets, usable anywhere a {!Eio.Flow.two_way}
+      or {!Eio.Net.stream_socket} is expected. *)
 
   val wrap : Schedule.t -> _ Eio.Net.stream_socket -> flow
   (** [wrap schedule sock] is [sock] with [schedule]'s faults injected on its
@@ -86,42 +100,49 @@ module Flow : sig
       [sock]. *)
 
   val pair : ?client:Schedule.t -> ?server:Schedule.t -> unit -> flow * flow
-  (** [pair ~client ~server ()] is a connected in-memory flow pair (reusing
-      {!Eio_net_mem}'s transport) with the client end wrapped by [client] and
-      the server end by [server] (each {!Schedule.none} by default). Bytes
-      written on one arrive on the other. Both ends must run under an Eio event
-      loop ({!Eio_mock.Backend.run} suffices). *)
+  (** [pair ~client ~server ()] is a connected pair of in-memory flows, the ends
+      of {!Eio_net_mem.pipe}, with the client end wrapped by [client] (defaults
+      to {!Schedule.none}) and the server end by [server] (defaults to
+      {!Schedule.none}). Bytes written on one arrive on the other. Both ends
+      must run under an Eio scheduler ({!Eio_mock.Backend.run} suffices), and no
+      switch closes them. *)
 end
 
 (** Adversarial datagram sockets: loss, duplication, reordering, truncation,
     garbage injection, and a stalled receive, all on the incoming path. *)
 module Datagram : sig
+  (** The type for the fault injected on one receive. *)
   type fault =
     | Pass  (** Deliver the next datagram unchanged. *)
     | Drop of int
         (** Drop [n] datagrams from the base, then deliver the one after them.
-        *)
+            [n] must not be negative. *)
     | Dup  (** Deliver the next datagram now and again on the following recv. *)
     | Reorder
         (** Hold the next datagram back and deliver the one after it first; the
             held datagram surfaces on the following recv. *)
     | Truncate of int
-        (** Deliver only the first [n] bytes of the next datagram. *)
+        (** Deliver only the first [n] bytes of the next datagram, none if [n]
+            is negative. *)
     | Garble of int
-        (** Deliver [n] seed-derived bytes in place of the next datagram. *)
+        (** Deliver [n] bytes drawn from the schedule's seed, [0] for a script,
+            in place of the next datagram, with its source address. *)
     | Delay of int
         (** {!Eio.Fiber.yield} [n] times, then deliver the next datagram. *)
 
   (** A datagram socket's recv-path fault schedule. *)
   module Schedule : sig
     type t
+    (** The type for datagram fault schedules. *)
 
     val none : t
     (** [none] injects no faults. *)
 
     val script : fault list -> t
-    (** [script events] applies [events.(i)] on the [i]th receive, passing
-        through once exhausted. Pins an exact scenario. *)
+    (** [script events] injects the [i]th element of [events] on the [i]th
+        receive that takes a datagram from the base, and passes through once
+        [events] is exhausted. A datagram held back by {!Dup} or {!Reorder} is
+        delivered on the receive after, with no fault. *)
 
     val seeded :
       ?loss:float ->
@@ -132,16 +153,23 @@ module Datagram : sig
       ?delay:int ->
       int ->
       t
-    (** [seeded seed] draws one fault per receive from [seed]: with the given
-        probabilities a datagram is dropped, duplicated, reordered, truncated,
-        or garbled, else (with a seed-driven chance when [delay > 0]) the
-        receive stalls [1..delay] turns, else it passes through. *)
+    (** [seeded ~loss ~dup ~reorder ~truncate ~garble ~delay seed] draws one
+        fault per receive from [seed]: with probability [loss], [dup],
+        [reorder], [truncate] and [garble] (each defaults to [0.]) a datagram is
+        dropped, duplicated, reordered, truncated to fewer than [8] bytes, or
+        replaced with fewer than [16] garbled bytes; otherwise, with even odds
+        when [delay] (defaults to [0]) is positive, the receive stalls [1] to
+        [delay] scheduler turns, and else it passes through. The probabilities
+        must not sum to more than [1.]. *)
 
     val pp : t Fmt.t
-    (** [pp] prints the schedule's kind and parameters. *)
+    (** [pp] formats a schedule as its kind, with the number of faults of a
+        script, or the [seed], [loss], [dup] and [reorder] of a seeded schedule.
+    *)
   end
 
   type socket = [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t
+  (** The type for wrapped datagram sockets. *)
 
   val wrap : Schedule.t -> _ Eio.Net.datagram_socket -> socket
   (** [wrap schedule sock] is [sock] with [schedule]'s faults injected on
@@ -154,6 +182,7 @@ end
     return adversarial flows, connects can be refused, timed out, or slowed, and
     a keep-alive-style listener drops after a bounded number of accepts. *)
 module Net : sig
+  (** The type for the fault injected on one connect. *)
   type connect =
     | Open  (** Connect normally; the flow is wrapped by the flow schedule. *)
     | Refuse  (** Raise a connection-refused error. *)
@@ -165,6 +194,7 @@ module Net : sig
       optional accept budget. *)
   module Schedule : sig
     type t
+    (** The type for network fault schedules. *)
 
     val v :
       ?flow:Flow.Schedule.t ->
@@ -172,11 +202,12 @@ module Net : sig
       ?max_accepts:int ->
       unit ->
       t
-    (** [v ~flow ~connect ~max_accepts ()] applies [flow] (default
-        {!Flow.Schedule.none}) to every connected and accepted flow, uses
-        [connect.(i)] on the [i]th connect (passing through once exhausted),
-        and, if [max_accepts] is set, closes the listener and raises
-        [End_of_file] from every accept past that many. *)
+    (** [v ~flow ~connect ~max_accepts ()] applies [flow] (defaults to
+        {!Flow.Schedule.none}) to every connected and accepted flow, injects the
+        [i]th element of [connect] (defaults to [[]]) on the [i]th connect of
+        the network and passes through once it is exhausted, and closes a
+        listener and raises [End_of_file] from each of its accepts past
+        [max_accepts] (defaults to no bound). *)
 
     val seeded :
       ?dribble:int ->
@@ -189,22 +220,26 @@ module Net : sig
       ?max_accepts:int ->
       int ->
       t
-    (** [seeded seed] is {!v} with the per-flow schedule set to
-        {!Flow.Schedule.seeded} of [seed] and the given knobs. *)
+    (** [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
+         ~fail_write_after ~connect ~max_accepts seed] is
+        [v ~flow ~connect ~max_accepts ()] with [flow] the
+        {!Flow.Schedule.seeded} schedule of [seed] and the flow arguments. *)
 
     val pp : t Fmt.t
-    (** [pp] prints the per-flow schedule, connect-fault count, and accept
-        budget. *)
+    (** [pp] formats a schedule as its flow schedule, the number of its connect
+        faults and its accept bound. *)
   end
 
   type t = [ `Generic ] Eio.Net.ty Eio.Resource.t
+  (** The type for wrapped networks. *)
 
   val wrap : Schedule.t -> _ Eio.Net.t -> t
   (** [wrap schedule net] is [net] with [schedule]'s faults injected: connects
       and accepts return {!Flow.wrap}ped flows, connect faults fire per
       [schedule], and the listener honours [max_accepts]. Datagram sockets are
-      not carried (use {!Datagram.wrap}); [getaddrinfo] and [getnameinfo] pass
-      through. *)
+      not carried: [datagram_socket] raises [Invalid_argument], and
+      {!Datagram.wrap} wraps one from [net]. [getaddrinfo] and [getnameinfo]
+      pass through. *)
 
   val v : sw:Eio.Switch.t -> Schedule.t -> t
   (** [v ~sw schedule] is {!wrap} over a fresh in-memory network
@@ -215,6 +250,7 @@ end
 (** A listener's connection bound, as the peers it accepts see it. *)
 module Listener : sig
   type net = [ `Generic ] Eio.Net.ty Eio.Resource.t
+  (** The type for the network {!accepted} serves on. *)
 
   val accepted :
     offered:int -> (net:net -> addr:Eio.Net.Sockaddr.stream -> unit) -> int
@@ -223,7 +259,8 @@ module Listener : sig
       connections waiting, each from a peer that opens it and never sends a
       byte, and is how many of them [serve] accepted once every fiber is
       blocked. A peer that sends nothing holds its connection for good, so the
-      count is what a listener lets that many silent peers make it hold. A
-      [serve] that returns fails the case: a listener serves until it is
-      stopped. *)
+      count is what a listener lets that many silent peers make it hold.
+
+      Raises [Failure] if [serve] returns, since a listener serves until it is
+      stopped. An exception from [serve] propagates. *)
 end
