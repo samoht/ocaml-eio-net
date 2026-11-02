@@ -199,6 +199,14 @@ let test_dgram_drop () =
   Alcotest.(check (list string))
     "dropped datagram is skipped" [ "d1"; "d2"; "d3" ] (recv_n sock 3)
 
+(* A negative drop count has no datagram to stop at: the receive would drop
+   every datagram the base ever delivers. The script refuses it when it is
+   built, before any receive. *)
+let test_dgram_drop_negative () =
+  match Datagram.Schedule.script [ Pass; Drop (-1) ] with
+  | exception Invalid_argument _ -> ()
+  | _ -> Alcotest.fail "a script with Drop (-1) was built"
+
 let test_dgram_dup () =
   Eio_mock.Backend.run @@ fun () ->
   let base = fake_dgram [ "d0"; "d1" ] in
@@ -333,6 +341,8 @@ let suite =
       Alcotest.test_case "flow seeded determinism" `Quick
         test_flow_seeded_deterministic;
       Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
+      Alcotest.test_case "datagram drop refuses a negative count" `Quick
+        test_dgram_drop_negative;
       Alcotest.test_case "datagram dup" `Quick test_dgram_dup;
       Alcotest.test_case "datagram reorder" `Quick test_dgram_reorder;
       Alcotest.test_case "datagram truncate" `Quick test_dgram_truncate;
