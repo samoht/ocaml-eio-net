@@ -61,14 +61,14 @@ Each decoder state retains at most `Config.buffer_size` bytes (maximum payload
 plus prefix). An oversized declaration is refused after its two or four prefix
 bytes, before requesting or retaining any payload.
 
-Incremental input uses the existing balanced rope: retained space is O(n) and
-arbitrarily fragmented input costs O(n log n) work for n payload bytes. The Eio
-interpreter obtains each requested prefix/payload through its bounded buffered
-reader, whose buffer is independently bounded by `Config.buffer_size`. Thus
-the complete Eio input path retains at most twice that byte bound plus fixed
-state metadata; kernel socket buffers are owned by the transport. Outgoing
-batches reference payload leaves, adding length prefixes and
-rope metadata; the caller owns the supplied batch size and delivered frames.
+The decoder keeps the reads of an incomplete payload as they came and joins
+them once, when the frame is whole: for n payload bytes it retains O(n) bytes
+and does O(n) work, however fragmented the input. The Eio interpreter reads
+each requested prefix or payload through a buffered reader that is also
+bounded by `Config.buffer_size`, so the whole Eio input path retains at most
+twice that bound, plus the kernel's socket buffers. An encoded frame is a new
+buffer holding its length prefix followed by the caller's payload buffers,
+which are not copied.
 
 ## API
 
@@ -79,11 +79,12 @@ raise `Eio_net.Frame.Error` with the pure error value.
 
 ## Related work
 
-- The existing Wire unsigned codecs encode/decode the length fields here.
+- [wire](https://github.com/parsimoni-labs/ocaml-wire)'s unsigned codecs encode and
+  decode the length fields.
 - [Angstrom](https://github.com/inhabitedtype/angstrom) offers general incremental
   parser combinators, while [Faraday](https://github.com/inhabitedtype/faraday)
   offers serializers with explicit copying/allocation control. This package
-  provides the bounded frame lifecycle using the project's existing codecs.
+  provides only the bounded frame lifecycle.
 - Tokio's [LengthDelimitedCodec](https://docs.rs/tokio-util/latest/tokio_util/codec/length_delimited/struct.LengthDelimitedCodec.html)
   similarly separates frame bounds from stream IO. Its configurable field
   offsets/adjustments are outside these two network-order representations.

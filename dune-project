@@ -18,18 +18,24 @@
  (description "IO-free network-order framing with bounded incremental decoding and atomic batch validation.")
  (tags (network framing))
  (depends
-  (ocaml (>= 4.14))
+  (ocaml (>= 5.3))
   fmt
   (wire (>= 1.3.0))
   (cstruct (>= 6.0.0))
   (alcotest :with-test)
   (alcobar :with-test)
   (ohex :with-test)
-  (mdx :with-test)))
+  (mdx (and :with-test (>= 2.3.0)))))
 
 (package
  (name eio-net)
  (synopsis "Eio network backends and test helpers")
+ (description
+  "Network channels, relays and test backends for Eio: a frame channel where one
+   receive is one frame, over a datagram socket, a length-prefixed flow or an
+   in-memory pair; an addressed datagram channel; a bidirectional relay; an
+   in-memory network and a fault-injecting wrapper for tests; and batched
+   datagram transfers on POSIX sockets.")
  (tags (eio network test))
  (depends
   (hermetic (>= 0.1.0))
@@ -41,7 +47,7 @@
   logs
   bytesrw
   mtime
-  ipaddr
+  (ipaddr (>= 5.3.0))
   fpath
   (alcotest :with-test)
   (eio_main :with-test)))
