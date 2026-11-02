@@ -16,4 +16,5 @@
   alcotest
   cstruct
   fmt
+  logs
   unix))

@@ -35,15 +35,15 @@ val complete : head -> unit
 
 val run :
   ?stop:'a Eio.Promise.t ->
+  ?on_error:(exn -> unit) ->
   max_connections:int ->
-  on_error:(exn -> unit) ->
   [> 'tag Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   (head ->
   'tag Eio.Net.stream_socket_ty Eio.Resource.t ->
   Eio.Net.Sockaddr.stream ->
   unit) ->
   'a
-(** [run ~stop ~max_connections ~on_error socket handler] accepts connections on
+(** [run ~stop ~on_error ~max_connections socket handler] accepts connections on
     [socket] and serves each with [handler h flow addr] in a fiber of its own,
     where [h] is the connection's {!type-head}, [flow] its socket and [addr] its
     peer's address. [flow] is closed when [handler] returns.
@@ -66,7 +66,8 @@ val run :
     process holds a connection raises its error, naming that none was held to
     shed or wait for. Any other failed accept raises its error.
 
-    [on_error] receives each exception a connection's [handler] raises but
+    [on_error] (defaults to logging a warning on the [eio-net.accept] log
+    source) receives each exception a connection's [handler] raises but
     [Eio.Cancel.Cancelled], with the peer's address in its context when it is an
     [Eio.Io], and the loop goes on serving the others: a failure on the socket,
     and an error the peer caused, as a malformed frame ([Eio_net_framing.Error])

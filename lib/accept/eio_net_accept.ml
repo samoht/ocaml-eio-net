@@ -1,5 +1,9 @@
 open! Hermetic
 
+let log_src = Logs.Src.create "eio-net.accept"
+
+module Log = (val Logs.src_log log_src)
+
 type answer = [ `Aborted | `Descriptors ]
 
 let portable = function
@@ -153,7 +157,9 @@ let fork loop ~sw ~on_error handler flow addr =
               (Eio.Exn.add_context e "handling connection from %a"
                  Eio.Net.Sockaddr.pp addr))
 
-let run ?stop ~max_connections ~on_error listening handler =
+let log_error exn = Log.warn (fun m -> m "connection failed: %a" Fmt.exn exn)
+
+let run ?stop ?(on_error = log_error) ~max_connections listening handler =
   if max_connections < 1 then
     Fmt.invalid_arg "Eio_net_accept.run: max_connections is %d" max_connections;
   let loop =

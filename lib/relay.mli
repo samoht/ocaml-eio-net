@@ -35,8 +35,8 @@ val forward :
 
     A connection that fails on a socket (the dial refused, either side dropping
     mid-splice) closes that connection's flows and is reported to [on_error]
-    (defaults to logging a warning on the [eio-net.relay] log source); the
-    listener itself keeps accepting.
+    (defaults to logging a warning on the [eio-net.accept] log source, as
+    {!Eio_net_accept.run} does); the listener itself keeps accepting.
 
     Raises [Invalid_argument] if [max_connections] is less than [1]. A failure
     to listen, such as an address in use, propagates from {!Eio.Net.listen}. *)

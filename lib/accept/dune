@@ -5,4 +5,4 @@
 (library
  (name eio_net_accept)
  (public_name eio-net.accept)
- (libraries hermetic eio fmt))
+ (libraries hermetic eio fmt logs))

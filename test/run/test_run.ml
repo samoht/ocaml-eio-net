@@ -276,6 +276,40 @@ let test_a_failed_connection_leaves_the_loop () =
     "the next peer is answered" "ok fresh\n" (exchange net "fresh\n");
   Alcotest.(check int) "the failure is reported" 1 (List.length !seen)
 
+(* Without [on_error], a failed connection is logged as a warning on the
+   [eio-net.accept] source, and the loop serves on. *)
+let test_a_failed_connection_is_logged_by_default () =
+  let warnings = ref [] in
+  let report src level ~over k msgf =
+    msgf @@ fun ?header:_ ?tags:_ fmt ->
+    Fmt.kstr
+      (fun _ ->
+        if level = Logs.Warning then warnings := Logs.Src.name src :: !warnings;
+        over ();
+        k ())
+      fmt
+  in
+  let previous = Logs.reporter () in
+  Logs.set_reporter { Logs.report };
+  Fun.protect ~finally:(fun () -> Logs.set_reporter previous) @@ fun () ->
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let served = function
+    | "boom" -> raise (Eio_unix.Err.v Unix.ECONNRESET "write" "")
+    | _ -> ()
+  in
+  Eio.Switch.run @@ fun scope ->
+  let listening = scripted ~sw:scope net [] in
+  Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+      Eio_net_accept.run ~max_connections:4 listening (line_server ~served));
+  Alcotest.(check string)
+    "the failed peer is not answered" "" (exchange net "boom\n");
+  Alcotest.(check string)
+    "the next peer is answered" "ok fresh\n" (exchange net "fresh\n");
+  Alcotest.(check (list string))
+    "the failure is a warning of eio-net.accept" [ "eio-net.accept" ] !warnings
+
 (* A peer that sends a length prefix past the bound makes its connection's
    handler raise [Eio_net_framing.Error]: the error is reported to [on_error]
    with the others, and the loop serves the next peer. *)
@@ -420,6 +454,8 @@ let suite =
         (complete_heads_are_not_shed 100);
       Alcotest.test_case "a failed connection leaves the loop" `Quick
         test_a_failed_connection_leaves_the_loop;
+      Alcotest.test_case "a failed connection is logged by default" `Quick
+        test_a_failed_connection_is_logged_by_default;
       Alcotest.test_case "a malformed peer leaves the loop" `Quick
         test_a_malformed_peer_leaves_the_loop;
       Alcotest.test_case "on_error raising ends the loop" `Quick
