@@ -75,10 +75,10 @@ module Config : sig
     t
   (** [v ~length_field ~min_length ~max_length ()] is the configuration of
       frames whose length is a [length_field] (defaults to [Uint32_be]) and
-      whose payloads are [min_length] (defaults to [0]) to [max_length] bytes
-      long. [max_length] defaults to 1 MiB ([1048576]), lowered to the capacity
-      of [length_field] or to [Sys.max_string_length] when either is smaller:
-      the default for [Uint16_be] is [65535].
+      whose payloads are [min_length] (defaults to [0]) to [max_length]
+      (defaults to the least of 1 MiB, the capacity of [length_field] and
+      [Sys.max_string_length], so [1048576] for [Uint32_be] and [65535] for
+      [Uint16_be]) bytes long.
 
       Raises [Invalid_argument] if [min_length] is negative, if [max_length] is
       below [min_length], or if [max_length] exceeds the capacity of
@@ -147,11 +147,11 @@ val encode :
 (** [encode ~prefixes c batch] is the frames of the payloads of [batch], in
     order, as one list of buffers for a vectored write. A payload is the
     concatenation of its buffers, and each payload follows its length prefix.
-    The prefixes of the batch share one buffer: [prefixes] if it holds at least
-    [Config.prefix_length c] bytes per payload, a new one otherwise (defaults to
-    a new one). Neither [prefixes] nor the payload buffers are copied, so none
-    of them may change until the result is written. An empty payload [[]] is a
-    frame of its prefix alone, and the empty batch is [Ok []].
+    The prefixes of the batch share one buffer: [prefixes] (defaults to a new
+    buffer) if it holds at least [Config.prefix_length c] bytes per payload, a
+    new one otherwise. Neither [prefixes] nor the payload buffers are copied, so
+    none of them may change until the result is written. An empty payload [[]]
+    is a frame of its prefix alone, and the empty batch is [Ok []].
 
     This is [Error (Invalid_length _)] for the first payload of [batch] whose
     length is outside the range of [c], and then no frame of [batch] is encoded.
