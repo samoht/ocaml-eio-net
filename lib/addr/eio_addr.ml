@@ -1,3 +1,5 @@
+open! Hermetic
+
 let ip a = Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets a)
 
 let ipaddr (a : Eio.Net.Ipaddr.v4v6) =

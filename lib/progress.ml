@@ -1,3 +1,5 @@
+open! Hermetic
+
 exception Too_slow of { limit : int; window : Mtime.Span.t }
 
 type t = {

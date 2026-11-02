@@ -1,3 +1,5 @@
+open! Hermetic
+
 type answer = [ `Aborted | `Descriptors ]
 
 let portable = function

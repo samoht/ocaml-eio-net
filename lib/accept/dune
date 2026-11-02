@@ -5,6 +5,4 @@
 (library
  (name eio_net_accept)
  (public_name eio-net.accept)
- (libraries hermetic.eio eio fmt)
- (flags
-  (:standard -open Hermetic_eio)))
+ (libraries hermetic eio fmt))

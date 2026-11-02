@@ -4,6 +4,4 @@
 (library
  (name eio_addr)
  (public_name eio-net.addr)
- (libraries hermetic.eio eio ipaddr fmt)
- (flags
-  (:standard -open Hermetic_eio)))
+ (libraries hermetic eio ipaddr fmt))

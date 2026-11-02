@@ -1,3 +1,5 @@
+open! Hermetic
+
 type Eio.Exn.Backend.t += Injected_fault
 
 let () =

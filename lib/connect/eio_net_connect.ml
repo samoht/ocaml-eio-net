@@ -1,3 +1,5 @@
+open! Hermetic
+
 type answer = [ `Refused | `Unreachable ]
 
 let portable = function
