@@ -34,13 +34,22 @@ let test_the_registered_classifier_answers () =
   Alcotest.(check (option answer))
     "a refusal it does not name" None
     (Eio_net_connect.classify refused);
-  Alcotest.check_raises "a second registration is refused by name"
-    (Invalid_argument
-       "Eio_net_connect.register: first is registered, second refused")
-    (fun () -> Eio_net_connect.register ~name:"second" (fun _ -> None));
+  ()
+
+(* A second classifier, as a program that links two network libraries
+   registers, is asked after the first: the first answer wins. *)
+let test_classifiers_are_asked_in_registration_order () =
+  Eio_net_connect.register ~name:"second" (function
+    | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETUNREACH, _, _)), _)
+    | Exit ->
+        Some `Refused
+    | _ -> None);
   Alcotest.(check (option answer))
-    "the first classifier stays" (Some `Unreachable)
-    (Eio_net_connect.classify unreachable)
+    "the first classifier's answer wins" (Some `Unreachable)
+    (Eio_net_connect.classify unreachable);
+  Alcotest.(check (option answer))
+    "the second answers what the first does not" (Some `Refused)
+    (Eio_net_connect.classify Exit)
 
 let suite =
   ( "eio_net_connect",
@@ -49,4 +58,6 @@ let suite =
         test_portable_without_a_registration;
       Alcotest.test_case "the registered classifier answers" `Quick
         test_the_registered_classifier_answers;
+      Alcotest.test_case "classifiers are asked in registration order" `Quick
+        test_classifiers_are_asked_in_registration_order;
     ] )
