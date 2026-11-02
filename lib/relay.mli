@@ -7,11 +7,13 @@
     side finishes. *)
 
 val splice : _ Eio.Flow.two_way -> _ Eio.Flow.two_way -> unit
-(** [splice a b] copies both directions concurrently until each side reaches
-    end-of-stream. A finished direction propagates as a half-close
+(** [splice a b] copies [a] to [b] and [b] to [a] concurrently until each source
+    reaches end-of-file. A finished direction propagates as a half-close
     ([Eio.Flow.shutdown `Send] on the other flow), so a peer that reads until
     end-of-file sees it as soon as its counterpart is done writing. The call
-    returns when both directions are done. *)
+    returns when both directions are done, and closes neither flow. An exception
+    from either flow, such as a reset, cancels the other direction and
+    propagates. *)
 
 val forward :
   sw:Eio.Switch.t ->
@@ -23,14 +25,18 @@ val forward :
   unit ->
   Eio.Net.Sockaddr.stream
 (** [forward ~sw ~net ~on_error ~max_connections ~listen ~connect ()] listens on
-    [listen] and, for every accepted connection, dials [connect] and {!splice}s
-    the two, in an {!Eio_net_accept.run} loop on [sw] that relays at most
-    [max_connections] connections at once: a client past them waits, holding no
-    upstream connection, until one ends. A relay serves from the accept, so it
-    sheds none. It is the bound address once listening (for a [listen] naming
-    port 0, the port the system chose), and it serves until [sw] ends.
+    [listen] (with a backlog of [16] and [SO_REUSEADDR]) and, for every accepted
+    connection, dials [connect] and {!splice}s the two, in an
+    {!Eio_net_accept.run} loop on [sw] that relays at most [max_connections]
+    connections at once: a client past them waits, holding no upstream
+    connection, until one ends. A relay serves from the accept, so it sheds
+    none. It is the bound address once listening (for a [listen] naming port 0,
+    the port the system chose), and it serves until [sw] ends.
 
     A connection that fails on a socket (the dial refused, either side dropping
     mid-splice) closes that connection's flows and is reported to [on_error]
-    (default: a warning on this module's log source); the listener itself keeps
-    accepting. *)
+    (defaults to logging a warning on the [eio-net.relay] log source); the
+    listener itself keeps accepting.
+
+    Raises [Invalid_argument] if [max_connections] is less than [1]. A failure
+    to listen, such as an address in use, propagates from {!Eio.Net.listen}. *)

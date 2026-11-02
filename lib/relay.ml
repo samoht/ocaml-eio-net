@@ -15,6 +15,10 @@ let default_on_error exn =
 
 let forward ~sw ~net ?(on_error = default_on_error) ~max_connections ~listen
     ~connect () =
+  (* Checked here as well as by the loop, which runs in a daemon fiber where
+     the error would fail [sw] rather than reach the caller. *)
+  if max_connections < 1 then
+    Fmt.invalid_arg "Relay.forward: max_connections is %d" max_connections;
   let socket = Eio.Net.listen ~sw ~backlog:16 ~reuse_addr:true net listen in
   (* A daemon fiber: the listener must not hold the switch open once the
      caller's own work ends. A relay has no head: it serves from the accept. *)
