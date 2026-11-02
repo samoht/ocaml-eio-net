@@ -22,7 +22,8 @@ val of_connected_datagram_fd :
     [Invalid_argument] on a longer one, and on a send the system refuses the
     {!Eio.Io} error {!Eio_unix.Err.v} makes of it; either way, frames before it
     in the batch may have been sent. A receive the system refuses raises that
-    {!Eio.Io} error too.
+    {!Eio.Io} error too; one a batch meets after its first datagram is raised by
+    the next receive, and the batch returns the datagrams before it.
 
     Fibers may send and receive at once: concurrent receives run one at a time,
     and so do concurrent sends, a batch to its end, while a send and a receive

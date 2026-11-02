@@ -37,7 +37,18 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
            (Eio.Exn.X (Eio_net.Datagram.Too_long { max = max_frame })))
   in
   let recv_buf = Cstruct.create (max_frame + 1) in
+  (* The failure a batch met after its first datagram, which the system
+     reports once: the next receive raises it. *)
+  let failed = ref None in
+  let raise_failed () =
+    Option.iter
+      (fun e ->
+        failed := None;
+        raise e)
+      !failed
+  in
   let recv () =
+    raise_failed ();
     let _source, len = Eio.Net.recv socket recv_buf in
     check len;
     Cstruct.to_string ~len recv_buf
@@ -49,9 +60,20 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
   in
   let recv_lengths = Array.make max_batch 0 in
   let recv_batch () =
+    raise_failed ();
     let _source, first_len = Eio.Net.recv socket recv_buffers.(0) in
     recv_lengths.(0) <- first_len;
-    let extra = eio (recv_batch_raw fd recv_buffers recv_lengths 1) max_batch in
+    let extra =
+      match recv_batch_raw fd recv_buffers recv_lengths 1 max_batch with
+      | extra -> extra
+      | exception Unix.Unix_error (e, fn, arg) ->
+          failed := Some (Eio_unix.Err.v e fn arg);
+          let rec received i =
+            if i < max_batch && recv_lengths.(i) >= 0 then received (i + 1)
+            else i - 1
+          in
+          received 1
+    in
     for i = 0 to extra do
       check recv_lengths.(i)
     done;

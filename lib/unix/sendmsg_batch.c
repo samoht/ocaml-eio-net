@@ -95,6 +95,13 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
   CAMLreturn(Val_int(sent));
 }
 
+/* Receives into the buffers [offset, count) of [vbuffers] the datagrams
+   waiting on [fd], without waiting, and stores each one's length in
+   [vlengths]. Returns how many were received: 0 when none waits. A failure
+   other than EAGAIN raises [Unix_error] once the lengths of the datagrams
+   received before it are stored, and those of the others are -1, so the
+   caller keeps the datagrams and reports the failure after them: the system
+   reports a socket's pending error once. */
 CAMLprim value caml_eio_net_recvmsg_batch(value vfd, value vbuffers,
                                            value vlengths, value voffset,
                                            value vcount) {
@@ -122,6 +129,7 @@ CAMLprim value caml_eio_net_recvmsg_batch(value vfd, value vbuffers,
   }
 
   ssize_t received = 0;
+  int error = 0;
   caml_enter_blocking_section();
 #ifdef __APPLE__
   if (recvmsg_x != NULL) {
@@ -133,32 +141,35 @@ CAMLprim value caml_eio_net_recvmsg_batch(value vfd, value vbuffers,
     }
     received =
         recvmsg_x(fd, messages, (unsigned int)(count - offset), MSG_DONTWAIT);
-    if (received > 0) {
-      for (int i = 0; i < received; i++)
-        lengths[offset + i] = messages[i].msg_datalen;
+    if (received < 0) {
+      error = errno;
+      received = 0;
     }
+    for (int i = 0; i < received; i++)
+      lengths[offset + i] = messages[i].msg_datalen;
   } else
 #endif
   {
     while (received < count - offset) {
       ssize_t len = recv(fd, iov[offset + received].iov_base,
                          iov[offset + received].iov_len, MSG_DONTWAIT);
-      if (len < 0) break;
+      if (len < 0) {
+        error = errno;
+        break;
+      }
       lengths[offset + received] = (size_t)len;
       received++;
     }
   }
-  int error = errno;
   caml_leave_blocking_section();
 
-  if (received < 0) {
-    if (error == EAGAIN || error == EWOULDBLOCK) received = 0;
-    else {
-      errno = error;
-      uerror("recvmsg_batch", Nothing);
-    }
-  }
   for (int i = 0; i < received; i++)
     Store_field(vlengths, offset + i, Val_long(lengths[offset + i]));
+  if (error != 0 && error != EAGAIN && error != EWOULDBLOCK) {
+    for (int i = offset + (int)received; i < count; i++)
+      Store_field(vlengths, i, Val_long(-1));
+    errno = error;
+    uerror("recvmsg_batch", Nothing);
+  }
   CAMLreturn(Val_int(received));
 }
