@@ -15,10 +15,10 @@ val of_socket :
   ?dst:Eio.Net.Sockaddr.datagram ->
   _ Eio.Net.datagram_socket ->
   t
-(** [of_socket ?max_frame ?dst socket] presents a datagram socket as an
-    addressed channel. Datagrams are received from any source, up to [max_frame]
-    bytes (default 65536); {!send} without [~dst] sends to [dst] (omit [dst] for
-    a connected socket).
+(** [of_socket ~max_frame ~dst socket] presents [socket] as an addressed
+    channel. Datagrams are received from any source, up to [max_frame] bytes
+    (defaults to [65536]); {!send} without [~dst] sends to [dst] (omit it for a
+    connected socket).
 
     {!recv} raises [Invalid_argument] on a datagram longer than [max_frame]
     rather than silently truncating it: a datagram socket otherwise reports a

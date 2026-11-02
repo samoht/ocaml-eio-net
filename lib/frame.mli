@@ -38,15 +38,19 @@ val of_datagram_socket :
   ?dst:Eio.Net.Sockaddr.datagram ->
   _ Eio.Net.datagram_socket ->
   t
-(** [of_datagram_socket ?max_frame ?dst socket] presents a datagram socket as a
-    frame channel: each datagram is one frame. Frames are sent to [dst] (omit
-    for a connected socket) and received from any source, up to [max_frame]
-    bytes (default 65536).
+(** [of_datagram_socket ~max_frame ~dst socket] presents [socket] as a frame
+    channel: each datagram is one frame. Frames are sent to [dst] (omit it for a
+    connected socket) and received from any source, up to [max_frame] bytes
+    (defaults to [65536]). {!send_batch} sends its frames one datagram at a
+    time.
 
-    {!recv} raises [Invalid_argument] on a datagram longer than [max_frame]
-    rather than silently truncating it (the channel stays usable after the
-    refusal). A protocol that needs the source address of each datagram uses the
-    addressed {!Datagram} channel instead. *)
+    {!recv}, {!recv_batch} and {!recv_slice} raise [Invalid_argument] on a
+    datagram longer than [max_frame] rather than silently truncating it; the
+    oversized datagram is consumed and the channel stays usable. A protocol that
+    needs the source address of each datagram uses the addressed {!Datagram}
+    channel instead.
+
+    Raises [Invalid_argument] if [max_frame] is not positive. *)
 
 val of_length_prefixed_flow :
   ?framing:Eio_net_framing.Config.t -> _ Eio.Flow.two_way -> t
@@ -58,13 +62,14 @@ val of_length_prefixed_flow :
     input. Receives are serialised among themselves, and so are sends, so a
     batch reaches the wire whole even when fibers send concurrently.
 
-    {!recv} raises [End_of_file] at the end of input at a frame boundary, and
-    [Eio_net_framing.Error] if the input ends inside a frame ([Truncated _]) or
-    a prefix declares a length outside the range of [framing]
-    ([Invalid_length _]). After such an error, or any exception that interrupts
-    a frame after part of it was consumed (a cancellation), every later receive
-    raises [Eio_net_framing.Error] with that error, or [Aborted] for another
-    exception, rather than read the middle of a frame as a prefix.
+    {!recv}, {!recv_batch} and {!recv_slice} raise [End_of_file] at the end of
+    input at a frame boundary, and [Eio_net_framing.Error] if the input ends
+    inside a frame ([Truncated _]) or a prefix declares a length outside the
+    range of [framing] ([Invalid_length _]). After such an error, or any
+    exception that interrupts a frame after part of it was consumed (a
+    cancellation), every later receive raises [Eio_net_framing.Error] with that
+    error, or [Aborted] for another exception, rather than read the middle of a
+    frame as a prefix.
 
     {!send} and {!send_batch} write a batch with one [Eio.Flow.write]. They
     raise [Eio_net_framing.Error (Invalid_length _)] before writing anything if
@@ -74,9 +79,10 @@ val of_length_prefixed_flow :
 
 val pair : unit -> t * t
 (** [pair ()] is two in-memory frame channels where a frame sent on one is
-    received on the other, and vice versa. For hermetic tests of a frame
-    protocol without binding a socket. Blocking {!recv} suspends the calling
-    fiber until a frame arrives, so both ends must run under {!Eio_main.run}. *)
+    received on the other, in order, and vice versa. Each direction queues
+    without bound: a send copies the frame and never blocks. A receive suspends
+    the calling fiber until a frame arrives, so the ends run under an Eio
+    scheduler, on one domain or two. *)
 
 (** {1:receiving Receiving} *)
 
@@ -106,13 +112,12 @@ val send : t -> Cstruct.t list -> unit
     The buffers must not change until [send] returns. *)
 
 val send_batch : t -> Cstruct.t list list -> unit
-(** [send_batch c frames] sends the burst [frames] on [c], in order, each frame
-    the concatenation of its buffers as with {!send}. It coalesces them into a
-    single [writev] where the transport allows (software GSO): one system call
-    for the whole burst instead of one per frame. A transport that cannot
-    coalesce (a datagram socket, where each frame is its own datagram) sends
-    them one at a time. If [frames] is empty, nothing is sent. The buffers must
-    not change until [send_batch] returns. *)
+(** [send_batch c frames] sends the frames of [frames] on [c], in order, each
+    frame the concatenation of its buffers as with {!send}, in as few system
+    calls as the transport allows: a stream transport writes the whole batch
+    with one vectored write, and a datagram transport sends one datagram per
+    frame, several in one system call where it can. If [frames] is empty,
+    nothing is sent. The buffers must not change until [send_batch] returns. *)
 
 (** {1:fmt Formatting} *)
 
