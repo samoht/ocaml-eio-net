@@ -10,23 +10,29 @@ type t = {
 
 let pp ppf _ = Fmt.string ppf "<frame channel>"
 
-(* A received frame is viewed in place, not copied: a slice a reader hands out
-   is read-only to its consumer, so the string is never written through it. *)
-let slice_of_string s =
+(* A frame the transports of this module receive is a fresh string that
+   nothing else holds, so its slice views it in place: a write through the
+   slice changes only that frame. A string from a caller's [recv] may be held
+   elsewhere, so its slice is a copy. *)
+let view s =
   Bytesrw.Bytes.Slice.of_bytes_or_eod (Stdlib_original.Bytes.unsafe_of_string s)
 
-let v ~recv ~send =
+let copy s = Bytesrw.Bytes.Slice.of_bytes_or_eod (Bytes.of_string s)
+
+let make ~slice ~recv ~send =
   {
     recv;
     recv_batch = (fun () -> [ recv () ]);
-    recv_slice = (fun () -> slice_of_string (recv ()));
+    recv_slice = (fun () -> slice (recv ()));
     send;
     send_batch = List.iter send;
   }
 
+let v ~recv ~send = make ~slice:copy ~recv ~send
+
 let of_datagram_socket ?max_frame ?dst socket =
   let channel = Datagram.of_socket ?max_frame ?dst socket in
-  v
+  make ~slice:view
     ~recv:(fun () -> snd (channel.Datagram.recv ()))
     ~send:(channel.Datagram.send None)
 
@@ -80,7 +86,7 @@ let of_length_prefixed_flow ?(framing = Framing.Config.v ()) flow =
   {
     recv = take_frame;
     recv_batch = (fun () -> [ take_frame () ]);
-    recv_slice = (fun () -> slice_of_string (take_frame ()));
+    recv_slice = (fun () -> view (take_frame ()));
     send = (fun payload -> send_batch [ payload ]);
     send_batch;
   }
@@ -94,7 +100,7 @@ let pair () =
     {
       recv;
       recv_batch = (fun () -> [ recv () ]);
-      recv_slice = (fun () -> slice_of_string (recv ()));
+      recv_slice = (fun () -> view (recv ()));
       send;
       send_batch = List.iter send;
     }

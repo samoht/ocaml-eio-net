@@ -43,8 +43,9 @@ val pp : t Fmt.t
 
 val v : recv:(unit -> string) -> send:(Cstruct.t list -> unit) -> t
 (** [v ~recv ~send] is a frame channel from a receive and a send function.
-    {!recv_batch} returns one frame and {!send_batch} sends the burst one frame
-    at a time; a transport that can batch overrides these operations. *)
+    {!recv_batch} returns one frame, {!recv_slice} a copy of it, and
+    {!send_batch} sends the burst one frame at a time; a transport that can
+    batch overrides these operations. *)
 
 val of_datagram_socket :
   ?max_frame:int ->
