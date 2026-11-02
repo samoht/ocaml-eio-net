@@ -91,6 +91,8 @@ let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
         match Eio.Flow.write flow buffers with
         | () -> ()
         | exception exn ->
+            (* Eio does not say what a write that raises has sent
+               (ocaml-multicore/eio#962), so part of a frame may be out. *)
             write_failed := true;
             raise exn)
   in
