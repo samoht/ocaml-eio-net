@@ -2,6 +2,6 @@
 ; so a unikernel guest that only needs to name an address links nothing else.
 
 (library
- (name eio_addr)
+ (name eio_net_addr)
  (public_name eio-net.addr)
  (libraries hermetic eio ipaddr fmt))

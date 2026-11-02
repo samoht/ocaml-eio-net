@@ -54,8 +54,8 @@ Seven sub-libraries sit beside it:
   refused or unreachable peer, read by the classifier its platform's network
   registers. A connection library asks it and works the same over every
   network.
-- `eio-net.addr`: conversions between `Ipaddr` and Eio socket addresses, and
-  host name resolution to a stream address.
+- `eio-net.addr`: `Eio_net_addr`, conversions between `Ipaddr` and Eio
+  socket addresses, and host name resolution to a stream address.
 
 ## Length-prefixed frames
 

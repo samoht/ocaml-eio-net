@@ -20,5 +20,5 @@ Initial release.
   network.
 - `eio-net.mem` and `eio-net.chaos`, an in-memory network and a wrapper that
   injects faults, for tests; `eio-net.unix`, batched sends and receives on
-  POSIX sockets; `eio-net.addr`, conversions between `Ipaddr` and Eio
-  addresses.
+  POSIX sockets; `eio-net.addr`, `Eio_net_addr`, conversions between
+  `Ipaddr` and Eio addresses.
