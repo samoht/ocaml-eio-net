@@ -17,6 +17,24 @@ let () =
 
 let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
 
+(* A stream option is ignored only where the queues already provide what it
+   asks for, so ignoring it yields the requested behaviour rather than
+   withholding it: [TCP_NODELAY] and [TCP_QUICKACK]. Every other option would
+   change what a caller observes and is refused by name, as is every option on
+   a datagram socket. *)
+module Sockopt = struct
+  let refuse opt =
+    Fmt.invalid_arg "eio-net.mem does not support socket option %a"
+      Eio.Net.Sockopt.pp opt
+
+  let stream : type a. a Eio.Net.Sockopt.t -> unit = function
+    | Eio.Net.Sockopt.TCP_NODELAY -> ()
+    | Eio.Net.Sockopt.TCP_QUICKACK -> ()
+    | opt -> refuse opt
+
+  let datagram : type a. a Eio.Net.Sockopt.t -> unit = refuse
+end
+
 (* One direction of a connection: the bytes written and not yet read. Its two
    ends may be used from two domains, so its state is guarded by a mutex and a
    read that finds nothing waits on a condition it registers for before it looks,
@@ -102,7 +120,7 @@ module Flow = struct
 
     let close t = shutdown t `All
     let read_methods = []
-    let setsockopt _ _ _ = ()
+    let setsockopt _ opt _ = Sockopt.stream opt
 
     let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
      fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
@@ -239,7 +257,7 @@ module Listening_socket = struct
           | Some _ | None -> ()))
 
   let listening_addr t = t.addr
-  let setsockopt _ _ _ = ()
+  let setsockopt _ opt _ = Sockopt.stream opt
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
    fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
@@ -372,7 +390,7 @@ module Datagram_socket = struct
     end
 
   let shutdown _ _ = ()
-  let setsockopt _ _ _ = ()
+  let setsockopt _ opt _ = Sockopt.datagram opt
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
    fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
@@ -405,24 +423,10 @@ module Network = struct
         (if sw == t.sw then [ sw ] else [ sw; t.sw ]);
     socket
 
-  (* An option is ignored only where these queues already provide what it asks
-     for, so ignoring it yields the requested behaviour rather than withholding
-     it: [TCP_NODELAY] and [TCP_QUICKACK]. Every other option would change what
-     a caller observes and is refused by name; post-connect [setsockopt] on a
-     mem socket remains a blanket no-op. *)
-  let ignored_hint : type a. a Eio.Net.Sockopt.t -> bool = function
-    | Eio.Net.Sockopt.TCP_NODELAY -> true
-    | Eio.Net.Sockopt.TCP_QUICKACK -> true
-    | _ -> false
-
-  let rec check_options (options : Eio.Net.Sockopt.settings) =
-    let open Eio.Net.Sockopt in
-    match options with
+  let rec check_options : Eio.Net.Sockopt.settings -> unit = function
     | [] -> ()
     | (opt, _) :: rest ->
-        if not (ignored_hint opt) then
-          Fmt.invalid_arg "eio-net.mem does not support socket option %a"
-            Eio.Net.Sockopt.pp opt;
+        Sockopt.stream opt;
         check_options rest
 
   (* A connection is a pair of queues: there is no local address to bind, so a

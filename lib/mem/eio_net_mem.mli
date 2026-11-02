@@ -50,15 +50,17 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     maps ["localhost"] and ["127.0.0.1"] with a numeric service to IPv4 loopback
     at that port, and any other host or service to no address.
 
-    [connect] accepts, and ignores, the socket options whose effect these queues
-    already have: the ones asking that writes not be coalesced and that
-    acknowledgements not be delayed, neither of which happens here. It refuses
+    [connect], and [setsockopt] on a connection or a listener, accept and ignore
+    the socket options whose effect these queues already have: [TCP_NODELAY] and
+    [TCP_QUICKACK], which ask that writes not be coalesced and that
+    acknowledgements not be delayed, neither of which happens here. They refuse
     every other option with [Invalid_argument], naming it, because ignoring one
-    that would change what a caller observes is a wrong answer with no symptom.
-    A caller cannot tell an ignored option from an applied one, so a test that
-    must know an option took effect needs a real socket. [bind_to] is refused
-    with [Invalid_argument]: there is no local address to bind. On a socket,
-    [setsockopt] does nothing and [getsockopt] raises [Invalid_argument].
+    that would change what a caller observes is a wrong answer with no symptom;
+    [setsockopt] on a datagram socket refuses every option. A caller cannot tell
+    an ignored option from an applied one, so a test that must know an option
+    took effect needs a real socket. [bind_to] is refused with
+    [Invalid_argument]: there is no local address to bind. [getsockopt] raises
+    [Invalid_argument] on every socket.
 
     A [datagram_socket] binds the address it is given: for [`UdpV4] and [`UdpV6]
     the loopback address at the lowest port of the dynamic range that no
@@ -82,6 +84,7 @@ val pipe :
     one are read on the other, and vice versa, preserving order. Unlike {!v} it
     binds no address and needs no [listen] and [connect] handshake: it is the
     bare transport for a test, or a wrapper such as an adversarial flow, that
-    needs two ends of a pipe. Blocking reads suspend the calling fiber until
-    data arrives, so both ends must run under an Eio event loop; the two ends
-    may be in different domains. No switch closes them: the caller does. *)
+    needs two ends of a pipe. Its ends take socket options as a connection of
+    {!v} does. Blocking reads suspend the calling fiber until data arrives, so
+    both ends must run under an Eio event loop; the two ends may be in different
+    domains. No switch closes them: the caller does. *)
