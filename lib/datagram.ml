@@ -27,6 +27,9 @@ let of_socket ?(max_frame = 65536) ?dst socket =
   in
   { recv; send }
 
+let recv t = t.recv ()
+let send t ?dst bufs = t.send dst bufs
+
 let equal_addr (a : Eio.Net.Sockaddr.datagram) (b : Eio.Net.Sockaddr.datagram) =
   match (a, b) with
   | `Udp (host_a, port_a), `Udp (host_b, port_b) ->

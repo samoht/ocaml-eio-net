@@ -16,21 +16,21 @@ let with_bound_pair f =
   let sock_b = Eio.Net.datagram_socket ~sw env#net addr_b in
   f ~addr_a ~addr_b ~sock_a ~sock_b
 
-let send channel dst payload =
-  channel.Eio_net.Datagram.send dst [ Cstruct.of_string payload ]
+let send channel ?dst payload =
+  Eio_net.Datagram.send channel ?dst [ Cstruct.of_string payload ]
 
 let test_source_round_trip () =
   with_bound_pair @@ fun ~addr_a ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
   let b = Eio_net.Datagram.of_socket sock_b in
-  send a (Some addr_b) "ping";
-  let source, payload = b.Eio_net.Datagram.recv () in
+  send a ~dst:addr_b "ping";
+  let source, payload = Eio_net.Datagram.recv b in
   Alcotest.(check string) "request arrives whole" "ping" payload;
   Alcotest.(check bool)
     "source is the sender's bound address" true
     (Eio_net.Datagram.equal_addr source addr_a);
-  send b (Some source) "pong";
-  let reply_source, reply = a.Eio_net.Datagram.recv () in
+  send b ~dst:source "pong";
+  let reply_source, reply = Eio_net.Datagram.recv a in
   Alcotest.(check string) "reply reaches the source" "pong" reply;
   Alcotest.(check bool)
     "reply comes from the responder" true
@@ -40,30 +40,30 @@ let test_default_destination () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket ~dst:addr_b sock_a in
   let b = Eio_net.Datagram.of_socket sock_b in
-  send a None "to-default";
-  let _, payload = b.Eio_net.Datagram.recv () in
+  send a "to-default";
+  let _, payload = Eio_net.Datagram.recv b in
   Alcotest.(check string) "datagram reaches configured dst" "to-default" payload
 
 let test_oversized_refused () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
   let b = Eio_net.Datagram.of_socket ~max_frame:8 sock_b in
-  send a (Some addr_b) "exactly-9";
-  send a (Some addr_b) "8-bytes!";
+  send a ~dst:addr_b "exactly-9";
+  send a ~dst:addr_b "8-bytes!";
   let refused =
-    match b.Eio_net.Datagram.recv () with
+    match Eio_net.Datagram.recv b with
     | _ -> false
     | exception Invalid_argument _ -> true
   in
   Alcotest.(check bool) "9-byte datagram refused at max_frame 8" true refused;
-  let _, payload = b.Eio_net.Datagram.recv () in
+  let _, payload = Eio_net.Datagram.recv b in
   Alcotest.(check string) "channel survives the refusal" "8-bytes!" payload
 
 let test_frame_carrier_refuses_oversize () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
   let b = Eio_net.Frame.of_datagram_socket ~max_frame:4 sock_b in
-  send a (Some addr_b) "five!";
+  send a ~dst:addr_b "five!";
   let refused =
     match Eio_net.Frame.recv b with
     | _ -> false

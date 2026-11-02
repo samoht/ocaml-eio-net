@@ -45,8 +45,8 @@ let send_batch t frames = t.send_batch frames
 let of_datagram_socket ?max_frame ?dst socket =
   let channel = Datagram.of_socket ?max_frame ?dst socket in
   make ~slice:view
-    ~recv:(fun () -> snd (channel.Datagram.recv ()))
-    ~send:(channel.Datagram.send None)
+    ~recv:(fun () -> snd (Datagram.recv channel))
+    ~send:(fun bufs -> Datagram.send channel bufs)
     ()
 
 (* [locked m f x] is [Eio.Mutex.use_ro m (fun () -> f x)] without allocating
