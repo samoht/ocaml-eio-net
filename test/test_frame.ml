@@ -273,10 +273,111 @@ let test_concurrent_fragmented_writers () =
     "whole batches survive byte-sized competing writes" true
     (got = [ "a1"; "a2"; "b1"; "b2" ] || got = [ "b1"; "b2"; "a1"; "a2" ])
 
+(* A flow whose input arrives through a stream: [None] ends it, and a read
+   with nothing queued blocks, so a test can cancel a receive at a chosen
+   point. Writes accumulate in a buffer. *)
+module Scripted_flow = struct
+  type t = { input : string option Eio.Stream.t; output : Buffer.t }
+
+  let single_read t buffer =
+    match Eio.Stream.take t.input with
+    | None ->
+        Eio.Stream.add t.input None;
+        raise End_of_file
+    | Some chunk ->
+        Cstruct.blit_from_string chunk 0 buffer 0 (String.length chunk);
+        String.length chunk
+
+  let single_write t buffers =
+    let data = Cstruct.copyv buffers in
+    Buffer.add_string t.output data;
+    String.length data
+
+  let handler =
+    Eio.Flow.Pi.two_way
+      (module struct
+        type nonrec t = t
+
+        let read_methods = []
+        let single_read = single_read
+        let single_write = single_write
+        let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+        let shutdown _ _ = ()
+      end)
+
+  let v chunks =
+    let input = Eio.Stream.create max_int in
+    List.iter (Eio.Stream.add input) chunks;
+    let t = { input; output = Buffer.create 64 } in
+    (t, Eio.Resource.T (t, handler))
+end
+
+let invalid_length length =
+  Eio_net_framing.Invalid_length { length; minimum = 0; maximum = 1_048_576 }
+
+let test_sticky_read_error () =
+  Eio_mock.Backend.run @@ fun () ->
+  let _, flow =
+    Scripted_flow.v [ Some "\255\255\255\255"; Some "\000\000\000\001x"; None ]
+  in
+  let channel = Eio_net.Frame.of_length_prefixed_flow flow in
+  let refusal = Eio_net_framing.Error (invalid_length 0xffff_ffffL) in
+  Alcotest.check_raises "hostile length refused" refusal (fun () ->
+      ignore (channel.recv ()));
+  Alcotest.check_raises "the refusal is sticky" refusal (fun () ->
+      ignore (channel.recv ()));
+  let _, flow = Scripted_flow.v [ Some "\000\000\000\003x"; None ] in
+  let channel = Eio_net.Frame.of_length_prefixed_flow flow in
+  let truncated =
+    Eio_net_framing.Error
+      (Truncated { part = Payload; expected = 3; received = 1 })
+  in
+  Alcotest.check_raises "truncated payload" truncated (fun () ->
+      ignore (channel.recv ()));
+  Alcotest.check_raises "truncation is sticky, not a clean end" truncated
+    (fun () -> ignore (channel.recv ()))
+
+let test_cancelled_read () =
+  Eio_mock.Backend.run @@ fun () ->
+  let script, flow = Scripted_flow.v [ Some "\000\000\000\005ab" ] in
+  let channel = Eio_net.Frame.of_length_prefixed_flow flow in
+  Eio.Fiber.first (fun () -> ignore (channel.recv ())) (fun () -> ());
+  List.iter (Eio.Stream.add script.input) [ Some "cde"; None ];
+  Alcotest.check_raises "a receive cancelled inside a payload aborts"
+    (Eio_net_framing.Error Aborted) (fun () -> ignore (channel.recv ()));
+  let script, flow = Scripted_flow.v [] in
+  let channel = Eio_net.Frame.of_length_prefixed_flow flow in
+  Eio.Fiber.first (fun () -> ignore (channel.recv ())) (fun () -> ());
+  List.iter (Eio.Stream.add script.input) [ Some "\000\000\000\002ok"; None ];
+  Alcotest.(check string)
+    "a receive cancelled before a frame leaves the stream usable" "ok"
+    (channel.recv ())
+
+let test_refused_batch_usable () =
+  Eio_mock.Backend.run @@ fun () ->
+  let script, flow = Scripted_flow.v [] in
+  let framing = Eio_net_framing.Config.v ~max_length:4 () in
+  let channel = Eio_net.Frame.of_length_prefixed_flow ~framing flow in
+  Alcotest.check_raises "oversized batch refused"
+    (Eio_net_framing.Error
+       (Invalid_length { length = 5L; minimum = 0; maximum = 4 }))
+    (fun () ->
+      channel.send_batch
+        [ [ Cstruct.of_string "ok" ]; [ Cstruct.of_string "large" ] ]);
+  Alcotest.(check string) "nothing written" "" (Buffer.contents script.output);
+  send channel "next";
+  Alcotest.(check string)
+    "a refused batch leaves the stream usable" "\000\000\000\004next"
+    (Buffer.contents script.output)
+
 let suite =
   ( "frame",
     [
       Alcotest.test_case "truncated frame EOF" `Quick test_truncated_frames;
+      Alcotest.test_case "sticky read error" `Quick test_sticky_read_error;
+      Alcotest.test_case "cancelled read" `Quick test_cancelled_read;
+      Alcotest.test_case "a refused batch leaves the stream usable" `Quick
+        test_refused_batch_usable;
       Alcotest.test_case "partial write cancellation" `Quick
         test_partial_write_cancelled;
       Alcotest.test_case "competing fragmented writers" `Quick
