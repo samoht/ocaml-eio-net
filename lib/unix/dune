@@ -14,6 +14,7 @@
   cstruct
   fpath
   ipaddr
+  fmt
   unix)
  (library_flags (-linkall))
  (foreign_stubs

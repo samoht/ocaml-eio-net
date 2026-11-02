@@ -1,7 +1,7 @@
 let max_batch_limit = 64
 
 external send_batch_raw :
-  Unix.file_descr -> Cstruct.t array -> int array -> int -> int
+  Unix.file_descr -> Cstruct.t array -> int array -> int -> int -> int
   = "caml_eio_net_sendmsg_batch"
 
 external recv_batch_raw :
@@ -19,21 +19,41 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
   if max_batch <= 0 then invalid_arg "Eio_net_unix.Frame: max_batch <= 0";
   if max_batch > max_batch_limit then
     invalid_arg "Eio_net_unix.Frame: max_batch > 64";
+  (* Eio waits for a descriptor to be ready only when an operation on it would
+     block; a blocking one would stall every fiber of the domain instead. *)
+  Unix.set_nonblock fd;
   let socket = Eio_unix.Net.import_socket_datagram ~sw ~close_unix:false fd in
-  let recv_buf = Cstruct.create max_frame in
+  (* One byte of headroom tells a datagram longer than [max_frame] from one
+     exactly [max_frame] long. *)
+  let check len =
+    if len > max_frame then
+      Fmt.invalid_arg
+        "Eio_net_unix.Frame: datagram exceeds max_frame (%d bytes)" max_frame
+  in
+  let recv_buf = Cstruct.create (max_frame + 1) in
   let recv () =
     let _source, len = Eio.Net.recv socket recv_buf in
+    check len;
     Cstruct.to_string ~len recv_buf
   in
-  let buffers = Array.init max_batch (fun _ -> Cstruct.create max_frame) in
-  let lengths = Array.make max_batch 0 in
-  let recv_batch () =
-    let _source, first_len = Eio.Net.recv socket buffers.(0) in
-    lengths.(0) <- first_len;
-    let extra = recv_batch_raw fd buffers lengths 1 max_batch in
-    List.init (extra + 1) (fun i ->
-        Cstruct.to_string ~len:lengths.(i) buffers.(i))
+  (* Receiving and sending have their own buffers: a frame waiting to go out
+     is not overwritten by one coming in. *)
+  let recv_buffers =
+    Array.init max_batch (fun _ -> Cstruct.create (max_frame + 1))
   in
+  let recv_lengths = Array.make max_batch 0 in
+  let recv_batch () =
+    let _source, first_len = Eio.Net.recv socket recv_buffers.(0) in
+    recv_lengths.(0) <- first_len;
+    let extra = recv_batch_raw fd recv_buffers recv_lengths 1 max_batch in
+    for i = 0 to extra do
+      check recv_lengths.(i)
+    done;
+    List.init (extra + 1) (fun i ->
+        Cstruct.to_string ~len:recv_lengths.(i) recv_buffers.(i))
+  in
+  let send_buffers = Array.init max_batch (fun _ -> Cstruct.create max_frame) in
+  let send_lengths = Array.make max_batch 0 in
   let rec copy_frames frames index =
     match frames with
     | [] -> (index, [])
@@ -42,19 +62,17 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
         let len = Cstruct.lenv frame in
         if len > max_frame then
           invalid_arg "Eio_net_unix.Frame: frame exceeds max_frame";
-        ignore (Cstruct.fillv ~src:frame ~dst:buffers.(index));
-        lengths.(index) <- len;
+        ignore (Cstruct.fillv ~src:frame ~dst:send_buffers.(index));
+        send_lengths.(index) <- len;
         copy_frames rest (index + 1)
   in
-  let rec send_prepared count =
-    let sent = send_batch_raw fd buffers lengths count in
-    if sent = 0 then (
-      Eio.Fiber.yield ();
-      send_prepared count)
-    else if sent < count then begin
-      Array.blit buffers sent buffers 0 (count - sent);
-      Array.blit lengths sent lengths 0 (count - sent);
-      send_prepared (count - sent)
+  (* Sends the prepared frames from [first] on, waiting for the socket to be
+     writable while it accepts none. *)
+  let rec send_prepared first count =
+    if first < count then begin
+      let sent = send_batch_raw fd send_buffers send_lengths first count in
+      if sent = 0 then Eio_unix.await_writable fd;
+      send_prepared (first + sent) count
     end
   in
   let send_batch frames =
@@ -62,7 +80,7 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
       | [] -> ()
       | frames ->
           let count, rest = copy_frames frames 0 in
-          send_prepared count;
+          send_prepared 0 count;
           chunks rest
     in
     chunks frames

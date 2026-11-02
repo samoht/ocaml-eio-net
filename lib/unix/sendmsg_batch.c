@@ -30,24 +30,30 @@ extern ssize_t recvmsg_x(int, struct ocaml_msghdr_x *, unsigned int, int)
     __attribute__((weak_import));
 #endif
 
+/* Sends the frames [offset, count) of [vbuffers], each [vlengths] long, one
+   datagram each. Returns how many were sent, from [offset] on: 0 when the
+   socket would block. Raises [Unix_error] when the first fails otherwise. */
 CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
-                                           value vlengths, value vcount) {
-  CAMLparam4(vfd, vbuffers, vlengths, vcount);
+                                           value vlengths, value voffset,
+                                           value vcount) {
+  CAMLparam5(vfd, vbuffers, vlengths, voffset, vcount);
   int fd = Int_val(vfd);
+  intnat offset_arg = Long_val(voffset);
   intnat count_arg = Long_val(vcount);
-  if (count_arg > OCAML_EIO_NET_MAX_BATCH ||
+  if (offset_arg < 0 || count_arg > OCAML_EIO_NET_MAX_BATCH ||
+      offset_arg > count_arg ||
       count_arg > (intnat)Wosize_val(vbuffers) ||
       count_arg > (intnat)Wosize_val(vlengths))
     caml_invalid_argument("Eio_net_unix.Frame: invalid send batch");
-  int count = (int)count_arg;
+  int count = (int)(count_arg - offset_arg);
   if (count <= 0) CAMLreturn(Val_int(0));
 
   struct iovec iov[OCAML_EIO_NET_MAX_BATCH];
   for (int i = 0; i < count; i++) {
-    value cstruct = Field(vbuffers, i);
+    value cstruct = Field(vbuffers, offset_arg + i);
     iov[i].iov_base =
         (char *)Caml_ba_data_val(Field(cstruct, 0)) + Long_val(Field(cstruct, 1));
-    iov[i].iov_len = Long_val(Field(vlengths, i));
+    iov[i].iov_len = Long_val(Field(vlengths, offset_arg + i));
   }
 
   ssize_t sent = 0;
@@ -66,7 +72,12 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
   {
     while (sent < count) {
       ssize_t len = send(fd, iov[sent].iov_base, iov[sent].iov_len, 0);
-      if (len < 0) break;
+      if (len < 0) {
+        /* A failure after the first is reported by the next call, which
+           starts with the frame that failed. */
+        if (sent == 0) sent = -1;
+        break;
+      }
       sent++;
     }
   }
