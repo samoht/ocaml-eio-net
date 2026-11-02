@@ -19,7 +19,7 @@ let test_portable_without_a_registration () =
     (Eio_net_accept.classify no_descriptor)
 
 let test_the_registered_classifier_answers () =
-  Eio_net_accept.register ~name:"first" (function
+  Eio_net_accept.register (function
     | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EMFILE, _, _)), _) ->
         Some `Descriptors
     | _ -> None);
@@ -34,7 +34,7 @@ let test_the_registered_classifier_answers () =
 (* A second classifier, as a program that links two network libraries
    registers, is asked after the first: the first answer wins. *)
 let test_classifiers_are_asked_in_registration_order () =
-  Eio_net_accept.register ~name:"second" (function
+  Eio_net_accept.register (function
     | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EMFILE, _, _)), _) | Exit ->
         Some `Aborted
     | _ -> None);

@@ -24,7 +24,7 @@ let test_portable_without_a_registration () =
     (Eio_net_connect.classify Eio.Time.Timeout)
 
 let test_the_registered_classifier_answers () =
-  Eio_net_connect.register ~name:"first" (function
+  Eio_net_connect.register (function
     | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETUNREACH, _, _)), _) ->
         Some `Unreachable
     | _ -> None);
@@ -39,7 +39,7 @@ let test_the_registered_classifier_answers () =
 (* A second classifier, as a program that links two network libraries
    registers, is asked after the first: the first answer wins. *)
 let test_classifiers_are_asked_in_registration_order () =
-  Eio_net_connect.register ~name:"second" (function
+  Eio_net_connect.register (function
     | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETUNREACH, _, _)), _)
     | Exit ->
         Some `Refused

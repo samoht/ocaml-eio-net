@@ -18,5 +18,5 @@ let accept_failure = function
       Some `Descriptors
   | _ -> None
 
-let () = Eio_net_connect.register ~name:"eio-net.unix" connect_failure
-let () = Eio_net_accept.register ~name:"eio-net.unix" accept_failure
+let () = Eio_net_connect.register connect_failure
+let () = Eio_net_accept.register accept_failure

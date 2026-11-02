@@ -10,17 +10,16 @@ let portable = function
   | Eio.Io (Eio.Net.E (Connection_reset _), _) -> Some `Aborted
   | _ -> None
 
-let registered = ref None
+(* The classifiers in registration order. [register] runs at module
+   initialisation, before any fiber classifies. *)
+let registered = ref []
 
 let classify exn =
-  match !registered with Some (_, f) -> f exn | None -> portable exn
-
-let register ~name f =
   match !registered with
-  | Some (held, _) ->
-      Fmt.invalid_arg "Eio_net_accept.register: %s is registered, %s refused"
-        held name
-  | None -> registered := Some (name, f)
+  | [] -> portable exn
+  | classifiers -> List.find_map (fun f -> f exn) classifiers
+
+let register f = registered := !registered @ [ f ]
 
 (* The head of a held connection. [received] reads the bytes of an incomplete
    head received so far and is [None] once the head is complete. A connection

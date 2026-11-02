@@ -99,15 +99,14 @@ type answer =
 val classify : exn -> answer option
 (** [classify exn] is the answer the exception [exn] of a failed accept carries,
     or [None] when it carries none, as a closed listener or a cancellation does.
-    It asks the registered classifier, or with none registered is
-    [Some `Aborted] for [Eio.Net.Connection_reset _] and [None] otherwise: the
-    answers Eio's portable errors name. *)
+    It asks each registered classifier in registration order and is the first
+    answer that is not [None], or with none registered is [Some `Aborted] for
+    [Eio.Net.Connection_reset _] and [None] otherwise: the answers Eio's
+    portable errors name. *)
 
-val register : name:string -> (exn -> answer option) -> unit
-(** [register ~name f] makes [f] the classifier {!classify} asks. [name] is the
-    library registering it. Only the library that provides a platform's network
-    calls it, once, from its own initialisation: [eio-net.unix] registers
-    [Eio_net_unix.accept_failure].
-
-    Raises [Invalid_argument] naming both libraries if a classifier is already
-    registered. *)
+val register : (exn -> answer option) -> unit
+(** [register f] adds [f] to the classifiers {!classify} asks, after those
+    registered before it. The library that provides a platform's network calls
+    it, once, from its own initialisation: [eio-net.unix] registers
+    [Eio_net_unix.accept_failure]. A program that links several such libraries
+    gets each one's answers, the first registered's first. *)

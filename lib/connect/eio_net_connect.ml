@@ -6,14 +6,13 @@ let portable = function
   | Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> Some `Refused
   | _ -> None
 
-let registered = ref None
+(* The classifiers in registration order. [register] runs at module
+   initialisation, before any fiber classifies. *)
+let registered = ref []
 
 let classify exn =
-  match !registered with Some (_, f) -> f exn | None -> portable exn
-
-let register ~name f =
   match !registered with
-  | Some (held, _) ->
-      Fmt.invalid_arg "Eio_net_connect.register: %s is registered, %s refused"
-        held name
-  | None -> registered := Some (name, f)
+  | [] -> portable exn
+  | classifiers -> List.find_map (fun f -> f exn) classifiers
+
+let register f = registered := !registered @ [ f ]
