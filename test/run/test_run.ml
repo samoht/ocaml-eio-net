@@ -1,7 +1,7 @@
 let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5000)
 let aborted () = Eio_unix.Err.v Unix.ECONNABORTED "accept" ""
 let no_descriptor () = Eio_unix.Err.v Unix.EMFILE "accept" ""
-let pending_error () = Eio_unix.Err.v Unix.ENETDOWN "accept" ""
+let refused_by_firewall () = Eio_unix.Err.v Unix.EPERM "accept" ""
 
 (* The classifier of a Unix network, which reads no descriptor left (EMFILE)
    as one of its answers. *)
@@ -313,10 +313,11 @@ let test_no_classifier_reads_the_portable_errors () =
   | None -> Alcotest.fail "the loop read EMFILE with no classifier handed"
 
 (* Each loop reads its accepts' failures with the classifier it is handed and
-   no other. Two loops of one process meet a pending network error (ENETDOWN),
-   which accept(2) on Linux passes on from the new connection: the one handed
-   a classifier that reads it as aborted accepts its next peer, and the one
-   handed the Unix classifier alone raises it. *)
+   no other. Two loops of one process meet EPERM, which accept(2) on Linux
+   returns for a connection a firewall refused and the Unix classifier leaves
+   unread, since a security module can make it persist on the listener: the
+   one handed a classifier that reads it as aborted accepts its next peer, and
+   the one handed the Unix classifier alone raises it. *)
 let test_each_loop_reads_failures_with_its_classifier () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -324,11 +325,12 @@ let test_each_loop_reads_failures_with_its_classifier () =
   let seen, on_error = errors () in
   let other = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5001) in
   let lenient = function
-    | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETDOWN, _, _)), _) ->
-        Some `Aborted
+    | Eio.Io (Eio.Fs.E (Permission_denied _), _) -> Some `Aborted
     | e -> classify e
   in
-  let failing () = [ (Eio.Promise.create_resolved (), pending_error ()) ] in
+  let failing () =
+    [ (Eio.Promise.create_resolved (), refused_by_firewall ()) ]
+  in
   Eio.Switch.run @@ fun scope ->
   let first = scripted ~sw:scope net (failing ()) in
   let second = scripted ~addr:other ~sw:scope net (failing ()) in
@@ -344,13 +346,10 @@ let test_each_loop_reads_failures_with_its_classifier () =
     "the lenient loop answers its next peer" "ok fresh\n"
     (exchange net "fresh\n");
   (match Eio.Promise.peek strict with
-  | Some
-      (Error (Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETDOWN, _, _)), _)))
-    ->
-      ()
+  | Some (Error (Eio.Io (Eio.Fs.E (Permission_denied _), _))) -> ()
   | Some (Error e) -> raise e
   | Some (Ok ()) -> Alcotest.fail "the strict loop returned"
-  | None -> Alcotest.fail "the strict loop read ENETDOWN as the lenient one");
+  | None -> Alcotest.fail "the strict loop read EPERM as the lenient one");
   check_no_error seen
 
 (* A connection whose head is complete is being served and is never shed: a

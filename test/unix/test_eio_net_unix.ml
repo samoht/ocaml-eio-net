@@ -605,6 +605,48 @@ let test_accept_failure () =
       (Unix.EBADF, "none", "none");
     ]
 
+(* The system the cases run on, as uname -s names it. *)
+let system =
+  lazy
+    (let ic = Unix.open_process_args_in "uname" [| "uname"; "-s" |] in
+     let s = String.trim (In_channel.input_all ic) in
+     ignore (Unix.close_process_in ic);
+     s)
+
+(* Codes OCaml's Unix names only as EUNKNOWNERR: EPROTO and ENONET, on the
+   systems that define them. *)
+let unknown_codes () =
+  match Lazy.force system with
+  | "Linux" -> [ ("EPROTO", 71); ("ENONET", 64) ]
+  | "Darwin" -> [ ("EPROTO", 100) ]
+  | _ -> []
+
+(* accept(2) on Linux passes on the network error pending on the new
+   connection, which consumes it, and a BSD's clears the listener's error it
+   returns: the Unix classifier reads each as an aborted accept, followed by
+   the next. An error that persists on the listener, EOPNOTSUPP for a socket
+   that is not a stream or EPERM from a security module, is no answer, so the
+   loop raises it rather than spin. *)
+let test_accept_pending_errors () =
+  let answer = function
+    | Some `Aborted -> "aborted"
+    | Some `Descriptors -> "descriptors"
+    | None -> "none"
+  in
+  let check name e want =
+    let exn = Eio_unix.Err.v e "accept" "" in
+    Alcotest.(check string) name want (answer (Eio_net_unix.accept_failure exn))
+  in
+  List.iter
+    (fun e -> check (Unix.error_message e) e "aborted")
+    Unix.[ ENETDOWN; ENOPROTOOPT; EHOSTDOWN; EHOSTUNREACH; ENETUNREACH ];
+  List.iter
+    (fun (name, n) -> check name (Unix.EUNKNOWNERR n) "aborted")
+    (unknown_codes ());
+  List.iter
+    (fun e -> check (Unix.error_message e) e "none")
+    Unix.[ EOPNOTSUPP; EPERM; EINVAL ]
+
 (* The Unix connect classifier reads a refused peer and an unreachable
    network; linking eio-net.unix leaves the portable classifier as it is. *)
 let test_connect_failure () =
@@ -634,6 +676,8 @@ let suite =
   ( "eio_net_unix",
     [
       Alcotest.test_case "the Unix accept classifier" `Quick test_accept_failure;
+      Alcotest.test_case "pending network errors of an accept" `Quick
+        test_accept_pending_errors;
       Alcotest.test_case "the Unix connect classifier" `Quick
         test_connect_failure;
       Alcotest.test_case "a local listener's mode, from its creation" `Quick
