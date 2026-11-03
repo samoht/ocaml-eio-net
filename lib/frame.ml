@@ -15,7 +15,7 @@ let pp ppf _ = Fmt.string ppf "<frame channel>"
    slice changes only that frame. A string from a caller's [recv] may be held
    elsewhere, so its slice is a copy. *)
 let view s =
-  Bytesrw.Bytes.Slice.of_bytes_or_eod (Stdlib_original.Bytes.unsafe_of_string s)
+  Bytesrw.Bytes.Slice.of_bytes_or_eod (Unsafe.Bytes.unsafe_of_string s)
 
 let copy s = Bytesrw.Bytes.Slice.of_bytes_or_eod (Bytes.of_string s)
 
