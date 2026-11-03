@@ -42,9 +42,13 @@ val connect_at :
 
     A base name that is a symbolic link is refused with [Eio.Fs.Symlink], as
     {!Eio.Path.open_in} [~follow:false] refuses one, since its target is not
-    under the directory's authority; it is checked before the connect, so a peer
-    that can write the directory can still swap one in. The base name must fit
-    an address: {!max_length} bytes on macOS and FreeBSD, and on Linux
+    under the directory's authority. It is checked before the connect, which
+    follows a link, so one who can write the directory can swap a link in
+    between and have this process connect, with its own credentials, to a socket
+    outside the directory. macOS gives no descriptor of a socket's file to
+    connect through, and the window is left open on every system: [connect_at]
+    is for a directory no untrusted user writes. The base name must fit an
+    address: {!max_length} bytes on macOS and FreeBSD, and on Linux
     {!max_length} less the length of the [/proc/self/fd/<dir>/] prefix; a longer
     one is refused with [ENAMETOOLONG]. On a Linux system with no [/proc]
     mounted, the link does not resolve and the connect fails as a missing socket
@@ -78,10 +82,13 @@ val listen :
     A file already at [path] is kept and the listen fails with [EADDRINUSE],
     unclassified, as bind(2) fails. When [replace] is [true] (defaults to
     [false]) a socket there, whether a listener still serves it or not, is
-    replaced; a file of any other kind is still kept. Whether it is a socket is
-    checked before it is replaced, so [replace] is for a directory no other peer
-    writes. Releasing [sw] closes the socket and removes [path] while it is
-    still that socket's file. A failure is an {!Eio.Io} error, made by
-    {!Eio_unix.Err.v}.
+    replaced; a file of any other kind is still kept. Releasing [sw] closes the
+    socket and removes [path] while it is still that socket's file. Each is
+    checked before the name is replaced or removed, so one who can write the
+    directory can swap another file in between, which is then replaced or
+    removed in its place. renameat(2) and unlinkat(2) act on the name and follow
+    no link, so that is only a name the writer could itself remove or put there:
+    no file outside the directory is reached. A failure is an {!Eio.Io} error,
+    made by {!Eio_unix.Err.v}.
 
     Raises [Invalid_argument] as {!connect_at} does. *)
