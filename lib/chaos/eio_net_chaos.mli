@@ -86,8 +86,8 @@ module Flow : sig
 
     val pp : t Fmt.t
     (** [pp] formats a schedule as the call that builds it, every parameter
-        given: [none], [script ~reads:[...] ~writes:[...] ()] with each fault,
-        or
+        given: {!val-none}, [script ~reads:[...] ~writes:[...] ()] with each
+        fault, or
         [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
          ~fail_write_after seed] with [reset_after] and [fail_write_after] left
         out when they are never. *)
@@ -172,7 +172,7 @@ module Datagram : sig
 
     val pp : t Fmt.t
     (** [pp] formats a schedule as the call that builds it, every parameter
-        given: [none], [script [...]] with each fault, or
+        given: {!val-none}, [script [...]] with each fault, or
         [seeded ~loss ~dup ~reorder ~truncate ~garble ~delay seed], each
         probability with the fewest digits that read back as it. *)
   end

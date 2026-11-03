@@ -74,11 +74,12 @@ module Config : sig
     unit ->
     t
   (** [v ~length_field ~min_length ~max_length ()] is the configuration of
-      frames whose length is a [length_field] (defaults to [Uint32_be]) and
-      whose payloads are [min_length] (defaults to [0]) to [max_length]
-      (defaults to the least of 1 MiB, the capacity of [length_field] and
-      [Sys.max_string_length], so [1048576] for [Uint32_be] and [65535] for
-      [Uint16_be]) bytes long.
+      frames whose length is a [length_field] (defaults to
+      {!constructor-Uint32_be}) and whose payloads are [min_length] (defaults to
+      [0]) to [max_length] (defaults to the least of 1 MiB, the capacity of
+      [length_field] and [Sys.max_string_length], so [1048576] for
+      {!constructor-Uint32_be} and [65535] for {!constructor-Uint16_be}) bytes
+      long.
 
       Raises [Invalid_argument] if [min_length] is negative, if [max_length] is
       below [min_length], or if [max_length] exceeds the capacity of
@@ -95,7 +96,7 @@ module Config : sig
 
   val prefix_length : t -> int
   (** [prefix_length c] is the length of the prefix of [c], in bytes: [2] for
-      [Uint16_be] and [4] for [Uint32_be]. *)
+      {!constructor-Uint16_be} and [4] for {!constructor-Uint32_be}. *)
 
   val buffer_size : t -> int
   (** [buffer_size c] is [max_length c + prefix_length c], the longest frame [c]
