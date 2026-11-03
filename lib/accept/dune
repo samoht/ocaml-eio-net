@@ -1,6 +1,6 @@
-; The accept loop and the classifier of a failed accept, kept apart from the
-; carriers as the connect classifier is, so a listener reads the one its
-; platform's network registers and links nothing else.
+; The accept loop and the answer of a failed accept, kept apart from the
+; carriers as the connect answer is, so a listener links nothing of its
+; platform's network: it is handed that network's classifier.
 
 (library
  (name eio_net_accept)

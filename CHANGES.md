@@ -19,7 +19,10 @@ Initial release.
   low-speed check bounds one.
 - `eio-net.accept`, the accept loop a listener serves its connections with,
   and `eio-net.connect`, the answer a failed connect carries from the
-  network.
+  network. A failed accept or connect is read by the classifier handed to
+  the code that accepts or connects: by default the one that reads Eio's
+  portable errors, and over a Unix network `Eio_net_unix.accept_failure` or
+  `connect_failure`.
 - `eio-net.mem` and `eio-net.chaos`, an in-memory network and a wrapper that
   injects faults, for tests; `eio-net.unix`, batched sends and receives on
   POSIX sockets, a vectored write off the runtime lock, the host's interface

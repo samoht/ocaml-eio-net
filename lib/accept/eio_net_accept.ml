@@ -6,20 +6,9 @@ module Log = (val Logs.src_log log_src)
 
 type answer = [ `Aborted | `Descriptors ]
 
-let portable = function
+let classify = function
   | Eio.Io (Eio.Net.E (Connection_reset _), _) -> Some `Aborted
   | _ -> None
-
-(* The classifiers in registration order. [register] runs at module
-   initialisation, before any fiber classifies. *)
-let registered = ref []
-
-let classify exn =
-  match !registered with
-  | [] -> portable exn
-  | classifiers -> List.find_map (fun f -> f exn) classifiers
-
-let register f = registered := !registered @ [ f ]
 
 (* The head of a held connection. [received] reads the bytes of an incomplete
    head received so far and is [None] once the head is complete. A connection
@@ -162,8 +151,8 @@ let fork loop ~sw ~on_error handler flow addr =
 
 let log_error exn = Log.warn (fun m -> m "connection failed: %a" Fmt.exn exn)
 
-let run ?stop ?(on_error = log_error) ?(pool = pool ()) ~max_connections
-    listening handler =
+let run ?stop ?(on_error = log_error) ?(pool = pool ()) ?(classify = classify)
+    ~max_connections listening handler =
   if max_connections < 1 then
     Fmt.invalid_arg "Eio_net_accept.run: max_connections is %d" max_connections;
   let loop =

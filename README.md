@@ -50,11 +50,11 @@ Seven sub-libraries sit beside it:
   handed, or at a path of any length through the directory capability that
   holds it, and listens at one through that directory with the permission
   bits it is given, and `Tcp.listen` reports a failed bind as an `Eio.Io`
-  error. Linking it registers the Unix classifiers of a failed connect and a
-  failed accept. It is the one library here compiled outside the `Hermetic`
-  prelude: it makes the host's sockets and descriptors with `Unix` and
-  `Eio_unix`, which the prelude refuses, and reaches files only through the
-  capabilities it is handed.
+  error. `connect_failure` and `accept_failure` are the classifiers of a
+  failed connect and a failed accept over a Unix network. It is the one
+  library here compiled outside the `Hermetic` prelude: it makes the host's
+  sockets and descriptors with `Unix` and `Eio_unix`, which the prelude
+  refuses, and reaches files only through the capabilities it is handed.
 - `eio-net.accept`: the accept loop a listener serves its connections with,
   `Eio_net_accept.run`. It holds at most a declared number of connections
   and, under pressure, sheds the one whose head (an HTTP request head, an SSH
@@ -62,13 +62,15 @@ Seven sub-libraries sit beside it:
   peer aborted, or one with no descriptor left, leaves it serving. With no
   descriptor left it sheds among the connections of every loop handed the
   same pool, and of no other. A connection that fails, whatever its peer
-  did, is reported and ends alone. It reads what a failed accept carries
-  with the classifier its platform's network registers, so it works the same
-  over every network.
+  did, is reported and ends alone. It reads a failed accept with the
+  classifier it is handed, `Eio_net_unix.accept_failure` over a Unix
+  network, and otherwise as Eio names its errors portably: no library a
+  program links changes how a loop reads its failures.
 - `eio-net.connect`: what a failed connect carries from the network, a
-  refused or unreachable peer, read by the classifier its platform's network
-  registers. A connection library asks it and works the same over every
-  network.
+  refused or unreachable peer, and the classifier that reads it from Eio's
+  portable errors. A connection library takes the classifier of its network
+  as an argument, `Eio_net_unix.connect_failure` over a Unix network, with
+  that one as its default.
 - `eio-net.addr`: `Eio_net_addr`, conversions between `Ipaddr` and Eio
   socket addresses, and host name resolution to a stream address.
 

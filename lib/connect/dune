@@ -1,6 +1,7 @@
-; The classifier of a failed connect, kept apart from the carriers so a
-; connection library reads the one its platform's network registers and links
-; nothing else: a unikernel guest keeps the portable answer.
+; The answer of a failed connect and its portable classifier, kept apart from
+; the carriers so a connection library names the answers a platform's
+; classifier gives and links nothing of that platform: a unikernel guest keeps
+; the portable answer.
 
 (library
  (name eio_net_connect)

@@ -13,7 +13,7 @@ module Local = Local
 module Tcp = Tcp
 module Interface = Interface
 
-val connect_failure : exn -> [ `Refused | `Unreachable ] option
+val connect_failure : exn -> Eio_net_connect.answer option
 (** [connect_failure exn] is the answer a failed {!Eio.Net.connect} raising
     [exn] carries from the network, or [None] when it carries none, as a timeout
     or a local error does:
@@ -25,11 +25,10 @@ val connect_failure : exn -> [ `Refused | `Unreachable ] option
       the host's own routing table, says no path to the peer exists. RFC 1122
       section 4.2.3.9 makes it a hard error for an attempt in SYN-SENT.
 
-    Linking this library registers it with {!Eio_net_connect.register}, so a
-    connect that asks {!Eio_net_connect.classify} over a Unix network uses it
-    with no argument. *)
+    It is the classifier to hand a connection library that connects over a Unix
+    network, in place of the portable {!Eio_net_connect.classify}. *)
 
-val accept_failure : exn -> [ `Aborted | `Descriptors ] option
+val accept_failure : exn -> Eio_net_accept.answer option
 (** [accept_failure exn] is the answer a failed {!Eio.Net.accept} raising [exn]
     carries from the system, or [None] when it carries none:
 
@@ -38,6 +37,7 @@ val accept_failure : exn -> [ `Aborted | `Descriptors ] option
     - [`Descriptors] for EMFILE and ENFILE: the process, or the system, has no
       descriptor left for the connection.
 
-    Linking this library registers it with {!Eio_net_accept.register}, so a
-    listener that asks {!Eio_net_accept.classify} over a Unix network uses it
-    with no argument. *)
+    It is the classifier to hand {!Eio_net_accept.run} over a Unix network, as
+    [~classify:Eio_net_unix.accept_failure]: the portable
+    {!Eio_net_accept.classify} reads no descriptor left as no answer, and a loop
+    handed it raises that accept's error. *)

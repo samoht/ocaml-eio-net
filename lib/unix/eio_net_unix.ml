@@ -17,6 +17,3 @@ let accept_failure = function
   | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error ((EMFILE | ENFILE), _, _)), _) ->
       Some `Descriptors
   | _ -> None
-
-let () = Eio_net_connect.register connect_failure
-let () = Eio_net_accept.register accept_failure

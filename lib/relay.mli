@@ -19,14 +19,15 @@ val forward :
   sw:Eio.Switch.t ->
   net:_ Eio.Net.t ->
   ?on_error:(exn -> unit) ->
+  ?classify:(exn -> Eio_net_accept.answer option) ->
   max_connections:int ->
   listen:Eio.Net.Sockaddr.stream ->
   connect:Eio.Net.Sockaddr.stream ->
   unit ->
   Eio.Net.Sockaddr.stream
-(** [forward ~sw ~net ~on_error ~max_connections ~listen ~connect ()] listens on
-    [listen] (with a backlog of [16] and [SO_REUSEADDR]) and, for every accepted
-    connection, dials [connect] and {!splice}s the two, in an
+(** [forward ~sw ~net ~on_error ~classify ~max_connections ~listen ~connect ()]
+    listens on [listen] (with a backlog of [16] and [SO_REUSEADDR]) and, for
+    every accepted connection, dials [connect] and {!splice}s the two, in an
     {!Eio_net_accept.run} loop on [sw] that relays at most [max_connections]
     connections at once: a client past them waits, holding no upstream
     connection, until one ends. A relay reads nothing from a client before it
@@ -38,7 +39,12 @@ val forward :
     A connection that fails (the dial refused, either side dropping mid-splice)
     closes that connection's flows and is reported to [on_error] (defaults to
     logging a warning on the [eio-net.accept] log source, as
-    {!Eio_net_accept.run} does); the listener itself keeps accepting.
+    {!Eio_net_accept.run} does); the listener itself keeps accepting. A failed
+    accept is read by [classify] (defaults to {!Eio_net_accept.classify}) as
+    {!Eio_net_accept.run} reads it, and one that ends the loop fails [sw]: over
+    a Unix network, [~classify:Eio_net_unix.accept_failure] makes an accept with
+    no descriptor left wait for a relayed connection to end rather than end the
+    relay.
 
     Raises [Invalid_argument] if [max_connections] is less than [1]. A failure
     to listen, such as an address in use, propagates from {!Eio.Net.listen}. *)

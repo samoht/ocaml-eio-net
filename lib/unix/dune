@@ -1,7 +1,3 @@
-; Linked whole: its initialisation registers the Unix connect and accept
-; classifiers, which a program that never names Eio_net_unix still dials and
-; listens with.
-;
 ; Outside the Hermetic prelude, unlike the other libraries: it makes the
 ; host's sockets with Unix.socket and Unix.listen, and wraps them with
 ; Eio_unix, all of which the prelude refuses. Local reaches a socket's file
@@ -21,7 +17,6 @@
   ipaddr
   fmt
   unix)
- (library_flags (-linkall))
  (foreign_stubs
   (language c)
   (names sendmsg_batch writev_offload local_stubs interface_stubs)))

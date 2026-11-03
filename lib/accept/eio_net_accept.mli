@@ -10,10 +10,33 @@
     only when both were handed the same pool.
 
     Eio names a connection reset portably and reports the rest as a backend
-    error, so the library that provides a platform's network registers the
-    classifier that reads its own errors, once, when it is linked, as
-    {!Eio_net_connect} does for a connect. {!run} asks {!classify} and works the
-    same over every network. *)
+    error, so {!run} reads a failed accept with the classifier it is handed:
+    {!classify} by default, which reads Eio's portable errors, and over a
+    platform's network the one the library that provides that network gives, as
+    [Eio_net_unix.accept_failure] reads EMFILE and ENFILE. A classifier is
+    handed to one loop, as a pool is: no library a program links changes how
+    another's loop reads its failures. *)
+
+(** {1:failures Failed accepts} *)
+
+type answer =
+  [ `Aborted
+    (** The peer aborted the connection before it was accepted: ECONNABORTED,
+        which Eio reports as [Eio.Net.Connection_reset]. It asks for the next
+        accept. *)
+  | `Descriptors
+    (** The process or the system has no descriptor left for the connection:
+        EMFILE or ENFILE. It asks for a descriptor to be freed first. *) ]
+(** The type for the answers from the system that end one accept and leave the
+    listener whole. *)
+
+val classify : exn -> answer option
+(** [classify exn] is the answer the exception [exn] of a failed accept carries
+    as Eio's portable errors name it: [Some `Aborted] for
+    [Eio.Net.Connection_reset _], and [None] otherwise, as for a closed
+    listener, a cancellation or an error of a backend. It is {!run}'s default;
+    the classifier of a platform's network answers that platform's errors as
+    well. *)
 
 (** {1:loop The loop} *)
 
@@ -47,6 +70,7 @@ val run :
   ?stop:'a Eio.Promise.t ->
   ?on_error:(exn -> unit) ->
   ?pool:pool ->
+  ?classify:(exn -> answer option) ->
   max_connections:int ->
   [> 'tag Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   (head ->
@@ -54,10 +78,10 @@ val run :
   Eio.Net.Sockaddr.stream ->
   unit) ->
   'a
-(** [run ~stop ~on_error ~pool ~max_connections socket handler] accepts
-    connections on [socket] and serves each with [handler h flow addr] in a
-    fiber of its own, where [h] is the connection's {!type-head}, [flow] its
-    socket and [addr] its peer's address. [flow] is closed when [handler]
+(** [run ~stop ~on_error ~pool ~classify ~max_connections socket handler]
+    accepts connections on [socket] and serves each with [handler h flow addr]
+    in a fiber of its own, where [h] is the connection's {!type-head}, [flow]
+    its socket and [addr] its peer's address. [flow] is closed when [handler]
     returns.
 
     What peers can make it hold is bounded by its state. Each connection holds
@@ -67,16 +91,20 @@ val run :
     connection whose head is incomplete and has made the least progress, the
     older of two that made the same, and waits for one of its connections to end
     before it serves the next; with no incomplete head held, it waits for one
-    that is being served. When an accept fails because the process or the system
-    has no descriptor left ({!classify}) the loop chooses the same way among the
-    connections of every [run] of [pool] (defaults to a new pool of this loop
-    alone), on any domain, and waits for any of them to end before it accepts
-    again. Choosing costs a pass over the connections the pool's loops hold. A
-    connection is shed by shutting its socket down, with no answer, so its reads
-    end on whichever domain it runs. An accept its peer aborted is followed by
-    the next. An accept with no descriptor left while no loop of [pool] holds a
-    connection raises its error, naming that none was held to shed or wait for.
-    Any other failed accept raises its error.
+    that is being served.
+
+    [classify] (defaults to {!val-classify}) reads the {!Eio.Io} exception of
+    each failed accept. An accept it reads as [`Aborted] is followed by the
+    next. One it reads as [`Descriptors] makes the loop choose the same way
+    among the connections of every [run] of [pool] (defaults to a new pool of
+    this loop alone), on any domain, and wait for any of them to end before it
+    accepts again; with no connection held by any loop of [pool], it raises the
+    accept's error, naming that none was held to shed or wait for. Choosing
+    costs a pass over the connections the pool's loops hold. A connection is
+    shed by shutting its socket down, with no answer, so its reads end on
+    whichever domain it runs. Any other failed accept raises its error, as one
+    with no descriptor left does over a Unix network unless [classify] is
+    [Eio_net_unix.accept_failure].
 
     [on_error] (defaults to logging a warning on the [eio-net.accept] log
     source) receives each exception a connection's [handler] raises but
@@ -94,31 +122,3 @@ val run :
     value once the others have ended.
 
     Raises [Invalid_argument] if [max_connections] is less than [1]. *)
-
-(** {1:failures Failed accepts} *)
-
-type answer =
-  [ `Aborted
-    (** The peer aborted the connection before it was accepted: ECONNABORTED,
-        which Eio reports as [Eio.Net.Connection_reset]. It asks for the next
-        accept. *)
-  | `Descriptors
-    (** The process or the system has no descriptor left for the connection:
-        EMFILE or ENFILE. It asks for a descriptor to be freed first. *) ]
-(** The type for the answers from the system that end one accept and leave the
-    listener whole. *)
-
-val classify : exn -> answer option
-(** [classify exn] is the answer the exception [exn] of a failed accept carries,
-    or [None] when it carries none, as a closed listener or a cancellation does.
-    It asks each registered classifier in registration order and is the first
-    answer that is not [None], or with none registered is [Some `Aborted] for
-    [Eio.Net.Connection_reset _] and [None] otherwise: the answers Eio's
-    portable errors name. *)
-
-val register : (exn -> answer option) -> unit
-(** [register f] adds [f] to the classifiers {!classify} asks, after those
-    registered before it. The library that provides a platform's network calls
-    it, once, from its own initialisation: [eio-net.unix] registers
-    [Eio_net_unix.accept_failure]. A program that links several such libraries
-    gets each one's answers, the first registered's first. *)
