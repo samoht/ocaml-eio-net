@@ -5,12 +5,11 @@ exception Too_slow of { limit : int; window : Mtime.Span.t }
 let () =
   Printexc.register_printer @@ function
   | Too_slow { limit; window } ->
-      Some
-        (Fmt.str
-           "Operation too slow. Less than %d bytes/sec transferred the last %g \
-            seconds"
-           limit
-           (Int64.to_float (Mtime.Span.to_uint64_ns window) /. 1e9))
+      Fmt.kstr Option.some
+        "Operation too slow. Less than %d bytes/sec transferred the last %g \
+         seconds"
+        limit
+        (Int64.to_float (Mtime.Span.to_uint64_ns window) /. 1e9)
   | _ -> None
 
 type t = {

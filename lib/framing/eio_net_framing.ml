@@ -34,7 +34,7 @@ exception Error of error
 
 let () =
   Printexc.register_printer (function
-    | Error e -> Some (Fmt.str "Eio_net_framing.Error: %a" pp_error e)
+    | Error e -> Fmt.kstr Option.some "Eio_net_framing.Error: %a" pp_error e
     | _ -> None)
 
 module Config = struct
