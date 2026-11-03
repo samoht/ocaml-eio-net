@@ -5,6 +5,7 @@
   eio-net
   eio-net.unix
   eio-net.accept
+  eio-net.connect
   eio-net.mem
   eio
   eio.unix

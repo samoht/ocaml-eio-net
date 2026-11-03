@@ -578,31 +578,64 @@ let test_tcp_listen_in_use () =
     ->
       ()
 
-(* Linking eio-net.unix registers its accept classifier: a peer that reset
-   its connection before the accept, and a process or system out of
-   descriptors, each leave the listener whole. *)
-let test_accept_failure_is_registered () =
-  let classify e = Eio_net_accept.classify (Eio_unix.Err.v e "accept" "") in
+(* The Unix accept classifier reads a peer that reset its connection before
+   the accept, and a process or system out of descriptors, as failures that
+   leave the listener whole. Linking eio-net.unix leaves the portable
+   classifier, a loop's default, as it is. *)
+let test_accept_failure () =
   let answer = function
     | Some `Aborted -> "aborted"
     | Some `Descriptors -> "descriptors"
     | None -> "none"
   in
   List.iter
-    (fun (e, want) ->
-      Alcotest.(check string) (Unix.error_message e) want (answer (classify e)))
+    (fun (e, want, portable) ->
+      let exn = Eio_unix.Err.v e "accept" "" in
+      Alcotest.(check string)
+        (Unix.error_message e) want
+        (answer (Eio_net_unix.accept_failure exn));
+      Alcotest.(check string)
+        (Unix.error_message e ^ ", portably")
+        portable
+        (answer (Eio_net_accept.classify exn)))
     [
-      (Unix.ECONNABORTED, "aborted");
-      (Unix.EMFILE, "descriptors");
-      (Unix.ENFILE, "descriptors");
-      (Unix.EBADF, "none");
+      (Unix.ECONNABORTED, "aborted", "aborted");
+      (Unix.EMFILE, "descriptors", "none");
+      (Unix.ENFILE, "descriptors", "none");
+      (Unix.EBADF, "none", "none");
+    ]
+
+(* The Unix connect classifier reads a refused peer and an unreachable
+   network; linking eio-net.unix leaves the portable classifier as it is. *)
+let test_connect_failure () =
+  let answer = function
+    | Some `Refused -> "refused"
+    | Some `Unreachable -> "unreachable"
+    | None -> "none"
+  in
+  List.iter
+    (fun (e, want, portable) ->
+      let exn = Eio_unix.Err.v e "connect" "" in
+      Alcotest.(check string)
+        (Unix.error_message e) want
+        (answer (Eio_net_unix.connect_failure exn));
+      Alcotest.(check string)
+        (Unix.error_message e ^ ", portably")
+        portable
+        (answer (Eio_net_connect.classify exn)))
+    [
+      (Unix.ECONNREFUSED, "refused", "refused");
+      (Unix.ENETUNREACH, "unreachable", "none");
+      (Unix.EHOSTUNREACH, "unreachable", "none");
+      (Unix.ETIMEDOUT, "none", "none");
     ]
 
 let suite =
   ( "eio_net_unix",
     [
-      Alcotest.test_case "the accept classifier is registered" `Quick
-        test_accept_failure_is_registered;
+      Alcotest.test_case "the Unix accept classifier" `Quick test_accept_failure;
+      Alcotest.test_case "the Unix connect classifier" `Quick
+        test_connect_failure;
       Alcotest.test_case "a local listener's mode, from its creation" `Quick
         test_local_listen_perm;
       Alcotest.test_case "a local listener over an existing file" `Quick

@@ -1,5 +1,5 @@
-; Links eio-net.unix, whose initialisation registers the Unix accept
-; classifier the loop reads: no descriptor left (EMFILE) is one of its answers.
+; Links eio-net.unix for the Unix accept classifier the cases hand a loop: no
+; descriptor left (EMFILE) is one of its answers.
 
 (test
  (name test)
