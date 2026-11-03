@@ -34,6 +34,15 @@ val accept_failure : exn -> Eio_net_accept.answer option
 
     - [`Aborted] for [Eio.Net.Connection_reset _], as Eio reports ECONNABORTED:
       a connection its peer reset before it was accepted.
+    - [`Aborted] for a network error pending on the new connection, which
+      accept(2) on Linux passes on and tells the caller to retry: ENETDOWN,
+      EPROTO, ENOPROTOOPT (which Eio reports as [Eio.Net.Invalid_option]),
+      EHOSTDOWN, ENONET, EHOSTUNREACH and ENETUNREACH. The error goes with the
+      connection it was pending on, and a BSD system clears the one it returns,
+      so the next accept does not meet it again. EOPNOTSUPP, also on Linux's
+      list, is no answer: accept(2) also returns it for every accept on a socket
+      that is not a stream. Nor is EPERM, which a security module may return for
+      every accept. A loop raises either rather than spin on it.
     - [`Descriptors] for EMFILE and ENFILE: the process, or the system, has no
       descriptor left for the connection.
 

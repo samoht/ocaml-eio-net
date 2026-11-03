@@ -21,9 +21,10 @@
 
 type answer =
   [ `Aborted
-    (** The peer aborted the connection before it was accepted: ECONNABORTED,
-        which Eio reports as [Eio.Net.Connection_reset]. It asks for the next
-        accept. *)
+    (** The connection ended before it was accepted: its peer aborted it
+        (ECONNABORTED, which Eio reports as [Eio.Net.Connection_reset]), or a
+        network error was pending on it, which accept(2) on Linux passes on. It
+        asks for the next accept. *)
   | `Descriptors
     (** The process or the system has no descriptor left for the connection:
         EMFILE or ENFILE. It asks for a descriptor to be freed first. *) ]

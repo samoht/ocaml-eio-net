@@ -61,9 +61,10 @@ Seven sub-libraries sit beside it:
   `Eio_net_accept.run`. It holds at most a declared number of connections
   and, under pressure, sheds the one whose head (an HTTP request head, an SSH
   handshake) is incomplete and has made the least progress; an accept its
-  peer aborted, or one with no descriptor left, leaves it serving. With no
-  descriptor left it sheds among the connections of every loop handed the
-  same pool, and of no other. A connection that fails, whatever its peer
+  peer aborted or that met a network error pending on the new connection,
+  or one with no descriptor left, leaves it serving. With no descriptor
+  left it sheds among the connections of every loop handed the same pool,
+  and of no other. A connection that fails, whatever its peer
   did, is reported and ends alone. It reads a failed accept with the
   classifier it is handed, `Eio_net_unix.accept_failure` over a Unix
   network, and otherwise as Eio names its errors portably: no library a

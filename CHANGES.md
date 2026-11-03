@@ -23,7 +23,9 @@ Initial release.
   network. A failed accept or connect is read by the classifier handed to
   the code that accepts or connects: by default the one that reads Eio's
   portable errors, and over a Unix network `Eio_net_unix.accept_failure` or
-  `connect_failure`.
+  `connect_failure`. `accept_failure` reads a network error Linux's accept(2)
+  passes on from the new connection as an aborted accept, and an error that
+  can persist on the listener, EOPNOTSUPP or EPERM, as none.
 - `eio-net.mem` and `eio-net.chaos`, an in-memory network and a wrapper that
   injects faults, for tests; `eio-net.unix`, batched sends and receives on
   POSIX sockets, a vectored write off the runtime lock, the host's interface
