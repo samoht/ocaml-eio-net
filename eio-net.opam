@@ -36,6 +36,7 @@ depends: [
   "alcobar" {with-test}
   "ohex" {with-test}
   "eio_main" {with-test}
+  "eio_posix" {with-test}
   "mdx" {with-test & >= "2.3.0"}
   "odoc" {with-doc}
 ]

@@ -44,4 +44,5 @@
   (alcobar :with-test)
   (ohex :with-test)
   (eio_main :with-test)
+  (eio_posix :with-test)
   (mdx (and :with-test (>= 2.3.0)))))
