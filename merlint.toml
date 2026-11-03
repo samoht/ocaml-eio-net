@@ -1,0 +1,13 @@
+# The accept loop hands every exception a connection's handler raises, but
+# Eio.Cancel.Cancelled, to on_error, as Eio_net_accept.run documents: the
+# handler is the caller's code, and one failed connection must not end the
+# listener.
+[[rules]]
+files = ["lib/accept/eio_net_accept.ml"]
+exclude = ["E105"]
+
+# The trace is a small unquoted table the test's own generator writes, read
+# with String.split_on_char: a CSV library would add a test dependency for it.
+[[rules]]
+files = ["test/interop/cpython-struct/*"]
+exclude = ["E825"]
