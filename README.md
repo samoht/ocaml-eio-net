@@ -1,90 +1,48 @@
 # eio-net
 
-Network channels, relays and test backends for
+Network channels and test networks for
 [Eio](https://github.com/ocaml-multicore/eio).
 
-## Overview
+`eio-net` gives an Eio application a frame channel, where one receive is one
+frame. The same channel runs over a datagram socket, a length-prefixed byte
+stream or an in-memory pair, so a protocol can be tested without real sockets.
+For those tests it also has an in-memory network and a wrapper that injects
+faults on a schedule a test can replay.
 
-A protocol implementation should not care whether its packets travel over a
-UDP socket, a unikernel's network interface or a test harness, and its tests
-should not need real sockets. `eio-net` provides the small abstractions that
-make this possible:
+## Libraries
 
-- `Eio_net.Frame`: a bidirectional packet channel where one receive is one
-  frame. CCSDS transfer frames, AX.25 and Ethernet codecs read and write over
-  it. An outgoing frame is a list of buffers, as `Eio.Flow.write` takes. Over
-  a length-prefixed flow or an Eio datagram socket the buffers go to `writev`
-  as they are, so a header and a payload held in separate buffers reach the
-  kernel without being copied into one, and a burst can go out in one system
-  call. The in-memory pair copies each frame, and so does the `eio-net.unix`
-  channel, into its batch buffers.
-- `Eio_net.Datagram`: an addressed datagram channel that reports each
-  datagram's source, for a UDP server that answers whoever wrote to it.
-- `Eio_net.Relay`: copies bytes between two flows in both directions, or
-  listens and forwards each accepted connection to another address, in an
-  `Eio_net_accept.run` loop that takes the classifier and the pool its
-  caller hands, as the loop does.
-- `Eio_net.Progress`: bounds a transfer by its progress, as curl's low-speed
-  check does: a window of reads and writes that moves fewer than a stated
-  number of bytes a second ends it, and a stalled peer costs at most two
-  windows.
+- `eio-net`: the `Eio_net.Frame` and `Eio_net.Datagram` channels.
+  `Eio_net.Relay` forwards connections and `Eio_net.Progress` ends a transfer
+  that moves too slowly.
+- `eio-net.framing`: bounded length-prefixed frames over `Eio.Buf_read`.
+- `eio-net.accept`: an accept loop that holds at most a given number of
+  connections.
+- `eio-net.connect`: the answer a failed connect carries, refused or
+  unreachable.
+- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, and host
+  name resolution.
+- `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets.
+- `eio-net.chaos`: fault injection for flows, datagram sockets and networks.
+- `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's
+  interface addresses and the Unix classifiers of failed connects and accepts.
 
-Seven sub-libraries sit beside it:
+`Eio_net_accept.run` reads a failed accept with the classifier it is given as
+`?classify`. Over a Unix network, pass `Eio_net_unix.accept_failure`: when the
+process runs out of descriptors, the loop then waits for one to be free. With
+the default classifier, that error ends the loop.
 
-- `eio-net.framing`: bounded length-prefixed frames over Eio's buffered
-  reader, which `Eio_net.Frame.of_length_prefixed_flow` uses. See
-  [Length-prefixed frames](#length-prefixed-frames).
-- `eio-net.mem`: an in-memory `Eio.Net.t` for stream and datagram sockets,
-  and connected in-memory pipes, so client and server code can talk through
-  the normal `Eio.Net` functions in a hermetic test.
-- `eio-net.chaos`: wrappers around a flow, a datagram socket or a network that
-  inject faults (short reads and writes, stalls, resets, dropped, duplicated
-  and reordered datagrams, refused connections) on a seeded or scripted
-  schedule that a test can print and replay.
-- `eio-net.unix`: a frame channel over a connected Unix datagram descriptor,
-  batching sends and receives with `sendmsg_x` and `recvmsg_x` on Darwin, and a
-  vectored write that runs off the OCaml runtime lock. The runtime lock is
-  the per-domain lock a thread must hold to run OCaml code; a C call that
-  releases it lets the domain's other threads run while it blocks in the
-  kernel. `Interface` lists the host's interface addresses with their
-  prefixes (getifaddrs) and waits for the kernel to report a change to them.
-  `Local` connects to a Unix-domain socket through the network it is
-  handed, or at a path of any length through the directory capability that
-  holds it, and listens at one through that directory with the permission
-  bits it is given, and `Tcp.listen` reports a failed bind as an `Eio.Io`
-  error. `connect_failure` and `accept_failure` are the classifiers of a
-  failed connect and a failed accept over a Unix network. It is the one
-  library here compiled outside the `Hermetic` prelude: it makes the host's
-  sockets and descriptors with `Unix` and `Eio_unix`, which the prelude
-  refuses, and reaches files only through the capabilities it is handed.
-- `eio-net.accept`: the accept loop a listener serves its connections with,
-  `Eio_net_accept.run`. It holds at most a declared number of connections
-  and, under pressure, sheds the one whose head (an HTTP request head, an SSH
-  handshake) is incomplete and has made the least progress; an accept its
-  peer aborted or that met a network error pending on the new connection,
-  or one with no descriptor left, leaves it serving. With no descriptor
-  left it sheds among the connections of every loop handed the same pool,
-  and of no other. A connection that fails, whatever its peer
-  did, is reported and ends alone. It reads a failed accept with the
-  classifier it is handed, `Eio_net_unix.accept_failure` over a Unix
-  network, and otherwise as Eio names its errors portably: no library a
-  program links changes how a loop reads its failures.
-- `eio-net.connect`: what a failed connect carries from the network, a
-  refused or unreachable peer, and the classifier that reads it from Eio's
-  portable errors. A connection library takes the classifier of its network
-  as an argument, `Eio_net_unix.connect_failure` over a Unix network, with
-  that one as its default.
-- `eio-net.addr`: `Eio_net_addr`, conversions between `Ipaddr` and Eio
-  socket addresses, and host name resolution to a stream address.
+## Installation
 
-## Length-prefixed frames
+<!-- $MDX skip -->
+```sh
+$ opam install eio-net
+```
 
-`Eio_net_framing` reads and writes frames made of an unsigned network-order
-length followed by that many payload bytes. The length excludes its own
-prefix. `Uint16_be` is the LENGTH field of
-[RFC 4571 section 2](https://www.rfc-editor.org/rfc/rfc4571.html#section-2),
-zero-length frame included, and `Uint32_be` is the default. What a payload
-means belongs to the protocol above.
+## Usage
+
+`Eio_net_framing` writes each payload after its length, as an unsigned
+big-endian integer. Here the length takes two bytes and payloads are at most
+8 bytes long:
 
 ```ocaml
 # let framing = Eio_net_framing.Config.v ~length_field:Uint16_be ~max_length:8 ();;
@@ -104,75 +62,44 @@ val r : Eio.Buf_read.t = <abstr>
 - : string = ""
 # Eio_net_framing.read framing r;;
 Exception: End_of_file.
-```
-
-`read` takes one frame from an `Eio.Buf_read.t`, which reads its flow until
-the frame is whole. The end of input at a frame boundary is `End_of_file`;
-inside a frame it is the error `Truncated`, with the part (prefix or payload)
-and the bytes received of it.
-
-```ocaml
 # Eio_net_framing.read framing (Eio.Buf_read.of_string "\000\003a");;
 Exception: Eio_net_framing.Error: truncated payload: received 1 of 3 bytes
 ```
 
-`encode` lays out a batch as one list of buffers: the prefixes of the batch
-share one new buffer, and the payload buffers follow them uncopied, so
-`write` hands the batch to a single `Eio.Flow.write`, one `writev` on a
-socket. It validates the whole batch first: a payload of the wrong length
-refuses the batch and nothing is written.
+`write` sends the whole batch with one `Eio.Flow.write` and does not copy the
+payloads. `Eio_net.Frame.of_length_prefixed_flow ~framing flow` turns a byte
+stream into a frame channel with the same format.
 
-### Bounds
+## Bounds
 
-The default maximum payload is 1 MiB, lowered to the capacity of the length
-field and to the platform's string limit; an explicit maximum beyond either is
-refused. A prefix that declares a length outside the configured range is
-refused as `Invalid_length`, with the exact unsigned length, as soon as the
-prefix is whole and before any payload byte is requested. A reader made with
-`~max_size:(Config.buffer_size framing)` (the maximum payload plus the prefix)
-therefore never holds more than that, whatever a peer declares.
+A framing configuration accepts payloads up to 1 MiB by default, or 65535
+bytes with a two-byte length. `read` raises `Invalid_length` as soon as a
+prefix declares a longer payload, before it reads any payload byte. A reader
+made with `~max_size:(Eio_net_framing.Config.buffer_size framing)` therefore
+never holds more than the longest frame.
 
-Reading a frame reads its prefix in place, without allocating, and copies its
-payload once, from the reader's buffer into the payload string.
+A datagram longer than a channel's `max_frame` (64 KiB by default) raises the
+`Eio.Io` error `Too_long` instead of arriving truncated. `Eio_net_accept.run`
+holds at most `max_connections` connections. When it is full and another peer
+connects, it drops the connection whose head (an HTTP request head, say) is
+incomplete and has made the least progress.
 
-### Over a stream
+## Related work
 
-`Eio_net.Frame.of_length_prefixed_flow ~framing flow` is a frame channel over
-a byte stream. Its receives, and its sends, are serialised, so a batch reaches
-the wire whole when fibers send concurrently. A receive that raises
-`Eio_net_framing.Error`, or that an exception interrupts inside a frame, makes
-every later receive raise the same error (`Aborted` for the exception) rather
-than read the middle of a frame as a prefix. A send that raises partway makes
-every later send raise `Eio_net_framing.Error Aborted`, since part of a frame
-may be on the wire; a batch refused for its lengths writes nothing and leaves
-the channel usable.
-
-### Related work
-
-- [Angstrom](https://github.com/inhabitedtype/angstrom) offers general
-  incremental parser combinators, and
-  [Faraday](https://github.com/inhabitedtype/faraday) serialisers with explicit
-  control over copying. Eio's `Buf_read` plays the first role here, and this
-  library adds only the bounded frame.
-- Tokio's [LengthDelimitedCodec](https://docs.rs/tokio-util/latest/tokio_util/codec/length_delimited/struct.LengthDelimitedCodec.html)
-  similarly separates frame bounds from stream IO. Its configurable field
-  offsets and adjustments are outside these two network-order representations.
-- Committed CPython `struct` vectors in `test/interop/cpython-struct`
-  independently check byte order, field boundaries and unsigned declarations;
-  the tests replay them without Python.
-
-## Installation
-
-<!-- $MDX skip -->
-```sh
-$ opam install eio-net
-```
+Tokio's
+[LengthDelimitedCodec](https://docs.rs/tokio-util/latest/tokio_util/codec/length_delimited/struct.LengthDelimitedCodec.html)
+does the same job in Rust, and also supports length fields at an offset or
+with an adjustment. [Angstrom](https://github.com/inhabitedtype/angstrom) and
+[Faraday](https://github.com/inhabitedtype/faraday) parse and serialise any
+format in OCaml. `eio-net.framing` reads with Eio's own `Buf_read` and adds
+only the bounded frame.
 
 ## API
 
-The interfaces are documented in the `.mli` files under `lib/`: `frame.mli`,
-`datagram.mli` and `relay.mli` for the main library, and one directory per
-sub-library.
+The `.mli` files document each library. Those of `eio-net` are
+[`frame.mli`](lib/frame.mli), [`datagram.mli`](lib/datagram.mli),
+[`relay.mli`](lib/relay.mli) and [`progress.mli`](lib/progress.mli). Each
+sub-library has its own directory under [`lib/`](lib/).
 
 ## Licence
 
