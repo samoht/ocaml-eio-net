@@ -19,9 +19,9 @@ let view s =
 
 let copy s = Bytesrw.Bytes.Slice.of_bytes_or_eod (Bytes.of_string s)
 
-(* [make ~slice] is [v] with [slice] as the default slice of a received
+(* [channel ~slice] is [v] with [slice] as the default slice of a received
    frame: [view] for the transports of this module, [copy] for a caller's. *)
-let make ?recv_batch ?recv_slice ?send_batch ~slice ~recv ~send () =
+let channel ?recv_batch ?recv_slice ?send_batch ~slice ~recv ~send () =
   let recv_batch =
     match recv_batch with Some f -> f | None -> fun () -> [ recv () ]
   in
@@ -34,7 +34,7 @@ let make ?recv_batch ?recv_slice ?send_batch ~slice ~recv ~send () =
   { recv; recv_batch; recv_slice; send; send_batch }
 
 let v ?recv_batch ?recv_slice ?send_batch ~recv ~send () =
-  make ?recv_batch ?recv_slice ?send_batch ~slice:copy ~recv ~send ()
+  channel ?recv_batch ?recv_slice ?send_batch ~slice:copy ~recv ~send ()
 
 let recv t = t.recv ()
 let recv_batch t = t.recv_batch ()
@@ -43,10 +43,10 @@ let send t bufs = t.send bufs
 let send_batch t frames = t.send_batch frames
 
 let of_datagram_socket ?max_frame ?dst socket =
-  let channel = Datagram.of_socket ?max_frame ?dst socket in
-  make ~slice:view
-    ~recv:(fun () -> snd (Datagram.recv channel))
-    ~send:(fun bufs -> Datagram.send channel bufs)
+  let datagrams = Datagram.of_socket ?max_frame ?dst socket in
+  channel ~slice:view
+    ~recv:(fun () -> snd (Datagram.recv datagrams))
+    ~send:(fun bufs -> Datagram.send datagrams bufs)
     ()
 
 (* [locked m f x] is [Eio.Mutex.use_ro m (fun () -> f x)] without allocating
@@ -111,7 +111,7 @@ let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
   in
   let take_frame () = locked read_lock read_frame () in
   let send_batch payloads = locked write_lock write_batch payloads in
-  make ~send_batch ~slice:view ~recv:take_frame
+  channel ~send_batch ~slice:view ~recv:take_frame
     ~send:(fun payload -> send_batch [ payload ])
     ()
 
@@ -121,6 +121,6 @@ let pair () =
   let chan recv_stream send_stream =
     let recv () = Eio.Stream.take recv_stream in
     let send bufs = Eio.Stream.add send_stream (Cstruct.copyv bufs) in
-    make ~slice:view ~recv ~send ()
+    channel ~slice:view ~recv ~send ()
   in
   (chan b_to_a a_to_b, chan a_to_b b_to_a)
