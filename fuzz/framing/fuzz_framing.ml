@@ -174,7 +174,7 @@ let failed_writer sixteen budget payload =
   (match Eio_net.Frame.send channel [ Cstruct.of_string "later" ] with
   | () -> fail "a failed stream resumed"
   | exception Framing.Error Aborted -> ()
-  | exception _ -> fail "a failed stream did not report Aborted");
+  | exception Framing.Error _ -> fail "a failed stream did not report Aborted");
   if Buffer.length flow.buffer <> budget then
     fail "bytes reached the flow after the failure"
 
