@@ -433,8 +433,8 @@ let test_a_closed_connection_leaves_its_switch () =
   let () =
     let client = Eio.Net.connect ~sw net addr in
     let server, _ = Eio.Net.accept ~sw listener in
-    Weak.set held 0 (Some (Obj.repr client));
-    Weak.set held 1 (Some (Obj.repr server));
+    Weak.set held 0 (Some client);
+    Weak.set held 1 (Some server);
     Eio.Flow.close client;
     Eio.Flow.close server
   in
