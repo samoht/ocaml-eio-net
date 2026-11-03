@@ -21,7 +21,9 @@ make this possible:
 - `Eio_net.Datagram`: an addressed datagram channel that reports each
   datagram's source, for a UDP server that answers whoever wrote to it.
 - `Eio_net.Relay`: copies bytes between two flows in both directions, or
-  listens and forwards each accepted connection to another address.
+  listens and forwards each accepted connection to another address, in an
+  `Eio_net_accept.run` loop that takes the classifier and the pool its
+  caller hands, as the loop does.
 - `Eio_net.Progress`: bounds a transfer by its progress, as curl's low-speed
   check does: a window of reads and writes that moves fewer than a stated
   number of bytes a second ends it, and a stalled peer costs at most two

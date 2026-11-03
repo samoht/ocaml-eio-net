@@ -14,7 +14,8 @@ Initial release.
   `writev` without copying them into one; the in-memory pair and
   `eio-net.unix` copy each frame.
 - `Eio_net.Datagram`, an addressed datagram channel, and `Eio_net.Relay`,
-  which copies bytes between two flows.
+  which copies bytes between two flows, or forwards a listener's
+  connections in an accept loop handed the caller's classifier and pool.
 - `Eio_net.Progress`, a transfer bounded by its progress, as curl's
   low-speed check bounds one.
 - `eio-net.accept`, the accept loop a listener serves its connections with,

@@ -6,7 +6,8 @@ let one_way src dst =
 
 let splice a b = Eio.Fiber.both (fun () -> one_way a b) (fun () -> one_way b a)
 
-let forward ~sw ~net ?on_error ?classify ~max_connections ~listen ~connect () =
+let forward ~sw ~net ?on_error ?pool ?classify ~max_connections ~listen ~connect
+    () =
   (* Checked here as well as by the loop, which runs in a daemon fiber where
      the error would fail [sw] rather than reach the caller. *)
   if max_connections < 1 then
@@ -15,7 +16,7 @@ let forward ~sw ~net ?on_error ?classify ~max_connections ~listen ~connect () =
   (* A daemon fiber: the listener must not hold the switch open once the
      caller's own work ends. A relay has no head: it serves from the accept. *)
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      Eio_net_accept.run ?on_error ?classify ~max_connections socket
+      Eio_net_accept.run ?on_error ?pool ?classify ~max_connections socket
         (fun head client _addr ->
           Eio_net_accept.complete head;
           Eio.Switch.run @@ fun conn_sw ->
