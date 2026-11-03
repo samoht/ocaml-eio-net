@@ -220,6 +220,49 @@ let test_forward_reads_failures_with_its_classifier () =
     "relayed past the failed accepts" "after"
     (relayed ~sw mem bound "after")
 
+(* A relay handed a pool frees a descriptor another loop of it holds: when its
+   accept finds none left (EMFILE), it sheds the stalled head that loop holds,
+   and relays its client once that connection has ended. *)
+let test_forward_sheds_within_its_pool () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let mem = Eio_net_mem.v ~sw () in
+  let upstream = mem_echo ~sw mem in
+  let pool = Eio_net_accept.pool () in
+  let server = Eio.Net.listen ~sw ~backlog:16 mem (loopback 0) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio_net_accept.run ~pool ~max_connections:4 server (fun _head flow _ ->
+          ignore (Eio.Buf_read.(parse_exn take_all) ~max_size:64 flow)));
+  let shed, shed_r = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+      Eio.Switch.run @@ fun csw ->
+      let flow = Eio.Net.connect ~sw:csw mem (Eio.Net.listening_addr server) in
+      Eio.Flow.copy_string "stalled" flow;
+      match Eio.Flow.single_read flow (Cstruct.create 1) with
+      | _ -> Alcotest.fail "a stalled head was answered"
+      | exception End_of_file -> Eio.Promise.resolve shed_r ());
+  (* The mock backend runs every fiber until it blocks: the server holds the
+     stalled peer once these yields have run. *)
+  for _ = 1 to 100 do
+    Eio.Fiber.yield ()
+  done;
+  let net = failing_net mem [ Eio_unix.Err.v Unix.EMFILE "accept" "" ] in
+  let classify = function
+    | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EMFILE, _, _)), _) ->
+        Some `Descriptors
+    | _ -> None
+  in
+  let bound =
+    Eio_net.Relay.forward ~sw ~net ~pool ~classify ~max_connections:4
+      ~listen:(loopback 0) ~connect:upstream ()
+  in
+  Alcotest.(check string)
+    "relayed once a descriptor is freed" "freed"
+    (relayed ~sw mem bound "freed");
+  Alcotest.(check bool)
+    "the other loop's stalled head was shed" true
+    (Eio.Promise.is_resolved shed)
+
 let suite =
   ( "relay",
     [
@@ -232,4 +275,6 @@ let suite =
         test_forward_holds_its_bound;
       Alcotest.test_case "forward reads failures with its classifier" `Quick
         test_forward_reads_failures_with_its_classifier;
+      Alcotest.test_case "forward sheds within its pool" `Quick
+        test_forward_sheds_within_its_pool;
     ] )
