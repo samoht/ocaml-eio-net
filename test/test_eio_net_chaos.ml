@@ -146,6 +146,27 @@ let test_flow_seeded_deterministic () =
   let c = run_seeded_flow 5678 in
   Alcotest.(check bool) "a different seed chunks differently" true (a <> c)
 
+(* The dribble and short-write bounds are uncapped, so one past [2^30 - 1]
+   still injects faults. *)
+let test_flow_seeded_wide_bounds () =
+  Eio_mock.Backend.run @@ fun () ->
+  let wide = 1 lsl 30 in
+  let client, server =
+    Flow.pair
+      ~client:(Flow.Schedule.seeded ~short_write:wide 1)
+      ~server:(Flow.Schedule.seeded ~dribble:wide 1)
+      ()
+  in
+  let sizes = ref [] in
+  Eio.Fiber.both
+    (fun () ->
+      Eio.Flow.copy_string (String.make 20 'x') client;
+      Eio.Flow.close client)
+    (fun () -> sizes := read_sizes server);
+  Alcotest.(check int)
+    "all 20 bytes delivered" 20
+    (List.fold_left ( + ) 0 !sizes)
+
 (* --- Datagram faults ----------------------------------------------------- *)
 
 (* mem deliberately has no datagram support, so the fake lives here. *)
@@ -384,6 +405,8 @@ let suite =
       Alcotest.test_case "flow mid-stream eof" `Quick test_flow_eof;
       Alcotest.test_case "flow seeded determinism" `Quick
         test_flow_seeded_deterministic;
+      Alcotest.test_case "flow seeded wide bounds" `Quick
+        test_flow_seeded_wide_bounds;
       Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
       Alcotest.test_case "datagram drop refuses a negative count" `Quick
         test_dgram_drop_negative;
