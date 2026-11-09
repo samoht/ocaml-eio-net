@@ -463,6 +463,56 @@ let test_capacity () =
   | exception Invalid_argument _ -> ()
   | _ -> Alcotest.fail "a capacity of 0 was accepted"
 
+(* A read or a write wakes one waiter, not every one: 8000 writers blocked on
+   a queue of one byte, and 8000 readers on an empty one, finish with work, here
+   counted as the words allocated, that grows with the number of waiters, not
+   with its square. Waking all of them each time allocates well past the
+   bound. *)
+let test_capacity_wakes_one () =
+  let n = 8000 in
+  let words f =
+    let before = Gc.minor_words () in
+    Eio_mock.Backend.run f;
+    Gc.minor_words () -. before
+  in
+  let writers () =
+    let client, server = Eio_net_mem.pipe ~capacity:1 () in
+    let one = Cstruct.of_string "x" in
+    Eio.Fiber.both
+      (fun () ->
+        Eio.Fiber.all (List.init n (fun _ () -> Eio.Flow.write client [ one ]));
+        Eio.Flow.shutdown client `Send)
+      (fun () ->
+        let buf = Cstruct.create 1 in
+        try
+          while true do
+            ignore (Eio.Flow.single_read server buf : int)
+          done
+        with End_of_file -> ())
+  in
+  let readers () =
+    let client, server = Eio_net_mem.pipe ~capacity:1 () in
+    let one = Cstruct.of_string "x" in
+    Eio.Fiber.both
+      (fun () ->
+        Eio.Fiber.all
+          (List.init n (fun _ () ->
+               ignore (Eio.Flow.single_read server (Cstruct.create 1) : int))))
+      (fun () ->
+        Eio.Fiber.yield ();
+        for _ = 1 to n do
+          Eio.Flow.write client [ one ]
+        done)
+  in
+  let bound = 4000. *. float n in
+  let check what f =
+    let w = words f in
+    if w > bound then
+      Alcotest.failf "%s: %.0f words for %d waiters, past %.0f" what w n bound
+  in
+  check "writers" writers;
+  check "readers" readers
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -936,6 +986,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a capacity wakes one waiter" `Quick
+        test_capacity_wakes_one;
       Alcotest.test_case "an empty write after peer close" `Quick
         test_empty_write_after_peer_close;
       Alcotest.test_case "a connect bound to an address" `Quick

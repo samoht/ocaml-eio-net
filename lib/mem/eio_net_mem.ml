@@ -113,12 +113,48 @@ module Sockopt = struct
   let datagram : type a. a Eio.Net.Sockopt.t -> unit = refuse
 end
 
+(* Fibers waiting on a pipe, first come first served. A waiter is taken from
+   the queue under the pipe's mutex, at most once, and woken once the mutex is
+   released. A waiter cancelled after it was taken passes the turn on, so no
+   wake-up is lost. *)
+module Waiters = struct
+  type waiter = { wake : unit Eio.Promise.u; mutable waiting : bool }
+  type t = waiter Queue.t
+
+  let v () : t = Queue.create ()
+
+  let add (q : t) =
+    let p, wake = Eio.Promise.create () in
+    let w = { wake; waiting = true } in
+    Queue.push w q;
+    (p, w)
+
+  let rec take (q : t) =
+    match Queue.take_opt q with
+    | None -> []
+    | Some w when w.waiting ->
+        w.waiting <- false;
+        [ w ]
+    | Some _ -> take q
+
+  let take_all (q : t) =
+    let all =
+      Queue.fold (fun acc w -> if w.waiting then w :: acc else acc) [] q
+    in
+    List.iter (fun w -> w.waiting <- false) all;
+    Queue.clear q;
+    all
+
+  let wake = List.iter (fun w -> Eio.Promise.resolve w.wake ())
+end
+
 (* One direction of a connection: the bytes written and not yet read. Its two
-   ends may be used from two domains, so its state is guarded by a mutex and a
-   read that finds nothing waits on a condition it registers for before it looks,
-   which a write broadcasts after it has queued its bytes. A write takes what
-   fits under [capacity] and waits on [writable] while nothing does, which a
-   read broadcasts.
+   ends may be used from two domains, so its state is guarded by a mutex. A
+   read that finds nothing waits in [readers], and a write that finds the queue
+   holding [capacity] bytes waits in [writers]. A write wakes one reader, and
+   the next writer if room is left; a read wakes one writer, and the next
+   reader if bytes are left. A change of state, a shutdown, a reset or a close,
+   wakes every waiter.
 
    The ends follow TCP: [shut] is the writer's FIN, after which the reader
    reads end-of-file, or a reset when [reset] says one came. A reset is
@@ -141,8 +177,8 @@ module Pipe = struct
     local : bool;
     capacity : int;
     mutable size : int; (* Bytes queued and not yet read. *)
-    readable : Eio.Condition.t;
-    writable : Eio.Condition.t;
+    readers : Waiters.t;
+    writers : Waiters.t;
   }
 
   let v ~local ~capacity =
@@ -158,14 +194,35 @@ module Pipe = struct
       deaf = false;
       capacity;
       size = 0;
-      readable = Eio.Condition.create ();
-      writable = Eio.Condition.create ();
+      readers = Waiters.v ();
+      writers = Waiters.v ();
     }
 
+  (* Runs [f] under the mutex; it returns its result and the waiters to wake
+     once the mutex is released. *)
+  let locked t f =
+    let result, woken = Mutex.protect t.mutex (fun () -> f t) in
+    Waiters.wake woken;
+    result
+
+  (* Waits for the wake-up of [waiter], registered in [q]. *)
+  let await t q (p, waiter) =
+    match Eio.Promise.await p with
+    | () -> ()
+    | exception (Eio.Cancel.Cancelled _ as e) ->
+        locked t (fun _ ->
+            if waiter.Waiters.waiting then begin
+              waiter.waiting <- false;
+              ((), [])
+            end
+            else ((), Waiters.take q));
+        raise e
+
+  (* Changes the state under the mutex and wakes every waiter. *)
   let update t f =
-    Mutex.protect t.mutex (fun () -> f t);
-    Eio.Condition.broadcast t.readable;
-    Eio.Condition.broadcast t.writable
+    locked t (fun t ->
+        f t;
+        ((), Waiters.take_all t.readers @ Waiters.take_all t.writers))
 
   (* The reset reaches the reader once it has read what is queued. *)
   let reset t = update t (fun t -> t.reset <- true)
@@ -190,39 +247,39 @@ module Pipe = struct
         push t bufs (n - k)
     | _ -> ()
 
-  let write t ~back bufs =
+  let rec write t ~back bufs =
     let n = Cstruct.lenv bufs in
     let result =
-      Eio.Condition.loop_no_mutex t.writable @@ fun () ->
-      Mutex.protect t.mutex @@ fun () ->
+      locked t @@ fun t ->
       if t.shut then raise (reset_exn ());
       (* An empty write sends nothing, so it meets no closed peer. *)
-      if n = 0 then Some (`Dropped 0)
-      else if t.refused then Some `Refused
+      if n = 0 then (`Dropped 0, [])
+      else if t.refused then (`Refused, [])
       else if t.gone then begin
         t.refused <- true;
         if t.local then raise (reset_exn ());
-        Some (`Lost n)
+        (`Lost n, [])
       end
-      else if t.deaf then Some (`Dropped n)
-      else if t.size >= t.capacity then None
+      else if t.deaf then (`Dropped n, [])
+      else if t.size >= t.capacity then (`Wait (Waiters.add t.writers), [])
       else
         let k = min n (t.capacity - t.size) in
         push t bufs k;
         t.size <- t.size + k;
-        Some (`Queued k)
+        let next = if t.size < t.capacity then Waiters.take t.writers else [] in
+        (`Queued k, Waiters.take t.readers @ next)
     in
     match result with
+    | `Wait w ->
+        await t t.writers w;
+        write t ~back bufs
     | `Refused ->
         consume_reset back;
         raise (reset_exn ())
     | `Lost n ->
         reset back;
         n
-    | `Dropped n -> n
-    | `Queued k ->
-        Eio.Condition.broadcast t.readable;
-        k
+    | `Dropped n | `Queued n -> n
 
   let rec take t dst got =
     match Queue.peek_opt t.queued with
@@ -239,14 +296,16 @@ module Pipe = struct
     | _ -> got
 
   (* What is queued drains before a reset or the end of the stream. *)
-  let read t dst =
-    let n =
-      Eio.Condition.loop_no_mutex t.readable @@ fun () ->
-      Mutex.protect t.mutex @@ fun () ->
+  let rec read t dst =
+    let result =
+      locked t @@ fun t ->
       if not (Queue.is_empty t.queued) then begin
         let n = take t dst 0 in
         t.size <- t.size - n;
-        Some n
+        let next =
+          if Queue.is_empty t.queued then [] else Waiters.take t.readers
+        in
+        (`Read n, Waiters.take t.writers @ next)
       end
       else if t.reset then begin
         t.reset <- false;
@@ -254,10 +313,13 @@ module Pipe = struct
         raise (reset_exn ())
       end
       else if t.shut || t.deaf then raise End_of_file
-      else None
+      else (`Wait (Waiters.add t.readers), [])
     in
-    Eio.Condition.broadcast t.writable;
-    n
+    match result with
+    | `Read n -> n
+    | `Wait w ->
+        await t t.readers w;
+        read t dst
 
   let shut t = update t (fun t -> t.shut <- true)
 
@@ -272,18 +334,14 @@ module Pipe = struct
   (* The reader closes: bytes it left unread answer the writer with a reset,
      which refuses its writes at once. *)
   let leave t =
-    let unread =
-      Mutex.protect t.mutex @@ fun () ->
-      let unread = not (Queue.is_empty t.queued) in
-      Queue.clear t.queued;
-      t.head <- 0;
-      t.size <- 0;
-      t.gone <- true;
-      if unread then t.refused <- true;
-      unread
-    in
-    Eio.Condition.broadcast t.writable;
-    unread
+    locked t @@ fun t ->
+    let unread = not (Queue.is_empty t.queued) in
+    Queue.clear t.queued;
+    t.head <- 0;
+    t.size <- 0;
+    t.gone <- true;
+    if unread then t.refused <- true;
+    (unread, Waiters.take_all t.readers @ Waiters.take_all t.writers)
 end
 
 module Flow = struct
