@@ -314,6 +314,19 @@ let test_connect_bound () =
     [ "127.0.0.1 true"; "127.0.0.1 false" ]
     [ given; chosen ]
 
+(* An empty write after the peer closed writes nothing and draws no reset:
+   the next read returns end of file. *)
+let test_empty_write_after_peer_close () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Flow.close server;
+  Alcotest.(check int)
+    "an empty write" 0
+    (Eio.Flow.single_write client [ Cstruct.empty ]);
+  match read_all client with
+  | "", End_of_file -> ()
+  | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
+
 (* A connection reset before it is read reports the reset to one read, and end
    of file to the reads after it, as a socket clears its pending error once it
    reports it. *)
@@ -923,6 +936,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "an empty write after peer close" `Quick
+        test_empty_write_after_peer_close;
       Alcotest.test_case "a connect bound to an address" `Quick
         test_connect_bound;
       Alcotest.test_case "an accepted connection's peer" `Quick

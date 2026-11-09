@@ -196,14 +196,15 @@ module Pipe = struct
       Eio.Condition.loop_no_mutex t.writable @@ fun () ->
       Mutex.protect t.mutex @@ fun () ->
       if t.shut then raise (reset_exn ());
-      if t.refused then Some `Refused
+      (* An empty write sends nothing, so it meets no closed peer. *)
+      if n = 0 then Some (`Dropped 0)
+      else if t.refused then Some `Refused
       else if t.gone then begin
         t.refused <- true;
         if t.local then raise (reset_exn ());
         Some (`Lost n)
       end
       else if t.deaf then Some (`Dropped n)
-      else if n = 0 then Some (`Queued 0)
       else if t.size >= t.capacity then None
       else
         let k = min n (t.capacity - t.size) in
