@@ -91,6 +91,17 @@ let ip_overlaps (ip, port) (ip', port') =
 
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
 
+(* The error a socket at [src] meets reaching [dst] across address families,
+   IPv6 against IPv4-mapped, as on Linux. *)
+let cross_family (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
+  if String.length (src :> string) <> 16 || String.length (dst :> string) <> 16
+  then None
+  else if is_v4 src && not (is_v4 dst) then Some Address_family
+  else if
+    (not (is_v4 src)) && (not (same src Eio.Net.Ipaddr.V6.any)) && is_v4 dst
+  then Some Network_unreachable
+  else None
+
 (* The IP addresses at which sockets of one kind hold each port, kept as they
    bind and close, so a bind checks only the sockets of its port. [lowest] is a
    port of the dynamic range (RFC 6335, section 6) at or below the lowest one
@@ -654,6 +665,16 @@ module Datagram_socket = struct
     | `Unix _ -> 212960
     | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
 
+  (* A send a socket refuses: too long, to port 0, or across address
+     families. *)
+  let refusal t dst bufs =
+    if Cstruct.lenv bufs > max_length dst then Some Message_too_long
+    else
+      match (t.addr, dst) with
+      | _, `Udp (_, 0) -> Some Invalid_port
+      | `Udp (b, _), `Udp (d, _) -> cross_family b d
+      | _ -> None
+
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
      the sender is not told; at a Unix path, the send finds no file, or one
      that no socket holds any more and refuses it. *)
@@ -664,23 +685,9 @@ module Datagram_socket = struct
       | Some dst -> dst
       | None -> raise (Eio.Exn.create (Eio.Exn.X No_destination))
     in
-    if Cstruct.lenv bufs > max_length dst then
-      raise (Eio.Exn.create (Eio.Exn.X Message_too_long));
-    (match dst with
-    | `Udp (_, 0) -> raise (Eio.Exn.create (Eio.Exn.X Invalid_port))
-    | `Udp _ | `Unix _ -> ());
-    (* A socket bound to an IPv6 address sends to no IPv4-mapped one, and one
-       bound to an IPv4-mapped address to no IPv6 one, as on Linux. *)
-    (match (t.addr, dst) with
-    | `Udp (b, _), `Udp (d, _)
-      when String.length (b :> string) = 16 && String.length (d :> string) = 16
-      ->
-        let fail code = raise (Eio.Exn.create (Eio.Exn.X code)) in
-        if is_v4 b && not (is_v4 d) then fail Address_family
-        else if
-          (not (is_v4 b)) && (not (same b Eio.Net.Ipaddr.V6.any)) && is_v4 d
-        then fail Network_unreachable
-    | _ -> ());
+    Option.iter
+      (fun code -> raise (Eio.Exn.create (Eio.Exn.X code)))
+      (refusal t dst bufs);
     match find t.hub dst with
     | None -> (
         match dst with
@@ -801,11 +808,7 @@ module Network = struct
     | None, _ | Some (`Unix _), `Unix _ -> ()
     | Some (`Tcp (b, _)), `Tcp (d, _)
       when String.length (b :> string) = String.length (d :> string) ->
-        if String.length (b :> string) = 16 then
-          if is_v4 b && not (is_v4 d) then fail Address_family
-          else if
-            (not (is_v4 b)) && (not (same b Eio.Net.Ipaddr.V6.any)) && is_v4 d
-          then fail Network_unreachable
+        Option.iter fail (cross_family b d)
     | Some _, _ ->
         invalid_arg
           "eio-net.mem: bind_to is not of the connect address's family"
