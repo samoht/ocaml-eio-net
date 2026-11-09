@@ -119,16 +119,10 @@ let stream = "socket_stream.cc"
 let stream_blocking = "socket_stream_blocking.cc"
 
 (* A write on a Unix-domain stream whose peer has closed fails at once with
-   EPIPE. eio-net.mem follows TCP, which loses the first write and answers it
-   with a reset. *)
+   EPIPE. *)
 let write_one_side_closed ~file =
   per_stream ~file ~test:"WriteOneSideClosed" [ Unix_stream ]
-    (fun _ ->
-      expect ~mem:"wrote 3"
-        ~mem_bug:
-          "On a Unix-domain connection, raise the reset on the first write \
-           after the peer closed instead of losing it."
-        "reset")
+    (fun _ -> expect "reset")
     (fun ctx k ->
       let c, a, _ = stream_pair ctx k in
       Eio.Flow.close c;

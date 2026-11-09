@@ -68,7 +68,8 @@ end
    reported once, by a read or by a write that [refused] fails, as a socket
    clears its pending error; reads then return end-of-file. [gone] says the
    reader has closed: the first write to it is lost and answered with a reset,
-   which [refused] then makes every later write raise. [deaf] says the reader
+   which [refused] then makes every later write raise; on a Unix-domain
+   connection, [local], the first write raises it, as EPIPE. [deaf] says the reader
    shut its receive side: writes are lost, as Linux takes and drops them. *)
 module Pipe = struct
   type t = {
@@ -80,14 +81,16 @@ module Pipe = struct
     mutable gone : bool;
     mutable refused : bool;
     mutable deaf : bool;
+    local : bool;
     capacity : int;
     mutable size : int; (* Bytes queued and not yet read. *)
     readable : Eio.Condition.t;
     writable : Eio.Condition.t;
   }
 
-  let v ~capacity =
+  let v ~local ~capacity =
     {
+      local;
       mutex = Mutex.create ();
       queued = Queue.create ();
       head = 0;
@@ -139,6 +142,7 @@ module Pipe = struct
       if t.refused then Some `Refused
       else if t.gone then begin
         t.refused <- true;
+        if t.local then raise (reset_exn ());
         Some (`Lost n)
       end
       else if t.deaf then Some (`Dropped n)
@@ -293,9 +297,9 @@ module Flow = struct
     in
     (impl, Eio.Resource.T (impl, handler))
 
-  let pair ~capacity =
-    let to_client = Pipe.v ~capacity in
-    let to_server = Pipe.v ~capacity in
+  let pair ~local ~capacity =
+    let to_client = Pipe.v ~local ~capacity in
+    let to_server = Pipe.v ~local ~capacity in
     let client = v ~from_peer:to_client ~to_peer:to_server in
     let server = v ~from_peer:to_server ~to_peer:to_client in
     (client, server)
@@ -629,7 +633,8 @@ module Network = struct
     | None, `Tcp _ -> refused ()
     | Some listener, _ when Atomic.get listener.closed -> refused ()
     | Some listener, _ ->
-        let client, server = Flow.pair ~capacity:t.capacity in
+        let local = match addr with `Unix _ -> true | `Tcp _ -> false in
+        let client, server = Flow.pair ~local ~capacity:t.capacity in
         Eio.Stream.add listener.incoming (server, `Unix "in-memory-client");
         (* The listener closed while the connection waited for room: its
            queue was closed before this connection joined it. *)
@@ -684,7 +689,7 @@ let check_capacity = function
 
 let pipe ?capacity () =
   let capacity = check_capacity capacity in
-  let (_, client), (_, server) = Flow.pair ~capacity in
+  let (_, client), (_, server) = Flow.pair ~local:false ~capacity in
   (client, server)
 
 let v ?capacity ~sw () =

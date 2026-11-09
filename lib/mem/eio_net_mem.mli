@@ -10,7 +10,8 @@ type Eio.Exn.Backend.t +=
             where a TCP socket raises one:
             - A write after this end shut its send.
             - A write after the peer closed: the first is lost and answered with
-              a reset, which every later write raises.
+              a reset, which every later write raises. On a Unix-domain
+              connection the first write raises it, as EPIPE.
             - A read, once the queued bytes are read, and a write after the peer
               closed with bytes of ours unread.
             - A read and a write on a connection its listener closed before

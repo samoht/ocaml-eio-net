@@ -235,6 +235,24 @@ let test_write_after_peer_close () =
   | "", End_of_file -> ()
   | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
 
+(* A write on a Unix-domain connection whose peer has closed raises the reset
+   at once, as EPIPE, where a TCP connection loses the first one; reads return
+   end of file. *)
+let test_unix_write_after_peer_close () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let listener = Eio.Net.listen ~sw ~backlog:1 net (`Unix "/tmp/epipe.sock") in
+  let client = Eio.Net.connect ~sw net (`Unix "/tmp/epipe.sock") in
+  let server, _ = Eio.Net.accept ~sw listener in
+  Eio.Flow.close server;
+  (match Eio.Flow.single_write client [ Cstruct.of_string "ping" ] with
+  | exception e when is_reset e -> ()
+  | (_ : int) -> Alcotest.fail "the first write went through");
+  match read_all client with
+  | "", End_of_file -> ()
+  | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
+
 (* A connection reset before it is read reports the reset to one read, and end
    of file to the reads after it, as a socket clears its pending error once it
    reports it. *)
@@ -762,6 +780,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a Unix-domain write after peer close" `Quick
+        test_unix_write_after_peer_close;
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
       Alcotest.test_case "a closed connection leaves its switch" `Quick
