@@ -12,6 +12,16 @@ let per_stream ~test kinds expect body =
         ~ipv6:(needs_ipv6 (Stream k)) (expect k) (fun ctx -> body ctx k))
     kinds
 
+(* A loopback port no socket holds: a listener's, closed before any
+   connection. *)
+let free_port ctx =
+  let l = listen ctx (`Tcp (v4_loopback, 0)) in
+  let port =
+    match Eio.Net.listening_addr l with `Tcp (_, p) -> p | `Unix _ -> 0
+  in
+  Eio.Net.close l;
+  port
+
 let cases =
   List.concat
     [
@@ -134,6 +144,34 @@ let cases =
             Some v4_mapped_loopback,
             expect "from 127.0.0.1" );
         ];
+      (* A connected client holds its address: a second connect bound to it,
+         and a listen there, find it in use. *)
+      [
+        case ~file ~test:"ClientPortHeld" ~variant:"second bound connect"
+          (expect "EADDRINUSE") (fun ctx ->
+            let l = listen ctx (`Tcp (v4_loopback, 0)) in
+            let bind_to = `Tcp (v4_loopback, free_port ctx) in
+            let connect () =
+              ignore
+                (Eio.Net.connect ~sw:ctx.sw ~bind_to ctx.net
+                   (Eio.Net.listening_addr l))
+            in
+            connect ();
+            outcome (fun () ->
+                connect ();
+                "connected"));
+        case ~file ~test:"ClientPortHeld" ~variant:"listen at it"
+          (expect "EADDRINUSE") (fun ctx ->
+            let l = listen ctx (`Tcp (v4_loopback, 0)) in
+            let port = free_port ctx in
+            ignore
+              (Eio.Net.connect ~sw:ctx.sw
+                 ~bind_to:(`Tcp (v4_loopback, port))
+                 ctx.net (Eio.Net.listening_addr l));
+            outcome (fun () ->
+                ignore (listen ctx (`Tcp (v4_loopback, port)));
+                "listening"));
+      ];
     ]
 
 let suite = Oracle.suite "review" cases

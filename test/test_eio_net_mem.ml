@@ -293,6 +293,19 @@ let test_accepted_peer_address () =
   | `Tcp (_, p), `Tcp (_, q) when p <> q -> ()
   | _ -> Alcotest.fail "two connections share a port"
 
+(* A client's port is one no socket holds, so a listener at the top of the
+   dynamic range never accepts a peer with its own address. *)
+let test_client_port_is_free () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 65535) in
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  ignore (Eio.Net.connect ~sw net addr);
+  match Eio.Net.accept ~sw l with
+  | _, `Tcp (_, 65535) -> Alcotest.fail "the peer holds the listener's port"
+  | _ -> ()
+
 (* A connect bound to a local address holds it: the listener sees that
    address as the peer's, with a port of the dynamic range for port 0. *)
 let test_connect_bound () =
@@ -1079,6 +1092,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a client's port is free" `Quick
+        test_client_port_is_free;
       Alcotest.test_case "a capacity serves writers first come first served"
         `Quick test_capacity_first_come;
       Alcotest.test_case "a cancelled wait leaves nothing behind" `Quick

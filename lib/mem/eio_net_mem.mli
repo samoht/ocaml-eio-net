@@ -114,7 +114,8 @@ val v :
     it is closed or when the switch passed to [accept] finishes. An accepted
     connection's peer address is the client's: the loopback address its
     destination reaches, IPv4-mapped for an IPv4 client of an IPv6 listener, at
-    a port of the dynamic range counted down from its top, or [`Unix ""] for a
+    a port of the dynamic range no socket holds, counted down from its top,
+    which the client holds until its flow closes, or [`Unix ""] for a
     Unix-domain client, which binds no path. Host resolution maps ["127.0.0.1"]
     and ["::1"] with a numeric service to the loopback address of their family
     at that port, once as a stream address and once as a datagram address, and
@@ -131,13 +132,13 @@ val v :
     an ignored option from an applied one, so a test that must know an option
     took effect needs a real socket. A [connect] bound with [bind_to] holds that
     address, which the listener sees as its peer's, at a port of the dynamic
-    range for port 0; one at a port a listener holds raises the error that
-    {!Address_in_use} marks, and one bound to an IPv6 address connecting to an
-    IPv4-mapped one, or the reverse, raises the error that
-    {!Network_unreachable} or {!Address_family} marks; one bound to an address
-    of another family, IPv4 for IPv6 or a path for TCP, raises the error that
-    {!Address_family} marks, as macOS fails it with EAFNOSUPPORT where Linux
-    says EINVAL. [getsockopt] raises [Invalid_argument] on every socket.
+    range for port 0; one at an address a listener or another client holds
+    raises the error that {!Address_in_use} marks, and one bound to an IPv6
+    address connecting to an IPv4-mapped one, or the reverse, raises the error
+    that {!Network_unreachable} or {!Address_family} marks; one bound to an
+    address of another family, IPv4 for IPv6 or a path for TCP, raises the error
+    that {!Address_family} marks, as macOS fails it with EAFNOSUPPORT where
+    Linux says EINVAL. [getsockopt] raises [Invalid_argument] on every socket.
 
     A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
     bind the loopback address of their family, and an address with port [0]

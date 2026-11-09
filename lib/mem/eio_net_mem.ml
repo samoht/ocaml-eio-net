@@ -112,14 +112,16 @@ let cross_family (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
 (* The IP addresses at which sockets of one kind hold each port, kept as they
    bind and close, so a bind checks only the sockets of its port. [lowest] is a
    port of the dynamic range (RFC 6335, section 6) at or below the lowest one
-   no socket holds: every port below it is held. *)
+   no socket holds: every port below it is held; [highest] is one at or above
+   the highest free one. *)
 module Ports = struct
   type t = {
     held : (int, Eio.Net.Ipaddr.v4v6 list) Hashtbl.t;
     mutable lowest : int;
+    mutable highest : int;
   }
 
-  let v () = { held = Hashtbl.create 64; lowest = 49152 }
+  let v () = { held = Hashtbl.create 64; lowest = 49152; highest = 65535 }
   let at t port = Option.value ~default:[] (Hashtbl.find_opt t.held port)
   let add t (ip, port) = Hashtbl.replace t.held port (ip :: at t port)
 
@@ -131,7 +133,8 @@ module Ports = struct
     match drop (at t port) with
     | [] ->
         Hashtbl.remove t.held port;
-        if port >= 49152 && port < t.lowest then t.lowest <- port
+        if port >= 49152 && port < t.lowest then t.lowest <- port;
+        if port <= 65535 && port > t.highest then t.highest <- port
     | ips -> Hashtbl.replace t.held port ips
 
   let in_use t (ip, port) =
@@ -148,6 +151,18 @@ module Ports = struct
       end
     in
     find t.lowest
+
+  (* The highest port of the dynamic range no socket holds. *)
+  let free_down t =
+    let rec find port =
+      if port < 49152 then None
+      else if Hashtbl.mem t.held port then find (port - 1)
+      else begin
+        t.highest <- port;
+        Some port
+      end
+    in
+    find t.highest
 end
 
 (* A Unix path no socket binds has no file, as Eio's POSIX backend removes it
@@ -491,6 +506,7 @@ module Flow = struct
       from_peer : Pipe.t;
       mutable closed : bool;
       mutable release : Eio.Switch.hook;
+      mutable on_close : unit -> unit;
     }
 
     (* As Eio's own sockets refuse a descriptor used after close. *)
@@ -527,7 +543,8 @@ module Flow = struct
         let unread = Pipe.leave t.from_peer in
         if abort then Pipe.update t.from_peer (fun p -> p.refused <- true);
         if unread || abort then Pipe.reset t.to_peer;
-        Pipe.shut t.to_peer
+        Pipe.shut t.to_peer;
+        t.on_close ()
       end
 
     let close t = close_with ~abort:false t
@@ -545,7 +562,13 @@ module Flow = struct
   let v ~from_peer ~to_peer =
     let impl =
       Impl.
-        { from_peer; to_peer; closed = false; release = Eio.Switch.null_hook }
+        {
+          from_peer;
+          to_peer;
+          closed = false;
+          release = Eio.Switch.null_hook;
+          on_close = ignore;
+        }
     in
     (impl, Eio.Resource.T (impl, handler))
 
@@ -563,6 +586,7 @@ module Flow = struct
     flow
 
   let close ((_, flow) : t) = Eio.Flow.close flow
+  let on_close ((impl, _) : t) f = impl.Impl.on_close <- f
   let abort ((impl, _) : t) = Impl.close_with ~abort:true impl
 end
 
@@ -856,7 +880,6 @@ module Network = struct
     hub : Listening_socket.hub;
     datagrams : Datagram_socket.hub;
     capacity : int;
-    next_port : int Atomic.t;
   }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
@@ -887,19 +910,34 @@ module Network = struct
      destination reaches, in the destination's family, at the next port of the
      dynamic range, counted down from the top of the range as listeners count
      up from its bottom. *)
-  let client_addr t ?bind ip =
+  (* Holds the address of a client that connects to [ip] in the listeners'
+     ports, until [release]: the address its destination reaches, in the
+     destination's family, or the one it is bound at, at a free port counted
+     down from the top of the dynamic range as listeners count up from its
+     bottom. *)
+  let hold t ?bind ip =
     let reached = List.hd (reaching ip) in
     let mapped = String.length (ip :> string) = 16 && is_v4 ip in
     let reached = if mapped then map reached else reached in
-    let next () =
-      let n = Atomic.fetch_and_add t.next_port 1 in
-      65535 - (n mod (65535 - 49152 + 1))
+    let ip, port =
+      match bind with
+      | None -> (reached, 0)
+      | Some (b, port) ->
+          ((if same (unmap b) (any (unmap b)) then reached else b), port)
     in
-    match bind with
-    | None -> (reached, next ())
-    | Some (b, port) ->
-        let b = if same (unmap b) (any (unmap b)) then reached else b in
-        (b, if port = 0 then next () else port)
+    Eio.Mutex.use_rw ~protect:true t.hub.mutex @@ fun () ->
+    let ports = t.hub.Listening_socket.ports in
+    if port <> 0 && Ports.in_use ports (ip, port) then Error `In_use
+    else
+      match if port = 0 then Ports.free_down ports else Some port with
+      | None -> Error `No_port
+      | Some port ->
+          Ports.add ports (ip, port);
+          Ok (ip, port)
+
+  let release t local =
+    Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
+        Ports.remove t.hub.Listening_socket.ports local)
 
   (* A connect bound to an address of the other family fails, as macOS fails
      it with EAFNOSUPPORT where Linux says EINVAL; IPv6 against IPv4-mapped
@@ -923,18 +961,8 @@ module Network = struct
     | `Unix _ -> `Unix ""
     | `Tcp (lip, _) -> `Tcp (seen_by lip ip, port)
 
-  (* A connection is a pair of queues. A local address it is bound at, at a
-     port a listener holds, is in use. *)
-  let connect t ~bind_to ~options ~sw addr =
-    check_options options;
-    check_bind bind_to addr;
-    (match bind_to with
-    | Some (`Tcp (_, port) as local)
-      when port <> 0
-           && Eio.Mutex.use_ro t.hub.mutex (fun () ->
-               Listening_socket.in_use t.hub local) ->
-        raise (address_in_use ())
-    | _ -> ());
+  (* A connect for a client that holds [local], if it is a TCP one. *)
+  let connect_held t ~sw ~bind_to ~release addr local =
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
           match addr with
@@ -952,15 +980,14 @@ module Network = struct
     | None, `Tcp _ -> refused ()
     | Some listener, _ when Atomic.get listener.closed -> refused ()
     | Some listener, _ ->
-        let local = match addr with `Unix _ -> true | `Tcp _ -> false in
-        let client, server = Flow.pair ~local ~capacity:t.capacity in
+        let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
+        let client, server = Flow.pair ~local:unix ~capacity:t.capacity in
+        Flow.on_close client release;
         let peer =
-          match (addr, bind_to) with
-          | `Tcp (ip, _), Some (`Tcp bind) ->
-              peer_addr listener.addr (client_addr t ~bind ip)
-          | `Tcp (ip, _), _ -> peer_addr listener.addr (client_addr t ip)
-          | `Unix _, Some (`Unix path) -> `Unix path
-          | `Unix _, _ -> `Unix ""
+          match (local, bind_to) with
+          | Some a, _ -> peer_addr listener.addr a
+          | None, Some (`Unix path) -> `Unix path
+          | None, _ -> `Unix ""
         in
         Eio.Stream.add listener.incoming (server, peer);
         (* The listener closed while the connection waited for room: its
@@ -971,6 +998,34 @@ module Network = struct
           refused ()
         end;
         Flow.close_with sw client
+
+  (* A connection is a pair of queues. A TCP client holds its address until
+     its flow closes; one bound at an address a socket holds finds it in
+     use. *)
+  let connect t ~bind_to ~options ~sw addr =
+    check_options options;
+    check_bind bind_to addr;
+    let local =
+      match (addr, bind_to) with
+      | `Unix _, _ -> None
+      | `Tcp (ip, _), bind -> (
+          let bind = match bind with Some (`Tcp b) -> Some b | _ -> None in
+          match hold t ?bind ip with
+          | Ok local -> Some local
+          | Error `In_use -> raise (address_in_use ())
+          | Error `No_port ->
+              failwith "eio-net.mem: every port of 49152-65535 is held")
+    in
+    (* Released once, by the flow's close or by a failed connect. *)
+    let released = Atomic.make false in
+    let release () =
+      if not (Atomic.exchange released true) then Option.iter (release t) local
+    in
+    match connect_held t ~sw ~bind_to ~release addr local with
+    | flow -> flow
+    | exception e ->
+        release ();
+        raise e
 
   let datagram_handler = Eio.Net.Pi.datagram_socket (module Datagram_socket)
 
@@ -1036,6 +1091,4 @@ let v ?capacity ~sw () =
       mutex = Mutex.create ();
     }
   in
-  Eio.Resource.T
-    ( Network.{ sw; hub; datagrams; capacity; next_port = Atomic.make 0 },
-      handler )
+  Eio.Resource.T (Network.{ sw; hub; datagrams; capacity }, handler)
