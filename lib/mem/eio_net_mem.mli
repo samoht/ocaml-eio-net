@@ -160,11 +160,14 @@ val v :
     {!Message_too_long} marks. One sent to UDP port 0 raises the error that
     {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. One sent from
     an IPv6 address to an IPv4-mapped one, or the reverse, raises the error that
-    {!Network_unreachable} or {!Address_family} marks. A [recv] into a buffer
-    shorter than the datagram gets its first bytes, as a socket does. The socket
-    is closed, and its address free again, when the switch passed to
-    [datagram_socket] finishes; a send or a receive on it then raises
-    [Invalid_argument]. *)
+    {!Network_unreachable} or {!Address_family} marks. One from an IPv4 socket
+    to an IPv6 address, or between UDP and a Unix path, raises the error that
+    {!Address_family} marks; one from an IPv6 socket to an IPv4 address goes the
+    IPv4 way, as on Linux, so it is sent from the wildcard address and refused
+    from any other. A [recv] into a buffer shorter than the datagram gets its
+    first bytes, as a socket does. The socket is closed, and its address free
+    again, when the switch passed to [datagram_socket] finishes; a send or a
+    receive on it then raises [Invalid_argument]. *)
 
 val pipe :
   ?capacity:int ->

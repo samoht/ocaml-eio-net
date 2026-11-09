@@ -742,15 +742,22 @@ module Datagram_socket = struct
     | `Unix _ -> 212960
     | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
 
-  (* A send a socket refuses: too long, to port 0, or across address
-     families. *)
+  (* A send a socket refuses: too long, to another socket type or address
+     family, or to port 0. An IPv6 socket sends to an IPv4 address the IPv4
+     way, as Linux does: from an IPv6 address other than the wildcard, the
+     network is unreachable. *)
   let refusal t dst bufs =
     if Cstruct.lenv bufs > max_length dst then Some Message_too_long
     else
       match (t.addr, dst) with
+      | `Udp _, `Unix _ | `Unix _, `Udp _ -> Some Address_family
       | _, `Udp (_, 0) -> Some Invalid_port
-      | `Udp (b, _), `Udp (d, _) -> cross_family b d
-      | _ -> None
+      | `Udp (b, _), `Udp (d, _) -> (
+          match (String.length (b :> string), String.length (d :> string)) with
+          | 4, 16 -> Some Address_family
+          | 16, 4 -> cross_family b (map d)
+          | _ -> cross_family b d)
+      | `Unix _, `Unix _ -> None
 
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
      the sender is not told; at a Unix path, the send finds no file, or one

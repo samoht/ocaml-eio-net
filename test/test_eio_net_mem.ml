@@ -905,8 +905,8 @@ let test_datagram_too_long () =
     [ "sent"; "EMSGSIZE"; "sent"; "EMSGSIZE"; "sent"; "EMSGSIZE" ]
     [ r4a; r4b; r6a; r6b; rua; rub ]
 
-(* A datagram sent to an IPv4-mapped IPv6 address reaches the socket bound at
-   the IPv4 address it maps, one sent to a wildcard address reaches the
+(* A datagram sent from an IPv6 socket to an IPv4-mapped IPv6 address reaches
+   the socket bound at the IPv4 address it maps, one sent to a wildcard address reaches the
    socket bound at loopback, and one sent to an IPv4 address reaches an IPv6
    wildcard socket, as dual-stack kernels deliver them. *)
 let test_datagram_reaches_like_a_kernel () =
@@ -922,8 +922,13 @@ let test_datagram_reaches_like_a_kernel () =
     Eio.Net.datagram_socket ~sw net (`Udp (Eio.Net.Ipaddr.V6.any, 9201))
   in
   let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
-  let send dst s = Eio.Net.send client ~dst [ Cstruct.of_string s ] in
-  send (`Udp (mapped, 9200)) "mapped";
+  let client6 =
+    Eio.Net.datagram_socket ~sw net (`Udp (Eio.Net.Ipaddr.V6.any, 9202))
+  in
+  let send ?(from = client) dst s =
+    Eio.Net.send from ~dst [ Cstruct.of_string s ]
+  in
+  send ~from:client6 (`Udp (mapped, 9200)) "mapped";
   send (`Udp (Eio.Net.Ipaddr.V4.any, 9200)) "wildcard";
   send (udp 9201) "dual";
   let first = snd (recv_string v4) in

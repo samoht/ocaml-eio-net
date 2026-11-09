@@ -25,7 +25,8 @@ let cases =
           outcome (fun () ->
               Fmt.str "wrote %d" (Eio.Flow.single_write c [ Cstruct.empty ])));
       (* A connect bound to an address of another family fails: EINVAL on
-         Linux, EAFNOSUPPORT on macOS. *)
+         Linux, EAFNOSUPPORT on macOS. A path for TCP fails with EAFNOSUPPORT
+         on Linux 7.2, where the review measured EINVAL on another Linux. *)
       [
         case ~file ~test:"BindToOtherFamily" ~variant:"127.0.0.1 to ::1"
           ~ipv6:true (expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL")
@@ -38,8 +39,8 @@ let cases =
                      ctx.net (Eio.Net.listening_addr l));
                 "connected"));
         case ~file ~test:"BindToOtherFamily" ~variant:"unix path to tcp"
-          (expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL")
-          (fun ctx ->
+          (expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT"
+             "EAFNOSUPPORT | EINVAL") (fun ctx ->
             let l = listen ctx (`Tcp (v4_loopback, 0)) in
             let bind_to = stream_addr ctx Unix_stream in
             outcome (fun () ->
@@ -48,6 +49,56 @@ let cases =
                      (Eio.Net.listening_addr l));
                 "connected"));
       ];
+      (* A datagram sent to an address of another family or socket type:
+         from IPv4 to IPv6 it fails; from IPv6 to IPv4 it takes the IPv4 path
+         on Linux, failing from ::1 and going from ::, where macOS fails it
+         with EINVAL; between UDP and a Unix path it fails, with EAFNOSUPPORT
+         on Linux 7.2 where the review measured EINVAL on another Linux. *)
+      List.map
+        (fun (variant, ipv6, src, dst, e) ->
+          case ~file ~test:"DatagramAcrossFamilies" ~variant ~ipv6 e (fun ctx ->
+              let r, r_addr =
+                match dst with
+                | `Udp ip -> datagram_socket ctx (`Udp (ip, 0))
+                | `Unix -> dgram_socket ctx Unix_dgram
+              in
+              let s, _ =
+                match src with
+                | `Udp ip -> datagram_socket ctx (`Udp (ip, 0))
+                | `Unix -> dgram_socket ctx Unix_dgram
+              in
+              outcome (fun () ->
+                  send s ~dst:r_addr "abc";
+                  ignore (recv r 3);
+                  "delivered")))
+        [
+          ( "127.0.0.1 to ::1",
+            true,
+            `Udp v4_loopback,
+            `Udp v6_loopback,
+            expect ~macos:"EHOSTUNREACH" "EAFNOSUPPORT" );
+          ( "::1 to 127.0.0.1",
+            true,
+            `Udp v6_loopback,
+            `Udp v4_loopback,
+            expect ~macos:"EINVAL" "ENETUNREACH" );
+          ( ":: to 127.0.0.1",
+            true,
+            `Udp Eio.Net.Ipaddr.V6.any,
+            `Udp v4_loopback,
+            expect ~macos:"EINVAL" "delivered" );
+          ( "udp to unix path",
+            false,
+            `Udp v4_loopback,
+            `Unix,
+            expect ~macos:"EADDRNOTAVAIL" ~mem:"EAFNOSUPPORT"
+              "EAFNOSUPPORT | EINVAL" );
+          ( "unix to udp",
+            false,
+            `Unix,
+            `Udp v4_loopback,
+            expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL" );
+        ];
     ]
 
 let suite = Oracle.suite "review" cases
