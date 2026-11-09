@@ -25,8 +25,10 @@ let rec takev len = function
 
 (* Formatters of the arguments of a printed schedule, which reads as the call
    that builds it: a negative number is parenthesised, as an argument must be,
-   and a float is printed with the fewest digits that read back as it. *)
+   and a float is printed with the fewest digits that read back as it, as a
+   float literal. *)
 let pp_int ppf n = if n < 0 then Fmt.pf ppf "(%d)" n else Fmt.int ppf n
+let is_digit_or_minus = function '0' .. '9' | '-' -> true | _ -> false
 
 let pp_float ppf x =
   let rec shortest digits =
@@ -35,7 +37,8 @@ let pp_float ppf x =
     else shortest (digits + 1)
   in
   let s = shortest 1 in
-  if x < 0. then Fmt.pf ppf "(%s)" s else Fmt.string ppf s
+  let s = if String.for_all is_digit_or_minus s then s ^ "." else s in
+  if Float.sign_bit x then Fmt.pf ppf "(%s)" s else Fmt.string ppf s
 
 let pp_list pp_v ppf l = Fmt.pf ppf "[%a]" Fmt.(list ~sep:(any "; ") pp_v) l
 let read_rng seed = Random.State.make [| seed; 0x5eed_1 |]
@@ -93,19 +96,24 @@ module Flow = struct
       | None -> ()
       | Some n -> Fmt.pf ppf " ~%s:%a" name pp_int n
 
-    let pp ppf = function
-      | Pass -> Fmt.string ppf "none"
+    (* [path] qualifies the function names, for a schedule printed inside
+       another's call. *)
+    let pp_in ~path ppf = function
+      | Pass -> Fmt.pf ppf "%snone" path
       | Script { reads; writes } ->
-          Fmt.pf ppf "script ~reads:%a ~writes:%a ()" (pp_list pp_read) reads
-            (pp_list pp_write) writes
+          Fmt.pf ppf "%sscript ~reads:%a ~writes:%a ()" path (pp_list pp_read)
+            reads (pp_list pp_write) writes
       | Seeded s ->
           Fmt.pf ppf
-            "seeded ~dribble:%a ~stall:%a ~short_write:%a%a ~reset_kind:%s%a %a"
-            pp_int s.dribble pp_int s.stall pp_int s.short_write
+            "%sseeded ~dribble:%a ~stall:%a ~short_write:%a%a ~reset_kind:%s%a \
+             %a"
+            path pp_int s.dribble pp_int s.stall pp_int s.short_write
             (pp_after "reset_after") s.reset_after
             (match s.reset_kind with `Reset -> "`Reset" | `Eof -> "`Eof")
             (pp_after "fail_write_after")
             s.fail_write_after pp_int s.seed
+
+    let pp = pp_in ~path:""
   end
 
   type driver = { read : delivered:int -> read; write : written:int -> write }
@@ -319,6 +327,19 @@ module Datagram = struct
 
     let seeded ?(loss = 0.) ?(dup = 0.) ?(reorder = 0.) ?(truncate = 0.)
         ?(garble = 0.) ?(delay = 0) seed =
+      List.iter
+        (fun (name, p) ->
+          if not (p >= 0. && p <= 1.) then
+            Fmt.invalid_arg
+              "Eio_net_chaos.Datagram.Schedule.seeded: %s is %g, outside [0, 1]"
+              name p)
+        [
+          ("loss", loss);
+          ("dup", dup);
+          ("reorder", reorder);
+          ("truncate", truncate);
+          ("garble", garble);
+        ];
       let sum = loss +. dup +. reorder +. truncate +. garble in
       if sum > 1. then
         Fmt.invalid_arg
@@ -529,8 +550,9 @@ module Net = struct
       | Slow n -> Fmt.pf ppf "Slow %a" pp_int n
 
     let pp ppf t =
-      Fmt.pf ppf "v ~flow:(%a) ~connect:%a%a ()" Flow.Schedule.pp t.flow
-        (pp_list pp_connect) t.connect
+      Fmt.pf ppf "v ~flow:(%a) ~connect:%a%a ()"
+        (Flow.Schedule.pp_in ~path:"Flow.Schedule.")
+        t.flow (pp_list pp_connect) t.connect
         (Flow.Schedule.pp_after "max_accepts")
         t.max_accepts
   end

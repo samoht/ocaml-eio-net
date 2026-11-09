@@ -383,8 +383,9 @@ let test_schedules_print_every_parameter () =
     (Datagram.Schedule.seeded ~loss:0.1 ~dup:0.2 ~reorder:0.05 ~truncate:0.15
        ~garble:0.3 ~delay:3 7);
   check "a network schedule"
-    "v ~flow:(seeded ~dribble:4 ~stall:0 ~short_write:0 ~reset_kind:`Reset 9) \
-     ~connect:[Refuse; Timeout; Slow 2; Open] ~max_accepts:3 ()"
+    "v ~flow:(Flow.Schedule.seeded ~dribble:4 ~stall:0 ~short_write:0 \
+     ~reset_kind:`Reset 9) ~connect:[Refuse; Timeout; Slow 2; Open] \
+     ~max_accepts:3 ()"
     Net.Schedule.pp
     (Net.Schedule.seeded ~dribble:4
        ~connect:Net.[ Refuse; Timeout; Slow 2; Open ]
@@ -395,6 +396,16 @@ let test_dgram_seeded_refuses_odds_past_one () =
   match Datagram.Schedule.seeded ~loss:0.6 ~dup:0.5 7 with
   | exception Invalid_argument _ -> ()
   | _ -> Alcotest.fail "odds summing to 1.1 were accepted"
+
+(* A probability outside [0., 1.], NaN among them, describes no distribution,
+   and its printed form would not read back. *)
+let test_dgram_seeded_refuses_odds_outside_unit () =
+  List.iter
+    (fun p ->
+      match Datagram.Schedule.seeded ~dup:p 7 with
+      | exception Invalid_argument _ -> ()
+      | _ -> Alcotest.failf "the probability %g was accepted" p)
+    [ Float.nan; -0.5; Float.neg_infinity ]
 
 let suite =
   ( "eio_net_chaos",
@@ -430,4 +441,6 @@ let suite =
         test_schedules_print_every_parameter;
       Alcotest.test_case "datagram seeded refuses odds past one" `Quick
         test_dgram_seeded_refuses_odds_past_one;
+      Alcotest.test_case "datagram seeded refuses odds outside [0, 1]" `Quick
+        test_dgram_seeded_refuses_odds_outside_unit;
     ] )

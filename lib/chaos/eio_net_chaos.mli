@@ -91,7 +91,8 @@ module Flow : sig
         fault, or
         [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
          ~fail_write_after seed] with [reset_after] and [fail_write_after] left
-        out when they are never. *)
+        out when they are never. The text builds the schedule again where
+        [Eio_net_chaos.Flow] and {!Flow.Schedule} are open. *)
   end
 
   type flow = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
@@ -169,14 +170,17 @@ module Datagram : sig
         when [delay] (defaults to [0]) is positive, the receive stalls [1] to
         [delay] scheduler turns, and else it passes through.
 
-        Raises [Invalid_argument] if [loss], [dup], [reorder], [truncate] and
-        [garble] sum to more than [1.]. *)
+        Raises [Invalid_argument] if one of [loss], [dup], [reorder], [truncate]
+        and [garble] is outside [[0., 1.]], NaN included, or if they sum to more
+        than [1.]. *)
 
     val pp : t Fmt.t
     (** [pp] formats a schedule as the call that builds it, every parameter
         given: {!val-none}, [script [...]] with each fault, or
         [seeded ~loss ~dup ~reorder ~truncate ~garble ~delay seed], each
-        probability with the fewest digits that read back as it. *)
+        probability as a float literal with the fewest digits that read back as
+        it. The text builds the schedule again where [Eio_net_chaos.Datagram]
+        and {!Datagram.Schedule} are open. *)
   end
 
   type socket = [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t
@@ -239,8 +243,10 @@ module Net : sig
     val pp : t Fmt.t
     (** [pp] formats a schedule as the call that builds it:
         [v ~flow:(...) ~connect:[...] ~max_accepts ()], with the flow schedule
-        as {!Flow.Schedule.pp} prints it and [max_accepts] left out when there
-        is no bound. *)
+        as {!Flow.Schedule.pp} prints it but qualified, as in
+        [Flow.Schedule.seeded ...], and [max_accepts] left out when there is no
+        bound. The text builds the schedule again where [Eio_net_chaos],
+        [Eio_net_chaos.Net] and {!Net.Schedule} are open. *)
   end
 
   type t = [ `Generic ] Eio.Net.ty Eio.Resource.t
