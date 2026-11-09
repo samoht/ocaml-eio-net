@@ -710,8 +710,7 @@ module Listening_socket = struct
               Hashtbl.remove t.hub.listeners t.addr;
               match t.addr with
               | `Tcp a -> Ports.remove t.hub.ports a
-              | `Unix path -> Files.leave ~remove:true t.hub.files path Listener
-              )
+              | `Unix path -> Files.leave t.hub.files path Listener)
           | Some _ | None -> ());
       let rec drain () =
         match Eio.Stream.take_nonblocking t.incoming with
@@ -930,6 +929,14 @@ module Network = struct
       invalid_arg "eio-net.mem does not support SO_REUSEPORT listeners";
     Eio.Switch.check sw;
     let listener = Listening_socket.v t.hub ~reuse_addr addr in
+    (* The file a listener leaves goes when the listen's switch finishes, as
+       Eio's POSIX backend removes it then: this runs after the close the
+       hooks below make. *)
+    (match addr with
+    | `Unix path ->
+        Eio.Switch.on_release sw (fun () ->
+            Files.leave ~remove:true t.hub.files path Stale)
+    | `Tcp _ -> ());
     let socket = Eio.Resource.T (listener, listening_handler) in
     let close () = Eio.Resource.close socket in
     listener.hooks <-

@@ -306,6 +306,20 @@ let test_client_port_is_free () =
   | _, `Tcp (_, 65535) -> Alcotest.fail "the peer holds the listener's port"
   | _ -> ()
 
+(* A Unix-domain listener closed by hand leaves its path until the switch it
+   listened under finishes, as Eio's POSIX backend removes the file then. *)
+let test_listener_path_freed_at_switch_end () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Unix "/tmp/hand.sock" in
+  Eio.Switch.run (fun lsw ->
+      Eio.Net.close (Eio.Net.listen ~sw:lsw ~backlog:1 net addr);
+      match Eio.Net.listen ~sw:lsw ~backlog:1 net addr with
+      | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+      | _ -> Alcotest.fail "listened at a path whose file is still there");
+  ignore (Eio.Net.listen ~sw ~backlog:1 net addr)
+
 (* A connect bound to a local address holds it: the listener sees that
    address as the peer's, with a port of the dynamic range for port 0. *)
 let test_connect_bound () =
@@ -1092,6 +1106,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a listener's path freed at switch end" `Quick
+        test_listener_path_freed_at_switch_end;
       Alcotest.test_case "a client's port is free" `Quick
         test_client_port_is_free;
       Alcotest.test_case "a capacity serves writers first come first served"

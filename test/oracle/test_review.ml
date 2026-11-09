@@ -212,6 +212,24 @@ let cases =
                      (Eio.Net.listening_addr l));
                 "connected"));
       ];
+      (* A listener closed by hand leaves its file: a listen there finds it
+         in use, and a connect there is refused. *)
+      [
+        case ~file ~test:"ListenerClosedByHand" ~variant:"listen there"
+          (expect "EADDRINUSE") (fun ctx ->
+            let addr = stream_addr ctx Unix_stream in
+            Eio.Net.close (listen ctx addr);
+            outcome (fun () ->
+                ignore (listen ctx addr);
+                "listening"));
+        case ~file ~test:"ListenerClosedByHand" ~variant:"connect there"
+          (expect "refused") (fun ctx ->
+            let addr = stream_addr ctx Unix_stream in
+            Eio.Net.close (listen ctx addr);
+            outcome (fun () ->
+                ignore (connect ctx addr);
+                "connected"));
+      ];
     ]
 
 let suite = Oracle.suite "review" cases
