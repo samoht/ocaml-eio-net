@@ -11,3 +11,9 @@ exclude = ["E105"]
 [[rules]]
 files = ["test/interop/cpython-struct/*"]
 exclude = ["E825"]
+
+# Eio_net only re-exports Frame, Datagram, Relay and Progress, each tested in
+# its own file.
+[[rules]]
+files = ["lib/eio_net.ml"]
+exclude = ["E605"]
