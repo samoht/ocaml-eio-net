@@ -572,6 +572,35 @@ let test_cancelled_waits_free () =
   if grown > 50_000 then
     Alcotest.failf "200000 cancelled waits kept %d live words" grown
 
+(* A writer that waits for room goes before a writer that comes after it,
+   though the later one finds room first: the room a read frees is the first
+   waiter's. *)
+let test_capacity_first_come () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe ~capacity:1 () in
+  Eio.Flow.write client [ Cstruct.of_string "x" ];
+  let got = Buffer.create 3 in
+  let read () =
+    let buf = Cstruct.create 1 in
+    let n = Eio.Flow.single_read server buf in
+    Buffer.add_string got (Cstruct.to_string ~len:n buf)
+  in
+  Eio.Fiber.all
+    [
+      (fun () -> Eio.Flow.write client [ Cstruct.of_string "1" ]);
+      (fun () ->
+        Eio.Fiber.yield ();
+        read ();
+        Eio.Flow.write client [ Cstruct.of_string "2" ]);
+      (fun () ->
+        Eio.Fiber.yield ();
+        Eio.Fiber.yield ();
+        read ();
+        read ());
+    ];
+  Alcotest.(check string)
+    "bytes in the order the writers came" "x12" (Buffer.contents got)
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -1045,6 +1074,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a capacity serves writers first come first served"
+        `Quick test_capacity_first_come;
       Alcotest.test_case "a cancelled wait leaves nothing behind" `Quick
         test_cancelled_waits_free;
       Alcotest.test_case "binding at port 0 scales" `Quick test_port_zero_scales;

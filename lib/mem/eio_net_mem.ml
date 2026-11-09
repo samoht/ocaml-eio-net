@@ -168,8 +168,11 @@ end
 (* Fibers waiting on a pipe, first come first served, in a doubly-linked
    list as {!Eio.Condition} keeps them, so a cancelled waiter leaves at once.
    A waiter is taken from the list under the pipe's mutex, at most once, and
-   woken once the mutex is released. A waiter cancelled after it was taken
-   passes the turn on, so no wake-up is lost. *)
+   woken once the mutex is released. The first waiter is woken with the turn:
+   until it has gone again, a newcomer queues behind the waiters rather than
+   take the room or bytes that woke it, and a woken waiter that must wait again
+   goes back to the head. A waiter cancelled after it was taken passes the turn
+   on, so no wake-up is lost. *)
 module Waiters = struct
   type node = {
     wake : unit Eio.Promise.u;
@@ -178,15 +181,26 @@ module Waiters = struct
     mutable waiting : bool;
   }
 
-  type t = { mutable first : node option; mutable last : node option }
+  type t = {
+    mutable first : node option;
+    mutable last : node option;
+    mutable turn : bool;
+  }
 
-  let v () = { first = None; last = None }
+  let v () = { first = None; last = None; turn = false }
 
   let add q =
     let p, wake = Eio.Promise.create () in
     let n = { wake; prev = q.last; next = None; waiting = true } in
     (match q.last with None -> q.first <- Some n | Some l -> l.next <- Some n);
     q.last <- Some n;
+    (p, n)
+
+  let add_first q =
+    let p, wake = Eio.Promise.create () in
+    let n = { wake; prev = None; next = q.first; waiting = true } in
+    (match q.first with None -> q.last <- Some n | Some f -> f.prev <- Some n);
+    q.first <- Some n;
     (p, n)
 
   let unlink q n =
@@ -204,11 +218,43 @@ module Waiters = struct
         [ n ]
 
   let rec take_all q =
+    q.turn <- false;
     match q.first with
     | None -> []
     | Some n ->
         unlink q n;
         n :: take_all q
+
+  (* A caller that does not hold the turn waits while others wait or hold
+     it. *)
+  let must_wait q ~turn = (not turn) && (Option.is_some q.first || q.turn)
+
+  (* Wakes the first waiter with the turn, unless a woken one holds it. *)
+  let pass q =
+    if q.turn then []
+    else
+      match take q with
+      | [] -> []
+      | woken ->
+          q.turn <- true;
+          woken
+
+  (* A caller that held the turn and leaves without waiting again passes it
+     on. *)
+  let release q ~turn =
+    if turn then begin
+      q.turn <- false;
+      pass q
+    end
+    else []
+
+  (* Queues a caller, at the head if it held the turn, which it gives up. *)
+  let queue q ~turn =
+    if turn then begin
+      q.turn <- false;
+      add_first q
+    end
+    else add q
 
   (* Removes a waiter still in the list; [false] if it was taken. *)
   let remove q n =
@@ -284,7 +330,11 @@ module Pipe = struct
     | () -> ()
     | exception (Eio.Cancel.Cancelled _ as e) ->
         locked t (fun _ ->
-            if Waiters.remove q waiter then ((), []) else ((), Waiters.take q));
+            if Waiters.remove q waiter then ((), [])
+            else begin
+              q.turn <- false;
+              ((), Waiters.pass q)
+            end);
         raise e
 
   (* Changes the state under the mutex and wakes every waiter. *)
@@ -316,39 +366,43 @@ module Pipe = struct
         push t bufs (n - k)
     | _ -> ()
 
-  let rec write t ~back bufs =
+  let rec write ?(turn = false) t ~back bufs =
     let n = Cstruct.lenv bufs in
     let result =
       locked t @@ fun t ->
-      if t.shut then raise (reset_exn ());
-      (* An empty write sends nothing, so it meets no closed peer. *)
-      if n = 0 then (`Dropped 0, [])
-      else if t.refused then (`Refused, [])
+      let leave outcome = (outcome, Waiters.release t.writers ~turn) in
+      if t.shut then leave (`Raise (reset_exn ()))
+        (* An empty write sends nothing, so it meets no closed peer. *)
+      else if n = 0 then leave (`Done 0)
+      else if t.refused then leave `Refused
       else if t.gone then begin
         t.refused <- true;
-        if t.local then raise (reset_exn ());
-        (`Lost n, [])
+        if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
       end
-      else if t.deaf then (`Dropped n, [])
-      else if t.size >= t.capacity then (`Wait (Waiters.add t.writers), [])
-      else
+      else if t.deaf then leave (`Done n)
+      else if Waiters.must_wait t.writers ~turn || t.size >= t.capacity then
+        (`Wait (Waiters.queue t.writers ~turn), [])
+      else begin
+        if turn then t.writers.turn <- false;
         let k = min n (t.capacity - t.size) in
         push t bufs k;
         t.size <- t.size + k;
-        let next = if t.size < t.capacity then Waiters.take t.writers else [] in
-        (`Queued k, Waiters.take t.readers @ next)
+        let next = if t.size < t.capacity then Waiters.pass t.writers else [] in
+        (`Done k, Waiters.pass t.readers @ next)
+      end
     in
     match result with
     | `Wait w ->
         await t t.writers w;
-        write t ~back bufs
+        write ~turn:true t ~back bufs
+    | `Raise e -> raise e
     | `Refused ->
         consume_reset back;
         raise (reset_exn ())
     | `Lost n ->
         reset back;
         n
-    | `Dropped n | `Queued n -> n
+    | `Done n -> n
 
   let rec take t dst got =
     match Queue.peek_opt t.queued with
@@ -365,30 +419,35 @@ module Pipe = struct
     | _ -> got
 
   (* What is queued drains before a reset or the end of the stream. *)
-  let rec read t dst =
+  let rec read ?(turn = false) t dst =
     let result =
       locked t @@ fun t ->
-      if not (Queue.is_empty t.queued) then begin
+      if Waiters.must_wait t.readers ~turn then
+        (`Wait (Waiters.queue t.readers ~turn), [])
+      else if not (Queue.is_empty t.queued) then begin
+        if turn then t.readers.turn <- false;
         let n = take t dst 0 in
         t.size <- t.size - n;
         let next =
-          if Queue.is_empty t.queued then [] else Waiters.take t.readers
+          if Queue.is_empty t.queued then [] else Waiters.pass t.readers
         in
-        (`Read n, Waiters.take t.writers @ next)
+        (`Read n, Waiters.pass t.writers @ next)
       end
       else if t.reset then begin
         t.reset <- false;
         t.shut <- true;
-        raise (reset_exn ())
+        (`Raise (reset_exn ()), Waiters.release t.readers ~turn)
       end
-      else if t.shut || t.deaf then raise End_of_file
-      else (`Wait (Waiters.add t.readers), [])
+      else if t.shut || t.deaf then
+        (`Raise End_of_file, Waiters.release t.readers ~turn)
+      else (`Wait (Waiters.queue t.readers ~turn), [])
     in
     match result with
     | `Read n -> n
+    | `Raise e -> raise e
     | `Wait w ->
         await t t.readers w;
-        read t dst
+        read ~turn:true t dst
 
   let shut t = update t (fun t -> t.shut <- true)
 
