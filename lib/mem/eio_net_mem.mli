@@ -17,9 +17,12 @@ type Eio.Exn.Backend.t +=
               accepting it.
 
             A read after the peer closed or shut its send otherwise raises
-            [End_of_file] once the queued bytes are read. A read, a write or a
-            shutdown on a flow after its own close raises [Invalid_argument], as
-            Eio's own sockets do. *)
+            [End_of_file] once the queued bytes are read. A write after the peer
+            shut its receive side returns and its bytes are lost, as on Linux;
+            macOS resets the second such write. A read after this end shut its
+            receive side raises [End_of_file]. A read, a write or a shutdown on
+            a flow after its own close raises [Invalid_argument], as Eio's own
+            sockets do. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes

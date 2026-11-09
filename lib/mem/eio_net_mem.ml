@@ -66,7 +66,8 @@ end
    The ends follow TCP: [shut] is the writer's FIN, after which the reader
    reads end-of-file, or a reset when [reset] says one came. [gone] says the
    reader has closed: the first write to it is lost and answered with a reset,
-   which [refused] then makes every later write raise. *)
+   which [refused] then makes every later write raise. [deaf] says the reader
+   shut its receive side: writes are lost, as Linux takes and drops them. *)
 module Pipe = struct
   type t = {
     mutex : Mutex.t;
@@ -76,6 +77,7 @@ module Pipe = struct
     mutable reset : bool;
     mutable gone : bool;
     mutable refused : bool;
+    mutable deaf : bool;
     capacity : int;
     mutable size : int; (* Bytes queued and not yet read. *)
     readable : Eio.Condition.t;
@@ -91,6 +93,7 @@ module Pipe = struct
       reset = false;
       gone = false;
       refused = false;
+      deaf = false;
       capacity;
       size = 0;
       readable = Eio.Condition.create ();
@@ -127,6 +130,7 @@ module Pipe = struct
         t.refused <- true;
         Some (`Lost n)
       end
+      else if t.deaf then Some (`Dropped n)
       else if n = 0 then Some (`Queued 0)
       else if t.size >= t.capacity then None
       else
@@ -139,6 +143,7 @@ module Pipe = struct
     | `Lost n ->
         reset back;
         n
+    | `Dropped n -> n
     | `Queued k ->
         Eio.Condition.broadcast t.readable;
         k
@@ -168,13 +173,21 @@ module Pipe = struct
         Some n
       end
       else if t.reset then raise (reset_exn ())
-      else if t.shut then raise End_of_file
+      else if t.shut || t.deaf then raise End_of_file
       else None
     in
     Eio.Condition.broadcast t.writable;
     n
 
   let shut t = update t (fun t -> t.shut <- true)
+
+  (* The reader shuts its receive side: what is queued is dropped. *)
+  let deafen t =
+    update t (fun t ->
+        Queue.clear t.queued;
+        t.head <- 0;
+        t.size <- 0;
+        t.deaf <- true)
 
   (* The reader closes: bytes it left unread answer the writer with a reset,
      which refuses its writes at once. *)
@@ -224,10 +237,10 @@ module Flow = struct
       check t "shutdown";
       match cmd with
       | `Send -> Pipe.shut t.to_peer
-      | `Receive -> Pipe.shut t.from_peer
+      | `Receive -> Pipe.deafen t.from_peer
       | `All ->
           Pipe.shut t.to_peer;
-          Pipe.shut t.from_peer
+          Pipe.deafen t.from_peer
 
     (* [abort] resets the peer, as a connection a listener drops unaccepted
        is; otherwise the peer reads end-of-file, or a reset if this end left

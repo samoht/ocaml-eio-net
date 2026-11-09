@@ -234,6 +234,25 @@ let test_write_after_peer_close () =
   | "", e when is_reset e -> ()
   | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
 
+(* A peer that shuts its receive side takes writes and drops them, as on
+   Linux, and reads end-of-file itself. *)
+let test_write_after_peer_shutdown_receive () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Flow.shutdown server `Receive;
+  let write () = Eio.Flow.single_write client [ Cstruct.of_string "ping" ] in
+  Alcotest.(check (list int))
+    "both writes return" [ 4; 4 ]
+    [ write (); write () ];
+  (match read_all server with
+  | "", End_of_file -> ()
+  | got, e -> Alcotest.failf "the server read %S then %a" got Fmt.exn e);
+  Eio.Flow.copy_string "pong" server;
+  Eio.Flow.shutdown server `Send;
+  match read_all client with
+  | "pong", End_of_file -> ()
+  | got, e -> Alcotest.failf "the client read %S then %a" got Fmt.exn e
+
 (* A peer that closes with bytes unread resets the connection: what it wrote
    before arrives, then the reset, and writes raise it at once. *)
 let test_close_with_unread_bytes () =
@@ -690,6 +709,8 @@ let suite =
         test_listen_refuses_reuse_port;
       Alcotest.test_case "write after peer close" `Quick
         test_write_after_peer_close;
+      Alcotest.test_case "write after peer shuts its receive side" `Quick
+        test_write_after_peer_shutdown_receive;
       Alcotest.test_case "close with unread bytes" `Quick
         test_close_with_unread_bytes;
       Alcotest.test_case "use after own close" `Quick test_use_after_own_close;
