@@ -6,22 +6,34 @@
 
 type Eio.Exn.Backend.t +=
   | Closed
-        (** The backend code carried by the connection-reset a mem flow raises
-            when a write finds its send side closed (the peer has gone away, or
-            this end shut its own send). It makes that write an {!Eio.Io} error
-            of the same shape a real socket raises on write-after-reset. A read
-            after close raises [End_of_file] once the bytes already written have
-            been read, matching a real socket's EOF. *)
+        (** The backend code carried by the connection reset a mem flow raises,
+            where a TCP socket raises one:
+            - A write after this end shut its send.
+            - A write after the peer closed: the first is lost and answered with
+              a reset, which the next write and every read raise.
+            - A read, once the queued bytes are read, and a write after the peer
+              closed with bytes of ours unread.
+            - A read and a write on a connection its listener closed before
+              accepting it.
+
+            A read after the peer closed or shut its send otherwise raises
+            [End_of_file] once the queued bytes are read. A read, a write or a
+            shutdown on a flow after its own close raises [Invalid_argument], as
+            Eio's own sockets do. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
-            when no listener is bound at the address, or the listener closes
+            when no listener is bound at a TCP address, or the listener closes
             while the connection waits for it, as a real socket raises
-            [Connection_failure (Refused _)]. *)
+            [Connection_failure (Refused _)]. It is also the code of the
+            [Eio.Fs.Not_found] error a [connect] or a datagram [send] raises at
+            a Unix path no socket binds, which has no file. *)
   | Address_in_use
         (** The backend code of the unclassified {!Eio.Io} error [listen] raises
             at an address a listener holds, and [datagram_socket] at one a
             datagram socket holds, where a real socket's bind fails with
-            [EADDRINUSE], which Eio also leaves unclassified. *)
+            [EADDRINUSE]. Eio's POSIX backend raises that one as a raw
+            [Unix.Unix_error] from [listen], and [Eio_net_unix.Tcp.listen] as an
+            {!Eio.Io} error. *)
 
 val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~sw ()] is a network whose [listen] and [connect] operations are paired
@@ -45,18 +57,21 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     reaches it. A [listen] with [reuse_port] raises [Invalid_argument]. A
     listener is closed, and its address free again, when it is closed or when
     the switch passed to [listen] or to {!v} finishes; the connections waiting
-    to be accepted are closed with it, so their clients read end-of-file. A
-    [connect] reaches the listener at its address, or at the wildcard address of
-    its port, and waits while [128] connections wait to be accepted there; with
-    no listener, or one that closes while it waits, it raises the connection
+    to be accepted are reset with it, as a kernel resets them. A [connect]
+    reaches the listener at its address, or at the wildcard address of its port,
+    and waits while [128] connections wait to be accepted there; with no
+    listener, or one that closes while it waits, it raises the connection
     failure that {!No_listener} marks, as a connect to a closed port is refused.
-    An accepted connection is closed when it is closed or when the switch passed
-    to [accept] finishes. An accepted connection's peer address is
-    [`Unix "in-memory-client"]. Host resolution maps ["127.0.0.1"] and ["::1"]
-    with a numeric service to the loopback address of their family at that port,
-    once as a stream address and once as a datagram address, and ["localhost"]
-    to both families, IPv6 first, as glibc and macOS order them. Any other host
-    or service maps to no address.
+    At a Unix path no listener holds it raises [Eio.Fs.Not_found] instead: a
+    closed listener leaves no file, as when Eio's POSIX backend removes it at
+    the end of the listen's switch. A real listener closed by hand leaves its
+    file, and a connect there is refused. An accepted connection is closed when
+    it is closed or when the switch passed to [accept] finishes. An accepted
+    connection's peer address is [`Unix "in-memory-client"]. Host resolution
+    maps ["127.0.0.1"] and ["::1"] with a numeric service to the loopback
+    address of their family at that port, once as a stream address and once as a
+    datagram address, and ["localhost"] to both families, IPv6 first, as glibc
+    and macOS order them. Any other host or service maps to no address.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and
@@ -79,7 +94,8 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     with the sender's address, after every datagram sent to it before: the
     network never drops, cuts or reorders one, and a send never waits. One sent
     to an address no socket binds, at its own address or the wildcard address of
-    its port, is lost, as UDP loses it. A send without a destination raises
+    its port, is lost, as UDP loses it; one sent to a Unix path no socket binds
+    raises [Eio.Fs.Not_found]. A send without a destination raises
     [Invalid_argument], since no socket is connected. A [recv] into a buffer
     shorter than the datagram gets its first bytes, as a socket does. The socket
     is closed, and its address free again, when the switch passed to

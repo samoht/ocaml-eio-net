@@ -202,17 +202,83 @@ let test_listen_refuses_reuse_port () =
   | exception Invalid_argument _ -> ()
   | _ -> Alcotest.fail "a listen with reuse_port was accepted"
 
-(* A write to a mem flow whose peer has closed raises the [Eio.Io] reset a
-   real socket raises, not the internal [Failure]. *)
+let is_reset = function
+  | Eio.Io (Eio.Net.E (Connection_reset _), _) -> true
+  | _ -> false
+
+let read_all flow =
+  let buf = Cstruct.create 64 and got = Buffer.create 16 in
+  let rec loop () =
+    match Eio.Flow.single_read flow buf with
+    | n ->
+        Buffer.add_string got (Cstruct.to_string ~len:n buf);
+        loop ()
+    | exception e -> (Buffer.contents got, e)
+  in
+  loop ()
+
+(* A write to a flow whose peer has closed is lost and answered with a reset,
+   as a TCP peer answers it: the first write returns, and the next write and
+   every read raise the [Eio.Io] reset. *)
 let test_write_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe () in
   Eio.Flow.close server;
-  match Eio.Flow.single_write client [ Cstruct.of_string "ping" ] with
-  | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
-  | exception Failure msg ->
-      Alcotest.failf "write to closed mem flow leaked Failure %S" msg
-  | (_ : int) -> Alcotest.fail "write to closed mem flow should raise"
+  Alcotest.(check int)
+    "the first write returns" 4
+    (Eio.Flow.single_write client [ Cstruct.of_string "ping" ]);
+  (match Eio.Flow.single_write client [ Cstruct.of_string "ping" ] with
+  | exception e when is_reset e -> ()
+  | (_ : int) -> Alcotest.fail "the second write went through");
+  match read_all client with
+  | "", e when is_reset e -> ()
+  | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
+
+(* A peer that closes with bytes unread resets the connection: what it wrote
+   before arrives, then the reset, and writes raise it at once. *)
+let test_close_with_unread_bytes () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Flow.copy_string "unread request" client;
+  Eio.Flow.copy_string "bye" server;
+  Eio.Flow.close server;
+  (match read_all client with
+  | "bye", e when is_reset e -> ()
+  | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e);
+  match Eio.Flow.single_write client [ Cstruct.of_string "more" ] with
+  | exception e when is_reset e -> ()
+  | (_ : int) -> Alcotest.fail "a write after the reset went through"
+
+(* A flow used after its own close raises [Invalid_argument], as Eio's own
+   sockets do, rather than read what was queued. *)
+let test_use_after_own_close () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Flow.copy_string "queued" server;
+  Eio.Flow.close client;
+  (match Eio.Flow.single_read client (Cstruct.create 8) with
+  | exception Invalid_argument _ -> ()
+  | (_ : int) -> Alcotest.fail "read a closed flow");
+  match Eio.Flow.single_write client [ Cstruct.of_string "x" ] with
+  | exception Invalid_argument _ -> ()
+  | (_ : int) -> Alcotest.fail "wrote to a closed flow"
+
+(* A Unix path no socket binds has no file: a connect or a datagram sent there
+   raises [Eio.Fs.Not_found], as over a real network. *)
+let test_unix_path_not_found () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  (match Eio.Net.connect ~sw net (`Unix "/nowhere/stream.sock") with
+  | exception Eio.Io (Eio.Fs.E (Not_found _), _) -> ()
+  | _ -> Alcotest.fail "connected to a missing path");
+  let sock = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/me.sock") in
+  match
+    Eio.Net.send sock ~dst:(`Unix "/nowhere/dgram.sock")
+      [ Cstruct.of_string "x" ]
+  with
+  | exception Eio.Io (Eio.Fs.E (Not_found _), _) -> ()
+  | () -> Alcotest.fail "sent to a missing path"
 
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
@@ -325,6 +391,8 @@ let test_connect_closes_at_switch_end () =
   let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
   Eio.Switch.run (fun csw -> ignore (Eio.Net.connect ~sw:csw net addr));
   let flow, _ = Eio.Net.accept ~sw listener in
+  (* The first write is lost and draws the reset the second raises. *)
+  ignore (Eio.Flow.single_write flow [ Cstruct.of_string "late" ] : int);
   match Eio.Flow.single_write flow [ Cstruct.of_string "late" ] with
   | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
   | (_ : int) ->
@@ -397,9 +465,9 @@ let test_a_write_in_another_domain_wakes_the_read () =
   in
   Eio.Fiber.both reader (fun () -> Eio.Domain_manager.run domain_mgr writer)
 
-(* A connection waiting to be accepted when its listener closes is closed with
-   it: its client reads end-of-file rather than wait for good. *)
-let test_a_closed_listener_closes_its_queue () =
+(* A connection waiting to be accepted when its listener closes is reset with
+   it, as a kernel resets it, rather than wait for good. *)
+let test_a_closed_listener_resets_its_queue () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
@@ -410,7 +478,8 @@ let test_a_closed_listener_closes_its_queue () =
         Eio.Net.connect ~sw net addr)
   in
   match Eio.Flow.single_read client (Cstruct.create 1) with
-  | exception End_of_file -> ()
+  | exception e when is_reset e -> ()
+  | exception e -> Alcotest.failf "a queued connection raised %a" Fmt.exn e
   | (_ : int) -> Alcotest.fail "a queued connection read a byte"
 
 (* A connect waiting for room in a full queue when the listener closes is
@@ -591,6 +660,11 @@ let suite =
         test_listen_refuses_reuse_port;
       Alcotest.test_case "write after peer close" `Quick
         test_write_after_peer_close;
+      Alcotest.test_case "close with unread bytes" `Quick
+        test_close_with_unread_bytes;
+      Alcotest.test_case "use after own close" `Quick test_use_after_own_close;
+      Alcotest.test_case "a Unix path with no socket" `Quick
+        test_unix_path_not_found;
       Alcotest.test_case "write after own shutdown" `Quick
         test_write_after_own_shutdown;
       Alcotest.test_case "read after peer close" `Quick
@@ -612,8 +686,8 @@ let suite =
         test_datagram_address_freed_at_switch_end;
       Alcotest.test_case "a datagram address in use" `Quick
         test_datagram_address_in_use;
-      Alcotest.test_case "a closed listener closes its queue" `Quick
-        test_a_closed_listener_closes_its_queue;
+      Alcotest.test_case "a closed listener resets its queue" `Quick
+        test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
       Alcotest.test_case "a closed connection leaves its switch" `Quick

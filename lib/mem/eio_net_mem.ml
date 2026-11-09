@@ -34,6 +34,10 @@ let ip_overlaps (ip, port) (ip', port') =
 
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
 
+(* A Unix path no socket binds has no file, as Eio's POSIX backend removes it
+   when the socket's switch finishes. *)
+let no_file () = Eio.Fs.err (Not_found No_listener)
+
 (* A stream option is ignored only where the queues already provide what it
    asks for, so ignoring it yields the requested behaviour rather than
    withholding it: [TCP_NODELAY] and [TCP_QUICKACK]. Every other option would
@@ -56,13 +60,21 @@ end
    ends may be used from two domains, so its state is guarded by a mutex and a
    read that finds nothing waits on a condition it registers for before it looks,
    which a write broadcasts after it has queued its bytes. A write never waits: a
-   pipe holds whatever has been written to it. *)
+   pipe holds whatever has been written to it.
+
+   The ends follow TCP: [shut] is the writer's FIN, after which the reader
+   reads end-of-file, or a reset when [reset] says one came. [gone] says the
+   reader has closed: the first write to it is lost and answered with a reset,
+   which [refused] then makes every later write raise. *)
 module Pipe = struct
   type t = {
     mutex : Mutex.t;
     queued : Cstruct.t Queue.t;
     mutable head : int; (* Bytes of the first queued buffer already read. *)
-    mutable closed : bool;
+    mutable shut : bool;
+    mutable reset : bool;
+    mutable gone : bool;
+    mutable refused : bool;
     readable : Eio.Condition.t;
   }
 
@@ -71,23 +83,42 @@ module Pipe = struct
       mutex = Mutex.create ();
       queued = Queue.create ();
       head = 0;
-      closed = false;
+      shut = false;
+      reset = false;
+      gone = false;
+      refused = false;
       readable = Eio.Condition.create ();
     }
 
-  (* The bytes are copied: the caller owns its buffers again once this returns. *)
-  let write t bufs =
-    let n =
+  let update t f =
+    Mutex.protect t.mutex (fun () -> f t);
+    Eio.Condition.broadcast t.readable
+
+  (* The reset reaches the reader once it has read what is queued. *)
+  let reset t = update t (fun t -> t.reset <- true)
+
+  (* The bytes are copied: the caller owns its buffers again once this returns.
+     A write to a reader that has gone is lost, and resets [back], the other
+     direction of the connection. *)
+  let write t ~back bufs =
+    let n = Cstruct.lenv bufs in
+    let lost =
       Mutex.protect t.mutex @@ fun () ->
-      if t.closed then raise (reset_exn ());
-      List.iter
-        (fun b ->
-          if Cstruct.length b > 0 then
-            Queue.push (Cstruct.of_string (Cstruct.to_string b)) t.queued)
-        bufs;
-      Cstruct.lenv bufs
+      if t.shut || t.refused then raise (reset_exn ());
+      if t.gone then begin
+        t.refused <- true;
+        true
+      end
+      else begin
+        List.iter
+          (fun b ->
+            if Cstruct.length b > 0 then
+              Queue.push (Cstruct.of_string (Cstruct.to_string b)) t.queued)
+          bufs;
+        false
+      end
     in
-    Eio.Condition.broadcast t.readable;
+    if lost then reset back else Eio.Condition.broadcast t.readable;
     n
 
   let rec take t dst got =
@@ -104,17 +135,27 @@ module Pipe = struct
         take t dst (got + n)
     | _ -> got
 
-  (* What is queued drains before a closed pipe reads as EOF. *)
+  (* What is queued drains before a reset or the end of the stream. *)
   let read t dst =
     Eio.Condition.loop_no_mutex t.readable @@ fun () ->
     Mutex.protect t.mutex @@ fun () ->
     if not (Queue.is_empty t.queued) then Some (take t dst 0)
-    else if t.closed then raise End_of_file
+    else if t.reset then raise (reset_exn ())
+    else if t.shut then raise End_of_file
     else None
 
-  let close t =
-    Mutex.protect t.mutex (fun () -> t.closed <- true);
-    Eio.Condition.broadcast t.readable
+  let shut t = update t (fun t -> t.shut <- true)
+
+  (* The reader closes: bytes it left unread answer the writer with a reset,
+     which refuses its writes at once. *)
+  let leave t =
+    Mutex.protect t.mutex @@ fun () ->
+    let unread = not (Queue.is_empty t.queued) in
+    Queue.clear t.queued;
+    t.head <- 0;
+    t.gone <- true;
+    if unread then t.refused <- true;
+    unread
 end
 
 module Flow = struct
@@ -126,27 +167,48 @@ module Flow = struct
     type t = {
       to_peer : Pipe.t;
       from_peer : Pipe.t;
+      mutable closed : bool;
       mutable release : Eio.Switch.hook;
     }
 
-    let single_write t bufs = Pipe.write t.to_peer bufs
+    (* As Eio's own sockets refuse a descriptor used after close. *)
+    let check t op =
+      if t.closed then Fmt.invalid_arg "eio-net.mem: %s on a closed flow" op
+
+    let single_write t bufs =
+      check t "write";
+      Pipe.write t.to_peer ~back:t.from_peer bufs
+
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
 
     let single_read t buf =
+      check t "read";
       if Cstruct.length buf = 0 then 0 else Pipe.read t.from_peer buf
 
-    let shutdown t = function
-      | `Send -> Pipe.close t.to_peer
-      | `Receive -> Pipe.close t.from_peer
+    let shutdown t cmd =
+      check t "shutdown";
+      match cmd with
+      | `Send -> Pipe.shut t.to_peer
+      | `Receive -> Pipe.shut t.from_peer
       | `All ->
-          Pipe.close t.to_peer;
-          Pipe.close t.from_peer
+          Pipe.shut t.to_peer;
+          Pipe.shut t.from_peer
 
-    let close t =
-      Eio.Switch.remove_hook t.release;
-      t.release <- Eio.Switch.null_hook;
-      shutdown t `All
+    (* [abort] resets the peer, as a connection a listener drops unaccepted
+       is; otherwise the peer reads end-of-file, or a reset if this end left
+       bytes unread. *)
+    let close_with ~abort t =
+      if not t.closed then begin
+        t.closed <- true;
+        Eio.Switch.remove_hook t.release;
+        t.release <- Eio.Switch.null_hook;
+        let unread = Pipe.leave t.from_peer in
+        if abort then Pipe.update t.from_peer (fun p -> p.refused <- true);
+        if unread || abort then Pipe.reset t.to_peer;
+        Pipe.shut t.to_peer
+      end
 
+    let close t = close_with ~abort:false t
     let read_methods = []
     let setsockopt _ opt _ = Sockopt.stream opt
 
@@ -159,7 +221,10 @@ module Flow = struct
   type t = Impl.t * Impl.tag Eio.Net.stream_socket_ty Eio.Resource.t
 
   let v ~from_peer ~to_peer =
-    let impl = Impl.{ from_peer; to_peer; release = Eio.Switch.null_hook } in
+    let impl =
+      Impl.
+        { from_peer; to_peer; closed = false; release = Eio.Switch.null_hook }
+    in
     (impl, Eio.Resource.T (impl, handler))
 
   let pair () =
@@ -176,6 +241,7 @@ module Flow = struct
     flow
 
   let close ((_, flow) : t) = Eio.Flow.close flow
+  let abort ((impl, _) : t) = Impl.close_with ~abort:true impl
 end
 
 module Listening_socket = struct
@@ -269,8 +335,8 @@ module Listening_socket = struct
     let flow, client_addr = Eio.Stream.take t.incoming in
     (Flow.close_with sw flow, client_addr)
 
-  (* The connections waiting to be accepted are closed with the listener, so
-     their clients read end-of-file. A connect that queues one after this is
+  (* The connections waiting to be accepted are reset with the listener, as
+     a kernel resets them. A connect that queues one after this is
      refused ([Network.connect]). *)
   let close t =
     if not (Atomic.exchange t.closed true) then begin
@@ -284,7 +350,7 @@ module Listening_socket = struct
       let rec drain () =
         match Eio.Stream.take_nonblocking t.incoming with
         | Some (flow, _) ->
-            Flow.close flow;
+            Flow.abort flow;
             drain ()
         | None -> ()
       in
@@ -382,7 +448,7 @@ module Datagram_socket = struct
         | `Unix _ -> None)
 
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
-     the sender is not told. *)
+     the sender is not told; at a Unix path, the send finds no file. *)
   let send t ?dst bufs =
     if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
     let dst =
@@ -391,7 +457,7 @@ module Datagram_socket = struct
       | None -> invalid_arg "eio-net.mem: a datagram send needs a destination"
     in
     match find t.hub dst with
-    | None -> ()
+    | None -> ( match dst with `Unix _ -> raise (no_file ()) | `Udp _ -> ())
     | Some peer ->
         let delivered =
           Mutex.protect peer.lock @@ fun () ->
@@ -491,10 +557,11 @@ module Network = struct
     let refused () =
       raise (Eio.Net.err (Connection_failure (Refused No_listener)))
     in
-    match listener with
-    | None -> refused ()
-    | Some listener when Atomic.get listener.closed -> refused ()
-    | Some listener ->
+    match (listener, addr) with
+    | None, `Unix _ -> raise (no_file ())
+    | None, `Tcp _ -> refused ()
+    | Some listener, _ when Atomic.get listener.closed -> refused ()
+    | Some listener, _ ->
         let client, server = Flow.pair () in
         Eio.Stream.add listener.incoming (server, `Unix "in-memory-client");
         (* The listener closed while the connection waited for room: its
