@@ -69,13 +69,18 @@ let start t =
       t.start <- Some s;
       s
 
+(* [f] runs once, in a fiber of its own: cancelling a write that has sent
+   part of its bytes and calling it again would send them twice. Each window
+   is judged while it waits, and only [Too_slow] cancels it. *)
 let move t f =
+  Eio.Switch.run @@ fun sw ->
+  let moved = Eio.Fiber.fork_promise ~sw f in
   let rec go () =
     let start = start t in
     match
       Eio.Fiber.first
         ~combine:(fun a b -> match a with `Moved _ -> a | `Quiet -> b)
-        (fun () -> `Moved (f ()))
+        (fun () -> `Moved (Eio.Promise.await_exn moved))
         (fun () ->
           t.sleep (left t start);
           `Quiet)

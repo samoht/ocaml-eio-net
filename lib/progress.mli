@@ -31,13 +31,12 @@ val v : mono:_ Eio.Time.Mono.t -> limit:int -> window:Mtime.Span.t -> t
 
 val move : t -> (unit -> int) -> int
 (** [move t f] is [f ()], which moves bytes and returns how many, counted in
-    [t]. It waits no later than the end of the current window to judge it, and
-    if [f] has not returned by then, it cancels [f]: a window with too few bytes
-    raises {!Too_slow}, and otherwise [f] is called again in the next window.
-    Bytes [f] moved as the window ended count. Fibers may move in [t] at once,
-    as a reader and a writer of one flow do: their bytes count in the same
-    windows, and each window is judged once. An exception from [f] propagates.
-*)
+    [t]. [f] is called once. Each window that ends while [f] runs is judged: one
+    with too few bytes cancels [f] and raises {!Too_slow}, and otherwise [f]
+    goes on into the next window. Bytes [f] moved as a window ended count in it.
+    Fibers may move in [t] at once, as a reader and a writer of one flow do:
+    their bytes count in the same windows, and each window is judged once. An
+    exception from [f] propagates. *)
 
 val reader : t -> Bytesrw.Bytes.Reader.t -> Bytesrw.Bytes.Reader.t
 (** [reader t r] is [r], each read a {!move} in [t]. *)

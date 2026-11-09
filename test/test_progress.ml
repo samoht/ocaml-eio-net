@@ -126,6 +126,40 @@ let test_shared n () =
       done);
   Alcotest.(check int) "every move went through" 20 !moves
 
+(* A move that outlasts a window another fiber keeps above the limit runs
+   once: a write that sent part of its bytes is not cut and sent again. *)
+let test_move_runs_once n () =
+  let window = seconds n in
+  Eio_mock.Backend.run_full @@ fun env ->
+  let mono = env#mono_clock in
+  let p = Progress.v ~mono ~limit:100 ~window in
+  let step =
+    Mtime.Span.of_uint64_ns
+      (Int64.div (Mtime.Span.to_uint64_ns window) 10L |> Int64.mul 6L)
+  in
+  let sent = Buffer.create 4 and finished = ref false and moves = ref 0 in
+  Eio.Fiber.both
+    (fun () ->
+      let moved =
+        Progress.move p (fun () ->
+            Buffer.add_string sent "a";
+            Eio.Time.Mono.sleep_span mono Mtime.Span.(3 * window);
+            Buffer.add_string sent "b";
+            2)
+      in
+      Alcotest.(check int) "the slow move's count" 2 moved;
+      finished := true)
+    (fun () ->
+      while (not !finished) && !moves < 20 do
+        ignore
+          (Progress.move p (fun () ->
+               Eio.Time.Mono.sleep_span mono step;
+               1000 * n)
+            : int);
+        incr moves
+      done);
+  Alcotest.(check string) "the slow move ran once" "ab" (Buffer.contents sent)
+
 let test_words () =
   Alcotest.(check string)
     "curl's words"
@@ -147,4 +181,5 @@ let suite =
     @ cases "a peer at the limit goes on" test_steady
     @ cases "the time before the first move counts in no window" test_first_move
     @ cases "two fibers sharing a transfer judge each window once" test_shared
+    @ cases "a move that outlasts a window runs once" test_move_runs_once
     @ [ Alcotest.test_case "Too_slow in curl's words" `Quick test_words ] )
