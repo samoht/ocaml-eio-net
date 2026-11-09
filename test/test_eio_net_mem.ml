@@ -340,6 +340,27 @@ let test_unix_path_not_found () =
 
 (* With a capacity, a write takes what fits and waits while the queue is
    full, so a writer that ignores flow control shows. *)
+(* A closed Unix-domain datagram socket leaves its file, as Eio's POSIX backend
+   removes none: a send there is refused, and a bind there finds the address
+   in use. *)
+let test_closed_datagram_path () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let path = `Unix "/tmp/gone.sock" in
+  Eio.Switch.run (fun inner ->
+      ignore (Eio.Net.datagram_socket ~sw:inner net path));
+  let sock = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/sender.sock") in
+  (match Eio.Net.send sock ~dst:path [ Cstruct.of_string "x" ] with
+  | exception
+      Eio.Io
+        (Eio.Net.E (Connection_failure (Refused Eio_net_mem.No_listener)), _) ->
+      ()
+  | () -> Alcotest.fail "sent to a closed socket's path");
+  match Eio.Net.datagram_socket ~sw net path with
+  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+  | _ -> Alcotest.fail "bound a path whose file is still there"
+
 let test_capacity () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe ~capacity:4 () in
@@ -780,6 +801,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a closed datagram socket's path" `Quick
+        test_closed_datagram_path;
       Alcotest.test_case "a Unix-domain write after peer close" `Quick
         test_unix_write_after_peer_close;
       Alcotest.test_case "a closed listener refuses connects" `Quick

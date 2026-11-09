@@ -32,9 +32,11 @@ type Eio.Exn.Backend.t +=
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes
             while the connection waits for it, as a real socket raises
-            [Connection_failure (Refused _)]. It is also the code of the
-            [Eio.Fs.Not_found] error a [connect] or a datagram [send] raises at
-            a Unix path no socket binds, which has no file. *)
+            [Connection_failure (Refused _)], and of the one a datagram [send]
+            raises at the path of a closed Unix-domain datagram socket. It is
+            also the code of the [Eio.Fs.Not_found] error a [connect] or a
+            datagram [send] raises at a Unix path no socket binds, which has no
+            file. *)
   | Address_in_use
         (** The backend code of the unclassified {!Eio.Io} error [listen] raises
             at an address a listener holds, and [datagram_socket] at one a
@@ -111,12 +113,15 @@ val v :
     network never drops, cuts or reorders one, and a send never waits. One sent
     to an address no socket binds, at its own address or the wildcard address of
     its port, is lost, as UDP loses it; one sent to a Unix path no socket binds
-    raises [Eio.Fs.Not_found]. A send without a destination raises
-    [Invalid_argument], since no socket is connected. A [recv] into a buffer
-    shorter than the datagram gets its first bytes, as a socket does. The socket
-    is closed, and its address free again, when the switch passed to
-    [datagram_socket] finishes; a send or a receive on it then raises
-    [Invalid_argument]. *)
+    raises [Eio.Fs.Not_found]. A closed Unix-domain datagram socket leaves its
+    path behind, as Eio's POSIX backend leaves the file: a datagram sent there
+    is refused with the connection failure that {!No_listener} marks, and a
+    socket bound there raises the error that {!Address_in_use} marks. A send
+    without a destination raises [Invalid_argument], since no socket is
+    connected. A [recv] into a buffer shorter than the datagram gets its first
+    bytes, as a socket does. The socket is closed, and its address free again,
+    when the switch passed to [datagram_socket] finishes; a send or a receive on
+    it then raises [Invalid_argument]. *)
 
 val pipe :
   ?capacity:int ->

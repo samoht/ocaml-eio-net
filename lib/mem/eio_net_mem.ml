@@ -441,8 +441,11 @@ end
 module Datagram_socket = struct
   type tag = [ `Generic ]
 
+  (* [files] holds the paths of closed Unix-domain sockets, whose files Eio's
+     POSIX backend leaves behind. *)
   type hub = {
     sockets : (Eio.Net.Sockaddr.datagram, t) Hashtbl.t;
+    files : (string, unit) Hashtbl.t;
     mutex : Mutex.t;
   }
 
@@ -488,10 +491,16 @@ module Datagram_socket = struct
       | `Udp (ip, 0) -> `Udp (ip, free_port hub)
       | (`Udp _ | `Unix _) as addr -> addr
     in
+    let file =
+      match addr with
+      | `Unix path -> Hashtbl.mem hub.files path
+      | `Udp _ -> false
+    in
     if
-      Hashtbl.fold
-        (fun held _ in_use -> in_use || overlaps addr held)
-        hub.sockets false
+      file
+      || Hashtbl.fold
+           (fun held _ in_use -> in_use || overlaps addr held)
+           hub.sockets false
     then raise (address_in_use ());
     let t =
       {
@@ -518,7 +527,8 @@ module Datagram_socket = struct
         | `Unix _ -> None)
 
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
-     the sender is not told; at a Unix path, the send finds no file. *)
+     the sender is not told; at a Unix path, the send finds no file, or one
+     that no socket holds any more and refuses it. *)
   let send t ?dst bufs =
     if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
     let dst =
@@ -527,7 +537,14 @@ module Datagram_socket = struct
       | None -> invalid_arg "eio-net.mem: a datagram send needs a destination"
     in
     match find t.hub dst with
-    | None -> ( match dst with `Unix _ -> raise (no_file ()) | `Udp _ -> ())
+    | None -> (
+        match dst with
+        | `Unix path ->
+            if
+              Mutex.protect t.hub.mutex (fun () -> Hashtbl.mem t.hub.files path)
+            then raise (Eio.Net.err (Connection_failure (Refused No_listener)))
+            else raise (no_file ())
+        | `Udp _ -> ())
     | Some peer ->
         let delivered =
           Mutex.protect peer.lock @@ fun () ->
@@ -562,7 +579,11 @@ module Datagram_socket = struct
     if was_open then begin
       Eio.Switch.remove_hook t.release;
       t.release <- Eio.Switch.null_hook;
-      Mutex.protect t.hub.mutex (fun () -> Hashtbl.remove t.hub.sockets t.addr);
+      Mutex.protect t.hub.mutex (fun () ->
+          Hashtbl.remove t.hub.sockets t.addr;
+          match t.addr with
+          | `Unix path -> Hashtbl.replace t.hub.files path ()
+          | `Udp _ -> ());
       Eio.Condition.broadcast t.readable
     end
 
@@ -701,6 +722,10 @@ let v ?capacity ~sw () =
     }
   in
   let datagrams =
-    { Datagram_socket.sockets = Hashtbl.create 8; mutex = Mutex.create () }
+    {
+      Datagram_socket.sockets = Hashtbl.create 8;
+      files = Hashtbl.create 8;
+      mutex = Mutex.create ();
+    }
   in
   Eio.Resource.T (Network.{ sw; hub; datagrams; capacity }, handler)

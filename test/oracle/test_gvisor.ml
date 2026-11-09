@@ -249,13 +249,7 @@ let unix_dgram_cases =
          peer's file stays: Eio's POSIX backend removes no datagram socket's
          path. *)
       per_dgram ~file:unix_dgram ~test:"WriteOneSideClosed" [ Unix_dgram ]
-        (fun _ ->
-          expect ~mem:"ENOENT"
-            ~mem_bug:
-              "Keep a closed datagram socket's path as a file that refuses a \
-               send (Connection_failure Refused), as Eio's POSIX backend \
-               leaves it."
-            "refused")
+        (fun _ -> expect "refused")
         (fun ctx k ->
           let a, a_addr = dgram_socket ctx k in
           let b, _ = dgram_socket ctx k in
