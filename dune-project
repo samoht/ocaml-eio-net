@@ -29,7 +29,7 @@
   (cstruct (>= 6.0.0))
   fmt
   logs
-  bytesrw
+  (bytesrw (>= 0.2.0))
   mtime
   (ipaddr (>= 5.3.0))
   fpath
