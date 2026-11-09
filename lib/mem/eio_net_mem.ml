@@ -91,6 +91,47 @@ let ip_overlaps (ip, port) (ip', port') =
 
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
 
+(* The IP addresses at which sockets of one kind hold each port, kept as they
+   bind and close, so a bind checks only the sockets of its port. [lowest] is a
+   port of the dynamic range (RFC 6335, section 6) at or below the lowest one
+   no socket holds: every port below it is held. *)
+module Ports = struct
+  type t = {
+    held : (int, Eio.Net.Ipaddr.v4v6 list) Hashtbl.t;
+    mutable lowest : int;
+  }
+
+  let v () = { held = Hashtbl.create 64; lowest = 49152 }
+  let at t port = Option.value ~default:[] (Hashtbl.find_opt t.held port)
+  let add t (ip, port) = Hashtbl.replace t.held port (ip :: at t port)
+
+  let remove t (ip, port) =
+    let rec drop = function
+      | [] -> []
+      | ip' :: rest -> if same ip ip' then rest else ip' :: drop rest
+    in
+    match drop (at t port) with
+    | [] ->
+        Hashtbl.remove t.held port;
+        if port >= 49152 && port < t.lowest then t.lowest <- port
+    | ips -> Hashtbl.replace t.held port ips
+
+  let in_use t (ip, port) =
+    List.exists (fun ip' -> ip_overlaps (ip, port) (ip', port)) (at t port)
+
+  (* The lowest port of the dynamic range no socket holds, at any address. *)
+  let free t =
+    let rec find port =
+      if port > 65535 then None
+      else if Hashtbl.mem t.held port then find (port + 1)
+      else begin
+        t.lowest <- port;
+        Some port
+      end
+    in
+    find t.lowest
+end
+
 (* A Unix path no socket binds has no file, as Eio's POSIX backend removes it
    when the socket's switch finishes. *)
 let no_file () = Eio.Fs.err (Not_found No_listener)
@@ -435,6 +476,7 @@ module Listening_socket = struct
 
   type hub = {
     listeners : (Eio.Net.Sockaddr.stream, t) Hashtbl.t;
+    ports : Ports.t;
     mutex : Eio.Mutex.t;
   }
 
@@ -446,33 +488,10 @@ module Listening_socket = struct
     mutable hooks : Eio.Switch.hook list;
   }
 
-  (* The lowest port of the dynamic range (RFC 6335, section 6) that no
-     listener holds, at any address. *)
-  let free_port hub =
-    let held = Hashtbl.create (Hashtbl.length hub.listeners) in
-    Hashtbl.iter
-      (fun addr _ ->
-        match addr with
-        | `Tcp (_, port) -> Hashtbl.replace held port ()
-        | `Unix _ -> ())
-      hub.listeners;
-    let rec find port =
-      if port > 65535 then None
-      else if Hashtbl.mem held port then find (port + 1)
-      else Some port
-    in
-    find 49152
-
-  let overlaps (a : Eio.Net.Sockaddr.stream) (b : Eio.Net.Sockaddr.stream) =
-    match (a, b) with
-    | `Tcp a, `Tcp b -> ip_overlaps a b
-    | `Unix path, `Unix path' -> String.equal path path'
-    | `Tcp _, `Unix _ | `Unix _, `Tcp _ -> false
-
-  let in_use hub addr =
-    Hashtbl.fold
-      (fun held _ in_use -> in_use || overlaps addr held)
-      hub.listeners false
+  let in_use hub (addr : Eio.Net.Sockaddr.stream) =
+    match addr with
+    | `Tcp a -> Ports.in_use hub.ports a
+    | `Unix _ -> Hashtbl.mem hub.listeners addr
 
   (* A Unix-domain path is taken over with [reuse_addr], as Eio's POSIX backend
      removes the socket file there before it binds; the listener that held it
@@ -480,7 +499,8 @@ module Listening_socket = struct
   let bind hub ~reuse_addr addr =
     let addr =
       match addr with
-      | `Tcp (ip, 0) -> Option.map (fun port -> `Tcp (ip, port)) (free_port hub)
+      | `Tcp (ip, 0) ->
+          Option.map (fun port -> `Tcp (ip, port)) (Ports.free hub.ports)
       | addr -> Some addr
     in
     match addr with
@@ -501,6 +521,7 @@ module Listening_socket = struct
             }
           in
           Hashtbl.replace hub.listeners addr t;
+          (match addr with `Tcp a -> Ports.add hub.ports a | `Unix _ -> ());
           Ok t
 
   (* The refusals are raised once the mutex is released, which an exception
@@ -531,7 +552,11 @@ module Listening_socket = struct
       (* A path taken over is its new listener's to free. *)
       Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
           match Hashtbl.find_opt t.hub.listeners t.addr with
-          | Some held when held == t -> Hashtbl.remove t.hub.listeners t.addr
+          | Some held when held == t -> (
+              Hashtbl.remove t.hub.listeners t.addr;
+              match t.addr with
+              | `Tcp a -> Ports.remove t.hub.ports a
+              | `Unix _ -> ())
           | Some _ | None -> ());
       let rec drain () =
         match Eio.Stream.take_nonblocking t.incoming with
@@ -561,6 +586,7 @@ module Datagram_socket = struct
      POSIX backend leaves behind. *)
   type hub = {
     sockets : (Eio.Net.Sockaddr.datagram, t) Hashtbl.t;
+    ports : Ports.t;
     files : (string, unit) Hashtbl.t;
     mutex : Mutex.t;
   }
@@ -575,28 +601,11 @@ module Datagram_socket = struct
     mutable release : Eio.Switch.hook;
   }
 
-  (* The lowest port of the dynamic range (RFC 6335, section 6) that no
-     datagram socket holds, at any address. *)
   let free_port hub =
-    let held port =
-      Hashtbl.fold
-        (fun addr _ held ->
-          held || match addr with `Udp (_, p) -> p = port | `Unix _ -> false)
-        hub.sockets false
-    in
-    let rec find port =
-      if port > 65535 then
+    match Ports.free hub.ports with
+    | Some port -> port
+    | None ->
         failwith "eio-net.mem: every port of 49152-65535 has a datagram socket"
-      else if held port then find (port + 1)
-      else port
-    in
-    find 49152
-
-  let overlaps (a : Eio.Net.Sockaddr.datagram) (b : Eio.Net.Sockaddr.datagram) =
-    match (a, b) with
-    | `Udp a, `Udp b -> ip_overlaps a b
-    | `Unix path, `Unix path' -> String.equal path path'
-    | `Udp _, `Unix _ | `Unix _, `Udp _ -> false
 
   let v hub addr =
     Mutex.protect hub.mutex @@ fun () ->
@@ -607,17 +616,12 @@ module Datagram_socket = struct
       | `Udp (ip, 0) -> `Udp (ip, free_port hub)
       | (`Udp _ | `Unix _) as addr -> addr
     in
-    let file =
+    let in_use =
       match addr with
-      | `Unix path -> Hashtbl.mem hub.files path
-      | `Udp _ -> false
+      | `Unix path -> Hashtbl.mem hub.files path || Hashtbl.mem hub.sockets addr
+      | `Udp a -> Ports.in_use hub.ports a
     in
-    if
-      file
-      || Hashtbl.fold
-           (fun held _ in_use -> in_use || overlaps addr held)
-           hub.sockets false
-    then raise (address_in_use ());
+    if in_use then raise (address_in_use ());
     let t =
       {
         hub;
@@ -630,6 +634,7 @@ module Datagram_socket = struct
       }
     in
     Hashtbl.replace hub.sockets addr t;
+    (match addr with `Udp a -> Ports.add hub.ports a | `Unix _ -> ());
     t
 
   (* The socket a datagram sent to [addr] reaches ([reaching]). *)
@@ -723,7 +728,7 @@ module Datagram_socket = struct
           Hashtbl.remove t.hub.sockets t.addr;
           match t.addr with
           | `Unix path -> Hashtbl.replace t.hub.files path ()
-          | `Udp _ -> ());
+          | `Udp a -> Ports.remove t.hub.ports a);
       Eio.Condition.broadcast t.readable
     end
 
@@ -921,12 +926,14 @@ let v ?capacity ~sw () =
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;
+      ports = Ports.v ();
       mutex = Eio.Mutex.create ();
     }
   in
   let datagrams =
     {
       Datagram_socket.sockets = Hashtbl.create 8;
+      ports = Ports.v ();
       files = Hashtbl.create 8;
       mutex = Mutex.create ();
     }

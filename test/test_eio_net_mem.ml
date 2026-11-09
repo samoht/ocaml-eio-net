@@ -513,6 +513,36 @@ let test_capacity_wakes_one () =
   check "writers" writers;
   check "readers" readers
 
+(* Binding at port 0 costs the same however many sockets hold a port: 2000
+   listeners and 2000 datagram sockets bind with work, counted as the words
+   allocated, that grows with their number, not with its square. *)
+let test_port_zero_scales () =
+  let n = 2000 in
+  let words f =
+    let before = Gc.minor_words () in
+    Eio_mock.Backend.run f;
+    Gc.minor_words () -. before
+  in
+  let bound = 2000. *. float n in
+  let check what f =
+    let w = words f in
+    if w > bound then
+      Alcotest.failf "%s: %.0f words for %d binds, past %.0f" what w n bound
+  in
+  let v4 = Eio.Net.Ipaddr.V4.loopback in
+  check "listeners" (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let net = Eio_net_mem.v ~sw () in
+      for _ = 1 to n do
+        ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (v4, 0)))
+      done);
+  check "datagram sockets" (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let net = Eio_net_mem.v ~sw () in
+      for _ = 1 to n do
+        ignore (Eio.Net.datagram_socket ~sw net (`Udp (v4, 0)))
+      done)
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -986,6 +1016,7 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "binding at port 0 scales" `Quick test_port_zero_scales;
       Alcotest.test_case "a capacity wakes one waiter" `Quick
         test_capacity_wakes_one;
       Alcotest.test_case "an empty write after peer close" `Quick
