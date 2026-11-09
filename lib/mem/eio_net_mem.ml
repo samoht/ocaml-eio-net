@@ -1,6 +1,11 @@
 open! Hermetic
 
-type Eio.Exn.Backend.t += Closed | No_listener | Address_in_use | No_destination
+type Eio.Exn.Backend.t +=
+  | Closed
+  | No_listener
+  | Address_in_use
+  | No_destination
+  | Message_too_long
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -16,9 +21,24 @@ let () =
     | No_destination ->
         Format.pp_print_string ppf "No destination (eio-net.mem)";
         true
+    | Message_too_long ->
+        Format.pp_print_string ppf "Message too long (eio-net.mem)";
+        true
     | _ -> false)
 
 let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
+
+(* The IPv4 address an IPv4-mapped IPv6 address stands for, or [ip]. *)
+let unmap (ip : Eio.Net.Ipaddr.v4v6) =
+  let raw = (ip :> string) in
+  if
+    String.length raw = 16
+    && String.equal (String.sub raw 0 12)
+         "\000\000\000\000\000\000\000\000\000\000\xff\xff"
+  then Eio.Net.Ipaddr.of_raw (String.sub raw 12 4)
+  else ip
+
+let is_v4 ip = String.length (unmap ip :> string) = 4
 
 let any ip =
   Eio.Net.Ipaddr.fold ip
@@ -529,6 +549,13 @@ module Datagram_socket = struct
         | `Udp (ip, port) -> Hashtbl.find_opt hub.sockets (`Udp (any ip, port))
         | `Unix _ -> None)
 
+  (* The longest datagram a socket sends to [dst]: UDP's payload over IPv4 or
+     IPv6, or what Linux's default send buffer (212992 bytes, less 32) lets a
+     Unix-domain socket send. *)
+  let max_length : Eio.Net.Sockaddr.datagram -> int = function
+    | `Unix _ -> 212960
+    | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
+
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
      the sender is not told; at a Unix path, the send finds no file, or one
      that no socket holds any more and refuses it. *)
@@ -539,6 +566,8 @@ module Datagram_socket = struct
       | Some dst -> dst
       | None -> raise (Eio.Exn.create (Eio.Exn.X No_destination))
     in
+    if Cstruct.lenv bufs > max_length dst then
+      raise (Eio.Exn.create (Eio.Exn.X Message_too_long));
     match find t.hub dst with
     | None -> (
         match dst with

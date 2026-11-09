@@ -302,13 +302,7 @@ let non_stream_cases =
          with EMSGSIZE. gVisor sends three times SO_SNDBUF; 1 MiB is more than
          any platform's default. *)
       per_dgram ~file:non_stream ~test:"SendMsgTooLarge" dgram_kinds
-        (fun _ ->
-          expect ~mem:"sent"
-            ~mem_bug:
-              "Refuse a datagram longer than a socket could send (65507 bytes \
-               of UDP payload over IPv4) with an EMSGSIZE error instead of \
-               queueing it."
-            "EMSGSIZE")
+        (fun _ -> expect "EMSGSIZE")
         (fun ctx k ->
           let a, _ = dgram_socket ctx k in
           let _, b_addr = dgram_socket ctx k in

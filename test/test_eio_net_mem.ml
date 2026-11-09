@@ -661,6 +661,38 @@ let recv_string sock =
   let src, n = Eio.Net.recv sock buf in
   (src, Cstruct.to_string (Cstruct.sub buf 0 n))
 
+(* A datagram longer than UDP can carry, 65507 bytes of payload over IPv4 and
+   65527 over IPv6, or than Linux's default send buffer lets a Unix-domain
+   socket send, is refused with the error that [Message_too_long] marks, as a
+   socket refuses it with EMSGSIZE. *)
+let test_datagram_too_long () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let v6 port : Eio.Net.Sockaddr.datagram =
+    `Udp (Eio.Net.Ipaddr.V6.loopback, port)
+  in
+  let send sock dst n =
+    match Eio.Net.send sock ~dst [ Cstruct.create n ] with
+    | () -> "sent"
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Message_too_long, _) -> "EMSGSIZE"
+  in
+  let a4 = Eio.Net.datagram_socket ~sw net (udp 9100) in
+  let a6 = Eio.Net.datagram_socket ~sw net (v6 9100) in
+  let au = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/long-a.sock") in
+  ignore (Eio.Net.datagram_socket ~sw net (`Unix "/tmp/long-b.sock"));
+  let b = `Unix "/tmp/long-b.sock" in
+  let r4a = send a4 (udp 9101) 65507 in
+  let r4b = send a4 (udp 9101) 65508 in
+  let r6a = send a6 (v6 9101) 65527 in
+  let r6b = send a6 (v6 9101) 65528 in
+  let rua = send au b 212960 in
+  let rub = send au b 212961 in
+  Alcotest.(check (list string))
+    "at and past each limit"
+    [ "sent"; "EMSGSIZE"; "sent"; "EMSGSIZE"; "sent"; "EMSGSIZE" ]
+    [ r4a; r4b; r6a; r6b; rua; rub ]
+
 (* A datagram arrives whole with the address it was sent from, so a server
    answers whoever wrote to it, as over UDP. The client binds no address of its
    own and is given one. *)
@@ -801,6 +833,7 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a datagram too long" `Quick test_datagram_too_long;
       Alcotest.test_case "a closed datagram socket's path" `Quick
         test_closed_datagram_path;
       Alcotest.test_case "a Unix-domain write after peer close" `Quick
