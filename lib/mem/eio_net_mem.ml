@@ -605,6 +605,18 @@ module Datagram_socket = struct
     (match dst with
     | `Udp (_, 0) -> raise (Eio.Exn.create (Eio.Exn.X Invalid_port))
     | `Udp _ | `Unix _ -> ());
+    (* A socket bound to an IPv6 address sends to no IPv4-mapped one, and one
+       bound to an IPv4-mapped address to no IPv6 one, as on Linux. *)
+    (match (t.addr, dst) with
+    | `Udp (b, _), `Udp (d, _)
+      when String.length (b :> string) = 16 && String.length (d :> string) = 16
+      ->
+        let fail code = raise (Eio.Exn.create (Eio.Exn.X code)) in
+        if is_v4 b && not (is_v4 d) then fail Address_family
+        else if
+          (not (is_v4 b)) && (not (same b Eio.Net.Ipaddr.V6.any)) && is_v4 d
+        then fail Network_unreachable
+    | _ -> ());
     match find t.hub dst with
     | None -> (
         match dst with

@@ -155,9 +155,11 @@ val v :
     longer than 65507 bytes to an IPv4 address, 65527 to an IPv6 one, or 212960
     to a Unix path, as Linux's default send buffer allows, raises the error that
     {!Message_too_long} marks. One sent to UDP port 0 raises the error that
-    {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. A [recv] into
-    a buffer shorter than the datagram gets its first bytes, as a socket does.
-    The socket is closed, and its address free again, when the switch passed to
+    {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. One sent from
+    an IPv6 address to an IPv4-mapped one, or the reverse, raises the error that
+    {!Network_unreachable} or {!Address_family} marks. A [recv] into a buffer
+    shorter than the datagram gets its first bytes, as a socket does. The socket
+    is closed, and its address free again, when the switch passed to
     [datagram_socket] finishes; a send or a receive on it then raises
     [Invalid_argument]. *)
 

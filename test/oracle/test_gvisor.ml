@@ -814,21 +814,13 @@ let inet_cases =
          to an address of one family cannot send to the other's. *)
       [
         case ~file:inet ~test:"UdpV6ListenerV4SendTo" ~ipv6:true
-          (expect ~macos:"EADDRNOTAVAIL" ~mem:"sent"
-             ~mem_bug:
-               "Refuse a send from an IPv6 address to an IPv4-mapped one, as \
-                both kernels do."
-             "ENETUNREACH") (fun ctx ->
+          (expect ~macos:"EADDRNOTAVAIL" "ENETUNREACH") (fun ctx ->
             let s, _ = datagram_socket ctx (`Udp (v6_loopback, 0)) in
             outcome (fun () ->
                 send s ~dst:(`Udp (v4_mapped_loopback, 1337)) "hello";
                 "sent"));
         case ~file:inet ~test:"UdpV4ListenerV6SendTo" ~ipv6:true
-          (expect ~macos:"EHOSTUNREACH" ~mem:"sent"
-             ~mem_bug:
-               "Refuse a send from an IPv4-mapped address to an IPv6 one, as \
-                both kernels do."
-             "EAFNOSUPPORT") (fun ctx ->
+          (expect ~macos:"EHOSTUNREACH" "EAFNOSUPPORT") (fun ctx ->
             let s, _ = datagram_socket ctx (`Udp (v4_mapped_loopback, 0)) in
             outcome (fun () ->
                 send s ~dst:(`Udp (v6_loopback, 1337)) "hello";
