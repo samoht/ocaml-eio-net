@@ -106,7 +106,9 @@ module Flow : sig
   val wrap : Schedule.t -> _ Eio.Net.stream_socket -> flow
   (** [wrap schedule sock] is [sock] with [schedule]'s faults injected on its
       reads and writes. Shutdown, close, and socket options pass through to
-      [sock]. *)
+      [sock]. A close or a receive shutdown drops the bytes a short read left
+      buffered: a read after the close raises [Invalid_argument], and one after
+      the shutdown raises [End_of_file]. *)
 
   val pair : ?client:Schedule.t -> ?server:Schedule.t -> unit -> flow * flow
   (** [pair ~client ~server ()] is a connected pair of in-memory flows, the ends

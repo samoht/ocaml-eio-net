@@ -417,6 +417,32 @@ let test_net_max_accepts_concurrent () =
   Alcotest.(check (pair int int))
     "accepted, refused" (1, 1) (!accepted, !refused)
 
+(* Bytes a short read left buffered go with the read side: a read after the
+   flow's own close raises [Invalid_argument], and one after it shut its
+   receive side raises [End_of_file], as eio-net.mem raises them. *)
+let test_flow_buffer_follows_read_side () =
+  Eio_mock.Backend.run @@ fun () ->
+  let after shut =
+    let c, s =
+      Flow.pair ~server:(Flow.Schedule.script ~reads:[ Deliver 1 ] ()) ()
+    in
+    Eio.Flow.copy_string "hello" c;
+    let buf = Cstruct.create 16 in
+    ignore (Eio.Flow.single_read s buf : int);
+    shut s;
+    match Eio.Flow.single_read s buf with
+    | n -> Fmt.str "read %S" (Cstruct.to_string ~len:n buf)
+    | exception Invalid_argument _ -> "Invalid_argument"
+    | exception End_of_file -> "End_of_file"
+  in
+  let closed = after Eio.Flow.close in
+  let receive = after (fun s -> Eio.Flow.shutdown s `Receive) in
+  let all = after (fun s -> Eio.Flow.shutdown s `All) in
+  Alcotest.(check (list string))
+    "close, receive, all"
+    [ "Invalid_argument"; "End_of_file"; "End_of_file" ]
+    [ closed; receive; all ]
+
 (* A printed schedule is the call that builds it, every parameter included. *)
 let test_schedules_print_every_parameter () =
   let check what expected pp v =
@@ -508,6 +534,8 @@ let suite =
         test_net_max_accepts_cancelled;
       Alcotest.test_case "net max accepts shared by concurrent accepts" `Quick
         test_net_max_accepts_concurrent;
+      Alcotest.test_case "flow buffer follows the read side" `Quick
+        test_flow_buffer_follows_read_side;
       Alcotest.test_case "schedules print every parameter" `Quick
         test_schedules_print_every_parameter;
       Alcotest.test_case "datagram seeded refuses odds past one" `Quick

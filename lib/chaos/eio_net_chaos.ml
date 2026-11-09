@@ -216,6 +216,7 @@ module Flow = struct
       mutable delivered : int;
       mutable written : int;
       mutable recv_closed : bool;
+      mutable closed : bool;
     }
 
     let fill_one t =
@@ -236,6 +237,7 @@ module Flow = struct
       n
 
     let single_read t dst =
+      if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
       if t.recv_closed then raise End_of_file;
       let fault, limit = t.driver.read ~delivered:t.delivered in
       match fault with
@@ -273,8 +275,24 @@ module Flow = struct
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
     let read_methods = []
-    let shutdown t cmd = t.base.shutdown cmd
-    let close t = t.base.close ()
+
+    (* Bytes left buffered go with the read side, as the socket's own queue
+       does. *)
+    let drop_buffer t = t.leftover <- Cstruct.empty
+
+    let shutdown t cmd =
+      (match cmd with
+      | `Receive | `All ->
+          drop_buffer t;
+          t.recv_closed <- true
+      | `Send -> ());
+      t.base.shutdown cmd
+
+    let close t =
+      drop_buffer t;
+      t.closed <- true;
+      t.base.close ()
+
     let setsockopt t opt v = t.base.setopt opt v
     let getsockopt t opt = t.base.getopt opt
   end
@@ -292,6 +310,7 @@ module Flow = struct
         delivered = 0;
         written = 0;
         recv_closed = false;
+        closed = false;
       }
     in
     Eio.Resource.T (state, handler)
