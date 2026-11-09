@@ -19,15 +19,15 @@ let all_kinds =
     Dgram Unix_dgram;
   ]
 
-let per_kind ~file ~test kinds expect body =
+let per_kind ?capacity ~file ~test kinds expect body =
   List.map
     (fun k ->
-      case ~file ~test ~variant:(kind_name k) ~ipv6:(needs_ipv6 k) (expect k)
-        (fun ctx -> body ctx k))
+      case ?capacity ~file ~test ~variant:(kind_name k) ~ipv6:(needs_ipv6 k)
+        (expect k) (fun ctx -> body ctx k))
     kinds
 
-let per_stream ~file ~test kinds expect body =
-  per_kind ~file ~test
+let per_stream ?capacity ~file ~test kinds expect body =
+  per_kind ?capacity ~file ~test
     (List.map (fun k -> Stream k) kinds)
     (function Stream k -> expect k | Dgram _ -> assert false)
     (fun ctx -> function Stream k -> body ctx k | Dgram _ -> assert false)
@@ -600,16 +600,11 @@ let tcp_cases =
           Fmt.str "wrote %d; %s" n (read a 1));
       (* NonblockingLargeWrite: a write of more than the send buffer holds
          writes part of it. gVisor writes three times SO_SNDBUF; 16 MiB is
-         more than any platform's default buffers. *)
-      per_stream ~file:tcp ~test:"NonblockingLargeWrite" tcp_kinds
-        (fun _ ->
-          expect ~mem:"all of it"
-            ~mem_bug:
-              "Let one write queue at most a socket buffer's worth (Linux \
-               starts at 16 KiB) and return the count, so a caller that \
-               ignores a partial write fails here as on a socket; this changes \
-               the documented default of writes that never wait."
-            "part of it")
+         more than any platform's default buffers. eio-net.mem bounds its
+         queues only when asked, so it runs with a socket buffer's 64 KiB. *)
+      per_stream ~capacity:65536 ~file:tcp ~test:"NonblockingLargeWrite"
+        tcp_kinds
+        (fun _ -> expect "part of it")
         (fun ctx k ->
           let c, _, _ = stream_pair ctx k in
           let size = 16 * 1024 * 1024 in

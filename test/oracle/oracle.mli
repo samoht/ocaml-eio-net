@@ -152,6 +152,7 @@ type case
 val case :
   ?variant:string ->
   ?ipv6:bool ->
+  ?capacity:int ->
   file:string ->
   test:string ->
   expect ->
@@ -159,7 +160,7 @@ val case :
   case
 (** [case ~file ~test expect body] runs [body] for gVisor's test [test] of
     [file]. A case with [ipv6] is skipped on real sockets where ::1 cannot be
-    bound. *)
+    bound. eio-net.mem runs it with [capacity], unbounded by default. *)
 
 val suite : string -> case list -> string * unit Alcotest.test_case list
 (** [suite name cases] runs each case once on eio-net.mem and once on real

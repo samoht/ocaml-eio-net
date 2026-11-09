@@ -18,12 +18,12 @@ type ctx = {
   mutable next : int;
 }
 
-let run backend f =
+let run ?capacity backend f =
   match backend with
   | Mem ->
       Eio_mock.Backend.run @@ fun () ->
       Eio.Switch.run @@ fun sw ->
-      f { backend; sw; net = Eio_net_mem.v ~sw (); next = 0 }
+      f { backend; sw; net = Eio_net_mem.v ?capacity ~sw (); next = 0 }
   | Real ->
       (* Eio_main picks this backend on macOS. On Linux it is named here: the
          would-block probe below needs a backend that tries each operation
@@ -275,11 +275,12 @@ type case = {
   variant : string;
   expect : expect;
   ipv6 : bool;
+  capacity : int option;
   body : ctx -> string;
 }
 
-let case ?(variant = "") ?(ipv6 = false) ~file ~test expect body =
-  { file; test; variant; expect; ipv6; body }
+let case ?(variant = "") ?(ipv6 = false) ?capacity ~file ~test expect body =
+  { file; test; variant; expect; ipv6; capacity; body }
 
 let real_expected e = match platform with Linux -> e.linux | Macos -> e.macos
 
@@ -309,7 +310,9 @@ let test_cases c =
   let skip_ipv6 () = c.ipv6 && not (Lazy.force ipv6) in
   let mem () =
     consistent c;
-    Alcotest.(check string) "eio-net.mem" c.expect.mem (run Mem c.body)
+    Alcotest.(check string)
+      "eio-net.mem" c.expect.mem
+      (run ?capacity:c.capacity Mem c.body)
   in
   let real () =
     if skip_ipv6 () then Alcotest.skip ()
