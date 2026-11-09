@@ -663,6 +663,7 @@ module Network = struct
     hub : Listening_socket.hub;
     datagrams : Datagram_socket.hub;
     capacity : int;
+    next_port : int Atomic.t;
   }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
@@ -689,6 +690,32 @@ module Network = struct
         Sockopt.stream opt;
         check_options rest
 
+  (* The address of a client that connects to [ip]: the address its
+     destination reaches, in the destination's family, at the next port of the
+     dynamic range, counted down from the top of the range as listeners count
+     up from its bottom. *)
+  let client_addr t ip =
+    let n = Atomic.fetch_and_add t.next_port 1 in
+    let port = 65535 - (n mod (65535 - 49152 + 1)) in
+    let reached = List.hd (reaching ip) in
+    let mapped = String.length (ip :> string) = 16 && is_v4 ip in
+    ((if mapped then map reached else reached), port)
+
+  (* The client's address as the listener at [listener] sees it: an IPv4
+     client of an IPv6 listener is IPv4-mapped. A Unix-domain client binds no
+     path. *)
+  let peer_addr (listener : Eio.Net.Sockaddr.stream) (ip, port) :
+      Eio.Net.Sockaddr.stream =
+    match listener with
+    | `Unix _ -> `Unix ""
+    | `Tcp (lip, _) ->
+        let ip =
+          if String.length (lip :> string) = 4 then unmap ip
+          else if is_v4 ip then map (unmap ip)
+          else ip
+        in
+        `Tcp (ip, port)
+
   (* A connection is a pair of queues: there is no local address to bind, so a
      caller asking for one is refused. *)
   let connect t ~bind_to ~options ~sw addr =
@@ -714,7 +741,12 @@ module Network = struct
     | Some listener, _ ->
         let local = match addr with `Unix _ -> true | `Tcp _ -> false in
         let client, server = Flow.pair ~local ~capacity:t.capacity in
-        Eio.Stream.add listener.incoming (server, `Unix "in-memory-client");
+        let peer =
+          match addr with
+          | `Tcp (ip, _) -> peer_addr listener.addr (client_addr t ip)
+          | `Unix _ -> `Unix ""
+        in
+        Eio.Stream.add listener.incoming (server, peer);
         (* The listener closed while the connection waited for room: its
            queue was closed before this connection joined it. *)
         if Atomic.get listener.closed then begin
@@ -786,4 +818,6 @@ let v ?capacity ~sw () =
       mutex = Mutex.create ();
     }
   in
-  Eio.Resource.T (Network.{ sw; hub; datagrams; capacity }, handler)
+  Eio.Resource.T
+    ( Network.{ sw; hub; datagrams; capacity; next_port = Atomic.make 0 },
+      handler )

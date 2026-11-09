@@ -525,12 +525,7 @@ let tcp_cases =
          from accept: a TCP address on loopback. *)
       per_stream ~file:tcp ~test:"ConnectedAcceptedPeerAndLocalAreReciprocals"
         tcp_kinds
-        (fun k ->
-          expect ~mem:"unix:in-memory-client"
-            ~mem_bug:
-              "Give each accepted connection a TCP peer address, the \
-               listener's loopback address and a port of the dynamic range."
-            ("tcp:" ^ pp_ip (ip_of k)))
+        (fun k -> expect ("tcp:" ^ pp_ip (ip_of k)))
         (fun ctx k ->
           let l = listen ctx (stream_addr ctx k) in
           let _c = connect ctx (Eio.Net.listening_addr l) in

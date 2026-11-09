@@ -101,11 +101,14 @@ val v :
     the end of the listen's switch. A real listener closed by hand leaves its
     file, and a connect there is refused. An accepted connection is closed when
     it is closed or when the switch passed to [accept] finishes. An accepted
-    connection's peer address is [`Unix "in-memory-client"]. Host resolution
-    maps ["127.0.0.1"] and ["::1"] with a numeric service to the loopback
-    address of their family at that port, once as a stream address and once as a
-    datagram address, and ["localhost"] to both families, IPv6 first, as glibc
-    and macOS order them. Any other host or service maps to no address.
+    connection's peer address is the client's: the loopback address its
+    destination reaches, IPv4-mapped for an IPv4 client of an IPv6 listener, at
+    a port of the dynamic range counted down from its top, or [`Unix ""] for a
+    Unix-domain client, which binds no path. Host resolution maps ["127.0.0.1"]
+    and ["::1"] with a numeric service to the loopback address of their family
+    at that port, once as a stream address and once as a datagram address, and
+    ["localhost"] to both families, IPv6 first, as glibc and macOS order them.
+    Any other host or service maps to no address.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and

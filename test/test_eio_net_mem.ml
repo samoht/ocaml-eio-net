@@ -253,6 +253,46 @@ let test_unix_write_after_peer_close () =
   | "", End_of_file -> ()
   | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
 
+(* An accepted connection's peer is the client's address: the loopback
+   address of the family the listener takes it in, at a port of the dynamic
+   range that no other connection holds; an IPv4 client of an IPv6 listener
+   shows as IPv4-mapped. A Unix-domain client binds no path, as Eio's POSIX
+   backend reports it. *)
+let test_accepted_peer_address () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let peer listen_addr connect_ip =
+    let l = Eio.Net.listen ~sw ~backlog:4 net listen_addr in
+    let port =
+      match Eio.Net.listening_addr l with `Tcp (_, p) -> p | `Unix _ -> 0
+    in
+    let dst =
+      match connect_ip with
+      | Some ip -> `Tcp (ip, port)
+      | None -> Eio.Net.listening_addr l
+    in
+    ignore (Eio.Net.connect ~sw net dst);
+    snd (Eio.Net.accept ~sw l)
+  in
+  let show = function
+    | `Tcp (ip, port) ->
+        Fmt.str "%a %b" Eio.Net.Ipaddr.pp ip (port >= 49152 && port <= 65535)
+    | `Unix path -> Fmt.str "unix %S" path
+  in
+  let v4 = Eio.Net.Ipaddr.V4.loopback in
+  let a = peer (`Tcp (v4, 0)) None in
+  let b = peer (`Tcp (v4, 0)) None in
+  let c = peer (`Tcp (Eio.Net.Ipaddr.V6.any, 0)) (Some v4) in
+  let d = peer (`Unix "/tmp/peer.sock") None in
+  Alcotest.(check (list string))
+    "peers"
+    [ "127.0.0.1 true"; "127.0.0.1 true"; "::ffff:127.0.0.1 true"; "unix \"\"" ]
+    (List.map show [ a; b; c; d ]);
+  match (a, b) with
+  | `Tcp (_, p), `Tcp (_, q) when p <> q -> ()
+  | _ -> Alcotest.fail "two connections share a port"
+
 (* A connection reset before it is read reports the reset to one read, and end
    of file to the reads after it, as a socket clears its pending error once it
    reports it. *)
@@ -862,6 +902,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "an accepted connection's peer" `Quick
+        test_accepted_peer_address;
       Alcotest.test_case "a datagram too long" `Quick test_datagram_too_long;
       Alcotest.test_case "a datagram reaches as a kernel delivers it" `Quick
         test_datagram_reaches_like_a_kernel;
