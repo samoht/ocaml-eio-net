@@ -263,10 +263,28 @@ let test_forward_sheds_within_its_pool () =
     "the other loop's stalled head was shed" true
     (Eio.Promise.is_resolved shed)
 
+(* A Unix path a live listener holds is in use: the relay does not take it
+   over, as SO_REUSEADDR makes Eio's POSIX backend do by removing the socket
+   file. *)
+let test_forward_unix_path_in_use () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let path = `Unix "relay.sock" in
+  let _live = Eio.Net.listen ~sw ~backlog:4 net path in
+  match
+    Eio_net.Relay.forward ~sw ~net ~max_connections:4 ~listen:path
+      ~connect:(loopback 1) ()
+  with
+  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+  | _ -> Alcotest.fail "the relay took over a live listener's path"
+
 let suite =
   ( "relay",
     [
       Alcotest.test_case "forward echoes through" `Quick test_forward_echo;
+      Alcotest.test_case "forward keeps a Unix path in use" `Quick
+        test_forward_unix_path_in_use;
       Alcotest.test_case "port 0 reports the real port" `Quick
         test_forward_reports_port;
       Alcotest.test_case "dial failure keeps listening" `Quick

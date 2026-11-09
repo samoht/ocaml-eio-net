@@ -27,12 +27,12 @@ val forward :
   unit ->
   Eio.Net.Sockaddr.stream
 (** [forward ~sw ~net ~on_error ~pool ~classify ~max_connections ~listen
-     ~connect ()] listens on [listen] (with a backlog of [16] and
-    [SO_REUSEADDR]) and, for every accepted connection, dials [connect] and
-    {!splice}s the two, in an {!Eio_net_accept.run} loop on [sw] that relays at
-    most [max_connections] connections at once: a client past them waits,
-    holding no upstream connection, until one ends. A relay reads nothing from a
-    client before it relays it, so it marks each connection
+     ~connect ()] listens on [listen] (with a backlog of [16], and
+    [SO_REUSEADDR] for a TCP address) and, for every accepted connection, dials
+    [connect] and {!splice}s the two, in an {!Eio_net_accept.run} loop on [sw]
+    that relays at most [max_connections] connections at once: a client past
+    them waits, holding no upstream connection, until one ends. A relay reads
+    nothing from a client before it relays it, so it marks each connection
     {!Eio_net_accept.complete} as it is accepted, and the loop sheds none of
     them under pressure: it waits for one to end. It is the bound address once
     listening (for a [listen] naming port 0, the port the system chose), and it
@@ -55,4 +55,6 @@ val forward :
     its connections, which are complete from the accept.
 
     Raises [Invalid_argument] if [max_connections] is less than [1]. A failure
-    to listen, such as an address in use, propagates from {!Eio.Net.listen}. *)
+    to listen, such as an address in use, propagates from {!Eio.Net.listen}: a
+    Unix path is in use while a file is there, a live listener's socket or not.
+*)

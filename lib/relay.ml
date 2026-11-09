@@ -12,7 +12,10 @@ let forward ~sw ~net ?on_error ?pool ?classify ~max_connections ~listen ~connect
      the error would fail [sw] rather than reach the caller. *)
   if max_connections < 1 then
     Fmt.invalid_arg "Relay.forward: max_connections is %d" max_connections;
-  let socket = Eio.Net.listen ~sw ~backlog:16 ~reuse_addr:true net listen in
+  (* On a Unix path, Eio's POSIX backend takes [reuse_addr] as leave to
+     remove the file there, a live listener's included. *)
+  let reuse_addr = match listen with `Tcp _ -> true | `Unix _ -> false in
+  let socket = Eio.Net.listen ~sw ~backlog:16 ~reuse_addr net listen in
   (* A daemon fiber: the listener must not hold the switch open once the
      caller's own work ends. A relay has no head: it serves from the accept. *)
   Eio.Fiber.fork_daemon ~sw (fun () ->
