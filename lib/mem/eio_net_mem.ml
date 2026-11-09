@@ -165,39 +165,60 @@ module Sockopt = struct
   let datagram : type a. a Eio.Net.Sockopt.t -> unit = refuse
 end
 
-(* Fibers waiting on a pipe, first come first served. A waiter is taken from
-   the queue under the pipe's mutex, at most once, and woken once the mutex is
-   released. A waiter cancelled after it was taken passes the turn on, so no
-   wake-up is lost. *)
+(* Fibers waiting on a pipe, first come first served, in a doubly-linked
+   list as {!Eio.Condition} keeps them, so a cancelled waiter leaves at once.
+   A waiter is taken from the list under the pipe's mutex, at most once, and
+   woken once the mutex is released. A waiter cancelled after it was taken
+   passes the turn on, so no wake-up is lost. *)
 module Waiters = struct
-  type waiter = { wake : unit Eio.Promise.u; mutable waiting : bool }
-  type t = waiter Queue.t
+  type node = {
+    wake : unit Eio.Promise.u;
+    mutable prev : node option;
+    mutable next : node option;
+    mutable waiting : bool;
+  }
 
-  let v () : t = Queue.create ()
+  type t = { mutable first : node option; mutable last : node option }
 
-  let add (q : t) =
+  let v () = { first = None; last = None }
+
+  let add q =
     let p, wake = Eio.Promise.create () in
-    let w = { wake; waiting = true } in
-    Queue.push w q;
-    (p, w)
+    let n = { wake; prev = q.last; next = None; waiting = true } in
+    (match q.last with None -> q.first <- Some n | Some l -> l.next <- Some n);
+    q.last <- Some n;
+    (p, n)
 
-  let rec take (q : t) =
-    match Queue.take_opt q with
+  let unlink q n =
+    (match n.prev with None -> q.first <- n.next | Some p -> p.next <- n.next);
+    (match n.next with None -> q.last <- n.prev | Some x -> x.prev <- n.prev);
+    n.prev <- None;
+    n.next <- None;
+    n.waiting <- false
+
+  let take q =
+    match q.first with
     | None -> []
-    | Some w when w.waiting ->
-        w.waiting <- false;
-        [ w ]
-    | Some _ -> take q
+    | Some n ->
+        unlink q n;
+        [ n ]
 
-  let take_all (q : t) =
-    let all =
-      Queue.fold (fun acc w -> if w.waiting then w :: acc else acc) [] q
-    in
-    List.iter (fun w -> w.waiting <- false) all;
-    Queue.clear q;
-    all
+  let rec take_all q =
+    match q.first with
+    | None -> []
+    | Some n ->
+        unlink q n;
+        n :: take_all q
 
-  let wake = List.iter (fun w -> Eio.Promise.resolve w.wake ())
+  (* Removes a waiter still in the list; [false] if it was taken. *)
+  let remove q n =
+    n.waiting
+    && begin
+      unlink q n;
+      true
+    end
+
+  let wake = List.iter (fun n -> Eio.Promise.resolve n.wake ())
 end
 
 (* One direction of a connection: the bytes written and not yet read. Its two
@@ -263,11 +284,7 @@ module Pipe = struct
     | () -> ()
     | exception (Eio.Cancel.Cancelled _ as e) ->
         locked t (fun _ ->
-            if waiter.Waiters.waiting then begin
-              waiter.waiting <- false;
-              ((), [])
-            end
-            else ((), Waiters.take q));
+            if Waiters.remove q waiter then ((), []) else ((), Waiters.take q));
         raise e
 
   (* Changes the state under the mutex and wakes every waiter. *)

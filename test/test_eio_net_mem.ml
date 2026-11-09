@@ -543,6 +543,35 @@ let test_port_zero_scales () =
         ignore (Eio.Net.datagram_socket ~sw net (`Udp (v4, 0)))
       done)
 
+(* A read or a write cancelled while it waits leaves nothing behind: 100000
+   cancelled reads and 100000 cancelled writes keep the live heap within a
+   bound that a waiter left queued by each would pass. *)
+let test_cancelled_waits_free () =
+  Eio_mock.Backend.run @@ fun () ->
+  let live () =
+    Gc.full_major ();
+    (Gc.stat ()).live_words
+  in
+  let reader, _ = Eio_net_mem.pipe () in
+  let writer, _ = Eio_net_mem.pipe ~capacity:1 () in
+  Eio.Flow.write writer [ Cstruct.of_string "x" ];
+  let buf = Cstruct.create 1 in
+  let cancelled f = Eio.Fiber.first (fun () -> ignore (f ())) Eio.Fiber.yield in
+  let waits n =
+    for _ = 1 to n do
+      cancelled (fun () -> Eio.Flow.single_read reader buf);
+      cancelled (fun () -> Eio.Flow.single_write writer [ buf ])
+    done
+  in
+  waits 1000;
+  let before = live () in
+  waits 100_000;
+  let grown = live () - before in
+  (* The pipes stay live while the heap is measured. *)
+  ignore (Sys.opaque_identity (reader, writer));
+  if grown > 50_000 then
+    Alcotest.failf "200000 cancelled waits kept %d live words" grown
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -1016,6 +1045,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a cancelled wait leaves nothing behind" `Quick
+        test_cancelled_waits_free;
       Alcotest.test_case "binding at port 0 scales" `Quick test_port_zero_scales;
       Alcotest.test_case "a capacity wakes one waiter" `Quick
         test_capacity_wakes_one;
