@@ -40,6 +40,7 @@
   mtime
   (ipaddr (>= 5.3.0))
   fpath
+  (conf-linux-libc-dev (= :os linux))
   (alcotest :with-test)
   (alcobar :with-test)
   (ohex :with-test)
