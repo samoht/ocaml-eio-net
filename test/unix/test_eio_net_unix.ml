@@ -158,9 +158,10 @@ let test_offload_write_refused () =
    ICMP port unreachable left when the peer had gone. A batch that receives
    the datagram and then meets the error returns the datagram, and the next
    receive reports the error: neither is lost, in whichever order the system
-   reports them. *)
+   reports them. Each receive waits for the socket to be readable, which the
+   datagram and the error each make it. *)
 let test_connected_datagram_error_after_a_datagram () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let socket () =
     let fd = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_DGRAM 0 in
@@ -174,12 +175,8 @@ let test_connected_datagram_error_after_a_datagram () =
   ignore (Unix.send_substring fb "kept" 0 4 [] : int);
   Unix.close fb;
   ignore (Unix.send_substring fa "lost" 0 4 [] : int);
-  Eio.Time.sleep env#clock 0.1;
   let receive () =
-    match
-      Eio.Time.with_timeout_exn env#clock 1.0 (fun () ->
-          Eio_net.Frame.recv_batch a)
-    with
+    match Eio_net.Frame.recv_batch a with
     | frames -> frames
     | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) ->
         [ "refused" ]
