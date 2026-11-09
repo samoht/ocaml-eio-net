@@ -6,6 +6,7 @@ type Eio.Exn.Backend.t +=
   | Address_in_use
   | No_destination
   | Message_too_long
+  | Invalid_port
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -23,6 +24,9 @@ let () =
         true
     | Message_too_long ->
         Format.pp_print_string ppf "Message too long (eio-net.mem)";
+        true
+    | Invalid_port ->
+        Format.pp_print_string ppf "Invalid port (eio-net.mem)";
         true
     | _ -> false)
 
@@ -568,6 +572,9 @@ module Datagram_socket = struct
     in
     if Cstruct.lenv bufs > max_length dst then
       raise (Eio.Exn.create (Eio.Exn.X Message_too_long));
+    (match dst with
+    | `Udp (_, 0) -> raise (Eio.Exn.create (Eio.Exn.X Invalid_port))
+    | `Udp _ | `Unix _ -> ());
     match find t.hub dst with
     | None -> (
         match dst with

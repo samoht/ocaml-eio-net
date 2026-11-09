@@ -52,6 +52,9 @@ type Eio.Exn.Backend.t +=
         (** The backend code of the unclassified {!Eio.Io} error a datagram
             [send] raises for a datagram longer than a socket sends, where a
             socket fails with [EMSGSIZE]. *)
+  | Invalid_port
+        (** The backend code of the unclassified {!Eio.Io} error a datagram
+            [send] to UDP port 0 raises, where Linux fails it with [EINVAL]. *)
 
 val v :
   ?capacity:int ->
@@ -128,11 +131,12 @@ val v :
     without a destination raises the error that {!No_destination} marks, since
     no socket is connected. A datagram longer than 65507 bytes to an IPv4
     address, 65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default
-    send buffer allows, raises the error that {!Message_too_long} marks. A
-    [recv] into a buffer shorter than the datagram gets its first bytes, as a
-    socket does. The socket is closed, and its address free again, when the
-    switch passed to [datagram_socket] finishes; a send or a receive on it then
-    raises [Invalid_argument]. *)
+    send buffer allows, raises the error that {!Message_too_long} marks. One
+    sent to UDP port 0 raises the error that {!Invalid_port} marks, as on Linux;
+    macOS sends it over IPv4. A [recv] into a buffer shorter than the datagram
+    gets its first bytes, as a socket does. The socket is closed, and its
+    address free again, when the switch passed to [datagram_socket] finishes; a
+    send or a receive on it then raises [Invalid_argument]. *)
 
 val pipe :
   ?capacity:int ->

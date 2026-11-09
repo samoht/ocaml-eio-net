@@ -447,11 +447,8 @@ let udp_cases =
          socket binds it goes. macOS sends to port 0 over IPv4. *)
       per_dgram ~file:udp ~test:"SendToZeroPort" udp_kinds
         (function
-          | Udp4 -> expect ~macos:"sent; sent" ~mem:"sent; sent" "EINVAL; sent"
-          | _ ->
-              expect ~macos:"EADDRNOTAVAIL; sent" ~mem:"sent; sent"
-                ~mem_bug:"Refuse a send to port 0 with an EINVAL error."
-                "EINVAL; sent")
+          | Udp4 -> expect ~macos:"sent; sent" "EINVAL; sent"
+          | _ -> expect ~macos:"EADDRNOTAVAIL; sent" "EINVAL; sent")
         (fun ctx k ->
           let a, _ = dgram_socket ctx k in
           let to_port port =
