@@ -8,7 +8,8 @@ type Eio.Exn.Backend.t +=
   | Closed
         (** The backend code carried by the connection reset a mem flow raises,
             where a TCP socket raises one:
-            - A write after this end shut its send.
+            - A write after this end shut its send. An empty write returns 0
+              instead, as on Linux; macOS fails it with EPIPE.
             - A write after the peer closed: the first is lost and answered with
               a reset, which every later write raises. On a Unix-domain
               connection the first write raises it, as EPIPE.

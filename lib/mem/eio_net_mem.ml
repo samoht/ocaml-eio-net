@@ -371,9 +371,10 @@ module Pipe = struct
     let result =
       locked t @@ fun t ->
       let leave outcome = (outcome, Waiters.release t.writers ~turn) in
-      if t.shut then leave (`Raise (reset_exn ()))
-        (* An empty write sends nothing, so it meets no closed peer. *)
-      else if n = 0 then leave (`Done 0)
+      (* An empty write sends nothing, so it meets no shutdown or closed
+         peer, as on Linux. *)
+      if n = 0 then leave (`Done 0)
+      else if t.shut then leave (`Raise (reset_exn ()))
       else if t.refused then leave `Refused
       else if t.gone then begin
         t.refused <- true;

@@ -5,4 +5,5 @@ let () =
       Test_gvisor.unix_suite;
       Test_gvisor.udp_suite;
       Test_gvisor.tcp_suite;
+      Test_review.suite;
     ]
