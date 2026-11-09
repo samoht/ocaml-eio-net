@@ -75,10 +75,11 @@ stream into a frame channel with the same format.
 ## Bounds
 
 A framing configuration accepts payloads up to 1 MiB by default, or 65535
-bytes with a two-byte length. `read` raises `Invalid_length` as soon as a
-prefix declares a longer payload, before it reads any payload byte. A reader
-made with `~max_size:(Eio_net_framing.Config.buffer_size framing)` therefore
-never holds more than the longest frame.
+bytes with a two-byte length. `read` raises
+`Eio_net_framing.Error (Invalid_length _)` as soon as a prefix declares a
+longer payload, before it reads any payload byte. A reader made with
+`~max_size:(Eio_net_framing.Config.buffer_size framing)` therefore never holds
+more than the longest frame.
 
 A datagram longer than a channel's `max_frame` (64 KiB by default) raises the
 `Eio.Io` error `Too_long` instead of arriving truncated. `Eio_net_accept.run`
