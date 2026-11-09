@@ -116,23 +116,28 @@ module Flow = struct
     let pp = pp_in ~path:""
   end
 
-  type driver = { read : delivered:int -> read; write : written:int -> write }
+  (* A read's fault comes with the most bytes it may deliver, so a seeded
+     reset lands at its byte exactly. *)
+  type driver = {
+    read : delivered:int -> read * int;
+    write : written:int -> write;
+  }
 
   let driver (s : Schedule.t) : driver =
     match s with
     | Pass ->
         {
-          read = (fun ~delivered:_ -> Deliver 0);
+          read = (fun ~delivered:_ -> (Deliver 0, max_int));
           write = (fun ~written:_ -> Accept 0);
         }
     | Script { reads; writes } ->
         let rq = ref reads and wq = ref writes in
         let read ~delivered:_ =
           match !rq with
-          | [] -> Deliver 0
+          | [] -> (Deliver 0, max_int)
           | x :: xs ->
               rq := xs;
-              x
+              (x, max_int)
         in
         let write ~written:_ =
           match !wq with
@@ -146,16 +151,21 @@ module Flow = struct
         let rng_r = read_rng s.seed and rng_w = write_rng s.seed in
         let read_fired = ref false and write_fired = ref false in
         let read ~delivered =
+          let fault () =
+            if s.stall > 0 && Random.State.bool rng_r then
+              Stall (1 + Random.State.full_int rng_r s.stall)
+            else if s.dribble > 0 then
+              Deliver (1 + Random.State.full_int rng_r s.dribble)
+            else Deliver 0
+          in
           match s.reset_after with
-          | Some n when (not !read_fired) && delivered >= n -> (
-              read_fired := true;
-              match s.reset_kind with `Reset -> Reset | `Eof -> Eof)
-          | _ ->
-              if s.stall > 0 && Random.State.bool rng_r then
-                Stall (1 + Random.State.full_int rng_r s.stall)
-              else if s.dribble > 0 then
-                Deliver (1 + Random.State.full_int rng_r s.dribble)
-              else Deliver 0
+          | Some n when not !read_fired ->
+              if delivered >= n then begin
+                read_fired := true;
+                ((match s.reset_kind with `Reset -> Reset | `Eof -> Eof), 0)
+              end
+              else (fault (), n - delivered)
+          | _ -> (fault (), max_int)
         in
         let write ~written =
           match s.fail_write_after with
@@ -215,11 +225,11 @@ module Flow = struct
 
     let ensure_buffer t = if Cstruct.length t.leftover = 0 then fill_one t
 
-    let deliver t dst ~cap =
+    let deliver t dst ~cap ~limit =
       ensure_buffer t;
       let avail = Cstruct.length t.leftover in
       let want = if cap <= 0 then avail else min cap avail in
-      let n = min want (Cstruct.length dst) in
+      let n = min (min want limit) (Cstruct.length dst) in
       Cstruct.blit t.leftover 0 dst 0 n;
       t.leftover <- Cstruct.sub t.leftover n (avail - n);
       t.delivered <- t.delivered + n;
@@ -227,7 +237,8 @@ module Flow = struct
 
     let single_read t dst =
       if t.recv_closed then raise End_of_file;
-      match t.driver.read ~delivered:t.delivered with
+      let fault, limit = t.driver.read ~delivered:t.delivered in
+      match fault with
       | Reset -> raise (reset_exn ())
       | Eof ->
           t.recv_closed <- true;
@@ -236,8 +247,8 @@ module Flow = struct
           for _ = 1 to n do
             Eio.Fiber.yield ()
           done;
-          deliver t dst ~cap:0
-      | Deliver cap -> deliver t dst ~cap
+          deliver t dst ~cap:0 ~limit
+      | Deliver cap -> deliver t dst ~cap ~limit
       | Coalesce n ->
           (* The end of input stops the base reads; it is raised only once
              nothing is buffered. *)
@@ -246,7 +257,7 @@ module Flow = struct
                fill_one t
              done
            with End_of_file when Cstruct.length t.leftover > 0 -> ());
-          deliver t dst ~cap:0
+          deliver t dst ~cap:0 ~limit
 
     let single_write t bufs =
       let total = Cstruct.lenv bufs in

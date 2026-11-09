@@ -78,12 +78,16 @@ module Flow : sig
           [0], uncapped).
         - The first read once [reset_after] bytes (defaults to never) have been
           delivered is a [reset_kind] (defaults to [`Reset]) fault: {!Reset} for
-          [`Reset] and {!Eof} for [`Eof].
+          [`Reset] and {!Eof} for [`Eof]. No read before it delivers a byte past
+          [reset_after], so the fault lands at that byte exactly.
         - The first write once [fail_write_after] bytes (defaults to never) have
           been written is a {!Fail}.
 
         Read faults and write faults each depend only on [seed], not on how
-        reads and writes interleave. *)
+        reads and writes interleave. The bytes a read delivers also depend on
+        those the base holds when it runs, so they repeat only when the bytes
+        arrive the same way, as on a single-domain scheduler over
+        {!Eio_net_mem}. *)
 
     val pp : t Fmt.t
     (** [pp] formats a schedule as the call that builds it, every parameter

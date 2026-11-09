@@ -164,6 +164,31 @@ let test_flow_seeded_deterministic () =
   let c = run_seeded_flow 5678 in
   Alcotest.(check bool) "a different seed chunks differently" true (a <> c)
 
+(* A seeded reset lands at byte [reset_after] exactly, however the bytes
+   arrived: a read before it delivers no byte past it. *)
+let test_flow_seeded_reset_at_byte () =
+  List.iter
+    (fun dribble ->
+      Eio_mock.Backend.run @@ fun () ->
+      let client, server =
+        Flow.pair ~server:(Flow.Schedule.seeded ~dribble ~reset_after:5 1) ()
+      in
+      Eio.Flow.copy_string "0123456789" client;
+      let got = Buffer.create 10 in
+      let buf = Cstruct.create 64 in
+      let rec loop () =
+        match Eio.Flow.single_read server buf with
+        | n ->
+            Buffer.add_string got (Cstruct.to_string ~len:n buf);
+            loop ()
+        | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> ()
+      in
+      loop ();
+      Alcotest.(check string)
+        (Fmt.str "bytes before the reset (dribble %d)" dribble)
+        "01234" (Buffer.contents got))
+    [ 0; 3 ]
+
 (* The dribble and short-write bounds are uncapped, so one past [2^30 - 1]
    still injects faults. *)
 let test_flow_seeded_wide_bounds () =
@@ -420,6 +445,8 @@ let suite =
       Alcotest.test_case "flow mid-stream eof" `Quick test_flow_eof;
       Alcotest.test_case "flow seeded determinism" `Quick
         test_flow_seeded_deterministic;
+      Alcotest.test_case "flow seeded reset at its byte" `Quick
+        test_flow_seeded_reset_at_byte;
       Alcotest.test_case "flow seeded wide bounds" `Quick
         test_flow_seeded_wide_bounds;
       Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
