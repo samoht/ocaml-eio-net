@@ -1,4 +1,5 @@
-(** Frame channels over Unix datagram descriptors. *)
+(** {!Eio_net.Frame} channels over Unix datagram descriptors, with several
+    datagrams sent or received in one system call where the system allows. *)
 
 val of_connected_datagram_fd :
   sw:Eio.Switch.t ->

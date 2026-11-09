@@ -1,8 +1,9 @@
-(** Length-prefixed frames over Eio flows.
+(** A length-prefix codec for byte streams: a frame is an unsigned network-order
+    length followed by that many payload bytes. It reads and writes one frame at
+    a time and keeps no state; [Eio_net.Frame.of_length_prefixed_flow] builds a
+    frame channel on it.
 
-    A frame is an unsigned network-order length followed by that many payload
-    bytes; the length excludes its own prefix. [Uint16_be] is the LENGTH field
-    of
+    The length excludes its own prefix. [Uint16_be] is the LENGTH field of
     {{:https://www.rfc-editor.org/rfc/rfc4571.html#section-2}RFC 4571 section 2},
     zero-length frame included, and [Uint32_be] is the default. What a payload
     means belongs to the protocol above.
@@ -12,9 +13,8 @@
     bytes, whatever length a peer declares. {!read} takes one frame from an
     {!Eio.Buf_read.t}, which reads its flow until the frame is whole. {!encode}
     lays out a batch of frames for one vectored write without copying the
-    payloads, and {!write} writes it. Neither keeps state between calls:
-    [Eio_net.Frame.of_length_prefixed_flow] adds the serialisation and the
-    failure state a stream needs. *)
+    payloads, and {!write} writes it. [Eio_net.Frame.of_length_prefixed_flow]
+    adds the serialisation and the failure state a stream needs. *)
 
 (** {1:errors Length fields and errors} *)
 

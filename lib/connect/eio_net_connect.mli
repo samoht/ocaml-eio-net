@@ -1,4 +1,10 @@
-(** The answer a failed {!Eio.Net.connect} carries from the network.
+(** A classifier of failed connects: it tells whether the network refused the
+    attempt or found no path to the peer.
+
+    An {!type-answer} is what the network replied to a {!Eio.Net.connect}: a TCP
+    reset or an ICMP error. A timeout or a local error is no answer. A
+    connection library uses the classifier to tell a peer that refused, or that
+    no route reaches, from one that did not reply in time.
 
     Eio names a refusal portably and reports the rest as a backend error, so a
     connection library reads a failed connect with the classifier its caller

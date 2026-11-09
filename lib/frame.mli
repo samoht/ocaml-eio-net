@@ -1,6 +1,10 @@
 (** A frame channel: a bidirectional packet link where one {!recv} is one frame
     and one {!send} puts one frame on the wire.
 
+    This is the channel. Over a byte stream it uses the codec of
+    {!Eio_net_framing} ({!of_length_prefixed_flow}), and [Eio_net_unix.Frame]
+    builds one over a Unix datagram descriptor.
+
     Frame-based protocols such as CCSDS transfer frames, AX.25 and Ethernet read
     and write over it, independently of how the bytes move: a network interface,
     an Eio datagram socket or an in-memory pipe. A protocol codec layers over it
