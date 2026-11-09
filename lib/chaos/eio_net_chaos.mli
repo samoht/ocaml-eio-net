@@ -23,7 +23,8 @@ module Flow : sig
     | Coalesce of int
         (** Do [n] base reads, accumulate them, then hand the whole buffer up:
             several transport reads become one application read. Stops early at
-            end-of-file. *)
+            end-of-file, which this read raises only when nothing is buffered.
+        *)
     | Stall of int
         (** {!Eio.Fiber.yield} [n] times, then deliver all buffered bytes. A
             cooperative stall: the scheduler runs other fibers in between, so a

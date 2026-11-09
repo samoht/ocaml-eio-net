@@ -231,14 +231,13 @@ module Flow = struct
           deliver t dst ~cap:0
       | Deliver cap -> deliver t dst ~cap
       | Coalesce n ->
-          (* One base read is mandatory (propagate its EOF); further reads are
-             best-effort and stop at EOF. *)
-          fill_one t;
+          (* The end of input stops the base reads; it is raised only once
+             nothing is buffered. *)
           (try
-             for _ = 2 to n do
+             for _ = 1 to n do
                fill_one t
              done
-           with End_of_file -> ());
+           with End_of_file when Cstruct.length t.leftover > 0 -> ());
           deliver t dst ~cap:0
 
     let single_write t bufs =

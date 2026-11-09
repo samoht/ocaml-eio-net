@@ -57,6 +57,24 @@ let test_flow_coalesce () =
     (fun () -> got := read1 server);
   Alcotest.(check string) "two writes coalesced into one read" "aabb" !got
 
+(* Bytes buffered by an earlier short read reach the reader before the end of
+   the stream. *)
+let test_flow_coalesce_at_eof () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server =
+    Flow.pair
+      ~server:(Flow.Schedule.script ~reads:[ Deliver 1; Coalesce 2 ] ())
+      ()
+  in
+  Eio.Flow.copy_string "abcdef" client;
+  Eio.Flow.shutdown client `Send;
+  let a = read1 server in
+  let b = read1 server in
+  Alcotest.(check (list string)) "every byte arrives" [ "a"; "bcdef" ] [ a; b ];
+  match read1 server with
+  | exception End_of_file -> ()
+  | s -> Alcotest.failf "read %S past the end" s
+
 let test_flow_stall () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server =
@@ -399,6 +417,8 @@ let suite =
     [
       Alcotest.test_case "flow dribble" `Quick test_flow_dribble;
       Alcotest.test_case "flow coalesce" `Quick test_flow_coalesce;
+      Alcotest.test_case "flow coalesce at end of stream" `Quick
+        test_flow_coalesce_at_eof;
       Alcotest.test_case "flow stall" `Quick test_flow_stall;
       Alcotest.test_case "flow torn write" `Quick test_flow_torn_write;
       Alcotest.test_case "flow mid-stream reset" `Quick test_flow_reset;
