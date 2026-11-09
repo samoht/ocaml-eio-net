@@ -124,7 +124,8 @@ module Datagram : sig
     | Dup  (** Deliver the next datagram now and again on the following recv. *)
     | Reorder
         (** Hold the next datagram back and deliver the one after it first; the
-            held datagram surfaces on the following recv. *)
+            held datagram surfaces on the following recv. A receive cancelled
+            while it waits for the one after keeps the held datagram. *)
     | Truncate of int
         (** Deliver only the first [n] bytes of the next datagram, none if [n]
             is negative. *)

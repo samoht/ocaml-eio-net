@@ -415,12 +415,13 @@ module Datagram = struct
 
   module Impl = struct
     type tag = [ `Generic ]
+    type datagram = Eio.Net.Sockaddr.datagram * string
 
-    type t = {
-      base : base;
-      driver : driver;
-      mutable deferred : (Eio.Net.Sockaddr.datagram * string) option;
-    }
+    (* A datagram [Dup] or [Reorder] keeps for a later receive. A held one
+       is kept in the state before the receive waits for the next, so a
+       cancelled receive loses neither. *)
+    type kept = Nothing | Next of datagram | Held of datagram
+    type t = { base : base; driver : driver; mutable kept : kept }
 
     let recv_raw t buf =
       let addr, len = t.base.recv buf in
@@ -442,13 +443,11 @@ module Datagram = struct
           apply t buf (Drop (n - 1))
       | Dup ->
           let a, d = recv_raw t buf in
-          t.deferred <- Some (a, d);
+          t.kept <- Next (a, d);
           put buf a d
       | Reorder ->
-          let a1, d1 = recv_raw t buf in
-          let a2, d2 = recv_raw t buf in
-          t.deferred <- Some (a1, d1);
-          put buf a2 d2
+          t.kept <- Held (recv_raw t buf);
+          recv t buf
       | Truncate k ->
           let a, d = recv_raw t buf in
           let d = if k < String.length d then String.sub d 0 (max 0 k) else d in
@@ -467,12 +466,16 @@ module Datagram = struct
           let a, d = recv_raw t buf in
           put buf a d
 
-    let recv t buf =
-      match t.deferred with
-      | Some (addr, data) ->
-          t.deferred <- None;
+    and recv t buf =
+      match t.kept with
+      | Next (addr, data) ->
+          t.kept <- Nothing;
           put buf addr data
-      | None -> apply t buf (t.driver.next ())
+      | Held held ->
+          let a, d = recv_raw t buf in
+          t.kept <- Next held;
+          put buf a d
+      | Nothing -> apply t buf (t.driver.next ())
 
     let send t ?dst bufs = t.base.send ?dst bufs
     let shutdown t cmd = t.base.shutdown cmd
@@ -487,7 +490,7 @@ module Datagram = struct
 
   let wrap schedule (sock : _ Eio.Net.datagram_socket) : socket =
     let state =
-      { Impl.base = base_of sock; driver = driver schedule; deferred = None }
+      { Impl.base = base_of sock; driver = driver schedule; kept = Nothing }
     in
     Eio.Resource.T (state, handler)
 end

@@ -234,6 +234,19 @@ let test_dgram_reorder () =
   Alcotest.(check (list string))
     "datagrams arrive out of order" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
 
+(* A receive cancelled while it holds a datagram back keeps it: the next
+   receives deliver the one after it, then the held one. *)
+let test_dgram_reorder_cancelled () =
+  with_datagrams [ "d0" ] @@ fun ~send base ->
+  let sock = Datagram.wrap (Datagram.Schedule.script [ Reorder ]) base in
+  Eio.Fiber.first
+    (fun () -> Alcotest.failf "received %S alone" (recv1 sock))
+    (fun () -> Eio.Fiber.yield ());
+  send "d1";
+  send "d2";
+  Alcotest.(check (list string))
+    "the held datagram survives" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
+
 let test_dgram_truncate () =
   with_datagrams [ "hello" ] @@ fun ~send:_ base ->
   let sock = Datagram.wrap (Datagram.Schedule.script [ Truncate 3 ]) base in
@@ -403,6 +416,8 @@ let suite =
         test_dgram_drop_negative;
       Alcotest.test_case "datagram dup" `Quick test_dgram_dup;
       Alcotest.test_case "datagram reorder" `Quick test_dgram_reorder;
+      Alcotest.test_case "datagram reorder survives a cancelled receive" `Quick
+        test_dgram_reorder_cancelled;
       Alcotest.test_case "datagram truncate" `Quick test_dgram_truncate;
       Alcotest.test_case "datagram garble" `Quick test_dgram_garble;
       Alcotest.test_case "datagram seeded determinism" `Quick
