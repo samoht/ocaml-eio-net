@@ -32,7 +32,9 @@ extern ssize_t recvmsg_x(int, struct ocaml_msghdr_x *, unsigned int, int)
 
 /* Sends the frames [offset, count) of [vbuffers], each [vlengths] long, one
    datagram each. Returns how many were sent, from [offset] on: 0 when the
-   socket would block. Raises [Unix_error] when the first fails otherwise. */
+   socket would block, and -1 on ENOBUFS, which macOS returns while the peer's
+   buffer is full although the socket polls writable. Raises [Unix_error] when
+   the first fails otherwise. */
 CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
                                            value vlengths, value voffset,
                                            value vcount) {
@@ -85,8 +87,10 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
   caml_leave_blocking_section();
 
   if (sent < 0) {
-    if (error == EAGAIN || error == EWOULDBLOCK || error == ENOBUFS)
+    if (error == EAGAIN || error == EWOULDBLOCK)
       sent = 0;
+    else if (error == ENOBUFS)
+      sent = -1;
     else {
       errno = error;
       uerror("sendmsg_batch", Nothing);

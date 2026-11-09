@@ -24,8 +24,8 @@ let test_connected_datagram_batch () =
   Unix.close fb
 
 (* A full Darwin datagram socket reports [ENOBUFS], not [EAGAIN], from
-   [sendmsg_x]: ordinary backpressure, so yield and retry. Small socket buffers
-   make the condition deterministic. *)
+   [sendmsg_x]: ordinary backpressure, so back off and retry. Small socket
+   buffers make the condition deterministic. *)
 let test_connected_datagram_backpressure () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->

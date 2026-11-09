@@ -21,9 +21,12 @@ val of_connected_datagram_fd :
     Sends copy each frame into a buffer of [max_frame] bytes and raise
     [Invalid_argument] on a longer one, and on a send the system refuses the
     {!Eio.Io} error {!Eio_unix.Err.v} makes of it; either way, frames before it
-    in the batch may have been sent. A receive the system refuses raises that
-    {!Eio.Io} error too; one a batch meets after its first datagram is raised by
-    the next receive, and the batch returns the datagrams before it.
+    in the batch may have been sent. A send waits while the socket is full: for
+    writability, or on macOS, where a full socket answers [ENOBUFS] and still
+    polls writable, for a sleep that doubles from 50 us to 10 ms. A receive the
+    system refuses raises that {!Eio.Io} error too; one a batch meets after its
+    first datagram is raised by the next receive, and the batch returns the
+    datagrams before it.
 
     Fibers may send and receive at once: concurrent receives run one at a time,
     and so do concurrent sends, a batch to its end, while a send and a receive

@@ -82,6 +82,10 @@ let receiver ~max_frame ~max_batch socket fd =
   in
   (recv, recv_batch)
 
+(* In microseconds. *)
+let min_backoff = 50
+let max_backoff = 10_000
+
 (* [sender ~max_frame ~max_batch fd] is the [send_batch] of the channel over
    [fd]. *)
 let sender ~max_frame ~max_batch fd =
@@ -100,21 +104,24 @@ let sender ~max_frame ~max_batch fd =
         copy_frames rest (index + 1)
   in
   (* Sends the prepared frames from [first] on, waiting for the socket to be
-     writable while it accepts none. *)
-  let rec send_prepared first count =
-    if first < count then begin
-      let sent =
-        eio (send_batch_raw fd send_buffers send_lengths first) count
-      in
-      if sent = 0 then Eio_unix.await_writable fd;
-      send_prepared (first + sent) count
-    end
+     writable while it accepts none. On ENOBUFS the socket polls writable, so
+     the wait is a sleep that doubles from 50 us to 10 ms. *)
+  let rec send_prepared ~backoff first count =
+    if first < count then
+      match eio (send_batch_raw fd send_buffers send_lengths first) count with
+      | 0 ->
+          Eio_unix.await_writable fd;
+          send_prepared ~backoff:min_backoff first count
+      | -1 ->
+          Eio_unix.sleep (float backoff *. 1e-6);
+          send_prepared ~backoff:(min max_backoff (2 * backoff)) first count
+      | sent -> send_prepared ~backoff:min_backoff (first + sent) count
   in
   let rec send_batch = function
     | [] -> ()
     | frames ->
         let count, rest = copy_frames frames 0 in
-        send_prepared 0 count;
+        send_prepared ~backoff:min_backoff 0 count;
         send_batch rest
   in
   send_batch
