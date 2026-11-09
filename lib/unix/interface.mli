@@ -59,10 +59,11 @@ module type S = sig
   (** [changed w] waits until an address has been added to or removed from an
       interface since the previous call returned, or since [w] opened. A
       notification the kernel dropped because the socket's buffer was full
-      counts as a change. A routing socket also carries messages of no address,
-      a route learned for each new destination among them: each costs one read
-      and returns nothing. A failed read raises the {!Eio.Io} error
-      {!Eio_unix.Err.v} makes of it. *)
+      counts as a change. On Linux only the kernel's messages count: one a
+      process with CAP_NET_ADMIN sends to the watch's port is ignored. A routing
+      socket also carries messages of no address, a route learned for each new
+      destination among them: each costs one read and returns nothing. A failed
+      read raises the {!Eio.Io} error {!Eio_unix.Err.v} makes of it. *)
 end
 
 include S

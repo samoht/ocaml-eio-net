@@ -164,15 +164,25 @@ CAMLprim value caml_eio_net_interface_watch(value v_unit)
 
 /* Read every message queued on the watch socket [v_fd]; true when one reports
  * an address added or removed, or when the kernel dropped messages
- * (ENOBUFS), which may have. A message is read whole into a buffer that only
- * its header needs: the rest of one longer than the buffer is discarded. */
+ * (ENOBUFS), which may have. On Linux a datagram counts only from the kernel
+ * (port 0): a process with CAP_NET_ADMIN can send one to the watch's port. A
+ * message is read whole into a buffer that only its header needs: the rest
+ * of one longer than the buffer is discarded. */
 CAMLprim value caml_eio_net_interface_drain(value v_fd)
 {
     int fd = Int_val(v_fd), changed = 0;
     long buffer[512];
     for (;;)
     {
+#if defined(__linux__)
+        struct sockaddr_nl from;
+        socklen_t from_len = sizeof(from);
+        memset(&from, 0, sizeof(from));
+        ssize_t n = recvfrom(fd, buffer, sizeof(buffer), 0,
+                             (struct sockaddr *)&from, &from_len);
+#else
         ssize_t n = recv(fd, buffer, sizeof(buffer), 0);
+#endif
         if (n == -1)
         {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -187,8 +197,16 @@ CAMLprim value caml_eio_net_interface_drain(value v_fd)
             caml_uerror("recv", Nothing);
         }
 #if defined(__linux__)
-        if (n > 0)
-            changed = 1;
+        if (n > 0 && from_len >= sizeof(from) && from.nl_family == AF_NETLINK &&
+            from.nl_pid == 0)
+        {
+            int len = (int)n;
+            for (const struct nlmsghdr *h = (const struct nlmsghdr *)buffer;
+                 NLMSG_OK(h, len); h = NLMSG_NEXT(h, len))
+                if (h->nlmsg_type == RTM_NEWADDR ||
+                    h->nlmsg_type == RTM_DELADDR)
+                    changed = 1;
+        }
 #else
         if ((size_t)n >= offsetof(struct rt_msghdr, rtm_type) + 1)
         {

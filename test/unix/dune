@@ -15,4 +15,7 @@
   fpath
   ipaddr
   cstruct
-  unix))
+  unix)
+ (foreign_stubs
+  (language c)
+  (names netlink_spoof)))

@@ -59,6 +59,31 @@ let test_interface_addresses () =
       | Ipaddr.V6 _ -> ())
     addresses
 
+external netlink_spoof : unit -> int = "caml_test_netlink_spoof"
+
+(* A message a user process sends to the watch's port is no address change:
+   only the kernel's count. Forging one needs CAP_NET_ADMIN on Linux, so the
+   test runs only where the forgery is sent. The forged message is queued
+   when the send returns, and the yields let the scheduler poll for it. *)
+let test_watch_ignores_user_messages () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let w = Eio_net_unix.Interface.watch ~sw in
+  if netlink_spoof () > 0 then
+    match
+      Eio.Fiber.first
+        (fun () ->
+          Eio_net_unix.Interface.changed w;
+          `Changed)
+        (fun () ->
+          for _ = 1 to 1000 do
+            Eio.Fiber.yield ()
+          done;
+          `Quiet)
+    with
+    | `Quiet -> ()
+    | `Changed -> Alcotest.fail "a forged message woke the watch"
+
 (* A stand-in builds the addresses it lists. *)
 let test_address () =
   let prefix = Ipaddr.Prefix.of_string_exn "192.0.2.7/24" in
@@ -78,5 +103,7 @@ let suite =
     [
       Alcotest.test_case "the host's interface addresses" `Quick
         test_interface_addresses;
+      Alcotest.test_case "the watch ignores user messages" `Quick
+        test_watch_ignores_user_messages;
       Alcotest.test_case "an address" `Quick test_address;
     ] )
