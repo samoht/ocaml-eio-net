@@ -605,22 +605,40 @@ module Net = struct
   module Listening_socket = struct
     type tag = [ `Generic ]
 
+    (* [taken] counts the slots of the budget held by accepts under way or
+       returned, [accepted] those returned. Accepts may run in several
+       domains. *)
     type t = {
       base : base_listener;
       max_accepts : int option;
-      mutable accepts : int;
+      taken : int Atomic.t;
+      accepted : int Atomic.t;
     }
 
+    let rec take t m =
+      let n = Atomic.get t.taken in
+      n < m && (Atomic.compare_and_set t.taken n (n + 1) || take t m)
+
+    (* An accept takes its slot before it waits and gives it back if it
+       raises or is cancelled, so it uses none of the budget then. One that
+       finds every slot taken raises [End_of_file], and closes the listener
+       once the accepts holding them have returned. *)
     let accept t ~sw =
-      (match t.max_accepts with
-      | Some m when t.accepts >= m ->
-          t.base.listener_close ();
-          raise End_of_file
-      | _ -> ());
-      (* Counted once it returns: a cancelled accept uses no budget. *)
-      let accepted = t.base.accept ~sw in
-      t.accepts <- t.accepts + 1;
-      accepted
+      match t.max_accepts with
+      | None -> t.base.accept ~sw
+      | Some m ->
+          if not (take t m) then begin
+            if Atomic.get t.accepted >= m then t.base.listener_close ();
+            raise End_of_file
+          end;
+          let returned = ref false in
+          Fun.protect
+            ~finally:(fun () -> if not !returned then Atomic.decr t.taken)
+            (fun () ->
+              let accepted = t.base.accept ~sw in
+              returned := true;
+              Atomic.incr t.accepted;
+              accepted)
 
     let close t = t.base.listener_close ()
     let listening_addr t = t.base.listener_addr ()
@@ -663,7 +681,8 @@ module Net = struct
         {
           Listening_socket.base;
           max_accepts = t.schedule.max_accepts;
-          accepts = 0;
+          taken = Atomic.make 0;
+          accepted = Atomic.make 0;
         }
       in
       Eio.Resource.T (state, listening_handler)

@@ -226,8 +226,11 @@ module Net : sig
         [i]th element of [connect] (defaults to [[]]) on the [i]th connect of
         the network and passes through once it is exhausted, and closes a
         listener and raises [End_of_file] from each of its accepts past
-        [max_accepts] (defaults to no bound). An accept counts once it returns a
-        connection, so a cancelled one uses none of the budget. *)
+        [max_accepts] (defaults to no bound). An accept takes its share of the
+        budget when it starts and gives it back if it raises or is cancelled, so
+        a cancelled one uses none of it; an accept that finds the budget held by
+        accepts still waiting raises [End_of_file] and leaves the listener open.
+    *)
 
     val seeded :
       ?dribble:int ->

@@ -391,6 +391,32 @@ let test_net_max_accepts_cancelled () =
   | _ -> ()
   | exception End_of_file -> Alcotest.fail "the cancelled accept was counted"
 
+(* Accepts waiting side by side share the budget: with one accept allowed,
+   two waiting accepts and two connects give one connection, and the other
+   accept raises [End_of_file]. *)
+let test_net_max_accepts_concurrent () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Net.v ~sw (Net.Schedule.v ~max_accepts:1 ()) in
+  let listener = Eio.Net.listen ~sw ~backlog:4 net addr in
+  let accepted = ref 0 and refused = ref 0 in
+  let accept () =
+    match Eio.Net.accept ~sw listener with
+    | _ -> incr accepted
+    | exception End_of_file -> incr refused
+  in
+  Eio.Fiber.all
+    [
+      accept;
+      accept;
+      (fun () ->
+        for _ = 1 to 2 do
+          ignore (Eio.Net.connect ~sw net addr)
+        done);
+    ];
+  Alcotest.(check (pair int int))
+    "accepted, refused" (1, 1) (!accepted, !refused)
+
 (* A printed schedule is the call that builds it, every parameter included. *)
 let test_schedules_print_every_parameter () =
   let check what expected pp v =
@@ -480,6 +506,8 @@ let suite =
       Alcotest.test_case "net max accepts" `Quick test_net_max_accepts;
       Alcotest.test_case "net max accepts ignores a cancelled accept" `Quick
         test_net_max_accepts_cancelled;
+      Alcotest.test_case "net max accepts shared by concurrent accepts" `Quick
+        test_net_max_accepts_concurrent;
       Alcotest.test_case "schedules print every parameter" `Quick
         test_schedules_print_every_parameter;
       Alcotest.test_case "datagram seeded refuses odds past one" `Quick
