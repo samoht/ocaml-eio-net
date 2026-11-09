@@ -87,20 +87,24 @@ val v :
     listener is closed, and its address free again, when it is closed or when
     the switch passed to [listen] or to {!v} finishes; the connections waiting
     to be accepted are reset with it, as a kernel resets them. A [connect]
-    reaches the listener at its address, or at the wildcard address of its port,
-    and waits while [128] connections wait to be accepted there; with no
-    listener, or one that closes while it waits, it raises the connection
-    failure that {!No_listener} marks, as a connect to a closed port is refused.
-    At a Unix path no listener holds it raises [Eio.Fs.Not_found] instead: a
-    closed listener leaves no file, as when Eio's POSIX backend removes it at
-    the end of the listen's switch. A real listener closed by hand leaves its
-    file, and a connect there is refused. An accepted connection is closed when
-    it is closed or when the switch passed to [accept] finishes. An accepted
-    connection's peer address is [`Unix "in-memory-client"]. Host resolution
-    maps ["127.0.0.1"] and ["::1"] with a numeric service to the loopback
-    address of their family at that port, once as a stream address and once as a
-    datagram address, and ["localhost"] to both families, IPv6 first, as glibc
-    and macOS order them. Any other host or service maps to no address.
+    reaches the listener at its address, or at the wildcard address of its
+    family and port, or, for an IPv4 address, at the IPv6 wildcard address of
+    its port, as a dual-stack listener takes it. An IPv4-mapped IPv6 address
+    stands for the IPv4 address it maps, and a wildcard destination for the
+    loopback address of its family, as both kernels route them. It waits while
+    [128] connections wait to be accepted there; with no listener, or one that
+    closes while it waits, it raises the connection failure that {!No_listener}
+    marks, as a connect to a closed port is refused. At a Unix path no listener
+    holds it raises [Eio.Fs.Not_found] instead: a closed listener leaves no
+    file, as when Eio's POSIX backend removes it at the end of the listen's
+    switch. A real listener closed by hand leaves its file, and a connect there
+    is refused. An accepted connection is closed when it is closed or when the
+    switch passed to [accept] finishes. An accepted connection's peer address is
+    [`Unix "in-memory-client"]. Host resolution maps ["127.0.0.1"] and ["::1"]
+    with a numeric service to the loopback address of their family at that port,
+    once as a stream address and once as a datagram address, and ["localhost"]
+    to both families, IPv6 first, as glibc and macOS order them. Any other host
+    or service maps to no address.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and
@@ -121,22 +125,23 @@ val v :
     by the rule [listen] follows, raises the error that {!Address_in_use} marks;
     [reuse_port] raises [Invalid_argument]. A datagram sent to it arrives whole,
     with the sender's address, after every datagram sent to it before: the
-    network never drops, cuts or reorders one, and a send never waits. One sent
-    to an address no socket binds, at its own address or the wildcard address of
-    its port, is lost, as UDP loses it; one sent to a Unix path no socket binds
-    raises [Eio.Fs.Not_found]. A closed Unix-domain datagram socket leaves its
-    path behind, as Eio's POSIX backend leaves the file: a datagram sent there
-    is refused with the connection failure that {!No_listener} marks, and a
-    socket bound there raises the error that {!Address_in_use} marks. A send
-    without a destination raises the error that {!No_destination} marks, since
-    no socket is connected. A datagram longer than 65507 bytes to an IPv4
-    address, 65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default
-    send buffer allows, raises the error that {!Message_too_long} marks. One
-    sent to UDP port 0 raises the error that {!Invalid_port} marks, as on Linux;
-    macOS sends it over IPv4. A [recv] into a buffer shorter than the datagram
-    gets its first bytes, as a socket does. The socket is closed, and its
-    address free again, when the switch passed to [datagram_socket] finishes; a
-    send or a receive on it then raises [Invalid_argument]. *)
+    network never drops, cuts or reorders one, and a send never waits. A
+    datagram reaches a socket by the rule a [connect] reaches a listener. One
+    sent to an address no socket binds that way is lost, as UDP loses it; one
+    sent to a Unix path no socket binds raises [Eio.Fs.Not_found]. A closed
+    Unix-domain datagram socket leaves its path behind, as Eio's POSIX backend
+    leaves the file: a datagram sent there is refused with the connection
+    failure that {!No_listener} marks, and a socket bound there raises the error
+    that {!Address_in_use} marks. A send without a destination raises the error
+    that {!No_destination} marks, since no socket is connected. A datagram
+    longer than 65507 bytes to an IPv4 address, 65527 to an IPv6 one, or 212960
+    to a Unix path, as Linux's default send buffer allows, raises the error that
+    {!Message_too_long} marks. One sent to UDP port 0 raises the error that
+    {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. A [recv] into
+    a buffer shorter than the datagram gets its first bytes, as a socket does.
+    The socket is closed, and its address free again, when the switch passed to
+    [datagram_socket] finishes; a send or a receive on it then raises
+    [Invalid_argument]. *)
 
 val pipe :
   ?capacity:int ->

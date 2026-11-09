@@ -31,14 +31,12 @@ let () =
     | _ -> false)
 
 let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
+let mapped_prefix = "\000\000\000\000\000\000\000\000\000\000\xff\xff"
 
 (* The IPv4 address an IPv4-mapped IPv6 address stands for, or [ip]. *)
 let unmap (ip : Eio.Net.Ipaddr.v4v6) =
   let raw = (ip :> string) in
-  if
-    String.length raw = 16
-    && String.equal (String.sub raw 0 12)
-         "\000\000\000\000\000\000\000\000\000\000\xff\xff"
+  if String.length raw = 16 && String.equal (String.sub raw 0 12) mapped_prefix
   then Eio.Net.Ipaddr.of_raw (String.sub raw 12 4)
   else ip
 
@@ -48,6 +46,28 @@ let any ip =
   Eio.Net.Ipaddr.fold ip
     ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
     ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
+
+(* The IPv4-mapped IPv6 form of an IPv4 address. *)
+let map (ip : Eio.Net.Ipaddr.v4v6) =
+  Eio.Net.Ipaddr.of_raw (mapped_prefix ^ (ip :> string))
+
+let same (x : Eio.Net.Ipaddr.v4v6) (y : Eio.Net.Ipaddr.v4v6) =
+  String.equal (x :> string) (y :> string)
+
+(* The addresses, best first, at which a socket takes a connection or a
+   datagram sent to [ip]: the address itself, in either form if it is IPv4,
+   then the wildcard address of its family, and for IPv4 the IPv6 wildcard
+   address of a dual-stack socket. A wildcard destination stands for the
+   loopback address of its family, as both kernels route it. *)
+let reaching ip =
+  let ip = unmap ip in
+  if is_v4 ip then
+    let ip = if same ip (any ip) then Eio.Net.Ipaddr.V4.loopback else ip in
+    let v4_any = Eio.Net.Ipaddr.V4.any in
+    [ ip; map ip; v4_any; map v4_any; Eio.Net.Ipaddr.V6.any ]
+  else
+    let ip = if same ip (any ip) then Eio.Net.Ipaddr.V6.loopback else ip in
+    [ ip; Eio.Net.Ipaddr.V6.any ]
 
 (* Two IP addresses of one port overlap when they are equal or one is the
    wildcard address of the other's family, as bind(2) on Linux has it. *)
@@ -543,15 +563,15 @@ module Datagram_socket = struct
     Hashtbl.replace hub.sockets addr t;
     t
 
-  (* The socket bound at [addr], or at the wildcard address of its port. *)
+  (* The socket a datagram sent to [addr] reaches ([reaching]). *)
   let find hub (addr : Eio.Net.Sockaddr.datagram) =
     Mutex.protect hub.mutex @@ fun () ->
-    match Hashtbl.find_opt hub.sockets addr with
-    | Some _ as found -> found
-    | None -> (
-        match addr with
-        | `Udp (ip, port) -> Hashtbl.find_opt hub.sockets (`Udp (any ip, port))
-        | `Unix _ -> None)
+    match addr with
+    | `Udp (ip, port) ->
+        List.find_map
+          (fun ip -> Hashtbl.find_opt hub.sockets (`Udp (ip, port)))
+          (reaching ip)
+    | `Unix _ -> Hashtbl.find_opt hub.sockets addr
 
   (* The longest datagram a socket sends to [dst]: UDP's payload over IPv4 or
      IPv6, or what Linux's default send buffer (212992 bytes, less 32) lets a
@@ -675,15 +695,12 @@ module Network = struct
     check_options options;
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
-          match Hashtbl.find_opt t.hub.listeners addr with
-          | Some _ as listener -> listener
-          | None ->
-              let wildcard =
-                match addr with
-                | `Tcp (ip, port) -> Some (`Tcp (any ip, port))
-                | `Unix _ -> None
-              in
-              Option.bind wildcard (Hashtbl.find_opt t.hub.listeners))
+          match addr with
+          | `Tcp (ip, port) ->
+              List.find_map
+                (fun ip -> Hashtbl.find_opt t.hub.listeners (`Tcp (ip, port)))
+                (reaching ip)
+          | `Unix _ -> Hashtbl.find_opt t.hub.listeners addr)
     in
     let refused () =
       raise (Eio.Net.err (Connection_failure (Refused No_listener)))

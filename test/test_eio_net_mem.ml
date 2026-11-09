@@ -693,6 +693,35 @@ let test_datagram_too_long () =
     [ "sent"; "EMSGSIZE"; "sent"; "EMSGSIZE"; "sent"; "EMSGSIZE" ]
     [ r4a; r4b; r6a; r6b; rua; rub ]
 
+(* A datagram sent to an IPv4-mapped IPv6 address reaches the socket bound at
+   the IPv4 address it maps, one sent to a wildcard address reaches the
+   socket bound at loopback, and one sent to an IPv4 address reaches an IPv6
+   wildcard socket, as dual-stack kernels deliver them. *)
+let test_datagram_reaches_like_a_kernel () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let mapped =
+    Eio.Net.Ipaddr.of_raw
+      "\000\000\000\000\000\000\000\000\000\000\xff\xff\127\000\000\001"
+  in
+  let v4 = Eio.Net.datagram_socket ~sw net (udp 9200) in
+  let dual =
+    Eio.Net.datagram_socket ~sw net (`Udp (Eio.Net.Ipaddr.V6.any, 9201))
+  in
+  let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  let send dst s = Eio.Net.send client ~dst [ Cstruct.of_string s ] in
+  send (`Udp (mapped, 9200)) "mapped";
+  send (`Udp (Eio.Net.Ipaddr.V4.any, 9200)) "wildcard";
+  send (udp 9201) "dual";
+  let first = snd (recv_string v4) in
+  let second = snd (recv_string v4) in
+  let third = snd (recv_string dual) in
+  Alcotest.(check (list string))
+    "delivered"
+    [ "mapped"; "wildcard"; "dual" ]
+    [ first; second; third ]
+
 (* A datagram arrives whole with the address it was sent from, so a server
    answers whoever wrote to it, as over UDP. The client binds no address of its
    own and is given one. *)
@@ -834,6 +863,8 @@ let suite =
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
       Alcotest.test_case "a datagram too long" `Quick test_datagram_too_long;
+      Alcotest.test_case "a datagram reaches as a kernel delivers it" `Quick
+        test_datagram_reaches_like_a_kernel;
       Alcotest.test_case "a closed datagram socket's path" `Quick
         test_closed_datagram_path;
       Alcotest.test_case "a Unix-domain write after peer close" `Quick

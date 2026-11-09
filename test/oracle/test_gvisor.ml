@@ -725,35 +725,12 @@ let simple_connect ctx listen_addr connector =
   Eio.Flow.close a;
   "connected"
 
-(* A mem connect finds its listener at the address it names or at the
-   wildcard address of that address's family, so an IPv4 address and its
-   IPv4-mapped IPv6 form never meet, an IPv6 wildcard listener does not take
-   IPv4 connections, and a connect to a wildcard address reaches no
-   loopback listener. [mem_connect] says which pairs meet. *)
+(* An IPv6 wildcard socket holds its port at IPv4 addresses too, as a
+   dual-stack socket does; eio-net.mem holds it at IPv6 addresses only. *)
 let mem_dual_stack =
   "Treat an IPv4-mapped IPv6 address as the IPv4 address it maps, and let an \
    IPv6 wildcard socket hold its port at IPv4 addresses too, as a dual-stack \
    socket does."
-
-let mem_connect_bug =
-  "Treat an IPv4-mapped IPv6 address as the IPv4 address it maps, let an IPv6 \
-   wildcard listener take IPv4 connections, and send a connect to a wildcard \
-   address to the loopback address of its family, as both kernels do."
-
-let mem_connect (l, c) =
-  let family_any = function
-    | V4_any | V4_loopback -> `V4
-    | V4_mapped_any | V4_mapped_loopback | V6_any | V6_loopback -> `V6
-  in
-  let any_l = match l with V4_any | V6_any -> true | _ -> false in
-  let same = l = c in
-  if same || (any_l && family_any l = family_any c) then "connected"
-  else "refused"
-
-let tcp_listen_expect param =
-  let mem = mem_connect param in
-  if mem = "connected" then expect "connected"
-  else expect ~mem ~mem_bug:mem_connect_bug "connected"
 
 let inet_cases =
   List.concat
@@ -765,16 +742,15 @@ let inet_cases =
           let listen_ip =
             if is_v4 l then Eio.Net.Ipaddr.V4.any else Eio.Net.Ipaddr.V6.any
           in
-          let mem_param = ((if is_v4 l then V4_any else V6_any), c) in
           case ~file:inet ~test:"TCP" ~variant:(param_name param)
-            ~ipv6:(needs_v6 param) (tcp_listen_expect mem_param) (fun ctx ->
+            ~ipv6:(needs_v6 param) (expect "connected") (fun ctx ->
               simple_connect ctx (`Tcp (listen_ip, 0)) c))
         inet_params;
       (* TCPListenUnbound: so does a listener bound to its address. *)
       List.map
         (fun ((l, c) as param) ->
           case ~file:inet ~test:"TCPListenUnbound" ~variant:(param_name param)
-            ~ipv6:(needs_v6 param) (tcp_listen_expect param) (fun ctx ->
+            ~ipv6:(needs_v6 param) (expect "connected") (fun ctx ->
               simple_connect ctx (`Tcp (ip_of_addr l, 0)) c))
         inet_params;
       (* LoopbackAddressRangeConnect: a wildcard listener takes a connect to
