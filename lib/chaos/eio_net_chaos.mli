@@ -29,7 +29,7 @@ module Flow : sig
         (** {!Eio.Fiber.yield} [n] times, then deliver all buffered bytes. A
             cooperative stall: the scheduler runs other fibers in between, so a
             reader that stalls with no other runnable work trips
-            {!Eio_mock.Backend}'s deadlock detector. *)
+            [Eio_mock.Backend]'s deadlock detector. *)
     | Reset  (** Raise a connection-reset instead of delivering. *)
     | Eof
         (** End the read direction: this read and every later one raise
@@ -113,7 +113,7 @@ module Flow : sig
       of {!Eio_net_mem.pipe}, with the client end wrapped by [client] (defaults
       to {!Schedule.none}) and the server end by [server] (defaults to
       {!Schedule.none}). Bytes written on one arrive on the other. Both ends
-      must run under an Eio scheduler ({!Eio_mock.Backend.run} suffices), and no
+      must run under an Eio scheduler ([Eio_mock.Backend.run] suffices), and no
       switch closes them. *)
 end
 
