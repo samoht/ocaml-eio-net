@@ -3,22 +3,73 @@
 Network channels and test networks for
 [Eio](https://github.com/ocaml-multicore/eio).
 
-`eio-net` gives an Eio application a frame channel, where one receive is one
-frame. The same channel runs over a datagram socket, a length-prefixed byte
-stream or an in-memory pair, so a protocol can be tested without real sockets.
-For those tests it also has an in-memory network and a wrapper that injects
-faults on a schedule a test can replay.
+Over a real network, a read may return a few bytes of a message or several
+messages at once. A peer may stall, reset the connection or end the stream
+midway. A connect may be refused or slow, and a datagram lost, duplicated or
+reordered. Loopback sockets in a test rarely do any of this, so the bugs that
+depend on it stay hidden. `eio-net` gives an Eio program an in-memory network
+and a wrapper that injects these faults on a schedule. A seeded schedule prints
+as the OCaml call that builds it, so a failing run replays exactly.
+
+Here a client reads from a server through a network that cuts each read to at
+most 3 bytes and resets the connection after 5 bytes:
+
+```ocaml
+# let schedule = Eio_net_chaos.Net.Schedule.seeded ~dribble:3 ~reset_after:5 42;;
+val schedule : Eio_net_chaos.Net.Schedule.t = <abstr>
+# let fetch schedule =
+    Eio_mock.Backend.run @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio_net_chaos.Net.wrap schedule (Eio_net_mem.v ~sw ()) in
+    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+    let listener = Eio.Net.listen ~sw ~backlog:1 net addr in
+    Eio.Fiber.fork ~sw (fun () ->
+        let flow, _ = Eio.Net.accept ~sw listener in
+        Eio.Flow.copy_string "hello, world" flow);
+    let flow = Eio.Net.connect ~sw net addr in
+    let buf = Cstruct.create 64 in
+    let rec read acc =
+      match Eio.Flow.single_read flow buf with
+      | n -> read (Cstruct.to_string ~len:n buf :: acc)
+      | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> List.rev acc
+    in
+    read [];;
+val fetch : Eio_net_chaos.Net.Schedule.t -> string list = <fun>
+# fetch schedule;;
+- : string list = ["he"; "ll"; "o"]
+# Fmt.pr "%a" Eio_net_chaos.Net.Schedule.pp schedule;;
+v ~flow:(Flow.Schedule.seeded ~dribble:3 ~stall:0 ~short_write:0 ~reset_after:5 ~reset_kind:`Reset 42) ~connect:[] ()
+- : unit = ()
+```
+
+The printed schedule, pasted back, replays the run:
+
+```ocaml
+# fetch
+    Eio_net_chaos.(
+      Net.Schedule.(
+        v
+          ~flow:
+            (Flow.Schedule.seeded ~dribble:3 ~stall:0 ~short_write:0
+               ~reset_after:5 ~reset_kind:`Reset 42)
+          ~connect:[] ()));;
+- : string list = ["he"; "ll"; "o"]
+```
+
+It also gives a frame channel, where one receive is one frame, over a datagram
+socket, a length-prefixed byte stream or an in-memory pair, and an accept loop
+that bounds the connections it holds.
 
 ## Libraries
 
 - `eio-net`: the `Eio_net.Frame` and `Eio_net.Datagram` channels.
   `Eio_net.Relay` forwards connections and `Eio_net.Progress` ends a transfer
   that moves too slowly.
-- `eio-net.framing`: bounded length-prefixed frames over `Eio.Buf_read`.
+- `eio-net.framing`: the length-prefix codec of a frame channel over a byte
+  stream, with bounded frames, over `Eio.Buf_read`.
 - `eio-net.accept`: an accept loop that holds at most a given number of
   connections.
-- `eio-net.connect`: the answer a failed connect carries, refused or
-  unreachable.
+- `eio-net.connect`: a classifier of failed connects, refused or unreachable.
 - `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, and host
   name resolution.
 - `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets.
@@ -28,11 +79,6 @@ faults on a schedule a test can replay.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's
   interface addresses and the Unix classifiers of failed connects and accepts.
 
-`Eio_net_accept.run` reads a failed accept with the classifier it is given as
-`?classify`. Over a Unix network, pass `Eio_net_unix.accept_failure`: when the
-process runs out of descriptors, the loop then waits for one to be free. With
-the default classifier, that error ends the loop.
-
 ## Installation
 
 <!-- $MDX skip -->
@@ -40,7 +86,7 @@ the default classifier, that error ends the loop.
 $ opam install eio-net
 ```
 
-## Usage
+## Framing
 
 `Eio_net_framing` writes each payload after its length, as an unsigned
 big-endian integer. Here the length takes two bytes and payloads are at most
@@ -82,10 +128,19 @@ longer payload, before it reads any payload byte. A reader made with
 more than the longest frame.
 
 A datagram longer than a channel's `max_frame` (64 KiB by default) raises the
-`Eio.Io` error `Too_long` instead of arriving truncated. `Eio_net_accept.run`
-holds at most `max_connections` connections. When it is full and another peer
-connects, it drops the connection whose head (an HTTP request head, say) is
+`Eio.Io` error `Too_long` instead of arriving truncated.
+
+## Accept loop
+
+`Eio_net_accept.run` holds at most `max_connections` connections. A
+connection's head is what its peer sends before it is served. When the loop is
+full and another peer connects, it drops the connection whose head is
 incomplete and has made the least progress.
+
+`Eio_net_accept.run` reads a failed accept with the classifier it is given as
+`?classify`. Over a Unix network, pass `Eio_net_unix.accept_failure`: when the
+process runs out of descriptors, the loop then waits for one to be free. With
+the default classifier, that error ends the loop.
 
 ## Related work
 
