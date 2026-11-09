@@ -209,9 +209,13 @@ module Flow = struct
   module Impl = struct
     type tag = [ `Generic ]
 
+    (* [lock] guards the buffer and the read side's state, which a close or a
+       shutdown in another domain changes while a read runs. It is never held
+       across a read of the base socket. *)
     type t = {
       base : base;
       driver : driver;
+      lock : Mutex.t;
       mutable leftover : Cstruct.t;
       mutable delivered : int;
       mutable written : int;
@@ -219,15 +223,27 @@ module Flow = struct
       mutable closed : bool;
     }
 
+    (* Under [lock]. *)
+    let check_open t =
+      if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
+      if t.recv_closed then raise End_of_file
+
     let fill_one t =
-      let scratch = Cstruct.create (max (Cstruct.length t.leftover) 0x4000) in
+      let size = Mutex.protect t.lock (fun () -> Cstruct.length t.leftover) in
+      let scratch = Cstruct.create (max size 0x4000) in
       let got = t.base.read scratch in
+      Mutex.protect t.lock @@ fun () ->
+      check_open t;
       t.leftover <- Cstruct.append t.leftover (Cstruct.sub scratch 0 got)
 
-    let ensure_buffer t = if Cstruct.length t.leftover = 0 then fill_one t
+    let ensure_buffer t =
+      if Mutex.protect t.lock (fun () -> Cstruct.length t.leftover = 0) then
+        fill_one t
 
     let deliver t dst ~cap ~limit =
       ensure_buffer t;
+      Mutex.protect t.lock @@ fun () ->
+      check_open t;
       let avail = Cstruct.length t.leftover in
       let want = if cap <= 0 then avail else min cap avail in
       let n = min (min want limit) (Cstruct.length dst) in
@@ -237,13 +253,16 @@ module Flow = struct
       n
 
     let single_read t dst =
-      if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
-      if t.recv_closed then raise End_of_file;
-      let fault, limit = t.driver.read ~delivered:t.delivered in
+      let delivered =
+        Mutex.protect t.lock (fun () ->
+            check_open t;
+            t.delivered)
+      in
+      let fault, limit = t.driver.read ~delivered in
       match fault with
       | Reset -> raise (reset_exn ())
       | Eof ->
-          t.recv_closed <- true;
+          Mutex.protect t.lock (fun () -> t.recv_closed <- true);
           raise End_of_file
       | Stall n ->
           for _ = 1 to n do
@@ -258,7 +277,11 @@ module Flow = struct
              for _ = 1 to n do
                fill_one t
              done
-           with End_of_file when Cstruct.length t.leftover > 0 -> ());
+           with
+           | End_of_file
+           when Mutex.protect t.lock (fun () -> Cstruct.length t.leftover > 0)
+           ->
+             ());
           deliver t dst ~cap:0 ~limit
 
     let single_write t bufs =
@@ -278,19 +301,19 @@ module Flow = struct
 
     (* Bytes left buffered go with the read side, as the socket's own queue
        does. *)
-    let drop_buffer t = t.leftover <- Cstruct.empty
-
     let shutdown t cmd =
       (match cmd with
       | `Receive | `All ->
-          drop_buffer t;
-          t.recv_closed <- true
+          Mutex.protect t.lock (fun () ->
+              t.leftover <- Cstruct.empty;
+              t.recv_closed <- true)
       | `Send -> ());
       t.base.shutdown cmd
 
     let close t =
-      drop_buffer t;
-      t.closed <- true;
+      Mutex.protect t.lock (fun () ->
+          t.leftover <- Cstruct.empty;
+          t.closed <- true);
       t.base.close ()
 
     let setsockopt t opt v = t.base.setopt opt v
@@ -306,6 +329,7 @@ module Flow = struct
       {
         Impl.base = base_of sock;
         driver = driver schedule;
+        lock = Mutex.create ();
         leftover = Cstruct.empty;
         delivered = 0;
         written = 0;
