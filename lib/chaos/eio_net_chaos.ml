@@ -144,9 +144,9 @@ module Flow = struct
               match s.reset_kind with `Reset -> Reset | `Eof -> Eof)
           | _ ->
               if s.stall > 0 && Random.State.bool rng_r then
-                Stall (1 + Random.State.int rng_r s.stall)
+                Stall (1 + Random.State.full_int rng_r s.stall)
               else if s.dribble > 0 then
-                Deliver (1 + Random.State.int rng_r s.dribble)
+                Deliver (1 + Random.State.full_int rng_r s.dribble)
               else Deliver 0
         in
         let write ~written =
@@ -156,7 +156,7 @@ module Flow = struct
               Fail
           | _ ->
               if s.short_write > 0 then
-                Accept (1 + Random.State.int rng_w s.short_write)
+                Accept (1 + Random.State.full_int rng_w s.short_write)
               else Accept 0
         in
         { read; write }
@@ -378,7 +378,7 @@ module Datagram = struct
           else if r < t then Truncate (Random.State.int rng 8)
           else if r < g then Garble (Random.State.int rng 16)
           else if s.delay > 0 && Random.State.bool rng then
-            Delay (1 + Random.State.int rng s.delay)
+            Delay (1 + Random.State.full_int rng s.delay)
           else Pass
         in
         { next; rng }
