@@ -149,26 +149,27 @@ val v :
     Linux says EINVAL. [getsockopt] raises [Invalid_argument] on every socket.
 
     A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
-    bind the loopback address of their family, and an address with port [0]
-    binds its IP address, each at the lowest port of the dynamic range that no
-    datagram socket holds. An address that overlaps one a datagram socket holds,
-    by the rule [listen] follows, raises the error that {!Address_in_use} marks;
-    [reuse_port] raises [Invalid_argument]. A datagram sent to it arrives whole,
-    with the sender's address as this socket sees it, the loopback address the
-    datagram reached for a wildcard sender and IPv4-mapped for an IPv4 sender to
-    an IPv6 socket, after every datagram sent to it before: the network never
-    drops, cuts or reorders one, and a send never waits. A datagram reaches a
-    socket by the rule a [connect] reaches a listener. One sent to an address no
-    socket binds that way is lost, as UDP loses it; one sent to a Unix path no
-    socket binds raises [Eio.Fs.Not_found], and one sent to a listener's or a
-    client's path raises the error that {!Wrong_socket_type} marks. A closed
-    Unix-domain datagram socket leaves its path behind, as Eio's POSIX backend
-    leaves the file: a datagram sent there is refused with the connection
-    failure that {!No_listener} marks, and a socket bound there raises the error
-    that {!Address_in_use} marks. A send without a destination raises the error
-    that {!No_destination} marks, since no socket is connected. A datagram
-    longer than 65507 bytes to an IPv4 address, 65527 to an IPv6 one, or 212960
-    to a Unix path, as Linux's default send buffer allows, raises the error that
+    bind the wildcard address of their family, as a kernel binds an unbound
+    socket on its first send, and an address with port [0] binds its IP address,
+    each at the lowest port of the dynamic range that no datagram socket holds.
+    An address that overlaps one a datagram socket holds, by the rule [listen]
+    follows, raises the error that {!Address_in_use} marks; [reuse_port] raises
+    [Invalid_argument]. A datagram sent to it arrives whole, with the sender's
+    address as this socket sees it, the loopback address the datagram reached
+    for a wildcard sender and IPv4-mapped for an IPv4 sender to an IPv6 socket,
+    after every datagram sent to it before: the network never drops, cuts or
+    reorders one, and a send never waits. A datagram reaches a socket by the
+    rule a [connect] reaches a listener. One sent to an address no socket binds
+    that way is lost, as UDP loses it; one sent to a Unix path no socket binds
+    raises [Eio.Fs.Not_found], and one sent to a listener's or a client's path
+    raises the error that {!Wrong_socket_type} marks. A closed Unix-domain
+    datagram socket leaves its path behind, as Eio's POSIX backend leaves the
+    file: a datagram sent there is refused with the connection failure that
+    {!No_listener} marks, and a socket bound there raises the error that
+    {!Address_in_use} marks. A send without a destination raises the error that
+    {!No_destination} marks, since no socket is connected. A datagram longer
+    than 65507 bytes to an IPv4 address, 65527 to an IPv6 one, or 212960 to a
+    Unix path, as Linux's default send buffer allows, raises the error that
     {!Message_too_long} marks. These are Linux's limits: by default, macOS
     refuses a UDP datagram longer than 9216 bytes and a Unix-domain one longer
     than 2048. One sent to UDP port 0 raises the error that {!Invalid_port}

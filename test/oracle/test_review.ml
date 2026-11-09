@@ -230,6 +230,36 @@ let cases =
                 ignore (connect ctx addr);
                 "connected"));
       ];
+      (* An unbound datagram socket sends from the wildcard address of its
+         family at an ephemeral port, as a kernel binds it on its first send:
+         an IPv6 one reaches an IPv4 address on Linux, where macOS fails with
+         EINVAL, and its datagrams come from the loopback address they
+         reached. *)
+      List.map
+        (fun (variant, ipv6, unbound, dst, e) ->
+          case ~file ~test:"UnboundDatagram" ~variant ~ipv6 e (fun ctx ->
+              let r, r_addr = datagram_socket ctx (`Udp (dst, 0)) in
+              let s : dgram =
+                Eio.Net.datagram_socket ~sw:ctx.sw ctx.net unbound
+              in
+              outcome (fun () ->
+                  send s ~dst:r_addr "abc";
+                  match Eio.Net.recv r (Cstruct.create 3) with
+                  | `Udp (ip, _), _ -> "from " ^ pp_ip ip
+                  | `Unix path, _ -> "from " ^ path)))
+        [
+          ( "UdpV6 to 127.0.0.1",
+            true,
+            `UdpV6,
+            v4_loopback,
+            expect ~macos:"EINVAL" "from 127.0.0.1" );
+          ("UdpV6 to ::1", true, `UdpV6, v6_loopback, expect "from ::1");
+          ( "UdpV4 to 127.0.0.1",
+            false,
+            `UdpV4,
+            v4_loopback,
+            expect "from 127.0.0.1" );
+        ];
     ]
 
 let suite = Oracle.suite "review" cases

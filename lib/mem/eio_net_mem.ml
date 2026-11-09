@@ -763,8 +763,10 @@ module Datagram_socket = struct
     Mutex.protect hub.mutex @@ fun () ->
     let addr : Eio.Net.Sockaddr.datagram =
       match addr with
-      | `UdpV4 -> `Udp (Eio.Net.Ipaddr.V4.loopback, free_port hub)
-      | `UdpV6 -> `Udp (Eio.Net.Ipaddr.V6.loopback, free_port hub)
+      (* An unbound socket is bound where a kernel binds it on its first
+         send: the wildcard address of its family, at an ephemeral port. *)
+      | `UdpV4 -> `Udp (Eio.Net.Ipaddr.V4.any, free_port hub)
+      | `UdpV6 -> `Udp (Eio.Net.Ipaddr.V6.any, free_port hub)
       | `Udp (ip, 0) -> `Udp (ip, free_port hub)
       | (`Udp _ | `Unix _) as addr -> addr
     in
