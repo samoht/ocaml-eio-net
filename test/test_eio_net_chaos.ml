@@ -187,42 +187,19 @@ let test_flow_seeded_wide_bounds () =
 
 (* --- Datagram faults ----------------------------------------------------- *)
 
-(* mem deliberately has no datagram support, so the fake lives here. *)
-module Fake_dgram = struct
-  type tag = [ `Generic ]
-
-  type t = {
-    inbound : (Eio.Net.Sockaddr.datagram * string) Eio.Stream.t;
-    outbound : string list ref;
-  }
-
-  let recv t buf =
-    let addr, data = Eio.Stream.take t.inbound in
-    let n = min (String.length data) (Cstruct.length buf) in
-    Cstruct.blit_from_string data 0 buf 0 n;
-    (addr, n)
-
-  let send t ?dst:_ bufs =
-    t.outbound :=
-      String.concat "" (List.map Cstruct.to_string bufs) :: !(t.outbound)
-
-  let shutdown _ _ = ()
-  let close _ = ()
-  let setsockopt _ _ _ = ()
-
-  let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
-   fun _ _ -> invalid_arg "fake datagram: getsockopt unsupported"
-end
-
-let fake_handler = Eio.Net.Pi.datagram_socket (module Fake_dgram)
 let loopback port = `Udp (Eio.Net.Ipaddr.V4.loopback, port)
 
-let fake_dgram payloads =
-  let inbound = Eio.Stream.create max_int in
-  List.iter (fun p -> Eio.Stream.add inbound (loopback 9000, p)) payloads;
-  let t = { Fake_dgram.inbound; outbound = ref [] } in
-  (Eio.Resource.T (t, fake_handler)
-    : [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t)
+(* [with_datagrams payloads f] is [f ~tx rx], where [rx] is a datagram socket
+   of an in-memory network that [tx] has sent each of [payloads] to. *)
+let with_datagrams payloads f =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let rx = Eio.Net.datagram_socket ~sw net (loopback 9000) in
+  let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  let send p = Eio.Net.send tx ~dst:(loopback 9000) [ Cstruct.of_string p ] in
+  List.iter send payloads;
+  f ~send rx
 
 let recv1 sock =
   let buf = Cstruct.create 64 in
@@ -232,8 +209,7 @@ let recv1 sock =
 let recv_n sock n = List.init n (fun _ -> recv1 sock)
 
 let test_dgram_drop () =
-  Eio_mock.Backend.run @@ fun () ->
-  let base = fake_dgram [ "d0"; "d1"; "d2"; "d3" ] in
+  with_datagrams [ "d0"; "d1"; "d2"; "d3" ] @@ fun ~send:_ base ->
   let sock = Datagram.wrap (Datagram.Schedule.script [ Drop 1 ]) base in
   Alcotest.(check (list string))
     "dropped datagram is skipped" [ "d1"; "d2"; "d3" ] (recv_n sock 3)
@@ -247,29 +223,25 @@ let test_dgram_drop_negative () =
   | _ -> Alcotest.fail "a script with Drop (-1) was built"
 
 let test_dgram_dup () =
-  Eio_mock.Backend.run @@ fun () ->
-  let base = fake_dgram [ "d0"; "d1" ] in
+  with_datagrams [ "d0"; "d1" ] @@ fun ~send:_ base ->
   let sock = Datagram.wrap (Datagram.Schedule.script [ Dup ]) base in
   Alcotest.(check (list string))
     "datagram is delivered twice" [ "d0"; "d0"; "d1" ] (recv_n sock 3)
 
 let test_dgram_reorder () =
-  Eio_mock.Backend.run @@ fun () ->
-  let base = fake_dgram [ "d0"; "d1"; "d2" ] in
+  with_datagrams [ "d0"; "d1"; "d2" ] @@ fun ~send:_ base ->
   let sock = Datagram.wrap (Datagram.Schedule.script [ Reorder ]) base in
   Alcotest.(check (list string))
     "datagrams arrive out of order" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
 
 let test_dgram_truncate () =
-  Eio_mock.Backend.run @@ fun () ->
-  let base = fake_dgram [ "hello" ] in
+  with_datagrams [ "hello" ] @@ fun ~send:_ base ->
   let sock = Datagram.wrap (Datagram.Schedule.script [ Truncate 3 ]) base in
   Alcotest.(check string) "datagram truncated" "hel" (recv1 sock)
 
 let test_dgram_garble () =
   let one () =
-    Eio_mock.Backend.run @@ fun () ->
-    let base = fake_dgram [ "hello" ] in
+    with_datagrams [ "hello" ] @@ fun ~send:_ base ->
     let sock = Datagram.wrap (Datagram.Schedule.script [ Garble 4 ]) base in
     recv1 sock
   in
@@ -279,9 +251,8 @@ let test_dgram_garble () =
   Alcotest.(check bool) "garble differs from the original" true (a <> "hell")
 
 let run_seeded_dgram seed =
-  Eio_mock.Backend.run @@ fun () ->
   let payloads = List.init 30 (fun i -> Fmt.str "%02d" i) in
-  let base = fake_dgram payloads in
+  with_datagrams payloads @@ fun ~send:_ base ->
   let sock =
     Datagram.wrap
       (Datagram.Schedule.seeded ~loss:0.4 ~dup:0.2 ~reorder:0.2 seed)
