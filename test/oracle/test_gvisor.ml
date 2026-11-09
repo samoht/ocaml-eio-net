@@ -374,12 +374,7 @@ let udp_cases =
       (* SendNotConnected: a send without a destination on a socket that is
          not connected fails with EDESTADDRREQ; a send with one goes. *)
       per_dgram ~file:udp ~test:"SendNotConnected" udp_kinds
-        (fun _ ->
-          expect ~mem:"unsupported; sent"
-            ~mem_bug:
-              "Raise an Eio.Io error for a send without a destination, as a \
-               socket's EDESTADDRREQ is, not Invalid_argument."
-            "EDESTADDRREQ; sent")
+        (fun _ -> expect "EDESTADDRREQ; sent")
         (fun ctx k ->
           let a, a_addr = dgram_socket ctx k in
           let without =

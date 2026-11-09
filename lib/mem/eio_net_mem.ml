@@ -1,6 +1,6 @@
 open! Hermetic
 
-type Eio.Exn.Backend.t += Closed | No_listener | Address_in_use
+type Eio.Exn.Backend.t += Closed | No_listener | Address_in_use | No_destination
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -12,6 +12,9 @@ let () =
         true
     | Address_in_use ->
         Format.pp_print_string ppf "Address in use (eio-net.mem)";
+        true
+    | No_destination ->
+        Format.pp_print_string ppf "No destination (eio-net.mem)";
         true
     | _ -> false)
 
@@ -534,7 +537,7 @@ module Datagram_socket = struct
     let dst =
       match dst with
       | Some dst -> dst
-      | None -> invalid_arg "eio-net.mem: a datagram send needs a destination"
+      | None -> raise (Eio.Exn.create (Eio.Exn.X No_destination))
     in
     match find t.hub dst with
     | None -> (

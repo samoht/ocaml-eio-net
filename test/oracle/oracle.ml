@@ -67,6 +67,7 @@ let classify = function
   | Eio.Io (Eio.Net.E (Connection_failure _), _) -> "connect failed"
   | Eio.Io (Eio.Fs.E (Not_found _), _) -> "ENOENT"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> "EADDRINUSE"
+  | Eio.Io (Eio.Exn.X Eio_net_mem.No_destination, _) -> "EDESTADDRREQ"
   | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (e, _, _)), _)
   | Unix.Unix_error (e, _, _) ->
       errno e

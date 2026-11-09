@@ -44,6 +44,10 @@ type Eio.Exn.Backend.t +=
             [EADDRINUSE]. Eio's POSIX backend raises that one as a raw
             [Unix.Unix_error] from [listen], and [Eio_net_unix.Tcp.listen] as an
             {!Eio.Io} error. *)
+  | No_destination
+        (** The backend code of the unclassified {!Eio.Io} error a datagram
+            [send] without a destination raises, as a socket that is not
+            connected fails it with [EDESTADDRREQ]. *)
 
 val v :
   ?capacity:int ->
@@ -117,11 +121,11 @@ val v :
     path behind, as Eio's POSIX backend leaves the file: a datagram sent there
     is refused with the connection failure that {!No_listener} marks, and a
     socket bound there raises the error that {!Address_in_use} marks. A send
-    without a destination raises [Invalid_argument], since no socket is
-    connected. A [recv] into a buffer shorter than the datagram gets its first
-    bytes, as a socket does. The socket is closed, and its address free again,
-    when the switch passed to [datagram_socket] finishes; a send or a receive on
-    it then raises [Invalid_argument]. *)
+    without a destination raises the error that {!No_destination} marks, since
+    no socket is connected. A [recv] into a buffer shorter than the datagram
+    gets its first bytes, as a socket does. The socket is closed, and its
+    address free again, when the switch passed to [datagram_socket] finishes; a
+    send or a receive on it then raises [Invalid_argument]. *)
 
 val pipe :
   ?capacity:int ->
