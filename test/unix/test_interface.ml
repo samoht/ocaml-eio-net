@@ -17,6 +17,19 @@ let binds addr =
       | () -> true
       | exception Unix.Unix_error (EADDRNOTAVAIL, _, _) -> false)
 
+(* IPv6 loopback is there when a socket binds ::1: a host or a container may
+   run without IPv6. *)
+let ipv6_loopback () =
+  match Unix.socket Unix.PF_INET6 Unix.SOCK_DGRAM 0 with
+  | exception Unix.Unix_error _ -> false
+  | fd ->
+      Fun.protect
+        ~finally:(fun () -> Unix.close fd)
+        (fun () ->
+          match Unix.bind fd (Unix.ADDR_INET (Unix.inet6_addr_loopback, 0)) with
+          | () -> true
+          | exception Unix.Unix_error _ -> false)
+
 module Address = Eio_net_unix.Interface.Address
 
 let test_interface_addresses () =
@@ -30,8 +43,9 @@ let test_interface_addresses () =
   in
   Alcotest.(check bool)
     "a loopback interface carries 127.0.0.1/8" true (listed "127.0.0.1/8");
-  Alcotest.(check bool)
-    "a loopback interface carries ::1/128" true (listed "::1/128");
+  if ipv6_loopback () then
+    Alcotest.(check bool)
+      "a loopback interface carries ::1/128" true (listed "::1/128");
   Alcotest.(check bool)
     "no host carries 192.0.2.1, so it does not bind" false
     (binds (Ipaddr.V4.of_string_exn "192.0.2.1"));
