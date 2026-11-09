@@ -293,6 +293,27 @@ let test_accepted_peer_address () =
   | `Tcp (_, p), `Tcp (_, q) when p <> q -> ()
   | _ -> Alcotest.fail "two connections share a port"
 
+(* A connect bound to a local address holds it: the listener sees that
+   address as the peer's, with a port of the dynamic range for port 0. *)
+let test_connect_bound () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let v4 = Eio.Net.Ipaddr.V4.loopback in
+  let l = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (v4, 9300)) in
+  let peer bind_to =
+    ignore (Eio.Net.connect ~sw ~bind_to net (`Tcp (v4, 9300)));
+    match snd (Eio.Net.accept ~sw l) with
+    | `Tcp (ip, port) -> Fmt.str "%a %b" Eio.Net.Ipaddr.pp ip (port = 9301)
+    | `Unix path -> path
+  in
+  let given = peer (`Tcp (v4, 9301)) in
+  let chosen = peer (`Tcp (Eio.Net.Ipaddr.V4.any, 0)) in
+  Alcotest.(check (list string))
+    "peers"
+    [ "127.0.0.1 true"; "127.0.0.1 false" ]
+    [ given; chosen ]
+
 (* A connection reset before it is read reports the reset to one read, and end
    of file to the reads after it, as a socket clears its pending error once it
    reports it. *)
@@ -902,6 +923,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a connect bound to an address" `Quick
+        test_connect_bound;
       Alcotest.test_case "an accepted connection's peer" `Quick
         test_accepted_peer_address;
       Alcotest.test_case "a datagram too long" `Quick test_datagram_too_long;

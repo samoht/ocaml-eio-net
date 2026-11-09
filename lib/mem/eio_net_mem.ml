@@ -7,6 +7,8 @@ type Eio.Exn.Backend.t +=
   | No_destination
   | Message_too_long
   | Invalid_port
+  | Network_unreachable
+  | Address_family
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -27,6 +29,12 @@ let () =
         true
     | Invalid_port ->
         Format.pp_print_string ppf "Invalid port (eio-net.mem)";
+        true
+    | Network_unreachable ->
+        Format.pp_print_string ppf "Network unreachable (eio-net.mem)";
+        true
+    | Address_family ->
+        Format.pp_print_string ppf "Address family not supported (eio-net.mem)";
         true
     | _ -> false)
 
@@ -694,12 +702,37 @@ module Network = struct
      destination reaches, in the destination's family, at the next port of the
      dynamic range, counted down from the top of the range as listeners count
      up from its bottom. *)
-  let client_addr t ip =
-    let n = Atomic.fetch_and_add t.next_port 1 in
-    let port = 65535 - (n mod (65535 - 49152 + 1)) in
+  let client_addr t ?bind ip =
     let reached = List.hd (reaching ip) in
     let mapped = String.length (ip :> string) = 16 && is_v4 ip in
-    ((if mapped then map reached else reached), port)
+    let reached = if mapped then map reached else reached in
+    let next () =
+      let n = Atomic.fetch_and_add t.next_port 1 in
+      65535 - (n mod (65535 - 49152 + 1))
+    in
+    match bind with
+    | None -> (reached, next ())
+    | Some (b, port) ->
+        let b = if same (unmap b) (any (unmap b)) then reached else b in
+        (b, if port = 0 then next () else port)
+
+  (* A connect bound to an address of the other family, IPv6 against
+     IPv4-mapped, fails as on Linux. *)
+  let check_bind (bind_to : Eio.Net.Sockaddr.stream option)
+      (addr : Eio.Net.Sockaddr.stream) =
+    let fail code = raise (Eio.Exn.create (Eio.Exn.X code)) in
+    match (bind_to, addr) with
+    | None, _ | Some (`Unix _), `Unix _ -> ()
+    | Some (`Tcp (b, _)), `Tcp (d, _)
+      when String.length (b :> string) = String.length (d :> string) ->
+        if String.length (b :> string) = 16 then
+          if is_v4 b && not (is_v4 d) then fail Address_family
+          else if
+            (not (is_v4 b)) && (not (same b Eio.Net.Ipaddr.V6.any)) && is_v4 d
+          then fail Network_unreachable
+    | Some _, _ ->
+        invalid_arg
+          "eio-net.mem: bind_to is not of the connect address's family"
 
   (* The client's address as the listener at [listener] sees it: an IPv4
      client of an IPv6 listener is IPv4-mapped. A Unix-domain client binds no
@@ -716,12 +749,18 @@ module Network = struct
         in
         `Tcp (ip, port)
 
-  (* A connection is a pair of queues: there is no local address to bind, so a
-     caller asking for one is refused. *)
+  (* A connection is a pair of queues. A local address it is bound at, at a
+     port a listener holds, is in use. *)
   let connect t ~bind_to ~options ~sw addr =
-    if Option.is_some bind_to then
-      invalid_arg "eio-net.mem does not support binding a local address";
     check_options options;
+    check_bind bind_to addr;
+    (match bind_to with
+    | Some (`Tcp (_, port) as local)
+      when port <> 0
+           && Eio.Mutex.use_ro t.hub.mutex (fun () ->
+               Listening_socket.in_use t.hub local) ->
+        raise (address_in_use ())
+    | _ -> ());
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
           match addr with
@@ -742,9 +781,12 @@ module Network = struct
         let local = match addr with `Unix _ -> true | `Tcp _ -> false in
         let client, server = Flow.pair ~local ~capacity:t.capacity in
         let peer =
-          match addr with
-          | `Tcp (ip, _) -> peer_addr listener.addr (client_addr t ip)
-          | `Unix _ -> `Unix ""
+          match (addr, bind_to) with
+          | `Tcp (ip, _), Some (`Tcp bind) ->
+              peer_addr listener.addr (client_addr t ~bind ip)
+          | `Tcp (ip, _), _ -> peer_addr listener.addr (client_addr t ip)
+          | `Unix _, Some (`Unix path) -> `Unix path
+          | `Unix _, _ -> `Unix ""
         in
         Eio.Stream.add listener.incoming (server, peer);
         (* The listener closed while the connection waited for room: its

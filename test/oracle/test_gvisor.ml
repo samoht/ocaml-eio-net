@@ -780,10 +780,7 @@ let inet_cases =
          an address of one family cannot connect to the other's. *)
       [
         case ~file:inet ~test:"V6ListenerV4Connect" ~variant:"TCP" ~ipv6:true
-          (expect ~macos:"EAFNOSUPPORT" ~mem:"unsupported"
-             ~mem_bug:
-               "Accept bind_to, and refuse a connect to the other family."
-             "ENETUNREACH") (fun ctx ->
+          (expect ~macos:"EAFNOSUPPORT" "ENETUNREACH") (fun ctx ->
             outcome @@ fun () ->
             let l = listen ctx (`Tcp (v4_loopback, 0)) in
             let port =
@@ -798,10 +795,7 @@ let inet_cases =
                  (`Tcp (v4_mapped_loopback, port)));
             "connected");
         case ~file:inet ~test:"V4ListenerV6Connect" ~variant:"TCP" ~ipv6:true
-          (expect ~mem:"unsupported"
-             ~mem_bug:
-               "Accept bind_to, and refuse a connect to the other family."
-             "EAFNOSUPPORT") (fun ctx ->
+          (expect "EAFNOSUPPORT") (fun ctx ->
             outcome @@ fun () ->
             let l = listen ctx (`Tcp (v6_loopback, 0)) in
             let port =

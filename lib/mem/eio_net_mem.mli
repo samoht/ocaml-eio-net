@@ -55,6 +55,16 @@ type Eio.Exn.Backend.t +=
   | Invalid_port
         (** The backend code of the unclassified {!Eio.Io} error a datagram
             [send] to UDP port 0 raises, where Linux fails it with [EINVAL]. *)
+  | Network_unreachable
+        (** The backend code of the unclassified {!Eio.Io} error a [connect]
+            bound to an IPv6 address raises at an IPv4-mapped one, and a
+            datagram [send] from such a socket, where Linux fails with
+            [ENETUNREACH]. *)
+  | Address_family
+        (** The backend code of the unclassified {!Eio.Io} error a [connect]
+            bound to an IPv4-mapped address raises at an IPv6 one, and a
+            datagram [send] from such a socket, where a socket fails with
+            [EAFNOSUPPORT]. *)
 
 val v :
   ?capacity:int ->
@@ -118,8 +128,12 @@ val v :
     that would change what a caller observes is a wrong answer with no symptom;
     [setsockopt] on a datagram socket refuses every option. A caller cannot tell
     an ignored option from an applied one, so a test that must know an option
-    took effect needs a real socket. [bind_to] is refused with
-    [Invalid_argument]: there is no local address to bind. [getsockopt] raises
+    took effect needs a real socket. A [connect] bound with [bind_to] holds that
+    address, which the listener sees as its peer's, at a port of the dynamic
+    range for port 0; one at a port a listener holds raises the error that
+    {!Address_in_use} marks, and one bound to an IPv6 address connecting to an
+    IPv4-mapped one, or the reverse, raises the error that
+    {!Network_unreachable} or {!Address_family} marks. [getsockopt] raises
     [Invalid_argument] on every socket.
 
     A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
