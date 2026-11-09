@@ -91,4 +91,10 @@ val listen :
     no file outside the directory is reached. A failure is an {!Eio.Io} error,
     made by {!Eio_unix.Err.v}.
 
+    {!Eio.Net.listening_addr} is [`Unix p], with [p] the native path of [path]
+    ({!Eio.Path.native}), which may be longer than {!max_length}. The kernel
+    knows the socket only by the name it was bound at in its private directory,
+    so that name, which reaches nothing, is what a client's getpeername(2)
+    reports.
+
     Raises [Invalid_argument] as {!connect_at} does. *)

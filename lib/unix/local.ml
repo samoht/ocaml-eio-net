@@ -112,7 +112,34 @@ let bind_and_place dir ~replace ~backlog ~perm name =
       Unix.close sock;
       raise e
 
+(* The kernel names a listener by the path it was bound at, in its private
+   directory, so its address is the path given to [listen] instead. *)
+module Listening = struct
+  type tag = [ `Generic | `Unix ]
+
+  type t = {
+    socket : [ `Unix_fd | tag Eio.Net.listening_socket_ty ] Eio.Resource.t;
+    addr : Eio.Net.Sockaddr.stream;
+  }
+
+  let accept t ~sw = Eio.Net.accept ~sw t.socket
+  let close t = Eio.Resource.close t.socket
+  let listening_addr t = t.addr
+  let fd t = Eio_unix.Resource.fd t.socket
+
+  let setsockopt : type a. t -> a Eio.Net.Sockopt.t -> a -> unit =
+   fun t opt v -> Eio.Net.setsockopt t.socket opt v
+
+  let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
+   fun t opt -> Eio.Net.getsockopt t.socket opt
+end
+
+let listening_handler = Eio_unix.Pi.listening_socket_handler (module Listening)
+
 let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
+  let addr =
+    `Unix (match Eio.Path.native path with Some p -> p | None -> snd path)
+  in
   let dir, name = parent ~sw path in
   let sock, id =
     Eio_unix.Fd.use_exn "listen" dir @@ fun dir ->
@@ -128,4 +155,4 @@ let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
       ignore_unix_error (fun () ->
           let _, dev, ino = id_at dir name in
           if (dev, ino) = id then unlink_at dir name false));
-  (socket :> listening)
+  (Eio.Resource.T (Listening.{ socket; addr }, listening_handler) :> listening)

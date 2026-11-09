@@ -475,6 +475,30 @@ let test_local_listen_perm () =
   check 0o600;
   check 0o660
 
+(* A listener reports the path it was given, not the name it was bound by in
+   its private directory: a client connects to the address it reports. *)
+let test_local_listening_addr () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  let p = Filename.concat (Filename.temp_dir "addr" "") "s" in
+  Eio.Switch.run @@ fun sw ->
+  let listening = listen ~sw ~net ~fs p in
+  let addr = Eio.Net.listening_addr listening in
+  Alcotest.(check string)
+    "the path given" ("unix:" ^ p)
+    (Fmt.str "%a" Eio.Net.Sockaddr.pp addr);
+  Eio.Fiber.both
+    (fun () ->
+      let flow, _ = Eio.Net.accept ~sw listening in
+      Eio.Flow.copy_string "here" flow;
+      Eio.Flow.close flow)
+    (fun () ->
+      let flow = Eio.Net.connect ~sw net addr in
+      Alcotest.(check string)
+        "served at that address" "here"
+        (Eio.Buf_read.parse_exn ~max_size:64 Eio.Buf_read.take_all flow))
+
 let address_in_use f =
   match f () with
   | _ -> Alcotest.fail "bound over an existing file"
@@ -679,6 +703,8 @@ let suite =
         test_connect_failure;
       Alcotest.test_case "a local listener's mode, from its creation" `Quick
         test_local_listen_perm;
+      Alcotest.test_case "a local listener reports its path" `Quick
+        test_local_listening_addr;
       Alcotest.test_case "a local listener over an existing file" `Quick
         test_local_listen_existing;
       Alcotest.test_case "a local listener at a long path, and released" `Quick
