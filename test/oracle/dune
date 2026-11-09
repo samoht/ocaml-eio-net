@@ -1,0 +1,13 @@
+(test
+ (name test)
+ (package eio-net)
+ (libraries
+  eio-net.mem
+  eio
+  eio.mock
+  eio.unix
+  eio_posix
+  cstruct
+  fmt
+  unix
+  alcotest))

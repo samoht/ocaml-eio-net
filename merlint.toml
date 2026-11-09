@@ -17,3 +17,10 @@ exclude = ["E825"]
 [[rules]]
 files = ["lib/eio_net.ml"]
 exclude = ["E605"]
+
+# The oracle records whatever an operation raises as its outcome, so it
+# catches every exception but cancellation; and its cases compare eio-net.mem
+# and real sockets with gVisor's tests rather than test one library module.
+[[rules]]
+files = ["test/oracle/*"]
+exclude = ["E105", "E610"]
