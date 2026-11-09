@@ -169,9 +169,11 @@ val v :
     that {!No_destination} marks, since no socket is connected. A datagram
     longer than 65507 bytes to an IPv4 address, 65527 to an IPv6 one, or 212960
     to a Unix path, as Linux's default send buffer allows, raises the error that
-    {!Message_too_long} marks. One sent to UDP port 0 raises the error that
-    {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. One sent from
-    an IPv6 address to an IPv4-mapped one, or the reverse, raises the error that
+    {!Message_too_long} marks. These are Linux's limits: by default, macOS
+    refuses a UDP datagram longer than 9216 bytes and a Unix-domain one longer
+    than 2048. One sent to UDP port 0 raises the error that {!Invalid_port}
+    marks, as on Linux; macOS sends it over IPv4. One sent from an IPv6 address
+    to an IPv4-mapped one, or the reverse, raises the error that
     {!Network_unreachable} or {!Address_family} marks. One from an IPv4 socket
     to an IPv6 address, or between UDP and a Unix path, raises the error that
     {!Address_family} marks; one from an IPv6 socket to an IPv4 address goes the
