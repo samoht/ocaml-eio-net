@@ -35,7 +35,8 @@ val move : t -> (unit -> int) -> int
     with too few bytes cancels [f] and raises {!Too_slow}, and otherwise [f]
     goes on into the next window. Bytes [f] moved as a window ended count in it.
     Fibers may move in [t] at once, as a reader and a writer of one flow do:
-    their bytes count in the same windows, and each window is judged once. An
+    their bytes count in the same windows, and a window with too few bytes
+    cancels every move under way as it ends, each raising {!Too_slow}. An
     exception from [f] propagates. *)
 
 val reader : t -> Bytesrw.Bytes.Reader.t -> Bytesrw.Bytes.Reader.t
