@@ -9,6 +9,7 @@ type Eio.Exn.Backend.t +=
   | Invalid_port
   | Network_unreachable
   | Address_family
+  | Wrong_socket_type
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -35,6 +36,9 @@ let () =
         true
     | Address_family ->
         Format.pp_print_string ppf "Address family not supported (eio-net.mem)";
+        true
+    | Wrong_socket_type ->
+        Format.pp_print_string ppf "Wrong socket type (eio-net.mem)";
         true
     | _ -> false)
 
@@ -168,6 +172,38 @@ end
 (* A Unix path no socket binds has no file, as Eio's POSIX backend removes it
    when the socket's switch finishes. *)
 let no_file () = Eio.Fs.err (Not_found No_listener)
+
+(* The Unix-domain paths that hold a socket file, shared by stream and
+   datagram sockets as a file system shares them. A socket's file stays once
+   it closes, [Stale], as Eio's POSIX backend leaves it, until it is removed. *)
+module Files = struct
+  type kind = Listener | Datagram | Client | Stale
+  type t = { mutex : Mutex.t; files : (string, kind) Hashtbl.t }
+
+  let v () = { mutex = Mutex.create (); files = Hashtbl.create 8 }
+
+  let find t path =
+    Mutex.protect t.mutex (fun () -> Hashtbl.find_opt t.files path)
+
+  (* Binds [path] unless a file is there; [take_over] binds over it. *)
+  let bind t ?(take_over = false) path kind =
+    Mutex.protect t.mutex @@ fun () ->
+    (take_over || not (Hashtbl.mem t.files path))
+    && begin
+      Hashtbl.replace t.files path kind;
+      true
+    end
+
+  (* The socket of [kind] at [path] closes and leaves its file, or with
+     [remove] takes it away. *)
+  let leave ?(remove = false) t path kind =
+    Mutex.protect t.mutex @@ fun () ->
+    match Hashtbl.find_opt t.files path with
+    | Some k when k = kind ->
+        if remove then Hashtbl.remove t.files path
+        else Hashtbl.replace t.files path Stale
+    | Some _ | None -> ()
+end
 
 (* A stream option is ignored only where the queues already provide what it
    asks for, so ignoring it yields the requested behaviour rather than
@@ -596,6 +632,7 @@ module Listening_socket = struct
   type hub = {
     listeners : (Eio.Net.Sockaddr.stream, t) Hashtbl.t;
     ports : Ports.t;
+    files : Files.t;
     mutex : Eio.Mutex.t;
   }
 
@@ -606,11 +643,6 @@ module Listening_socket = struct
     closed : bool Atomic.t;
     mutable hooks : Eio.Switch.hook list;
   }
-
-  let in_use hub (addr : Eio.Net.Sockaddr.stream) =
-    match addr with
-    | `Tcp a -> Ports.in_use hub.ports a
-    | `Unix _ -> Hashtbl.mem hub.listeners addr
 
   (* A Unix-domain path is taken over with [reuse_addr], as Eio's POSIX backend
      removes the socket file there before it binds; the listener that held it
@@ -625,10 +657,13 @@ module Listening_socket = struct
     match addr with
     | None -> Error `No_port
     | Some addr ->
-        let taken_over =
-          match addr with `Unix _ -> reuse_addr | `Tcp _ -> false
+        let bound =
+          match addr with
+          | `Unix path ->
+              Files.bind hub.files ~take_over:reuse_addr path Files.Listener
+          | `Tcp a -> not (Ports.in_use hub.ports a)
         in
-        if (not taken_over) && in_use hub addr then Error `In_use
+        if not bound then Error `In_use
         else
           let t =
             {
@@ -675,7 +710,8 @@ module Listening_socket = struct
               Hashtbl.remove t.hub.listeners t.addr;
               match t.addr with
               | `Tcp a -> Ports.remove t.hub.ports a
-              | `Unix _ -> ())
+              | `Unix path -> Files.leave ~remove:true t.hub.files path Listener
+              )
           | Some _ | None -> ());
       let rec drain () =
         match Eio.Stream.take_nonblocking t.incoming with
@@ -701,12 +737,10 @@ end
 module Datagram_socket = struct
   type tag = [ `Generic ]
 
-  (* [files] holds the paths of closed Unix-domain sockets, whose files Eio's
-     POSIX backend leaves behind. *)
   type hub = {
     sockets : (Eio.Net.Sockaddr.datagram, t) Hashtbl.t;
     ports : Ports.t;
-    files : (string, unit) Hashtbl.t;
+    files : Files.t;
     mutex : Mutex.t;
   }
 
@@ -737,7 +771,7 @@ module Datagram_socket = struct
     in
     let in_use =
       match addr with
-      | `Unix path -> Hashtbl.mem hub.files path || Hashtbl.mem hub.sockets addr
+      | `Unix path -> not (Files.bind hub.files path Files.Datagram)
       | `Udp a -> Ports.in_use hub.ports a
     in
     if in_use then raise (address_in_use ());
@@ -814,16 +848,20 @@ module Datagram_socket = struct
     Option.iter
       (fun code -> raise (Eio.Exn.create (Eio.Exn.X code)))
       (refusal t dst bufs);
-    match find t.hub dst with
-    | None -> (
-        match dst with
-        | `Unix path ->
-            if
-              Mutex.protect t.hub.mutex (fun () -> Hashtbl.mem t.hub.files path)
-            then raise (Eio.Net.err (Connection_failure (Refused No_listener)))
-            else raise (no_file ())
-        | `Udp _ -> ())
-    | Some peer ->
+    let file =
+      match dst with
+      | `Unix path -> Files.find t.hub.files path
+      | `Udp _ -> None
+    in
+    match (file, find t.hub dst) with
+    | Some (Files.Listener | Client), _ ->
+        raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
+    | Some Stale, _ ->
+        raise (Eio.Net.err (Connection_failure (Refused No_listener)))
+    | None, None -> (
+        match dst with `Unix _ -> raise (no_file ()) | `Udp _ -> ())
+    | Some Datagram, None -> ()
+    | (None | Some Datagram), Some peer ->
         let delivered =
           Mutex.protect peer.lock @@ fun () ->
           if not peer.closed then
@@ -860,7 +898,7 @@ module Datagram_socket = struct
       Mutex.protect t.hub.mutex (fun () ->
           Hashtbl.remove t.hub.sockets t.addr;
           match t.addr with
-          | `Unix path -> Hashtbl.replace t.hub.files path ()
+          | `Unix path -> Files.leave t.hub.files path Datagram
           | `Udp a -> Ports.remove t.hub.ports a);
       Eio.Condition.broadcast t.readable
     end
@@ -976,7 +1014,11 @@ module Network = struct
       raise (Eio.Net.err (Connection_failure (Refused No_listener)))
     in
     match (listener, addr) with
-    | None, `Unix _ -> raise (no_file ())
+    | None, `Unix path -> (
+        match Files.find t.hub.files path with
+        | Some Datagram -> raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
+        | Some (Stale | Client | Listener) -> refused ()
+        | None -> raise (no_file ()))
     | None, `Tcp _ -> refused ()
     | Some listener, _ when Atomic.get listener.closed -> refused ()
     | Some listener, _ ->
@@ -1005,21 +1047,32 @@ module Network = struct
   let connect t ~bind_to ~options ~sw addr =
     check_options options;
     check_bind bind_to addr;
-    let local =
+    let held =
       match (addr, bind_to) with
-      | `Unix _, _ -> None
+      | `Unix _, Some (`Unix path) ->
+          if Files.bind t.hub.files path Client then `Path path
+          else raise (address_in_use ())
+      | `Unix _, _ -> `Nothing
       | `Tcp (ip, _), bind -> (
           let bind = match bind with Some (`Tcp b) -> Some b | _ -> None in
           match hold t ?bind ip with
-          | Ok local -> Some local
+          | Ok local -> `Port local
           | Error `In_use -> raise (address_in_use ())
           | Error `No_port ->
               failwith "eio-net.mem: every port of 49152-65535 is held")
     in
-    (* Released once, by the flow's close or by a failed connect. *)
+    let local =
+      match held with `Port a -> Some a | `Path _ | `Nothing -> None
+    in
+    (* Released once, by the flow's close or by a failed connect; a bound
+       path leaves its file. *)
     let released = Atomic.make false in
     let release () =
-      if not (Atomic.exchange released true) then Option.iter (release t) local
+      if not (Atomic.exchange released true) then
+        match held with
+        | `Port a -> release t a
+        | `Path path -> Files.leave t.hub.files path Client
+        | `Nothing -> ()
     in
     match connect_held t ~sw ~bind_to ~release addr local with
     | flow -> flow
@@ -1076,10 +1129,12 @@ let pipe ?capacity () =
 
 let v ?capacity ~sw () =
   let capacity = check_capacity capacity in
+  let files = Files.v () in
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;
       ports = Ports.v ();
+      files;
       mutex = Eio.Mutex.create ();
     }
   in
@@ -1087,7 +1142,7 @@ let v ?capacity ~sw () =
     {
       Datagram_socket.sockets = Hashtbl.create 8;
       ports = Ports.v ();
-      files = Hashtbl.create 8;
+      files;
       mutex = Mutex.create ();
     }
   in

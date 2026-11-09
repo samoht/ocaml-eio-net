@@ -172,6 +172,46 @@ let cases =
                 ignore (listen ctx (`Tcp (v4_loopback, port)));
                 "listening"));
       ];
+      (* Stream and datagram sockets share one namespace of Unix paths. *)
+      [
+        case ~file ~test:"UnixPathShared" ~variant:"listen at a datagram path"
+          (expect "EADDRINUSE") (fun ctx ->
+            let _, addr = dgram_socket ctx Unix_dgram in
+            let path = match addr with `Unix p -> p | `Udp _ -> "" in
+            outcome (fun () ->
+                ignore (listen ctx (`Unix path));
+                "listening"));
+        case ~file ~test:"UnixPathShared" ~variant:"datagram at a listener path"
+          (expect "EADDRINUSE") (fun ctx ->
+            let addr = stream_addr ctx Unix_stream in
+            ignore (listen ctx addr);
+            let path = match addr with `Unix p -> p | `Tcp _ -> "" in
+            outcome (fun () ->
+                ignore (datagram_socket ctx (`Unix path));
+                "bound"));
+        case ~file ~test:"UnixPathShared"
+          ~variant:"datagram sent to a listener path" (expect "EPROTOTYPE")
+          (fun ctx ->
+            let addr = stream_addr ctx Unix_stream in
+            ignore (listen ctx addr);
+            let path = match addr with `Unix p -> p | `Tcp _ -> "" in
+            let s, _ = dgram_socket ctx Unix_dgram in
+            outcome (fun () ->
+                send s ~dst:(`Unix path) "abc";
+                "sent"));
+        case ~file ~test:"UnixPathShared"
+          ~variant:"connect bound to a listener path" (expect "EADDRINUSE")
+          (fun ctx ->
+            let addr = stream_addr ctx Unix_stream in
+            let l = listen ctx addr in
+            let other = stream_addr ctx Unix_stream in
+            ignore (listen ctx other);
+            outcome (fun () ->
+                ignore
+                  (Eio.Net.connect ~sw:ctx.sw ~bind_to:other ctx.net
+                     (Eio.Net.listening_addr l));
+                "connected"));
+      ];
     ]
 
 let suite = Oracle.suite "review" cases
