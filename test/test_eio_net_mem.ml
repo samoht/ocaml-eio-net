@@ -280,6 +280,36 @@ let test_unix_path_not_found () =
   | exception Eio.Io (Eio.Fs.E (Not_found _), _) -> ()
   | () -> Alcotest.fail "sent to a missing path"
 
+(* With a capacity, a write takes what fits and waits while the queue is
+   full, so a writer that ignores flow control shows. *)
+let test_capacity () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe ~capacity:4 () in
+  Alcotest.(check int)
+    "a write takes what fits" 4
+    (Eio.Flow.single_write client [ Cstruct.of_string "abcdef" ]);
+  let blocked =
+    Eio.Fiber.first
+      (fun () ->
+        ignore (Eio.Flow.single_write client [ Cstruct.of_string "ef" ] : int);
+        false)
+      (fun () ->
+        Eio.Fiber.yield ();
+        true)
+  in
+  Alcotest.(check bool) "a write to a full queue waits" true blocked;
+  let got = ref "" in
+  Eio.Fiber.both
+    (fun () -> Eio.Flow.write client [ Cstruct.of_string "efgh" ])
+    (fun () ->
+      let buf = Cstruct.create 8 in
+      Eio.Flow.read_exact server buf;
+      got := Cstruct.to_string buf);
+  Alcotest.(check string) "every byte arrives once" "abcdefgh" !got;
+  match Eio_net_mem.pipe ~capacity:0 () with
+  | exception Invalid_argument _ -> ()
+  | _ -> Alcotest.fail "a capacity of 0 was accepted"
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -665,6 +695,7 @@ let suite =
       Alcotest.test_case "use after own close" `Quick test_use_after_own_close;
       Alcotest.test_case "a Unix path with no socket" `Quick
         test_unix_path_not_found;
+      Alcotest.test_case "a capacity bounds the queue" `Quick test_capacity;
       Alcotest.test_case "write after own shutdown" `Quick
         test_write_after_own_shutdown;
       Alcotest.test_case "read after peer close" `Quick

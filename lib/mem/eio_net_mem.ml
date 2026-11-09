@@ -59,8 +59,9 @@ end
 (* One direction of a connection: the bytes written and not yet read. Its two
    ends may be used from two domains, so its state is guarded by a mutex and a
    read that finds nothing waits on a condition it registers for before it looks,
-   which a write broadcasts after it has queued its bytes. A write never waits: a
-   pipe holds whatever has been written to it.
+   which a write broadcasts after it has queued its bytes. A write takes what
+   fits under [capacity] and waits on [writable] while nothing does, which a
+   read broadcasts.
 
    The ends follow TCP: [shut] is the writer's FIN, after which the reader
    reads end-of-file, or a reset when [reset] says one came. [gone] says the
@@ -75,10 +76,13 @@ module Pipe = struct
     mutable reset : bool;
     mutable gone : bool;
     mutable refused : bool;
+    capacity : int;
+    mutable size : int; (* Bytes queued and not yet read. *)
     readable : Eio.Condition.t;
+    writable : Eio.Condition.t;
   }
 
-  let v () =
+  let v ~capacity =
     {
       mutex = Mutex.create ();
       queued = Queue.create ();
@@ -87,12 +91,16 @@ module Pipe = struct
       reset = false;
       gone = false;
       refused = false;
+      capacity;
+      size = 0;
       readable = Eio.Condition.create ();
+      writable = Eio.Condition.create ();
     }
 
   let update t f =
     Mutex.protect t.mutex (fun () -> f t);
-    Eio.Condition.broadcast t.readable
+    Eio.Condition.broadcast t.readable;
+    Eio.Condition.broadcast t.writable
 
   (* The reset reaches the reader once it has read what is queued. *)
   let reset t = update t (fun t -> t.reset <- true)
@@ -100,26 +108,40 @@ module Pipe = struct
   (* The bytes are copied: the caller owns its buffers again once this returns.
      A write to a reader that has gone is lost, and resets [back], the other
      direction of the connection. *)
+  let rec push t bufs n =
+    match bufs with
+    | b :: bufs when n > 0 ->
+        let k = min n (Cstruct.length b) in
+        if k > 0 then
+          Queue.push (Cstruct.of_string (Cstruct.to_string ~len:k b)) t.queued;
+        push t bufs (n - k)
+    | _ -> ()
+
   let write t ~back bufs =
     let n = Cstruct.lenv bufs in
-    let lost =
+    let result =
+      Eio.Condition.loop_no_mutex t.writable @@ fun () ->
       Mutex.protect t.mutex @@ fun () ->
       if t.shut || t.refused then raise (reset_exn ());
       if t.gone then begin
         t.refused <- true;
-        true
+        Some (`Lost n)
       end
-      else begin
-        List.iter
-          (fun b ->
-            if Cstruct.length b > 0 then
-              Queue.push (Cstruct.of_string (Cstruct.to_string b)) t.queued)
-          bufs;
-        false
-      end
+      else if n = 0 then Some (`Queued 0)
+      else if t.size >= t.capacity then None
+      else
+        let k = min n (t.capacity - t.size) in
+        push t bufs k;
+        t.size <- t.size + k;
+        Some (`Queued k)
     in
-    if lost then reset back else Eio.Condition.broadcast t.readable;
-    n
+    match result with
+    | `Lost n ->
+        reset back;
+        n
+    | `Queued k ->
+        Eio.Condition.broadcast t.readable;
+        k
 
   let rec take t dst got =
     match Queue.peek_opt t.queued with
@@ -137,24 +159,37 @@ module Pipe = struct
 
   (* What is queued drains before a reset or the end of the stream. *)
   let read t dst =
-    Eio.Condition.loop_no_mutex t.readable @@ fun () ->
-    Mutex.protect t.mutex @@ fun () ->
-    if not (Queue.is_empty t.queued) then Some (take t dst 0)
-    else if t.reset then raise (reset_exn ())
-    else if t.shut then raise End_of_file
-    else None
+    let n =
+      Eio.Condition.loop_no_mutex t.readable @@ fun () ->
+      Mutex.protect t.mutex @@ fun () ->
+      if not (Queue.is_empty t.queued) then begin
+        let n = take t dst 0 in
+        t.size <- t.size - n;
+        Some n
+      end
+      else if t.reset then raise (reset_exn ())
+      else if t.shut then raise End_of_file
+      else None
+    in
+    Eio.Condition.broadcast t.writable;
+    n
 
   let shut t = update t (fun t -> t.shut <- true)
 
   (* The reader closes: bytes it left unread answer the writer with a reset,
      which refuses its writes at once. *)
   let leave t =
-    Mutex.protect t.mutex @@ fun () ->
-    let unread = not (Queue.is_empty t.queued) in
-    Queue.clear t.queued;
-    t.head <- 0;
-    t.gone <- true;
-    if unread then t.refused <- true;
+    let unread =
+      Mutex.protect t.mutex @@ fun () ->
+      let unread = not (Queue.is_empty t.queued) in
+      Queue.clear t.queued;
+      t.head <- 0;
+      t.size <- 0;
+      t.gone <- true;
+      if unread then t.refused <- true;
+      unread
+    in
+    Eio.Condition.broadcast t.writable;
     unread
 end
 
@@ -227,9 +262,9 @@ module Flow = struct
     in
     (impl, Eio.Resource.T (impl, handler))
 
-  let pair () =
-    let to_client = Pipe.v () in
-    let to_server = Pipe.v () in
+  let pair ~capacity =
+    let to_client = Pipe.v ~capacity in
+    let to_server = Pipe.v ~capacity in
     let client = v ~from_peer:to_client ~to_peer:to_server in
     let server = v ~from_peer:to_server ~to_peer:to_client in
     (client, server)
@@ -510,6 +545,7 @@ module Network = struct
     sw : Eio.Switch.t;
     hub : Listening_socket.hub;
     datagrams : Datagram_socket.hub;
+    capacity : int;
   }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
@@ -562,7 +598,7 @@ module Network = struct
     | None, `Tcp _ -> refused ()
     | Some listener, _ when Atomic.get listener.closed -> refused ()
     | Some listener, _ ->
-        let client, server = Flow.pair () in
+        let client, server = Flow.pair ~capacity:t.capacity in
         Eio.Stream.add listener.incoming (server, `Unix "in-memory-client");
         (* The listener closed while the connection waited for room: its
            queue was closed before this connection joined it. *)
@@ -610,11 +646,18 @@ end
 
 let handler = Eio.Net.Pi.network (module Network)
 
-let pipe () =
-  let (_, client), (_, server) = Flow.pair () in
+let check_capacity = function
+  | None -> max_int
+  | Some c when c >= 1 -> c
+  | Some c -> Fmt.invalid_arg "eio-net.mem: the capacity is %d" c
+
+let pipe ?capacity () =
+  let capacity = check_capacity capacity in
+  let (_, client), (_, server) = Flow.pair ~capacity in
   (client, server)
 
-let v ~sw () =
+let v ?capacity ~sw () =
+  let capacity = check_capacity capacity in
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;
@@ -624,4 +667,4 @@ let v ~sw () =
   let datagrams =
     { Datagram_socket.sockets = Hashtbl.create 8; mutex = Mutex.create () }
   in
-  Eio.Resource.T (Network.{ sw; hub; datagrams }, handler)
+  Eio.Resource.T (Network.{ sw; hub; datagrams; capacity }, handler)

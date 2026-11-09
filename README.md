@@ -22,6 +22,8 @@ faults on a schedule a test can replay.
 - `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, and host
   name resolution.
 - `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets.
+  Writes never wait unless `?capacity` bounds the bytes a connection queues;
+  a small capacity shows a peer that writes without reading.
 - `eio-net.chaos`: fault injection for flows, datagram sockets and networks.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's
   interface addresses and the Unix classifiers of failed connects and accepts.

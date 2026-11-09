@@ -35,14 +35,22 @@ type Eio.Exn.Backend.t +=
             [Unix.Unix_error] from [listen], and [Eio_net_unix.Tcp.listen] as an
             {!Eio.Io} error. *)
 
-val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~sw ()] is a network whose [listen] and [connect] operations are paired
-    in memory.
+val v :
+  ?capacity:int ->
+  sw:Eio.Switch.t ->
+  unit ->
+  [ `Generic ] Eio.Net.ty Eio.Resource.t
+(** [v ~capacity ~sw ()] is a network whose [listen] and [connect] operations
+    are paired in memory.
 
     A connection is closed when the switch passed to [connect] finishes, so the
     accepting end then reads EOF. The two ends of a connection may be used from
-    different domains: a write in one wakes a read waiting in the other. A write
-    never waits, since a connection holds whatever is written to it.
+    different domains: a write in one wakes a read waiting in the other. Each
+    direction of a connection queues at most [capacity] bytes (defaults to no
+    bound): a write takes what fits and waits while the queue is full, as a
+    socket's send buffer makes it wait, so a test with a small capacity shows a
+    peer that writes without reading. Raises [Invalid_argument] if [capacity] is
+    not positive.
 
     A [listen] binds the TCP or Unix stream address it is given. One on TCP port
     [0] binds the lowest port of the dynamic range, 49152-65535 (RFC 6335,
@@ -103,14 +111,16 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     [Invalid_argument]. *)
 
 val pipe :
+  ?capacity:int ->
   unit ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-(** [pipe ()] is a connected pair of in-memory stream sockets: bytes written on
-    one are read on the other, and vice versa, preserving order. Unlike {!v} it
-    binds no address and needs no [listen] and [connect] handshake: it is the
-    bare transport for a test, or a wrapper such as an adversarial flow, that
-    needs two ends of a pipe. Its ends take socket options as a connection of
-    {!v} does. Blocking reads suspend the calling fiber until data arrives, so
-    both ends must run under an Eio event loop; the two ends may be in different
+(** [pipe ~capacity ()] is a connected pair of in-memory stream sockets: bytes
+    written on one are read on the other, and vice versa, preserving order. Each
+    direction queues at most [capacity] bytes, as for {!v}. Unlike {!v} it binds
+    no address and needs no [listen] and [connect] handshake: it is the bare
+    transport for a test, or a wrapper such as an adversarial flow, that needs
+    two ends of a pipe. Its ends take socket options as a connection of {!v}
+    does. Blocking reads suspend the calling fiber until data arrives, so both
+    ends must run under an Eio event loop; the two ends may be in different
     domains. No switch closes them: the caller does. *)
