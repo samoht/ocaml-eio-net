@@ -134,8 +134,10 @@ val v :
     range for port 0; one at a port a listener holds raises the error that
     {!Address_in_use} marks, and one bound to an IPv6 address connecting to an
     IPv4-mapped one, or the reverse, raises the error that
-    {!Network_unreachable} or {!Address_family} marks. [getsockopt] raises
-    [Invalid_argument] on every socket.
+    {!Network_unreachable} or {!Address_family} marks; one bound to an address
+    of another family, IPv4 for IPv6 or a path for TCP, raises the error that
+    {!Address_family} marks, as macOS fails it with EAFNOSUPPORT where Linux
+    says EINVAL. [getsockopt] raises [Invalid_argument] on every socket.
 
     A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
     bind the loopback address of their family, and an address with port [0]

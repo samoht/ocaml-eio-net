@@ -876,8 +876,9 @@ module Network = struct
         let b = if same (unmap b) (any (unmap b)) then reached else b in
         (b, if port = 0 then next () else port)
 
-  (* A connect bound to an address of the other family, IPv6 against
-     IPv4-mapped, fails as on Linux. *)
+  (* A connect bound to an address of the other family fails, as macOS fails
+     it with EAFNOSUPPORT where Linux says EINVAL; IPv6 against IPv4-mapped
+     fails as on Linux. *)
   let check_bind (bind_to : Eio.Net.Sockaddr.stream option)
       (addr : Eio.Net.Sockaddr.stream) =
     let fail code = raise (Eio.Exn.create (Eio.Exn.X code)) in
@@ -886,9 +887,7 @@ module Network = struct
     | Some (`Tcp (b, _)), `Tcp (d, _)
       when String.length (b :> string) = String.length (d :> string) ->
         Option.iter fail (cross_family b d)
-    | Some _, _ ->
-        invalid_arg
-          "eio-net.mem: bind_to is not of the connect address's family"
+    | Some _, _ -> fail Address_family
 
   (* The client's address as the listener at [listener] sees it: an IPv4
      client of an IPv6 listener is IPv4-mapped. A Unix-domain client binds no

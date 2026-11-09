@@ -24,6 +24,30 @@ let cases =
           Eio.Flow.shutdown c `Send;
           outcome (fun () ->
               Fmt.str "wrote %d" (Eio.Flow.single_write c [ Cstruct.empty ])));
+      (* A connect bound to an address of another family fails: EINVAL on
+         Linux, EAFNOSUPPORT on macOS. *)
+      [
+        case ~file ~test:"BindToOtherFamily" ~variant:"127.0.0.1 to ::1"
+          ~ipv6:true (expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL")
+          (fun ctx ->
+            let l = listen ctx (`Tcp (v6_loopback, 0)) in
+            outcome (fun () ->
+                ignore
+                  (Eio.Net.connect ~sw:ctx.sw
+                     ~bind_to:(`Tcp (v4_loopback, 0))
+                     ctx.net (Eio.Net.listening_addr l));
+                "connected"));
+        case ~file ~test:"BindToOtherFamily" ~variant:"unix path to tcp"
+          (expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL")
+          (fun ctx ->
+            let l = listen ctx (`Tcp (v4_loopback, 0)) in
+            let bind_to = stream_addr ctx Unix_stream in
+            outcome (fun () ->
+                ignore
+                  (Eio.Net.connect ~sw:ctx.sw ~bind_to ctx.net
+                     (Eio.Net.listening_addr l));
+                "connected"));
+      ];
     ]
 
 let suite = Oracle.suite "review" cases
