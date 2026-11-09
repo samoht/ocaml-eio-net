@@ -617,8 +617,10 @@ module Net = struct
           t.base.listener_close ();
           raise End_of_file
       | _ -> ());
+      (* Counted once it returns: a cancelled accept uses no budget. *)
+      let accepted = t.base.accept ~sw in
       t.accepts <- t.accepts + 1;
-      t.base.accept ~sw
+      accepted
 
     let close t = t.base.listener_close ()
     let listening_addr t = t.base.listener_addr ()

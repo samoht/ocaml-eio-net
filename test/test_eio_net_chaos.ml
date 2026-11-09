@@ -377,6 +377,20 @@ let test_net_max_accepts () =
       with End_of_file -> dropped := true);
   Alcotest.(check bool) "listener drops past its accept budget" true !dropped
 
+(* An accept cancelled before a connection came uses none of the budget. *)
+let test_net_max_accepts_cancelled () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Net.v ~sw (Net.Schedule.v ~max_accepts:1 ()) in
+  let listener = Eio.Net.listen ~sw ~backlog:4 net addr in
+  Eio.Fiber.first
+    (fun () -> ignore (Eio.Net.accept ~sw listener))
+    (fun () -> Eio.Fiber.yield ());
+  let _client = Eio.Net.connect ~sw net addr in
+  match Eio.Net.accept ~sw listener with
+  | _ -> ()
+  | exception End_of_file -> Alcotest.fail "the cancelled accept was counted"
+
 (* A printed schedule is the call that builds it, every parameter included. *)
 let test_schedules_print_every_parameter () =
   let check what expected pp v =
@@ -464,6 +478,8 @@ let suite =
       Alcotest.test_case "net connect refused" `Quick test_net_connect_refused;
       Alcotest.test_case "net connect slow" `Quick test_net_connect_slow;
       Alcotest.test_case "net max accepts" `Quick test_net_max_accepts;
+      Alcotest.test_case "net max accepts ignores a cancelled accept" `Quick
+        test_net_max_accepts_cancelled;
       Alcotest.test_case "schedules print every parameter" `Quick
         test_schedules_print_every_parameter;
       Alcotest.test_case "datagram seeded refuses odds past one" `Quick
