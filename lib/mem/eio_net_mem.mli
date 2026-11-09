@@ -145,29 +145,31 @@ val v :
     datagram socket holds. An address that overlaps one a datagram socket holds,
     by the rule [listen] follows, raises the error that {!Address_in_use} marks;
     [reuse_port] raises [Invalid_argument]. A datagram sent to it arrives whole,
-    with the sender's address, after every datagram sent to it before: the
-    network never drops, cuts or reorders one, and a send never waits. A
-    datagram reaches a socket by the rule a [connect] reaches a listener. One
-    sent to an address no socket binds that way is lost, as UDP loses it; one
-    sent to a Unix path no socket binds raises [Eio.Fs.Not_found]. A closed
-    Unix-domain datagram socket leaves its path behind, as Eio's POSIX backend
-    leaves the file: a datagram sent there is refused with the connection
-    failure that {!No_listener} marks, and a socket bound there raises the error
-    that {!Address_in_use} marks. A send without a destination raises the error
-    that {!No_destination} marks, since no socket is connected. A datagram
-    longer than 65507 bytes to an IPv4 address, 65527 to an IPv6 one, or 212960
-    to a Unix path, as Linux's default send buffer allows, raises the error that
-    {!Message_too_long} marks. One sent to UDP port 0 raises the error that
-    {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. One sent from
-    an IPv6 address to an IPv4-mapped one, or the reverse, raises the error that
-    {!Network_unreachable} or {!Address_family} marks. One from an IPv4 socket
-    to an IPv6 address, or between UDP and a Unix path, raises the error that
-    {!Address_family} marks; one from an IPv6 socket to an IPv4 address goes the
-    IPv4 way, as on Linux, so it is sent from the wildcard address and refused
-    from any other. A [recv] into a buffer shorter than the datagram gets its
-    first bytes, as a socket does. The socket is closed, and its address free
-    again, when the switch passed to [datagram_socket] finishes; a send or a
-    receive on it then raises [Invalid_argument]. *)
+    with the sender's address as this socket sees it, the loopback address the
+    datagram reached for a wildcard sender and IPv4-mapped for an IPv4 sender to
+    an IPv6 socket, after every datagram sent to it before: the network never
+    drops, cuts or reorders one, and a send never waits. A datagram reaches a
+    socket by the rule a [connect] reaches a listener. One sent to an address no
+    socket binds that way is lost, as UDP loses it; one sent to a Unix path no
+    socket binds raises [Eio.Fs.Not_found]. A closed Unix-domain datagram socket
+    leaves its path behind, as Eio's POSIX backend leaves the file: a datagram
+    sent there is refused with the connection failure that {!No_listener} marks,
+    and a socket bound there raises the error that {!Address_in_use} marks. A
+    send without a destination raises the error that {!No_destination} marks,
+    since no socket is connected. A datagram longer than 65507 bytes to an IPv4
+    address, 65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default
+    send buffer allows, raises the error that {!Message_too_long} marks. One
+    sent to UDP port 0 raises the error that {!Invalid_port} marks, as on Linux;
+    macOS sends it over IPv4. One sent from an IPv6 address to an IPv4-mapped
+    one, or the reverse, raises the error that {!Network_unreachable} or
+    {!Address_family} marks. One from an IPv4 socket to an IPv6 address, or
+    between UDP and a Unix path, raises the error that {!Address_family} marks;
+    one from an IPv6 socket to an IPv4 address goes the IPv4 way, as on Linux,
+    so it is sent from the wildcard address and refused from any other. A [recv]
+    into a buffer shorter than the datagram gets its first bytes, as a socket
+    does. The socket is closed, and its address free again, when the switch
+    passed to [datagram_socket] finishes; a send or a receive on it then raises
+    [Invalid_argument]. *)
 
 val pipe :
   ?capacity:int ->

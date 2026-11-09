@@ -77,6 +77,13 @@ let reaching ip =
     let ip = if same ip (any ip) then Eio.Net.Ipaddr.V6.loopback else ip in
     [ ip; Eio.Net.Ipaddr.V6.any ]
 
+(* [ip] as a socket bound at [own] sees it: IPv4 to an IPv4 socket, and
+   IPv4-mapped to an IPv6 one. *)
+let seen_by (own : Eio.Net.Ipaddr.v4v6) ip =
+  if String.length (own :> string) = 4 then unmap ip
+  else if is_v4 ip then map (unmap ip)
+  else ip
+
 (* Two IP addresses of one port overlap when they are equal, one is the
    wildcard address of the other's family, or one is the IPv6 wildcard address,
    which a dual-stack socket holds at IPv4 addresses too, as bind(2) on Linux
@@ -759,6 +766,17 @@ module Datagram_socket = struct
           | _ -> cross_family b d)
       | `Unix _, `Unix _ -> None
 
+  (* The address a datagram from [t] to [dst] comes from, as [peer] sees it: a
+     wildcard sender sends from the loopback address the destination
+     reaches. *)
+  let source t ~dst peer : Eio.Net.Sockaddr.datagram =
+    match (t.addr, dst, peer.addr) with
+    | `Udp (ip, port), `Udp (d, _), `Udp (own, _) ->
+        let ip = unmap ip in
+        let ip = if same ip (any ip) then List.hd (reaching d) else ip in
+        `Udp (seen_by own ip, port)
+    | addr, _, _ -> addr
+
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
      the sender is not told; at a Unix path, the send finds no file, or one
      that no socket holds any more and refuses it. *)
@@ -786,7 +804,7 @@ module Datagram_socket = struct
           Mutex.protect peer.lock @@ fun () ->
           if not peer.closed then
             Queue.push
-              (t.addr, Cstruct.to_string (Cstruct.concat bufs))
+              (source t ~dst peer, Cstruct.to_string (Cstruct.concat bufs))
               peer.queued;
           not peer.closed
         in
@@ -903,13 +921,7 @@ module Network = struct
       Eio.Net.Sockaddr.stream =
     match listener with
     | `Unix _ -> `Unix ""
-    | `Tcp (lip, _) ->
-        let ip =
-          if String.length (lip :> string) = 4 then unmap ip
-          else if is_v4 ip then map (unmap ip)
-          else ip
-        in
-        `Tcp (ip, port)
+    | `Tcp (lip, _) -> `Tcp (seen_by lip ip, port)
 
   (* A connection is a pair of queues. A local address it is bound at, at a
      port a listener holds, is in use. *)

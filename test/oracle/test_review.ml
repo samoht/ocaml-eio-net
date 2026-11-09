@@ -99,6 +99,41 @@ let cases =
             `Udp v4_loopback,
             expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL" );
         ];
+      (* A datagram's source address is the sender's as the receiver sees
+         it: a wildcard sender sends from the loopback address the
+         destination reaches, and an IPv4 sender reaches an IPv6 receiver
+         IPv4-mapped. *)
+      List.map
+        (fun (variant, src, dst, sent_to, e) ->
+          case ~file ~test:"DatagramSource" ~variant ~ipv6:true e (fun ctx ->
+              let r, r_addr = datagram_socket ctx (`Udp (dst, 0)) in
+              let s, _ = datagram_socket ctx (`Udp (src, 0)) in
+              let to_ =
+                match (sent_to, r_addr) with
+                | Some ip, `Udp (_, port) -> `Udp (ip, port)
+                | _ -> r_addr
+              in
+              send s ~dst:to_ "abc";
+              match Eio.Net.recv r (Cstruct.create 3) with
+              | `Udp (ip, _), _ -> "from " ^ pp_ip ip
+              | `Unix path, _ -> "from " ^ path))
+        [
+          ( "127.0.0.1 to [::]",
+            v4_loopback,
+            Eio.Net.Ipaddr.V6.any,
+            Some v4_loopback,
+            expect "from ::ffff:127.0.0.1" );
+          ( "0.0.0.0 to 127.0.0.1",
+            Eio.Net.Ipaddr.V4.any,
+            v4_loopback,
+            None,
+            expect "from 127.0.0.1" );
+          ( ":: to ::ffff:127.0.0.1",
+            Eio.Net.Ipaddr.V6.any,
+            v4_loopback,
+            Some v4_mapped_loopback,
+            expect "from 127.0.0.1" );
+        ];
     ]
 
 let suite = Oracle.suite "review" cases
