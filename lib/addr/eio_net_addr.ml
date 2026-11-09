@@ -12,13 +12,13 @@ let udp a port = `Udp (ip a, port)
 
 let stream net ~host ~port =
   match Ipaddr.of_string host with
-  | Ok ip -> Ok (tcp ip port)
+  | Ok ip -> Ok [ tcp ip port ]
   | Error _ -> (
       match
         Eio.Net.getaddrinfo_stream ~service:(string_of_int port) net host
       with
-      | addr :: _ -> Ok addr
       | [] -> Fmt.error_msg "cannot resolve %S: no address" host
+      | addrs -> Ok addrs
       | exception (Eio.Io _ as e) ->
           Fmt.error_msg "cannot resolve %S: %a" host Eio.Exn.pp e)
 

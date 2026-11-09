@@ -20,13 +20,16 @@ val stream :
   _ Eio.Net.t ->
   host:string ->
   port:int ->
-  (Eio.Net.Sockaddr.stream, [ `Msg of string ]) result
-(** [stream net ~host ~port] is the stream address of [port] on [host], where
-    [host] is either a literal IP address or a name [net] resolves. A name with
-    several addresses gives the first the resolver returns. This is
-    [Error (`Msg m)] if [host] is neither a literal address nor a name that
-    resolves, where [m] names [host] and carries the resolver's {!Eio.Io} error,
-    if any. A cancellation during the lookup is raised, not returned. *)
+  (Eio.Net.Sockaddr.stream list, [ `Msg of string ]) result
+(** [stream net ~host ~port] is every stream address of [port] on [host], where
+    [host] is either a literal IP address, which gives itself alone, or a name
+    [net] resolves, which gives its addresses in the resolver's order. A client
+    tries each in turn until one connects, as {!Eio.Net.with_tcp_connect} does:
+    the first may be one no server listens on, as ["::1"] for a server bound to
+    ["127.0.0.1"]. This is [Error (`Msg m)] if [host] is neither a literal
+    address nor a name that resolves, where [m] names [host] and carries the
+    resolver's {!Eio.Io} error, if any. A cancellation during the lookup is
+    raised, not returned. *)
 
 val of_stream : Eio.Net.Sockaddr.stream -> (Ipaddr.t * int) option
 (** [of_stream addr] is the address and port [addr] names, or [None] for a Unix

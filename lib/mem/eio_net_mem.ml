@@ -519,10 +519,21 @@ module Network = struct
       Eio.Switch.on_release_cancellable sw (fun () -> Eio.Resource.close socket);
     socket
 
+  (* Each address once for streams and once for datagrams, as getaddrinfo(3)
+     lists one per socket type; "localhost" IPv6 first, as glibc and macOS
+     order it. *)
   let getaddrinfo _ ~service node =
+    let v4 = Eio.Net.Ipaddr.V4.loopback and v6 = Eio.Net.Ipaddr.V6.loopback in
+    let ips =
+      match node with
+      | "localhost" -> [ v6; v4 ]
+      | "127.0.0.1" -> [ v4 ]
+      | "::1" -> [ v6 ]
+      | _ -> []
+    in
     match int_of_string_opt service with
-    | Some port when node = "127.0.0.1" || node = "localhost" ->
-        [ `Tcp (Eio.Net.Ipaddr.V4.loopback, port) ]
+    | Some port when port >= 0 && port <= 65535 ->
+        List.concat_map (fun ip -> [ `Tcp (ip, port); `Udp (ip, port) ]) ips
     | _ -> []
 
   let getnameinfo _ = function

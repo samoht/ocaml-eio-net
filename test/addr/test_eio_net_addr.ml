@@ -46,30 +46,45 @@ let test_not_an_address () =
       ignore (Eio_net_addr.ip (Ipaddr.of_string_exn "10.0.0.1"));
       ignore (Eio_net_addr.ipaddr (Eio.Net.Ipaddr.of_raw "flatsat-1")))
 
+let stream net ~host ~port =
+  match Eio_net_addr.stream net ~host ~port with
+  | Ok addrs -> List.filter_map Eio_net_addr.of_stream addrs
+  | Error (`Msg msg) -> Alcotest.fail msg
+
 let test_stream_literal () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let a = Ipaddr.of_string_exn "192.0.2.7" in
-  Alcotest.(check (option (pair ip int)))
+  Alcotest.(check (list (pair ip int)))
     "a literal IPv4 host"
-    (Some (a, 9997))
-    (Result.to_option (Eio_net_addr.stream net ~host:"192.0.2.7" ~port:9997)
-    |> Fun.flip Option.bind Eio_net_addr.of_stream);
+    [ (a, 9997) ]
+    (stream net ~host:"192.0.2.7" ~port:9997);
   let a6 = Ipaddr.of_string_exn "2001:db8::1" in
-  Alcotest.(check (option (pair ip int)))
+  Alcotest.(check (list (pair ip int)))
     "a literal IPv6 host"
-    (Some (a6, 9998))
-    (Result.to_option (Eio_net_addr.stream net ~host:"2001:db8::1" ~port:9998)
-    |> Fun.flip Option.bind Eio_net_addr.of_stream)
+    [ (a6, 9998) ]
+    (stream net ~host:"2001:db8::1" ~port:9998)
+
+(* A name gives every address it resolves to, in the resolver's order, for a
+   client to try in turn. *)
+let test_stream_every_address () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  Alcotest.(check (list (pair ip int)))
+    "localhost"
+    [ (Ipaddr.of_string_exn "::1", 80); (Ipaddr.of_string_exn "127.0.0.1", 80) ]
+    (stream net ~host:"localhost" ~port:80)
 
 (* RFC 6761 sec 6.4: the ".invalid" TLD is reserved and does not resolve. *)
 let test_stream_unresolvable () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   match Eio_net_addr.stream net ~host:"flatsat-1.invalid" ~port:9997 with
-  | Ok addr ->
-      Alcotest.failf "an unresolvable host produced an address: %a"
-        Eio.Net.Sockaddr.pp addr
+  | Ok addrs ->
+      Alcotest.failf "an unresolvable host produced addresses: %a"
+        Fmt.(Dump.list Eio.Net.Sockaddr.pp)
+        addrs
   | Error (`Msg msg) ->
       Alcotest.(check bool)
         "the error names the host" true
@@ -83,6 +98,8 @@ let suite =
       Alcotest.test_case "sockaddr" `Quick test_sockaddr;
       Alcotest.test_case "not an address" `Quick test_not_an_address;
       Alcotest.test_case "stream: a literal host" `Quick test_stream_literal;
+      Alcotest.test_case "stream: every address of a name" `Quick
+        test_stream_every_address;
       Alcotest.test_case "stream: an unresolvable host" `Quick
         test_stream_unresolvable;
     ] )

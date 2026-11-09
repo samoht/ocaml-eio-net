@@ -52,9 +52,11 @@ val v : sw:Eio.Switch.t -> unit -> [ `Generic ] Eio.Net.ty Eio.Resource.t
     failure that {!No_listener} marks, as a connect to a closed port is refused.
     An accepted connection is closed when it is closed or when the switch passed
     to [accept] finishes. An accepted connection's peer address is
-    [`Unix "in-memory-client"]. Host resolution maps ["localhost"] and
-    ["127.0.0.1"] with a numeric service to IPv4 loopback at that port, and any
-    other host or service to no address.
+    [`Unix "in-memory-client"]. Host resolution maps ["127.0.0.1"] and ["::1"]
+    with a numeric service to the loopback address of their family at that port,
+    once as a stream address and once as a datagram address, and ["localhost"]
+    to both families, IPv6 first, as glibc and macOS order them. Any other host
+    or service maps to no address.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and

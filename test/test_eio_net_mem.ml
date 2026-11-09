@@ -1,5 +1,3 @@
-let sockaddr = Alcotest.testable Eio.Net.Sockaddr.pp ( = )
-
 let test_tcp_roundtrip () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -20,14 +18,36 @@ let test_tcp_roundtrip () =
       let got = Eio.Buf_read.(parse_exn take_all) flow ~max_size:16 in
       Alcotest.(check string) "client read" "pong" got)
 
+(* Each loopback name resolves to a stream and a datagram address, and
+   "localhost" to IPv6 first, as glibc and macOS order it. *)
 let test_resolve_localhost () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
-  Alcotest.(check (list sockaddr))
-    "localhost resolves"
-    [ `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) ]
-    (Eio.Net.getaddrinfo_stream net "localhost" ~service:"80")
+  let v4 = Eio.Net.Ipaddr.V4.loopback and v6 = Eio.Net.Ipaddr.V6.loopback in
+  let check what expected got =
+    let str = List.map (Fmt.str "%a" Eio.Net.Sockaddr.pp) in
+    Alcotest.(check (list string)) what (str expected) (str got)
+  in
+  check "localhost, streams"
+    [ `Tcp (v6, 80); `Tcp (v4, 80) ]
+    (Eio.Net.getaddrinfo_stream net "localhost" ~service:"80"
+      :> Eio.Net.Sockaddr.t list);
+  check "localhost, datagrams"
+    [ `Udp (v6, 53); `Udp (v4, 53) ]
+    (Eio.Net.getaddrinfo_datagram net "localhost" ~service:"53"
+      :> Eio.Net.Sockaddr.t list);
+  check "127.0.0.1, datagrams"
+    [ `Udp (v4, 53) ]
+    (Eio.Net.getaddrinfo_datagram net "127.0.0.1" ~service:"53"
+      :> Eio.Net.Sockaddr.t list);
+  check "::1, streams"
+    [ `Tcp (v6, 80) ]
+    (Eio.Net.getaddrinfo_stream net "::1" ~service:"80"
+      :> Eio.Net.Sockaddr.t list);
+  match Eio.Net.getaddrinfo net "example.org" ~service:"80" with
+  | exception Eio.Io (Eio.Net.E (Address_lookup_failed _), _) -> ()
+  | _ -> Alcotest.fail "another host resolved"
 
 let test_connect_to_wildcard_listener () =
   Eio_mock.Backend.run @@ fun () ->
