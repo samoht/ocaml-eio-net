@@ -64,7 +64,9 @@ end
    read broadcasts.
 
    The ends follow TCP: [shut] is the writer's FIN, after which the reader
-   reads end-of-file, or a reset when [reset] says one came. [gone] says the
+   reads end-of-file, or a reset when [reset] says one came. A reset is
+   reported once, by a read or by a write that [refused] fails, as a socket
+   clears its pending error; reads then return end-of-file. [gone] says the
    reader has closed: the first write to it is lost and answered with a reset,
    which [refused] then makes every later write raise. [deaf] says the reader
    shut its receive side: writes are lost, as Linux takes and drops them. *)
@@ -108,6 +110,14 @@ module Pipe = struct
   (* The reset reaches the reader once it has read what is queued. *)
   let reset t = update t (fun t -> t.reset <- true)
 
+  (* The reset was reported: the stream has ended. *)
+  let consume_reset t =
+    update t (fun t ->
+        if t.reset then begin
+          t.reset <- false;
+          t.shut <- true
+        end)
+
   (* The bytes are copied: the caller owns its buffers again once this returns.
      A write to a reader that has gone is lost, and resets [back], the other
      direction of the connection. *)
@@ -125,8 +135,9 @@ module Pipe = struct
     let result =
       Eio.Condition.loop_no_mutex t.writable @@ fun () ->
       Mutex.protect t.mutex @@ fun () ->
-      if t.shut || t.refused then raise (reset_exn ());
-      if t.gone then begin
+      if t.shut then raise (reset_exn ());
+      if t.refused then Some `Refused
+      else if t.gone then begin
         t.refused <- true;
         Some (`Lost n)
       end
@@ -140,6 +151,9 @@ module Pipe = struct
         Some (`Queued k)
     in
     match result with
+    | `Refused ->
+        consume_reset back;
+        raise (reset_exn ())
     | `Lost n ->
         reset back;
         n
@@ -172,7 +186,11 @@ module Pipe = struct
         t.size <- t.size - n;
         Some n
       end
-      else if t.reset then raise (reset_exn ())
+      else if t.reset then begin
+        t.reset <- false;
+        t.shut <- true;
+        raise (reset_exn ())
+      end
       else if t.shut || t.deaf then raise End_of_file
       else None
     in

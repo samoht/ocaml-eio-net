@@ -230,12 +230,7 @@ let unix_stream_cases =
          before accepting it reads a reset once, then end of file. *)
       per_stream ~file:listener_close ~test:"PendingConnectionGetsECONNRESET"
         [ Unix_stream ]
-        (fun _ ->
-          expect ~macos:"EOF; EOF" ~mem:"reset; reset"
-            ~mem_bug:
-              "Report a reset to one read, then end of file to the reads after \
-               it, as a socket clears its pending error once read."
-            "reset; EOF")
+        (fun _ -> expect ~macos:"EOF; EOF" "reset; EOF")
         (fun ctx k ->
           let l = listen ctx (stream_addr ctx k) in
           let c = connect ctx (Eio.Net.listening_addr l) in
@@ -947,13 +942,7 @@ let inet_cases =
          sleep. macOS reports the reset to one read before end of file. *)
       per_stream ~file:inet ~test:"TCPResetAfterClose" tcp_kinds
         (fun _ ->
-          expect ~macos:"wrote; reset; reset; EOF"
-            ~mem:"wrote; reset; reset; reset"
-            ~mem_bug:
-              "After the peer's end of file, let reads keep returning end of \
-               file once a write draws a reset, as the reset ends a stream \
-               that already ended."
-            "wrote; reset; EOF; EOF")
+          expect ~macos:"wrote; reset; reset; EOF" "wrote; reset; EOF; EOF")
         (fun ctx k ->
           let c, a, _ = stream_pair ctx k in
           Eio.Flow.close c;

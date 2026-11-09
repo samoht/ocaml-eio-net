@@ -218,8 +218,9 @@ let read_all flow =
   loop ()
 
 (* A write to a flow whose peer has closed is lost and answered with a reset,
-   as a TCP peer answers it: the first write returns, and the next write and
-   every read raise the [Eio.Io] reset. *)
+   as a TCP peer answers it: the first write returns and the next write raises
+   the [Eio.Io] reset. That write reports it, so reads return end of file, as
+   on Linux. *)
 let test_write_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe () in
@@ -231,8 +232,28 @@ let test_write_after_peer_close () =
   | exception e when is_reset e -> ()
   | (_ : int) -> Alcotest.fail "the second write went through");
   match read_all client with
-  | "", e when is_reset e -> ()
+  | "", End_of_file -> ()
   | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
+
+(* A connection reset before it is read reports the reset to one read, and end
+   of file to the reads after it, as a socket clears its pending error once it
+   reports it. *)
+let test_reset_read_once () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Flow.copy_string "unread" client;
+  Eio.Flow.close server;
+  let read () =
+    match Eio.Flow.single_read client (Cstruct.create 8) with
+    | exception e when is_reset e -> "reset"
+    | exception End_of_file -> "EOF"
+    | n -> Fmt.str "%d bytes" n
+  in
+  let first = read () in
+  let second = read () in
+  let third = read () in
+  Alcotest.(check (list string))
+    "reads" [ "reset"; "EOF"; "EOF" ] [ first; second; third ]
 
 (* A peer that shuts its receive side takes writes and drops them, as on
    Linux, and reads end-of-file itself. *)
@@ -740,6 +761,7 @@ let suite =
         test_datagram_address_in_use;
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
+      Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
       Alcotest.test_case "a closed connection leaves its switch" `Quick

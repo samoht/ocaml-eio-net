@@ -10,11 +10,15 @@ type Eio.Exn.Backend.t +=
             where a TCP socket raises one:
             - A write after this end shut its send.
             - A write after the peer closed: the first is lost and answered with
-              a reset, which the next write and every read raise.
+              a reset, which every later write raises.
             - A read, once the queued bytes are read, and a write after the peer
               closed with bytes of ours unread.
             - A read and a write on a connection its listener closed before
               accepting it.
+
+            The first read or write that raises the reset reports it, as a
+            socket clears its pending error: reads after it raise [End_of_file],
+            and writes keep raising the reset.
 
             A read after the peer closed or shut its send otherwise raises
             [End_of_file] once the queued bytes are read. A write after the peer
