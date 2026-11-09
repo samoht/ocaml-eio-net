@@ -79,32 +79,33 @@ val v :
     [listening_addr] reports it; it raises [Failure] if every port of the range
     is held. A [listen] at an address a listener holds raises the error that
     {!Address_in_use} marks; a TCP address overlaps an address of the same port
-    that is equal to it or is the wildcard address of its family, as bind(2) has
-    it on Linux. With [reuse_addr], a [listen] at a Unix-domain path takes the
-    path over instead, as Eio's POSIX backend removes the socket file there
-    before it binds: the listener that held it stays open, and no [connect]
-    reaches it. A [listen] with [reuse_port] raises [Invalid_argument]. A
-    listener is closed, and its address free again, when it is closed or when
-    the switch passed to [listen] or to {!v} finishes; the connections waiting
-    to be accepted are reset with it, as a kernel resets them. A [connect]
-    reaches the listener at its address, or at the wildcard address of its
-    family and port, or, for an IPv4 address, at the IPv6 wildcard address of
-    its port, as a dual-stack listener takes it. An IPv4-mapped IPv6 address
-    stands for the IPv4 address it maps, and a wildcard destination for the
-    loopback address of its family, as both kernels route them. It waits while
-    [128] connections wait to be accepted there; with no listener, or one that
-    closes while it waits, it raises the connection failure that {!No_listener}
-    marks, as a connect to a closed port is refused. At a Unix path no listener
-    holds it raises [Eio.Fs.Not_found] instead: a closed listener leaves no
-    file, as when Eio's POSIX backend removes it at the end of the listen's
-    switch. A real listener closed by hand leaves its file, and a connect there
-    is refused. An accepted connection is closed when it is closed or when the
-    switch passed to [accept] finishes. An accepted connection's peer address is
-    [`Unix "in-memory-client"]. Host resolution maps ["127.0.0.1"] and ["::1"]
-    with a numeric service to the loopback address of their family at that port,
-    once as a stream address and once as a datagram address, and ["localhost"]
-    to both families, IPv6 first, as glibc and macOS order them. Any other host
-    or service maps to no address.
+    that is equal to it or is the wildcard address of its family, and the IPv6
+    wildcard address overlaps every address of its port, as bind(2) has it on
+    Linux for a dual-stack socket. With [reuse_addr], a [listen] at a
+    Unix-domain path takes the path over instead, as Eio's POSIX backend removes
+    the socket file there before it binds: the listener that held it stays open,
+    and no [connect] reaches it. A [listen] with [reuse_port] raises
+    [Invalid_argument]. A listener is closed, and its address free again, when
+    it is closed or when the switch passed to [listen] or to {!v} finishes; the
+    connections waiting to be accepted are reset with it, as a kernel resets
+    them. A [connect] reaches the listener at its address, or at the wildcard
+    address of its family and port, or, for an IPv4 address, at the IPv6
+    wildcard address of its port, as a dual-stack listener takes it. An
+    IPv4-mapped IPv6 address stands for the IPv4 address it maps, and a wildcard
+    destination for the loopback address of its family, as both kernels route
+    them. It waits while [128] connections wait to be accepted there; with no
+    listener, or one that closes while it waits, it raises the connection
+    failure that {!No_listener} marks, as a connect to a closed port is refused.
+    At a Unix path no listener holds it raises [Eio.Fs.Not_found] instead: a
+    closed listener leaves no file, as when Eio's POSIX backend removes it at
+    the end of the listen's switch. A real listener closed by hand leaves its
+    file, and a connect there is refused. An accepted connection is closed when
+    it is closed or when the switch passed to [accept] finishes. An accepted
+    connection's peer address is [`Unix "in-memory-client"]. Host resolution
+    maps ["127.0.0.1"] and ["::1"] with a numeric service to the loopback
+    address of their family at that port, once as a stream address and once as a
+    datagram address, and ["localhost"] to both families, IPv6 first, as glibc
+    and macOS order them. Any other host or service maps to no address.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and

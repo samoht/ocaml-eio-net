@@ -69,15 +69,17 @@ let reaching ip =
     let ip = if same ip (any ip) then Eio.Net.Ipaddr.V6.loopback else ip in
     [ ip; Eio.Net.Ipaddr.V6.any ]
 
-(* Two IP addresses of one port overlap when they are equal or one is the
-   wildcard address of the other's family, as bind(2) on Linux has it. *)
+(* Two IP addresses of one port overlap when they are equal, one is the
+   wildcard address of the other's family, or one is the IPv6 wildcard address,
+   which a dual-stack socket holds at IPv4 addresses too, as bind(2) on Linux
+   has it. An IPv4-mapped address is the IPv4 address it maps. *)
 let ip_overlaps (ip, port) (ip', port') =
-  let same (x : Eio.Net.Ipaddr.v4v6) (y : Eio.Net.Ipaddr.v4v6) =
-    String.equal (x :> string) (y :> string)
-  in
+  let dual x = same x Eio.Net.Ipaddr.V6.any in
+  let x = unmap ip and y = unmap ip' in
   port = port'
-  && same (any ip) (any ip')
-  && (same ip ip' || same ip (any ip) || same ip' (any ip'))
+  && (dual ip || dual ip'
+     || (same (any x) (any y) && (same x y || same x (any x) || same y (any y)))
+     )
 
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
 

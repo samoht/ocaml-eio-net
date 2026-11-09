@@ -725,13 +725,6 @@ let simple_connect ctx listen_addr connector =
   Eio.Flow.close a;
   "connected"
 
-(* An IPv6 wildcard socket holds its port at IPv4 addresses too, as a
-   dual-stack socket does; eio-net.mem holds it at IPv6 addresses only. *)
-let mem_dual_stack =
-  "Treat an IPv4-mapped IPv6 address as the IPv4 address it maps, and let an \
-   IPv6 wildcard socket hold its port at IPv4 addresses too, as a dual-stack \
-   socket does."
-
 let inet_cases =
   List.concat
     [
@@ -858,10 +851,8 @@ let inet_cases =
        let bind_all bind = String.concat "; " (List.map bind others) in
        [
          case ~file:inet ~test:"DualStackV6AnyReservesEverything" ~variant:"TCP"
-           ~ipv6:true
-           (expect ~mem:"EADDRINUSE; EADDRINUSE; bound; EADDRINUSE"
-              ~mem_bug:mem_dual_stack
-              "EADDRINUSE; EADDRINUSE; EADDRINUSE; EADDRINUSE") (fun ctx ->
+           ~ipv6:true (expect "EADDRINUSE; EADDRINUSE; EADDRINUSE; EADDRINUSE")
+           (fun ctx ->
              let l = listen ctx (`Tcp (Eio.Net.Ipaddr.V6.any, 0)) in
              let port =
                match Eio.Net.listening_addr l with
@@ -873,10 +864,8 @@ let inet_cases =
                      ignore (listen ctx (`Tcp (ip_of_addr a, port)));
                      "bound")));
          case ~file:inet ~test:"DualStackV6AnyReservesEverything" ~variant:"UDP"
-           ~ipv6:true
-           (expect ~mem:"EADDRINUSE; EADDRINUSE; bound; EADDRINUSE"
-              ~mem_bug:mem_dual_stack
-              "EADDRINUSE; EADDRINUSE; EADDRINUSE; EADDRINUSE") (fun ctx ->
+           ~ipv6:true (expect "EADDRINUSE; EADDRINUSE; EADDRINUSE; EADDRINUSE")
+           (fun ctx ->
              let _, addr =
                datagram_socket ctx (`Udp (Eio.Net.Ipaddr.V6.any, 0))
              in
