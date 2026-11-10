@@ -43,7 +43,10 @@ type Eio.Exn.Backend.t +=
             as Eio's backends do. On TCP, a write after the peer shut its
             receive side, and only that, is queued and read in the same way. A
             read, a write or a shutdown on a flow after its own close raises
-            [Invalid_argument], as Eio's own sockets do. *)
+            [Invalid_argument], as Eio's own sockets do. One already in flight
+            finishes against the open socket, and the socket closes once none
+            is, as Eio defers a descriptor's close to its users: a read waiting
+            across its flow's close still gets what the peer writes. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes

@@ -562,35 +562,75 @@ module Flow = struct
     type tag = [ `Generic ]
 
     (* [release] is the hook that closes the flow when the switch it was
-       opened under finishes, removed once the flow is closed. *)
+       opened under finishes, removed once the flow is closed. A close defers
+       to the operations in flight, [users], as Eio's [Rcfd] defers a
+       descriptor's: [closing] refuses new ones at once, and the last user
+       closes the socket, [closed]. *)
     type t = {
       to_peer : Pipe.t;
       from_peer : Pipe.t;
+      lock : Mutex.t;
+      mutable users : int;
+      mutable closing : bool;
       mutable closed : bool;
+      mutable abort : bool;
       mutable release : Eio.Switch.hook;
       mutable on_close : unit -> unit;
       connection : int;
     }
 
-    (* As Eio's own sockets refuse a descriptor used after close. *)
-    let check t op =
-      if t.closed then Fmt.invalid_arg "eio-net.mem: %s on a closed flow" op
+    (* [abort] resets the peer, as a connection a listener drops unaccepted
+       is; otherwise the peer reads end-of-file, or a reset if this end left
+       bytes unread. *)
+    let teardown t =
+      let unread = Pipe.leave t.from_peer in
+      if t.abort then Pipe.update t.from_peer (fun p -> p.refused <- true);
+      if unread || t.abort then Pipe.reset t.to_peer;
+      Pipe.shut t.to_peer;
+      t.on_close ()
+
+    let leave t =
+      let last =
+        Mutex.protect t.lock @@ fun () ->
+        t.users <- t.users - 1;
+        t.users = 0 && t.closing && (not t.closed)
+        && begin
+          t.closed <- true;
+          true
+        end
+      in
+      if last then teardown t
+
+    (* Runs [f] as a user of the open socket. As Eio's own sockets refuse a
+       descriptor used after close. *)
+    let use t op f =
+      Mutex.protect t.lock (fun () ->
+          if t.closing then
+            Fmt.invalid_arg "eio-net.mem: %s on a closed flow" op;
+          t.users <- t.users + 1);
+      match f () with
+      | v ->
+          leave t;
+          v
+      | exception e ->
+          let bt = Printexc.get_raw_backtrace () in
+          leave t;
+          Printexc.raise_with_backtrace e bt
 
     let single_write t bufs =
-      check t "write";
-      Pipe.write t.to_peer ~back:t.from_peer bufs
+      use t "write" @@ fun () -> Pipe.write t.to_peer ~back:t.from_peer bufs
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
 
     (* An empty read is end-of-file, as Eio's backends report the 0 that
        read(2) returns for it. *)
     let single_read t buf =
-      check t "read";
+      use t "read" @@ fun () ->
       if Cstruct.length buf = 0 then raise End_of_file
       else Pipe.read t.from_peer buf
 
     let shutdown t cmd =
-      check t "shutdown";
+      use t "shutdown" @@ fun () ->
       match cmd with
       | `Send ->
           Pipe.shut t.to_peer;
@@ -601,20 +641,25 @@ module Flow = struct
           Pipe.fin_sent t.from_peer;
           Pipe.shut_receive t.from_peer
 
-    (* [abort] resets the peer, as a connection a listener drops unaccepted
-       is; otherwise the peer reads end-of-file, or a reset if this end left
-       bytes unread. *)
     let close_with ~abort t =
-      if not t.closed then begin
-        t.closed <- true;
+      let now =
+        Mutex.protect t.lock @@ fun () ->
+        if t.closing then `Again
+        else begin
+          t.closing <- true;
+          t.abort <- abort;
+          if t.users = 0 then begin
+            t.closed <- true;
+            `Now
+          end
+          else `Deferred
+        end
+      in
+      if now <> `Again then begin
         Eio.Switch.remove_hook t.release;
-        t.release <- Eio.Switch.null_hook;
-        let unread = Pipe.leave t.from_peer in
-        if abort then Pipe.update t.from_peer (fun p -> p.refused <- true);
-        if unread || abort then Pipe.reset t.to_peer;
-        Pipe.shut t.to_peer;
-        t.on_close ()
-      end
+        t.release <- Eio.Switch.null_hook
+      end;
+      if now = `Now then teardown t
 
     let close t = close_with ~abort:false t
     let read_methods = []
@@ -640,7 +685,11 @@ module Flow = struct
         {
           from_peer;
           to_peer;
+          lock = Mutex.create ();
+          users = 0;
+          closing = false;
           closed = false;
+          abort = false;
           release = Eio.Switch.null_hook;
           on_close = ignore;
           connection;

@@ -740,6 +740,52 @@ let test_empty_read () =
   | exception End_of_file -> ()
   | n -> Alcotest.failf "an empty read returned %d" n
 
+(* A close defers to the reads and writes in flight, as Eio's backends defer
+   a descriptor's close to its users: a read waiting across its own flow's
+   close still gets what the peer writes after, and only a later read raises
+   [Invalid_argument]. The socket then closes and the peer reads end-of-file. *)
+let test_close_defers_to_a_read () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  let buf = Cstruct.create 4 in
+  Eio.Fiber.both
+    (fun () ->
+      Alcotest.(check int)
+        "the read in flight" 1
+        (Eio.Flow.single_read client buf);
+      match Eio.Flow.single_read client buf with
+      | exception Invalid_argument _ -> ()
+      | (_ : int) -> Alcotest.fail "read after close")
+    (fun () ->
+      Eio.Fiber.yield ();
+      Eio.Flow.close client;
+      Eio.Fiber.yield ();
+      Eio.Flow.copy_string "z" server);
+  match Eio.Flow.single_read server buf with
+  | exception End_of_file -> ()
+  | (_ : int) -> Alcotest.fail "the peer read data"
+
+(* A write waiting for room across its own flow's close finishes against the
+   open socket, as a write in flight does under Eio's deferred close. *)
+let test_close_defers_to_a_write () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe ~capacity:1 () in
+  Eio.Flow.copy_string "a" client;
+  Eio.Fiber.both
+    (fun () ->
+      Alcotest.(check int)
+        "the write in flight" 1
+        (Eio.Flow.single_write client [ Cstruct.of_string "b" ]))
+    (fun () ->
+      Eio.Fiber.yield ();
+      Eio.Flow.close client;
+      let buf = Cstruct.create 1 in
+      Eio.Flow.read_exact server buf);
+  let got = read_all server in
+  match got with
+  | "b", End_of_file -> ()
+  | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -1268,6 +1314,10 @@ let suite =
       Alcotest.test_case "write after own shutdown" `Quick
         test_write_after_own_shutdown;
       Alcotest.test_case "an empty read" `Quick test_empty_read;
+      Alcotest.test_case "a close defers to a read" `Quick
+        test_close_defers_to_a_read;
+      Alcotest.test_case "a close defers to a write" `Quick
+        test_close_defers_to_a_write;
       Alcotest.test_case "a full write after the peer shut down both ways"
         `Quick test_full_write_after_peer_shutdown_all;
       Alcotest.test_case "read after peer close" `Quick
