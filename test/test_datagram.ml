@@ -43,7 +43,8 @@ let test_source_round_trip () =
    until ocaml-uring sets msg_namelen to the size of the address it is given
    (ocaml-multicore/eio#963). *)
 let test_unix_source_round_trip () =
-  let dir = Filename.temp_dir "eio-net" "" in
+  (* Under /tmp, not $TMPDIR, which may be too long for sun_path. *)
+  let dir = Filename.temp_dir ~temp_dir:"/tmp" "eio-net" "" in
   let path_a = Filename.concat dir "a" and path_b = Filename.concat dir "b" in
   Fun.protect ~finally:(fun () ->
       List.iter
