@@ -1157,6 +1157,31 @@ let test_datagram_address_in_use () =
     "the same port of the other family" false
     (in_use (`Udp (Eio.Net.Ipaddr.V6.loopback, 9005)))
 
+(* The two ends of a connection name the same connection, and no other
+   connection does; a socket of another library names none. *)
+let test_connection () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+  let listener = Eio.Net.listen ~sw ~backlog:2 net addr in
+  let c1 = Eio.Net.connect ~sw net addr in
+  let c2 = Eio.Net.connect ~sw net addr in
+  let s1, _ = Eio.Net.accept ~sw listener in
+  let s2, _ = Eio.Net.accept ~sw listener in
+  let a, b = Eio_net_mem.pipe () in
+  let id s = Option.get (Eio_net_mem.connection s) in
+  Alcotest.(check bool) "first connection" true (id c1 = id s1);
+  Alcotest.(check bool) "second connection" true (id c2 = id s2);
+  Alcotest.(check bool) "a pipe" true (id a = id b);
+  Alcotest.(check bool)
+    "three connections" true
+    (id c1 <> id c2 && id c1 <> id a && id c2 <> id a);
+  let mock = Eio_mock.Flow.make "mock" in
+  Alcotest.(check bool)
+    "another socket" true
+    (Eio_net_mem.connection (mock :> _ Eio.Net.stream_socket) = None)
+
 let suite =
   ( "eio_net_mem",
     [
@@ -1244,4 +1269,6 @@ let suite =
         test_a_closed_connection_leaves_its_switch;
       Alcotest.test_case "a write in another domain wakes the read" `Quick
         test_a_write_in_another_domain_wakes_the_read;
+      Alcotest.test_case "the ends of a connection name it" `Quick
+        test_connection;
     ] )

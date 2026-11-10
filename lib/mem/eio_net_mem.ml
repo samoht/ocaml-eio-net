@@ -567,6 +567,7 @@ module Flow = struct
       mutable closed : bool;
       mutable release : Eio.Switch.hook;
       mutable on_close : unit -> unit;
+      connection : int;
     }
 
     (* As Eio's own sockets refuse a descriptor used after close. *)
@@ -618,11 +619,17 @@ module Flow = struct
      fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
   end
 
-  let handler = Eio.Net.Pi.stream_socket (module Impl)
+  type (_, _, _) Eio.Resource.pi +=
+    | Connection : ('t, 't -> int, [> `Generic ]) Eio.Resource.pi
+
+  let handler =
+    Eio.Resource.handler
+      (H (Connection, fun (t : Impl.t) -> t.connection)
+      :: Eio.Resource.bindings (Eio.Net.Pi.stream_socket (module Impl)))
 
   type t = Impl.t * Impl.tag Eio.Net.stream_socket_ty Eio.Resource.t
 
-  let v ~from_peer ~to_peer =
+  let v ~connection ~from_peer ~to_peer =
     let impl =
       Impl.
         {
@@ -631,16 +638,25 @@ module Flow = struct
           closed = false;
           release = Eio.Switch.null_hook;
           on_close = ignore;
+          connection;
         }
     in
     (impl, Eio.Resource.T (impl, handler))
 
+  let connections = Atomic.make 0
+
   let pair ~local ~capacity =
+    let connection = Atomic.fetch_and_add connections 1 in
     let to_client = Pipe.v ~local ~capacity in
     let to_server = Pipe.v ~local ~capacity in
-    let client = v ~from_peer:to_client ~to_peer:to_server in
-    let server = v ~from_peer:to_server ~to_peer:to_client in
+    let client = v ~connection ~from_peer:to_client ~to_peer:to_server in
+    let server = v ~connection ~from_peer:to_server ~to_peer:to_client in
     (client, server)
+
+  let connection (Eio.Resource.T (t, ops) : _ Eio.Net.stream_socket) =
+    match Eio.Resource.get_opt ops Connection with
+    | Some f -> Some (f t)
+    | None -> None
 
   (* Closes [flow] when [sw] finishes, unless it is closed first. *)
   let close_with sw ((impl, flow) : t) =
@@ -1201,6 +1217,8 @@ let check_capacity = function
   | None -> max_int
   | Some c when c >= 1 -> c
   | Some c -> Fmt.invalid_arg "eio-net.mem: the capacity is %d" c
+
+let connection = Flow.connection
 
 let pipe ?capacity () =
   let capacity = check_capacity capacity in

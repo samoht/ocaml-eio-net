@@ -128,6 +128,12 @@ val pipe :
     ends must run under an Eio event loop; the two ends may be in different
     domains. No switch closes them: the caller does. *)
 
+val connection : _ Eio.Net.stream_socket -> int option
+(** [connection s] is [Some n] if [s] is an end of a connection of this library,
+    made by {!v} or {!pipe}, and [None] otherwise. The two ends of a connection
+    have the same [n], and no other connection has it. A wrapper that sees both
+    ends, such as a fault injector, pairs them with it. *)
+
 (** {1:streams Streams}
 
     A [listen] binds the TCP or Unix stream address it is given. One on TCP port
