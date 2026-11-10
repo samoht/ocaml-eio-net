@@ -207,11 +207,10 @@ let unix_stream_cases =
           outcome (fun () -> read_exact a 10));
       (* ReadOneSideClosedWithUnreadData: a peer that shuts down both ways
          reads as end of file, and once it closes with bytes of ours unread,
-         as a reset. macOS keeps reading end of file, and so does
-         eio-net.mem, whose receive shutdown drops what is queued. *)
+         as a reset. macOS keeps reading end of file. *)
       per_stream ~file:unix_stream ~test:"ReadOneSideClosedWithUnreadData"
         [ Unix_stream ]
-        (fun _ -> expect ~macos:"EOF; EOF" ~mem:"EOF; EOF" "EOF; reset")
+        (fun _ -> expect ~macos:"EOF; EOF" "EOF; reset")
         (fun ctx k ->
           let first, second, _ = stream_pair ctx k in
           write second (payload 10);

@@ -340,8 +340,8 @@ end
    clears its pending error; reads then return end-of-file. [gone] says the
    reader has closed: the first write to it is lost and answered with a reset,
    which [refused] then makes every later write raise; on a Unix-domain
-   connection, [local], the first write raises it, as EPIPE. [deaf] says the reader
-   shut its receive side: writes are lost, as Linux takes and drops them. *)
+   connection, [local], the first write raises it, as EPIPE. [rcv_shut] says the reader
+   shut its receive side: it reads what is queued, then end-of-file. *)
 module Pipe = struct
   type t = {
     mutex : Mutex.t;
@@ -351,7 +351,7 @@ module Pipe = struct
     mutable reset : bool;
     mutable gone : bool;
     mutable refused : bool;
-    mutable deaf : bool;
+    mutable rcv_shut : bool;
     local : bool;
     capacity : int;
     mutable size : int; (* Bytes queued and not yet read. *)
@@ -369,7 +369,7 @@ module Pipe = struct
       reset = false;
       gone = false;
       refused = false;
-      deaf = false;
+      rcv_shut = false;
       capacity;
       size = 0;
       readers = Waiters.v ();
@@ -439,7 +439,6 @@ module Pipe = struct
         t.refused <- true;
         if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
       end
-      else if t.deaf then leave (`Done n)
       else if Waiters.must_wait t.writers ~turn || t.size >= t.capacity then
         (`Wait (Waiters.queue t.writers ~turn), [])
       else begin
@@ -498,7 +497,7 @@ module Pipe = struct
         t.shut <- true;
         (`Raise (reset_exn ()), Waiters.release t.readers ~turn)
       end
-      else if t.shut || t.deaf then
+      else if t.shut || t.rcv_shut then
         (`Raise End_of_file, Waiters.release t.readers ~turn)
       else (`Wait (Waiters.queue t.readers ~turn), [])
     in
@@ -511,13 +510,9 @@ module Pipe = struct
 
   let shut t = update t (fun t -> t.shut <- true)
 
-  (* The reader shuts its receive side: what is queued is dropped. *)
-  let deafen t =
-    update t (fun t ->
-        Queue.clear t.queued;
-        t.head <- 0;
-        t.size <- 0;
-        t.deaf <- true)
+  (* The reader shuts its receive side: it still reads what is queued and
+     what arrives, as on Linux, and end-of-file once nothing is. *)
+  let shut_receive t = update t (fun t -> t.rcv_shut <- true)
 
   (* The reader closes: bytes it left unread answer the writer with a reset,
      which refuses its writes at once. *)
@@ -564,10 +559,10 @@ module Flow = struct
       check t "shutdown";
       match cmd with
       | `Send -> Pipe.shut t.to_peer
-      | `Receive -> Pipe.deafen t.from_peer
+      | `Receive -> Pipe.shut_receive t.from_peer
       | `All ->
           Pipe.shut t.to_peer;
-          Pipe.deafen t.from_peer
+          Pipe.shut_receive t.from_peer
 
     (* [abort] resets the peer, as a connection a listener drops unaccepted
        is; otherwise the peer reads end-of-file, or a reset if this end left

@@ -375,8 +375,8 @@ let test_reset_read_once () =
   Alcotest.(check (list string))
     "reads" [ "reset"; "EOF"; "EOF" ] [ first; second; third ]
 
-(* A peer that shuts its receive side takes writes and drops them, as on
-   Linux, and reads end-of-file itself. *)
+(* A peer that shuts its receive side still reads what is written to it, as on
+   Linux, then end-of-file once nothing is queued. *)
 let test_write_after_peer_shutdown_receive () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe () in
@@ -386,7 +386,7 @@ let test_write_after_peer_shutdown_receive () =
     "both writes return" [ 4; 4 ]
     [ write (); write () ];
   (match read_all server with
-  | "", End_of_file -> ()
+  | "pingping", End_of_file -> ()
   | got, e -> Alcotest.failf "the server read %S then %a" got Fmt.exn e);
   Eio.Flow.copy_string "pong" server;
   Eio.Flow.shutdown server `Send;

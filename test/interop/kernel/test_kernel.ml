@@ -20,7 +20,6 @@ type exception_ = {
   linux : string;
 }
 
-let streams = [ Tcp4; Tcp6; Unix_stream ]
 let tcp = [ Tcp4; Tcp6 ]
 let dgrams = [ Udp4; Udp6; Unix_dgram ]
 let ex why transports op ~mem ~linux = { why; transports; op; mem; linux }
@@ -31,14 +30,12 @@ let documented = []
 (* Divergences from Linux not fixed yet. *)
 let known =
   [
-    ex "M1: a read after our own receive shutdown delivers queued bytes (1)"
-      streams "read" ~mem:"EOF" ~linux:"r1";
-    ex "M1: a read after our own receive shutdown delivers queued bytes (2)"
-      streams "read" ~mem:"EOF" ~linux:"r2";
     ex "M2: data reaching a TCP end shut both ways resets it (write)" tcp
       "write" ~mem:"2" ~linux:"Reset";
-    ex "M2: data reaching a TCP end shut both ways resets it (read)" tcp "read"
-      ~mem:"EOF" ~linux:"Reset";
+    ex "M2: data reaching a TCP end shut both ways resets it (read 1)" tcp
+      "read" ~mem:"r1" ~linux:"Reset";
+    ex "M2: data reaching a TCP end shut both ways resets it (read 4)" tcp
+      "read" ~mem:"r2" ~linux:"Reset";
     ex "M3: a Unix-domain write after the peer's receive shutdown is EPIPE"
       [ Unix_stream ] "write" ~mem:"2" ~linux:"Reset";
     ex "M4: a TCP read after the peer's end of file stays end of file" tcp
