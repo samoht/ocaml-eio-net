@@ -79,7 +79,9 @@ let test_resolve_numbers () =
     [
       ("80", "tcp:127.0.0.1:80");
       ("", "tcp:127.0.0.1:0");
+      ("65535", "tcp:127.0.0.1:65535");
       ("65536", "tcp:127.0.0.1:0");
+      ("65617", "tcp:127.0.0.1:81");
       ("+80", "tcp:127.0.0.1:80");
       ("080", "tcp:127.0.0.1:80");
       (" 80", "tcp:127.0.0.1:80");
@@ -1451,6 +1453,44 @@ let test_wildcard_destination () =
   Alcotest.(check string) "datagram to 0.0.0.0" "x" (got r);
   Alcotest.(check string) "datagram to ::" "y" (got r4)
 
+(* Port 0 binds the lowest free port of the dynamic range, again once it is
+   freed, for listeners and datagram sockets; clients take ports counted down
+   from its top. *)
+let test_port_choice () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let port l =
+    match Eio.Net.listening_addr l with `Tcp (_, p) -> p | _ -> 0
+  in
+  let a = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (lo, 0)) in
+  let b = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (lo, 0)) in
+  Alcotest.(check (list int)) "listeners" [ 49152; 49153 ] [ port a; port b ];
+  Eio.Resource.close a;
+  let c = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (lo, 0)) in
+  Alcotest.(check int) "the freed lowest port" 49152 (port c);
+  let peer () =
+    ignore (Eio.Net.connect ~sw net (`Tcp (lo, port b)));
+    match Eio.Net.accept ~sw b with _, `Tcp (_, p) -> p | _ -> 0
+  in
+  let p1 = peer () in
+  let p2 = peer () in
+  Alcotest.(check (list int)) "clients" [ 65535; 65534 ] [ p1; p2 ];
+  let udp () =
+    let s = Eio.Net.datagram_socket ~sw net (`Udp (lo, 0)) in
+    let r = Eio.Net.datagram_socket ~sw net (`Udp (lo, 50000)) in
+    Eio.Net.send s ~dst:(`Udp (lo, 50000)) [ Cstruct.of_string "x" ];
+    let src, _ = Eio.Net.recv r (Cstruct.create 1) in
+    Eio.Resource.close r;
+    (s, match src with `Udp (_, p) -> p | `Unix _ -> 0)
+  in
+  let s, p = udp () in
+  Alcotest.(check int) "a datagram socket" 49152 p;
+  Eio.Resource.close s;
+  let _, p = udp () in
+  Alcotest.(check int) "a datagram socket, again" 49152 p
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1774,6 +1814,7 @@ let suite =
       Alcotest.test_case "bind_to another family" `Quick
         test_bind_to_another_family;
       Alcotest.test_case "the source address" `Quick test_source_address;
+      Alcotest.test_case "the choice of ports" `Quick test_port_choice;
       Alcotest.test_case "a wildcard destination" `Quick
         test_wildcard_destination;
       Alcotest.test_case "a connect under a finished switch" `Quick
