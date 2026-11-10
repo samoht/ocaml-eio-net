@@ -108,6 +108,11 @@ type Eio.Exn.Backend.t +=
             with its NUL, where OCaml's [Unix] fails with [ENAMETOOLONG]: by
             [listen], [connect], [bind_to], [datagram_socket] and a datagram
             [send]. *)
+  | Invalid_address
+        (** The backend code of the unclassified {!Eio.Io} error a [connect]
+            raises when its socket cannot bind the address [bind_to] gives: an
+            IPv4 one for an IPv6 destination, or an IP one for a Unix path,
+            where bind(2) fails with [EINVAL] on Linux. *)
 
 (** {1 Networks} *)
 
@@ -213,9 +218,11 @@ val connection : _ Eio.Net.stream_socket -> int option
     a listener or another client holds raises the error that {!Address_in_use}
     marks; one bound to an IPv6 address connecting to an IPv4-mapped one, or the
     reverse, raises the error that {!Network_unreachable} or {!Address_family}
-    marks; one bound to an address of another family, IPv4 for IPv6 or a path
-    for TCP, raises the error that {!Address_family} marks, as macOS fails it
-    with EAFNOSUPPORT where Linux says EINVAL.
+    marks; one bound to an address of another family raises, as Linux's bind(2)
+    fails, the error that {!Address_family} marks from an IPv4 socket, IPv6 or a
+    path for IPv4, and the one that {!Invalid_address} marks from an IPv6 or a
+    Unix-domain socket, IPv4 for IPv6 or TCP for a path; macOS says EAFNOSUPPORT
+    for both.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and

@@ -1252,6 +1252,35 @@ let test_unavailable_addresses () =
            (Eio.Net.listen ~sw ~backlog:1 net
               (`Unix ("/tmp/" ^ String.make 102 'x')))))
 
+(* A connect bound to an address its socket's family cannot bind fails as
+   bind(2) fails it on Linux: an IPv6 or Unix-domain socket with EINVAL, an
+   IPv4 one with EAFNOSUPPORT. *)
+let test_bind_to_another_family () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let v4 = Eio.Net.Ipaddr.V4.loopback and v6 = Eio.Net.Ipaddr.V6.loopback in
+  let raises code ~bind_to addr =
+    match Eio.Net.connect ~sw ~bind_to net addr with
+    | exception Eio.Io (Eio.Exn.X c, _) -> c = code
+    | (_ : _ Eio.Net.stream_socket) -> false
+  in
+  Alcotest.(check bool)
+    "IPv4 for IPv6" true
+    (raises Eio_net_mem.Invalid_address ~bind_to:(`Tcp (v4, 0)) (`Tcp (v6, 80)));
+  Alcotest.(check bool)
+    "TCP for a path" true
+    (raises Eio_net_mem.Invalid_address
+       ~bind_to:(`Tcp (v4, 0))
+       (`Unix "/tmp/s.sock"));
+  Alcotest.(check bool)
+    "IPv6 for IPv4" true
+    (raises Eio_net_mem.Address_family ~bind_to:(`Tcp (v6, 0)) (`Tcp (v4, 80)));
+  Alcotest.(check bool)
+    "a path for TCP" true
+    (raises Eio_net_mem.Address_family ~bind_to:(`Unix "/tmp/c.sock")
+       (`Tcp (v4, 80)))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1570,6 +1599,8 @@ let suite =
       Alcotest.test_case "TIME_WAIT" `Quick test_time_wait;
       Alcotest.test_case "addresses no interface has" `Quick
         test_unavailable_addresses;
+      Alcotest.test_case "bind_to another family" `Quick
+        test_bind_to_another_family;
       Alcotest.test_case "a connect under a finished switch" `Quick
         test_connect_under_a_finished_switch;
       Alcotest.test_case "a closed connection leaves its switch" `Quick

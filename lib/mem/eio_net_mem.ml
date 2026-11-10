@@ -13,6 +13,7 @@ type Eio.Exn.Backend.t +=
   | Not_connected
   | Address_not_available
   | Name_too_long
+  | Invalid_address
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -51,6 +52,9 @@ let () =
         true
     | Name_too_long ->
         Format.pp_print_string ppf "File name too long (eio-net.mem)";
+        true
+    | Invalid_address ->
+        Format.pp_print_string ppf "Invalid address (eio-net.mem)";
         true
     | _ -> false)
 
@@ -1277,9 +1281,10 @@ module Network = struct
         let ports = t.hub.Listening_socket.ports in
         if linger then Ports.linger ports port h else Ports.remove ports port h)
 
-  (* A connect bound to an address of the other family fails, as macOS fails
-     it with EAFNOSUPPORT where Linux says EINVAL; IPv6 against IPv4-mapped
-     fails as on Linux. *)
+  (* A connect's socket has its destination's family, and fails to bind an
+     address of another as Linux's bind(2) does: an IPv4 socket with
+     EAFNOSUPPORT, an IPv6 or Unix-domain one with EINVAL. IPv6 against
+     IPv4-mapped fails as on Linux. *)
   let check_bind (bind_to : Eio.Net.Sockaddr.stream option)
       (addr : Eio.Net.Sockaddr.stream) =
     match (bind_to, addr) with
@@ -1287,7 +1292,10 @@ module Network = struct
     | Some (`Tcp (b, _)), `Tcp (d, _)
       when String.length (b :> string) = String.length (d :> string) ->
         Option.iter fail (cross_family b d)
-    | Some _, _ -> fail Address_family
+    | Some (`Tcp _), `Tcp (d, _) when String.length (d :> string) = 16 ->
+        fail Invalid_address
+    | Some (`Tcp _), `Unix _ -> fail Invalid_address
+    | Some _, `Tcp _ -> fail Address_family
 
   (* The client's address as the listener at [listener] sees it: an IPv4
      client of an IPv6 listener is IPv4-mapped. A Unix-domain client binds no

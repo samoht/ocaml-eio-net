@@ -39,8 +39,7 @@ let cases =
          on Linux 7.2, where the review measured EINVAL on another Linux. *)
       [
         case ~file ~test:"BindToOtherFamily" ~variant:"127.0.0.1 to ::1"
-          ~ipv6:true (expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL")
-          (fun ctx ->
+          ~ipv6:true (expect ~macos:"EAFNOSUPPORT" "EINVAL") (fun ctx ->
             let l = listen ctx (`Tcp (v6_loopback, 0)) in
             outcome (fun () ->
                 ignore

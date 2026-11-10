@@ -133,6 +133,7 @@ let mem_errno : Eio.Exn.Backend.t -> string option = function
   | Eio_net_mem.Wrong_socket_type -> Some "EPROTOTYPE"
   | Eio_net_mem.Address_not_available -> Some "EADDRNOTAVAIL"
   | Eio_net_mem.Name_too_long -> Some "ENAMETOOLONG"
+  | Eio_net_mem.Invalid_address -> Some "EINVAL"
   | _ -> None
 
 let classify = function
