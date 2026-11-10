@@ -112,7 +112,9 @@ type Eio.Exn.Backend.t +=
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             raises when its socket cannot bind the address [bind_to] gives: an
             IPv4 one for an IPv6 destination, or an IP one for a Unix path,
-            where bind(2) fails with [EINVAL] on Linux. *)
+            where bind(2) fails with [EINVAL] on Linux; and of the one a
+            datagram [send] raises at an address its socket cannot send to,
+            described in {!section-datagrams}. *)
 
 (** {1 Networks} *)
 
@@ -301,11 +303,22 @@ val connection : _ Eio.Net.stream_socket -> int option
 
     A datagram sent from an IPv6 address to an IPv4-mapped one, or the reverse,
     raises the error that {!Network_unreachable} or {!Address_family} marks. One
-    from an IPv4 socket to an IPv6 address, or between UDP and a Unix path,
-    raises the error that {!Address_family} marks. One from an IPv6 socket to an
-    IPv4 address goes the IPv4 way, as on Linux: it is refused, with the error
-    that {!Network_unreachable} marks, from an IPv6 address other than the
-    wildcard or an IPv4-mapped one.
+    from an IPv4 socket to an IPv6 address raises the error that
+    {!Address_family} marks, and so does one to a Unix path of 14 bytes or more;
+    a shorter path, too short to fill a [sockaddr_in], raises the one that
+    {!Invalid_address} marks, and so does a Unix path from an IPv6 socket and a
+    UDP address from a Unix-domain one, as on Linux. One from an IPv6 socket to
+    an IPv4 address goes the IPv4 way, as on Linux: it is refused, with the
+    error that {!Network_unreachable} marks, from an IPv6 address other than the
+    wildcard or an IPv4-mapped one. One from a loopback address to an IPv4
+    address outside 127.0.0.0/8, other than a multicast one, raises the error
+    that {!Invalid_address} marks, as Linux cannot route it.
+
+    A datagram that is both too long and refused for its address meets the
+    errors in Linux's order. A Unix-domain socket checks the address family
+    first. An IPv4 socket refuses a datagram of more than 65535 bytes first, and
+    its address before the 65507-byte limit. An IPv6 socket checks the address
+    first.
 
     {1:paths Unix paths}
 

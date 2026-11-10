@@ -1677,6 +1677,70 @@ let test_datagram_reuse_addr () =
   | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
   | _ -> Alcotest.fail "bound without reuse_addr"
 
+(* A datagram's errors come in Linux's order: a Unix-domain socket refuses a
+   UDP address with EINVAL before the length; an IPv4 socket refuses more than
+   65535 bytes first, then an address of another family, port 0, or one its
+   loopback address cannot route to, then a datagram too long for IPv4; an
+   IPv6 socket refuses another family or an unreachable network first. *)
+let test_datagram_error_order () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let ip = Eio.Net.Ipaddr.of_raw in
+  let v4 = Eio.Net.Ipaddr.V4.loopback and v6 = Eio.Net.Ipaddr.V6.loopback in
+  let mapped =
+    ip "\000\000\000\000\000\000\000\000\000\000\255\255\127\000\000\001"
+  in
+  let unix_sock = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/order.sock") in
+  let v4_sock = Eio.Net.datagram_socket ~sw net (`Udp (v4, 0)) in
+  let v6_sock = Eio.Net.datagram_socket ~sw net (`Udp (v6, 0)) in
+  let mapped_sock = Eio.Net.datagram_socket ~sw net (`Udp (mapped, 0)) in
+  let error sock dst len =
+    match Eio.Net.send sock ~dst [ Cstruct.create len ] with
+    | () -> "sent"
+    | exception Eio.Io (Eio.Exn.X code, _) -> (
+        match code with
+        | Eio_net_mem.Invalid_address | Eio_net_mem.Invalid_port -> "EINVAL"
+        | Eio_net_mem.Address_family -> "EAFNOSUPPORT"
+        | Eio_net_mem.Network_unreachable -> "ENETUNREACH"
+        | Eio_net_mem.Message_too_long -> "EMSGSIZE"
+        | _ -> "other")
+    | exception e -> Printexc.to_string e
+  in
+  List.iter
+    (fun (name, sock, dst, len, expected) ->
+      Alcotest.(check string) name expected (error sock dst len))
+    [
+      ("Unix to UDP", unix_sock, `Udp (v4, 9), 10, "EINVAL");
+      ("Unix to UDP, too long", unix_sock, `Udp (v4, 9), 300000, "EINVAL");
+      ("IPv4 to IPv6, 65508", v4_sock, `Udp (v6, 9), 65508, "EAFNOSUPPORT");
+      ("IPv4 to IPv6, 65536", v4_sock, `Udp (v6, 9), 65536, "EMSGSIZE");
+      ("IPv4 to port 0, 65508", v4_sock, `Udp (v4, 0), 65508, "EINVAL");
+      ("IPv4 to a short path", v4_sock, `Unix "/tmp/nowhere", 10, "EINVAL");
+      ( "IPv4 to a long path",
+        v4_sock,
+        `Unix "/tmp/abcdefghijk",
+        10,
+        "EAFNOSUPPORT" );
+      ( "loopback to 10.1.2.3",
+        v4_sock,
+        `Udp (ip "\010\001\002\003", 9),
+        65508,
+        "EINVAL" );
+      ( "loopback to 224.0.0.1",
+        v4_sock,
+        `Udp (ip "\224\000\000\001", 9),
+        10,
+        "sent" );
+      ("IPv6 to a path", v6_sock, `Unix "/tmp/abcdefghijk", 300000, "EINVAL");
+      ("::1 to IPv4, too long", v6_sock, `Udp (v4, 9), 300000, "ENETUNREACH");
+      ( "mapped to IPv6, too long",
+        mapped_sock,
+        `Udp (v6, 9),
+        300000,
+        "EAFNOSUPPORT" );
+    ]
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -2004,6 +2068,8 @@ let suite =
         test_datagram_autobind;
       Alcotest.test_case "datagram sockets with reuse_addr" `Quick
         test_datagram_reuse_addr;
+      Alcotest.test_case "the order of a datagram's errors" `Quick
+        test_datagram_error_order;
       Alcotest.test_case "addresses no interface has" `Quick
         test_unavailable_addresses;
       Alcotest.test_case "bind_to another family" `Quick

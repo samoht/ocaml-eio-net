@@ -1150,22 +1150,54 @@ module Datagram_socket = struct
     | `Unix _ -> 212960
     | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
 
-  (* A send a socket refuses: too long, to another socket type or address
-     family, or to port 0. An IPv6 socket sends to an IPv4 address the IPv4
-     way, as Linux does: from an IPv6 address other than the wildcard, the
-     network is unreachable. *)
+  (* A loopback address routes only to loopback and multicast ones. *)
+  let unroutable b d =
+    let b = unmap b and d = unmap d in
+    let first ip = Char.code (ip : Eio.Net.Ipaddr.v4v6 :> string).[0] in
+    is_v4 b && is_v4 d
+    && (not (same b (any b)))
+    && first b = 127
+    && first d <> 127
+    && (first d < 224 || first d > 239)
+
+  (* A send a socket refuses, in the order Linux checks: a Unix-domain socket
+     refuses a UDP address with EINVAL, then a datagram too long. An IPv4
+     socket refuses more than 65535 bytes, then a path (EINVAL, or
+     EAFNOSUPPORT for one that fills a [sockaddr_in], 14 bytes or more), an
+     IPv6 address, port 0, an address its loopback address cannot route to,
+     then a datagram too long for IPv4. An IPv6 socket refuses a path, then
+     another family or an unreachable network, port 0, a loopback route, and
+     a datagram too long; it sends to an IPv4 address the IPv4 way, from an
+     IPv6 address other than the wildcard unreachable. *)
   let refusal t dst bufs =
-    if Cstruct.lenv bufs > max_length dst then Some Message_too_long
-    else
-      match (t.addr, dst) with
-      | `Udp _, `Unix _ | `Unix _, `Udp _ -> Some Address_family
-      | _, `Udp (_, 0) -> Some Invalid_port
-      | `Udp (b, _), `Udp (d, _) -> (
-          match (String.length (b :> string), String.length (d :> string)) with
-          | 4, 16 -> Some Address_family
-          | 16, 4 -> cross_family b (map d)
-          | _ -> cross_family b d)
-      | `Unix _, `Unix _ -> None
+    let len = Cstruct.lenv bufs in
+    let too_long = len > max_length dst in
+    let routed b d port =
+      if port = 0 then Some Invalid_port
+      else if unroutable b d then Some Invalid_address
+      else if too_long then Some Message_too_long
+      else None
+    in
+    match (t.addr, dst) with
+    | `Unix _, `Udp _ -> Some Invalid_address
+    | `Unix _, `Unix _ -> if too_long then Some Message_too_long else None
+    | `Udp (b, _), dst when String.length (b :> string) = 4 -> (
+        if len > 0xffff then Some Message_too_long
+        else
+          match dst with
+          | `Unix path ->
+              Some
+                (if String.length path >= 14 then Address_family
+                 else Invalid_address)
+          | `Udp (d, _) when String.length (d :> string) = 16 ->
+              Some Address_family
+          | `Udp (d, port) -> routed b d port)
+    | `Udp _, `Unix _ -> Some Invalid_address
+    | `Udp (b, _), `Udp (d, port) -> (
+        let d16 = if String.length (d :> string) = 4 then map d else d in
+        match cross_family b d16 with
+        | Some code -> Some code
+        | None -> routed b d port)
 
   (* The address a datagram from [t] to [dst] comes from, as [peer] sees it: a
      wildcard sender sends from the loopback address of the destination's

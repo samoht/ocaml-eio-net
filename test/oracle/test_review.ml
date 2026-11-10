@@ -61,8 +61,9 @@ let cases =
       (* A datagram sent to an address of another family or socket type:
          from IPv4 to IPv6 it fails; from IPv6 to IPv4 it takes the IPv4 path
          on Linux, failing from ::1 and going from ::, where macOS fails it
-         with EINVAL; between UDP and a Unix path it fails, with EAFNOSUPPORT
-         on Linux 7.2 where the review measured EINVAL on another Linux. *)
+         with EINVAL; from UDP to a Unix path it fails with EAFNOSUPPORT, or
+         EINVAL for a path too short to fill a sockaddr_in; from a Unix path
+         to UDP with EINVAL. *)
       List.map
         (fun (variant, ipv6, src, dst, e) ->
           case ~file ~test:"DatagramAcrossFamilies" ~variant ~ipv6 e (fun ctx ->
@@ -106,7 +107,7 @@ let cases =
             false,
             `Unix,
             `Udp v4_loopback,
-            expect ~macos:"EAFNOSUPPORT" ~mem:"EAFNOSUPPORT" "EINVAL" );
+            expect ~macos:"EAFNOSUPPORT" "EINVAL" );
         ];
       (* A datagram's source address is the sender's as the receiver sees
          it: a wildcard sender sends from the loopback address the
