@@ -39,7 +39,7 @@
     stream into a wrong answer.
 
     {b Assert latency to catch a missing timeout.} A connect that times out
-    takes 127 seconds, as on Linux, and then fails: a program without a connect
+    takes 133 seconds, as on Linux, and then fails: a program without a connect
     timeout waits for it and still succeeds. A test that bounds its program's
     latency reads [env#clock] before and after.
 
@@ -89,8 +89,9 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
       for good;
     - at each structural position of what one end writes, the connection is
       reset;
-    - each connect is refused, or times out after 127 seconds; each accepted
-      connection is reset before its first byte, as when the client left first;
+    - each connect is refused, times out after 133 seconds, or finds its host
+      unreachable after 3 seconds; each accepted connection is reset before its
+      first byte, as when the client left first;
     - each datagram received is lost, duplicated, held back behind the next, or
       replaced with noise from the same sender;
     - on the first 4 KiB of each end, every read returns one byte, or every
@@ -187,8 +188,16 @@ module Fault : sig
             lost. On an accept, the connection it returns has ended. *)
     | Refuse  (** A connect fails with [Connection_failure (Refused _)]. *)
     | Timeout
-        (** A connect fails with [Connection_failure Timeout] after 127 seconds
-            of the clock, as a lost handshake does on Linux. *)
+        (** A connect fails after 133 seconds of the clock, as a lost handshake
+            does on Linux, with the error eio_posix raises then:
+            [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (ETIMEDOUT,
+             "connect-in-progress", "")), _)]. Eio does not classify it as a
+            [Connection_failure]. *)
+    | Unreachable
+        (** A connect fails after 3 seconds of the clock, as one to a host that
+            does not answer its address lookup does on Linux, with
+            [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (EHOSTUNREACH,
+             "connect-in-progress", "")), _)]. *)
     | Emfile
         (** An accept fails with {!Emfile_fault}: the process has no descriptor
             left. The connection it took is reset, as if its client had left.

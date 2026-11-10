@@ -399,9 +399,34 @@ let test_net_connect_timeout () =
       (Eio_net_mem.v ~sw ())
   in
   (match Eio.Net.connect ~sw net addr with
-  | exception Eio.Io (Eio.Net.E (Connection_failure Timeout), _) -> ()
+  | exception
+      Eio.Io
+        ( Eio.Exn.X
+            (Eio_unix.Unix_error (Unix.ETIMEDOUT, "connect-in-progress", "")),
+          _ ) ->
+      ()
   | _ -> Alcotest.fail "the connect went through");
-  Alcotest.(check (float 0.)) "after 127 s" 127. (Eio.Time.now env#clock)
+  Alcotest.(check (float 0.)) "after 133 s" 133. (Eio.Time.now env#clock)
+
+(* An unreachable host fails a connect as eio_posix reports it, once the
+   kernel gives up on its address, after 3 s. *)
+let test_net_connect_unreachable () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Connect 1 Fault.Unreachable)
+      (Eio_net_mem.v ~sw ())
+  in
+  (match Eio.Net.connect ~sw net addr with
+  | exception
+      Eio.Io
+        ( Eio.Exn.X
+            (Eio_unix.Unix_error (Unix.EHOSTUNREACH, "connect-in-progress", "")),
+          _ ) ->
+      ()
+  | _ -> Alcotest.fail "the connect went through");
+  Alcotest.(check (float 0.)) "after 3 s" 3. (Eio.Time.now env#clock)
 
 let test_net_connect_stall () =
   Eio_mock.Backend.run_full @@ fun env ->
@@ -649,6 +674,8 @@ let suite =
       Alcotest.test_case "net short reads" `Quick test_net_short_reads;
       Alcotest.test_case "net connect refused" `Quick test_net_connect_refused;
       Alcotest.test_case "net connect timeout" `Quick test_net_connect_timeout;
+      Alcotest.test_case "net connect unreachable" `Quick
+        test_net_connect_unreachable;
       Alcotest.test_case "net connect stall" `Quick test_net_connect_stall;
       Alcotest.test_case "net operations" `Quick test_ops;
       Alcotest.test_case "writes counted across domains" `Quick

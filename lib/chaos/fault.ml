@@ -8,6 +8,7 @@ type t =
   | Eof
   | Refuse
   | Timeout
+  | Unreachable
   | Emfile
   | Drop
   | Dup
@@ -22,6 +23,7 @@ let pp ppf = function
   | Eof -> Fmt.string ppf "ends"
   | Refuse -> Fmt.string ppf "is refused"
   | Timeout -> Fmt.string ppf "times out"
+  | Unreachable -> Fmt.string ppf "finds its host unreachable"
   | Emfile -> Fmt.string ppf "fails with EMFILE"
   | Drop -> Fmt.string ppf "is lost"
   | Dup -> Fmt.string ppf "is duplicated"
@@ -36,6 +38,7 @@ let key = function
   | Eof -> "eof"
   | Refuse -> "refuse"
   | Timeout -> "timeout"
+  | Unreachable -> "unreachable"
   | Emfile -> "emfile"
   | Drop -> "drop"
   | Dup -> "dup"

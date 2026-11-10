@@ -17,7 +17,6 @@ let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Injected_fault)
 let refused_exn () =
   Eio.Net.err (Eio.Net.Connection_failure (Eio.Net.Refused Injected_fault))
 
-let timeout_exn () = Eio.Net.err (Eio.Net.Connection_failure Eio.Net.Timeout)
 let emfile_exn () = Eio.Exn.create (Eio.Exn.X Emfile_fault)
 
 let rec takev len = function
@@ -293,7 +292,9 @@ module Flow = struct
         | Some Eof ->
             break t.conn `Closed;
             raise_broken t
-        | Some (Refuse | Timeout | Emfile | Drop | Dup | Reorder | Garble _)
+        | Some
+            ( Refuse | Timeout | Unreachable | Emfile | Drop | Dup | Reorder
+            | Garble _ )
         | None ->
             deliver t dst ~cap:0
 
@@ -315,8 +316,8 @@ module Flow = struct
             | Some (Fault.Short k) -> max 1 (min k total)
             | Some (Hang | Reset | Eof) -> 0
             | Some
-                ( Stall _ | Refuse | Timeout | Emfile | Drop | Dup | Reorder
-                | Garble _ )
+                ( Stall _ | Refuse | Timeout | Unreachable | Emfile | Drop | Dup
+                | Reorder | Garble _ )
             | None ->
                 total
           in
@@ -342,8 +343,8 @@ module Flow = struct
             Eio.Time.sleep t.ctx.clock d;
             write ()
         | Some
-            ( Short _ | Refuse | Timeout | Emfile | Drop | Dup | Reorder
-            | Garble _ )
+            ( Short _ | Refuse | Timeout | Unreachable | Emfile | Drop | Dup
+            | Reorder | Garble _ )
         | None ->
             write ()
 
@@ -484,7 +485,9 @@ module Datagram = struct
                 | Some Hang ->
                     t.ready <- d :: t.ready;
                     `Wait None
-                | Some (Short _ | Reset | Eof | Refuse | Timeout | Emfile)
+                | Some
+                    ( Short _ | Reset | Eof | Refuse | Timeout | Unreachable
+                    | Emfile )
                 | None ->
                     `Pass)
           in
@@ -570,7 +573,9 @@ module Listener = struct
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;
           (flow, peer)
-      | Some (Short _ | Refuse | Timeout | Drop | Dup | Reorder | Garble _)
+      | Some
+          ( Short _ | Refuse | Timeout | Unreachable | Drop | Dup | Reorder
+          | Garble _ )
       | None ->
           (flow, peer)
 
@@ -615,8 +620,11 @@ module Network = struct
       match fault with
       | Some (Fault.Refuse | Reset) -> raise (refused_exn ())
       | Some Timeout ->
-          Eio.Time.sleep ctx.clock 127.;
-          raise (timeout_exn ())
+          Eio.Time.sleep ctx.clock 133.;
+          raise (Posix.timeout ())
+      | Some Unreachable ->
+          Eio.Time.sleep ctx.clock 3.;
+          raise (Posix.unreachable ())
       | Some Hang -> Eio.Fiber.await_cancel ()
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;

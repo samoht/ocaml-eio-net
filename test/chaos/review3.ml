@@ -43,6 +43,38 @@ let banner env =
       read_id flow)
   |> expect env Fmt.Dump.string id_s
 
+(* A reconnecting client. With [`Connection_failure] it retries only the
+   errors Eio classifies as connection failures, so a kernel ETIMEDOUT or
+   EHOSTUNREACH, which eio_posix raises unclassified, escapes. *)
+let connfail ?(bug = `None) env =
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7050) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          Eio.Flow.copy_string "hi\n" flow));
+  let rec attempt n =
+    if n > 3 then None
+    else
+      Eio.Switch.run @@ fun sw ->
+      match Eio.Net.connect ~sw env#net (tcp 7050) with
+      | exception Eio.Io (Eio.Net.E (Connection_failure _), _)
+        when bug = `Connection_failure ->
+          Eio.Time.sleep env#clock 1.0;
+          attempt (n + 1)
+      | exception Eio.Io _ when bug = `None ->
+          Eio.Time.sleep env#clock 1.0;
+          attempt (n + 1)
+      | flow -> (
+          match
+            Eio.Time.with_timeout_exn env#clock 1.0 (fun () ->
+                strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
+          with
+          | s -> Some s
+          | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) ->
+              attempt (n + 1))
+  in
+  expect env Fmt.Dump.string "hi" (attempt 1)
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in

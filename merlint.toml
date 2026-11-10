@@ -49,3 +49,9 @@ exclude = ["E105"]
 [[rules]]
 files = ["test/chaos/*"]
 exclude = ["E610"]
+
+# The errors eio_posix raises, built where the Hermetic prelude cannot refuse
+# Eio_unix; the wrapper's tests match each of them.
+[[rules]]
+files = ["lib/chaos/posix.ml"]
+exclude = ["E605"]

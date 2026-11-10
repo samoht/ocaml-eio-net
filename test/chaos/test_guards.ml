@@ -171,7 +171,7 @@ let suite =
         (Expect.passes (transfer 25 4096));
       Alcotest.test_case "a linear tier past the budget fails" `Quick
         (refused_with
-           "Eio_net_chaos.check: the linear tier needs 55 runs, more than the \
+           "Eio_net_chaos.check: the linear tier needs 56 runs, more than the \
             budget of 20"
            (transfer ~budget:20 25 4096));
       Alcotest.test_case "resume: correct" `Quick

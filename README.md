@@ -64,7 +64,7 @@ val workload : timeout:bool -> Eio_net_chaos.env -> unit = <fun>
 - : unit = ()
 ```
 
-Without its timeout, the client waits 127 seconds for a connect whose
+Without its timeout, the client waits 133 seconds for a connect whose
 handshake is lost, and the workload's bound on latency fails:
 
 ```ocaml
@@ -88,7 +88,9 @@ The tests follow a few rules:
 - Every program on the network meets the faults, the test's own peers
   included. Test servers use `Eio.Net.run_server ~on_error:ignore`, test
   clients catch `Eio.Io _ | End_of_file`, and both parse strictly.
-- A connect that times out takes 127 seconds, as on Linux, and then fails. A
+- A connect that times out takes 133 seconds, as on Linux, and then fails
+  with the error eio_posix raises, which Eio does not classify as a
+  connection failure. A
   program with no connect timeout still succeeds, so the test asserts its
   latency to catch it.
 - In the outage run every connect is refused and every datagram lost.

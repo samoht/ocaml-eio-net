@@ -140,7 +140,7 @@ let structural_rules (trace : trace) =
         }
       in
       match op.kind with
-      | `Connect -> [ r Refuse; r Timeout ]
+      | `Connect -> [ r Refuse; r Timeout; r Unreachable ]
       | `Accept -> [ r Reset ]
       | `Recv -> [ r Drop; r Dup; r Reorder; r (Garble 12) ]
       | `Read | `Write -> [])

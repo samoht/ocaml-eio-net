@@ -8,6 +8,7 @@ type t =
   | Eof
   | Refuse
   | Timeout
+  | Unreachable
   | Emfile
   | Drop
   | Dup

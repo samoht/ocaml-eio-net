@@ -9,12 +9,14 @@
   hermetic
   eio
   eio.utils
+  eio.unix
   eio-net.mem
   cstruct
   fmt
   mtime
   psq
-  domain-local-await))
+  domain-local-await
+  unix))
 
 (mdx
  (package eio-net)
