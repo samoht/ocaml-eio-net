@@ -30,8 +30,6 @@ let documented = []
 (* Divergences from Linux not fixed yet. *)
 let known =
   [
-    ex "M3: a Unix-domain write after the peer's receive shutdown is EPIPE"
-      [ Unix_stream ] "write" ~mem:"2" ~linux:"Reset";
     ex "M4: a TCP read after the peer's end of file stays end of file" tcp
       "read" ~mem:"Reset" ~linux:"EOF";
     ex "M5: a Unix-domain EPIPE write leaves the pending reset to the read"

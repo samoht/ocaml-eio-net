@@ -22,6 +22,8 @@ type Eio.Exn.Backend.t +=
             - A write to a TCP peer that shut down both ways: the first is lost
               and resets the connection, as Linux resets it then, so the peer's
               next read raises the reset and every later write does.
+            - A write on a Unix-domain connection whose peer shut its receive
+              side, as EPIPE.
 
             The first read or write that raises the reset reports it, as a
             socket clears its pending error: reads after it raise [End_of_file],
@@ -31,10 +33,10 @@ type Eio.Exn.Backend.t +=
             [End_of_file] once the queued bytes are read. A read after this end
             shut its receive side returns the bytes queued and those that arrive
             after, as on Linux, and raises [End_of_file] once none is queued;
-            macOS drops them. A write after the peer shut its receive side, and
-            only that, is queued and read in the same way. A read, a write or a
-            shutdown on a flow after its own close raises [Invalid_argument], as
-            Eio's own sockets do. *)
+            macOS drops them. On TCP, a write after the peer shut its receive
+            side, and only that, is queued and read in the same way. A read, a
+            write or a shutdown on a flow after its own close raises
+            [Invalid_argument], as Eio's own sockets do. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes

@@ -343,7 +343,8 @@ end
    connection, [local], the first write raises it, as EPIPE. [rcv_shut] says the reader
    shut its receive side: it reads what is queued, then end-of-file. Once it
    has also shut its send side, [fin_sent], data reaching a TCP reader resets
-   the connection, as Linux resets it in FIN-WAIT. *)
+   the connection, as Linux resets it in FIN-WAIT; a write to a Unix-domain
+   reader that shut its receive side raises the reset, as EPIPE. *)
 module Pipe = struct
   type t = {
     mutex : Mutex.t;
@@ -443,7 +444,8 @@ module Pipe = struct
         t.refused <- true;
         if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
       end
-      else if t.rcv_shut && t.fin_sent && not t.local then begin
+      else if t.rcv_shut && t.local then leave (`Raise (reset_exn ()))
+      else if t.rcv_shut && t.fin_sent then begin
         t.reset <- true;
         t.refused <- true;
         leave (`Lost n)
