@@ -1308,6 +1308,56 @@ let test_source_address () =
         (Fmt.to_to_string Eio.Net.Ipaddr.pp ip)
   | src, _ -> Alcotest.failf "source %s" (pp (src :> Eio.Net.Sockaddr.t))
 
+(* A wildcard destination stands for the address the socket is bound at, as
+   Linux routes it: 0.0.0.0 from 127.0.0.2 reaches 127.0.0.2, and :: from an
+   IPv4-mapped address reaches 127.0.0.1, for streams and datagrams. *)
+let test_wildcard_destination () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let ip = Eio.Net.Ipaddr.of_raw in
+  let other = ip "\127\000\000\002" in
+  let mapped =
+    ip "\000\000\000\000\000\000\000\000\000\000\255\255\127\000\000\001"
+  in
+  let v4 = Eio.Net.Ipaddr.V4.any and v6 = Eio.Net.Ipaddr.V6.any in
+  let connects ~listen ~bind dst =
+    Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (listen, 0)) in
+    let port =
+      match Eio.Net.listening_addr l with `Tcp (_, p) -> p | `Unix _ -> 0
+    in
+    match
+      Eio.Net.connect ~sw ~bind_to:(`Tcp (bind, 0)) net (`Tcp (dst, port))
+    with
+    | _ -> true
+    | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> false
+  in
+  Alcotest.(check bool)
+    "0.0.0.0 from 127.0.0.2 to 127.0.0.2" true
+    (connects ~listen:other ~bind:other v4);
+  Alcotest.(check bool)
+    "0.0.0.0 from 127.0.0.2 to 127.0.0.1" false
+    (connects ~listen:Eio.Net.Ipaddr.V4.loopback ~bind:other v4);
+  Alcotest.(check bool)
+    ":: from ::ffff:127.0.0.1" true
+    (connects ~listen:Eio.Net.Ipaddr.V4.loopback ~bind:mapped v6);
+  let r = Eio.Net.datagram_socket ~sw net (`Udp (other, 8140)) in
+  let s = Eio.Net.datagram_socket ~sw net (`Udp (other, 8141)) in
+  Eio.Net.send s ~dst:(`Udp (v4, 8140)) [ Cstruct.of_string "x" ];
+  let r4 =
+    Eio.Net.datagram_socket ~sw net (`Udp (Eio.Net.Ipaddr.V4.loopback, 8142))
+  in
+  let s6 = Eio.Net.datagram_socket ~sw net (`Udp (mapped, 8143)) in
+  Eio.Net.send s6 ~dst:(`Udp (v6, 8142)) [ Cstruct.of_string "y" ];
+  let got sock =
+    let buf = Cstruct.create 1 in
+    let _, n = Eio.Net.recv sock buf in
+    Cstruct.to_string ~len:n buf
+  in
+  Alcotest.(check string) "datagram to 0.0.0.0" "x" (got r);
+  Alcotest.(check string) "datagram to ::" "y" (got r4)
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1629,6 +1679,8 @@ let suite =
       Alcotest.test_case "bind_to another family" `Quick
         test_bind_to_another_family;
       Alcotest.test_case "the source address" `Quick test_source_address;
+      Alcotest.test_case "a wildcard destination" `Quick
+        test_wildcard_destination;
       Alcotest.test_case "a connect under a finished switch" `Quick
         test_connect_under_a_finished_switch;
       Alcotest.test_case "a closed connection leaves its switch" `Quick

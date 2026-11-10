@@ -104,6 +104,23 @@ let source_to ip : Eio.Net.Ipaddr.v4v6 =
   if is_v4 ip then (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6)
   else (Eio.Net.Ipaddr.V6.loopback :> Eio.Net.Ipaddr.v4v6)
 
+(* The destination a socket bound at [bound] reaches for [dst], as Linux
+   routes a wildcard one: the IPv4 wildcard address stands for the IPv4
+   address the socket is bound at, in [dst]'s form, and the IPv6 one from an
+   IPv4-mapped address for ::ffff:127.0.0.1. Otherwise {!reaching} takes a
+   wildcard address for the loopback address of its family. *)
+let toward ~(bound : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
+  let b = unmap bound in
+  if same dst Eio.Net.Ipaddr.V6.any then
+    if String.length (bound :> string) = 16 && is_v4 bound then
+      map Eio.Net.Ipaddr.V4.loopback
+    else dst
+  else if is_v4 dst && same (unmap dst) Eio.Net.Ipaddr.V4.any then
+    if is_v4 b && not (same b (any b)) then
+      if String.length (dst :> string) = 16 then map b else b
+    else dst
+  else dst
+
 (* [ip] as a socket bound at [own] sees it: IPv4 to an IPv4 socket, and
    IPv4-mapped to an IPv6 one. *)
 let seen_by (own : Eio.Net.Ipaddr.v4v6) ip =
@@ -1145,7 +1162,11 @@ module Datagram_socket = struct
     if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
     (match dst with Some (`Unix path) -> check_path path | _ -> ());
     let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
-    let dst = destination t ~local dst in
+    let dst =
+      match (destination t ~local dst, t.addr) with
+      | `Udp (d, port), `Udp (bound, _) -> `Udp (toward ~bound d, port)
+      | dst, _ -> dst
+    in
     Option.iter
       (fun code -> raise (Eio.Exn.create (Eio.Exn.X code)))
       (refusal t dst bufs);
@@ -1407,6 +1428,11 @@ module Network = struct
     check_options options;
     Eio.Switch.check sw;
     (match addr with `Unix path -> check_path path | `Tcp _ -> ());
+    let addr =
+      match (addr, bind_to) with
+      | `Tcp (d, port), Some (`Tcp (bound, _)) -> `Tcp (toward ~bound d, port)
+      | addr, _ -> addr
+    in
     check_bind bind_to addr;
     (match bind_to with
     | Some (`Tcp (ip, _)) -> check_local ip

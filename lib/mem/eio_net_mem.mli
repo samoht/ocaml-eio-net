@@ -186,12 +186,14 @@ val connection : _ Eio.Net.stream_socket -> int option
     of its family and port, or, for an IPv4 address, at the IPv6 wildcard
     address of its port, as a dual-stack listener takes it. An IPv4-mapped IPv6
     address stands for the IPv4 address it maps, and a wildcard destination for
-    the loopback address of its family, as both kernels route them. It waits
-    while [backlog + 1] connections wait to be accepted there, as Linux's accept
-    queue takes one more than the backlog, which it caps at 4096
-    ([net.core.somaxconn]); with no listener, or one that closes while it waits,
-    it raises the connection failure that {!No_listener} marks, as a connect to
-    a closed port is refused.
+    the loopback address of its family, as both kernels route them; from a
+    socket bound at an IPv4 address other than the wildcard, 0.0.0.0 stands for
+    that address, and from an IPv4-mapped one [::] stands for ::ffff:127.0.0.1,
+    as Linux routes them. It waits while [backlog + 1] connections wait to be
+    accepted there, as Linux's accept queue takes one more than the backlog,
+    which it caps at 4096 ([net.core.somaxconn]); with no listener, or one that
+    closes while it waits, it raises the connection failure that {!No_listener}
+    marks, as a connect to a closed port is refused.
 
     A connection is closed when the switch passed to [connect] finishes, so the
     accepting end then reads EOF, and an accepted connection when it is closed
