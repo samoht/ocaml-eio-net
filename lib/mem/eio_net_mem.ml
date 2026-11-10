@@ -169,13 +169,14 @@ module Ports = struct
     find t.highest
 end
 
-(* A Unix path no socket binds has no file, as Eio's POSIX backend removes it
-   when the socket's switch finishes. *)
+(* A Unix path no socket binds has no file, as Eio's backends remove a
+   listener's file when the switch it listened under finishes. *)
 let no_file () = Eio.Fs.err (Not_found No_listener)
 
 (* The Unix-domain paths that hold a socket file, shared by stream and
    datagram sockets as a file system shares them. A socket's file stays once
-   it closes, [Stale], as Eio's POSIX backend leaves it, until it is removed. *)
+   it closes, [Stale], as Eio's backends leave a datagram socket's file, until
+   it is removed. *)
 module Files = struct
   type kind = Listener | Datagram | Client | Stale
   type t = { mutex : Mutex.t; files : (string, kind) Hashtbl.t }
@@ -935,8 +936,9 @@ module Network = struct
     Eio.Switch.check sw;
     let listener = Listening_socket.v t.hub ~reuse_addr addr in
     (* The file a listener leaves goes when the listen's switch finishes, as
-       Eio's POSIX backend removes it then: this runs after the close the
-       hooks below make. *)
+       eio_linux removes it then, closed by hand or not; eio_posix keeps the
+       file of a listener closed by hand. This runs after the close the hooks
+       below make. *)
     (match addr with
     | `Unix path ->
         Eio.Switch.on_release sw (fun () ->

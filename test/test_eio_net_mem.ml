@@ -307,7 +307,8 @@ let test_client_port_is_free () =
   | _ -> ()
 
 (* A Unix-domain listener closed by hand leaves its path until the switch it
-   listened under finishes, as Eio's POSIX backend removes the file then. *)
+   listened under finishes, as eio_linux removes the file then; eio_posix
+   keeps it. *)
 let test_listener_path_freed_at_switch_end () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->

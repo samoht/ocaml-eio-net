@@ -117,18 +117,19 @@ val v :
     is refused. At a datagram socket's path it raises the error that
     {!Wrong_socket_type} marks. At a Unix path no socket holds it raises
     [Eio.Fs.Not_found]: a listener leaves its file until the switch passed to
-    [listen] finishes, as Eio's POSIX backend removes it then: until then, a
-    [connect] there is refused and a [listen] there finds it in use. An accepted
-    connection is closed when it is closed or when the switch passed to [accept]
-    finishes. An accepted connection's peer address is the client's: the
-    loopback address its destination reaches, IPv4-mapped for an IPv4 client of
-    an IPv6 listener, at a port of the dynamic range no socket holds, counted
-    down from its top, which the client holds until its flow closes, or
-    [`Unix ""] for a Unix-domain client, which binds no path. Host resolution
-    maps ["127.0.0.1"] and ["::1"] with a numeric service to the loopback
-    address of their family at that port, once as a stream address and once as a
-    datagram address, and ["localhost"] to both families, IPv6 first, as glibc
-    and macOS order them. Any other host or service maps to no address.
+    [listen] finishes, as eio_linux removes it then, and until then a [connect]
+    there is refused and a [listen] there finds it in use. eio_posix keeps the
+    file of a listener closed by hand. An accepted connection is closed when it
+    is closed or when the switch passed to [accept] finishes. An accepted
+    connection's peer address is the client's: the loopback address its
+    destination reaches, IPv4-mapped for an IPv4 client of an IPv6 listener, at
+    a port of the dynamic range no socket holds, counted down from its top,
+    which the client holds until its flow closes, or [`Unix ""] for a
+    Unix-domain client, which binds no path. Host resolution maps ["127.0.0.1"]
+    and ["::1"] with a numeric service to the loopback address of their family
+    at that port, once as a stream address and once as a datagram address, and
+    ["localhost"] to both families, IPv6 first, as glibc and macOS order them.
+    Any other host or service maps to no address.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and
