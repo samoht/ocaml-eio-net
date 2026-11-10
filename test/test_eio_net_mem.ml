@@ -1555,6 +1555,34 @@ let test_time_wait_follows_the_first_fin () =
     "the client shuts its receive side only" true
     (case 8163 (fun c _ -> Eio.Flow.shutdown c `Receive) (fun _ _ -> ()))
 
+(* An end that closed after its FIN, whose peer never sends its own, holds its
+   address in FIN_WAIT2 for 60 seconds, Linux's tcp_fin_timeout; a FIN that
+   comes in that time starts TIME_WAIT. *)
+let test_fin_wait2_times_out () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.Mono.make () in
+  let net = Eio_net_mem.v ~clock ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let at secs =
+    Eio_mock.Clock.Mono.set_time clock
+      (Mtime.of_uint64_ns (Int64.mul (Int64.of_int secs) 1_000_000_000L))
+  in
+  let a = `Tcp (lo, 8170) and b = `Tcp (lo, 8171) in
+  let _client_a, server_a = connection ~sw net a in
+  let client_b, server_b = connection ~sw net b in
+  Eio.Resource.close server_a;
+  Eio.Resource.close server_b;
+  at 29;
+  Eio.Resource.close client_b;
+  at 59;
+  Alcotest.(check bool) "an orphan at 59 s" true (in_use (listens net a));
+  at 60;
+  Alcotest.(check bool) "an orphan at 60 s" false (in_use (listens net a));
+  Alcotest.(check bool) "the peer's FIN at 29 s" true (in_use (listens net b));
+  at 89;
+  Alcotest.(check bool) "TIME_WAIT from 29 s" false (in_use (listens net b))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1877,6 +1905,7 @@ let suite =
       Alcotest.test_case "TIME_WAIT" `Quick test_time_wait;
       Alcotest.test_case "TIME_WAIT follows the first FIN" `Quick
         test_time_wait_follows_the_first_fin;
+      Alcotest.test_case "FIN_WAIT2 times out" `Quick test_fin_wait2_times_out;
       Alcotest.test_case "addresses no interface has" `Quick
         test_unavailable_addresses;
       Alcotest.test_case "bind_to another family" `Quick

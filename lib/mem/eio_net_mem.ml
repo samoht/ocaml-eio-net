@@ -195,8 +195,9 @@ module Ports = struct
   let v ?now () =
     { held = Hashtbl.create 64; lowest = 49152; highest = 65535; now }
 
-  (* TCP_TIMEWAIT_LEN on Linux. *)
+  (* TCP_TIMEWAIT_LEN on Linux, and its default tcp_fin_timeout. *)
   let time_wait = Mtime.Span.(60 * s)
+  let fin_timeout = Mtime.Span.(60 * s)
 
   let freed t port =
     if port >= 49152 && port < t.lowest then t.lowest <- port;
@@ -1418,6 +1419,8 @@ end
    An end holds it while open. Once closed, the end whose FIN went first, by
    a shutdown of its send side or by its close, holds it in TIME_WAIT for 60
    seconds from the peer's FIN, as Linux does, and the other lets go at once.
+   Closed with no FIN from its peer, it waits for one in FIN_WAIT2 for 60
+   seconds, Linux's tcp_fin_timeout.
    After a reset, and without a clock, each lets go once both have closed. *)
 module Ends = struct
   type side = [ `Client | `Server ]
@@ -1453,13 +1456,15 @@ module Ends = struct
         let both = Option.is_some t.closed.(o) in
         if Option.is_none t.now || t.reset then if both then `Release else `Held
         else
+          let after span t = Option.value ~default:t (Mtime.add_span t span) in
+          let orphan = after Ports.fin_timeout closed in
           match (t.fin.(i), t.fin.(o)) with
           | Some (mine, _), Some (theirs, _) when theirs < mine -> `Release
-          | _, Some (_, peer) -> (
-              match Mtime.add_span peer Ports.time_wait with
-              | Some u when Mtime.is_later u ~than:closed -> `Until u
-              | _ -> `Release)
-          | _, None -> `Held)
+          | _, Some (_, peer) when Mtime.is_later peer ~than:orphan -> `Release
+          | _, Some (_, peer) ->
+              let u = after Ports.time_wait peer in
+              if Mtime.is_later u ~than:closed then `Until u else `Release
+          | _, None -> `Until orphan)
 
   (* Changes the state, and gives what the client and the server now do. *)
   let update t f =

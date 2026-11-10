@@ -231,10 +231,12 @@ val connection : _ Eio.Net.stream_socket -> int option
     both ends have closed. Given a clock, the end whose FIN went first, sent by
     a shutdown of its send side or by its close, holds its address once closed
     in TIME_WAIT, for 60 seconds from the peer's FIN, as Linux does; the other
-    end lets go when it closes. A [listen] or a [connect] bound at an address
-    held this way raises the error that {!Address_in_use} marks, unless both
-    have [reuse_addr]: as on Linux, an accepted end has its listener's, a client
-    has none, and a listener's own hold refuses every other socket.
+    end lets go when it closes. Closed before the peer's FIN, it waits for that
+    FIN for 60 seconds, Linux's [tcp_fin_timeout], and then lets go. A [listen]
+    or a [connect] bound at an address held this way raises the error that
+    {!Address_in_use} marks, unless both have [reuse_addr]: as on Linux, an
+    accepted end has its listener's, a client has none, and a listener's own
+    hold refuses every other socket.
 
     A [connect] bound with [bind_to] holds that address, which the listener sees
     as its peer's, at a port of the dynamic range for port 0. One at an address
