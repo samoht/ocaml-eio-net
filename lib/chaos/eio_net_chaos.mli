@@ -93,8 +93,8 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
       replaced with noise from the same sender;
     - on the first 4 KiB of each end, every read returns one byte, or every
       write takes one byte; every read waits 5 ms and takes what several writes
-      sent; every connection queues 4 bytes each way, so a writer whose reader
-      does not read blocks;
+      sent; every connection queues 4 KiB each way, the least a Linux socket
+      buffer holds, so a writer whose reader does not read blocks;
     - the outage: every connect is refused and every datagram lost, for the
       whole run. {!outage} is then [true], so [run] checks what its program does
       when it gives up.

@@ -69,8 +69,8 @@ let scenario ?bug env =
 
 let test_pubsub ?bug () = Eio_net_chaos.check (scenario ?bug)
 
-(* The same scenario on a network whose connections queue 64 bytes, as a
-   socket buffer does. *)
+(* The same scenario on a network whose connections queue 8 bytes, so a
+   subscriber that does not read blocks its writer at once. *)
 let pinned ?bug () =
   Eio_mock.Backend.run_full @@ fun e ->
   Eio.Switch.run @@ fun sw ->
