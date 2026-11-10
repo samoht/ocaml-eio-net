@@ -203,14 +203,19 @@ module Flow = struct
     mutable delivered : int;
     mutable written : int;
     mutable closed : bool;
+    mutable reset_reported : bool;
   }
 
-  (* Under [t.lock]. A reset or an end drops what is buffered. *)
+  (* Under [t.lock]. A reset drops what is buffered, and is reported once, by
+     the first read or write that meets it: later reads return end of file,
+     as a socket clears its pending error. *)
   let check_read t =
     if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
     match Atomic.get t.conn.broken with
     | `Reset ->
         t.leftover <- Cstruct.empty;
+        if t.reset_reported then raise End_of_file;
+        t.reset_reported <- true;
         raise (reset_exn ())
     | `Closed ->
         t.leftover <- Cstruct.empty;
@@ -220,7 +225,14 @@ module Flow = struct
   (* Under [t.lock]. A closed flow refuses a write before any fault. *)
   let check_write t =
     if t.closed then invalid_arg "Eio_net_chaos: write on a closed flow";
-    if Atomic.get t.conn.broken <> `Open then raise (reset_exn ())
+    if Atomic.get t.conn.broken <> `Open then begin
+      t.reset_reported <- true;
+      raise (reset_exn ())
+    end
+
+  let write_reset t =
+    Mutex.protect t.lock (fun () -> t.reset_reported <- true);
+    raise (reset_exn ())
 
   let broken t = Atomic.get t.conn.broken <> `Open
 
@@ -328,7 +340,7 @@ module Flow = struct
       let write () =
         match Eio.Flow.write t.sock (takev n bufs) with
         | () -> n
-        | exception Eio.Io _ when broken t -> raise (reset_exn ())
+        | exception Eio.Io _ when broken t -> write_reset t
       in
       if total = 0 then 0
       else
@@ -336,10 +348,10 @@ module Flow = struct
         | Some Fault.Hang -> Eio.Fiber.await_cancel ()
         | Some Reset ->
             break t.conn `Reset;
-            raise (reset_exn ())
+            write_reset t
         | Some Eof ->
             break t.conn `Closed;
-            raise (reset_exn ())
+            write_reset t
         | Some (Stall d) ->
             Eio.Time.sleep t.ctx.clock d;
             write ()
@@ -388,6 +400,7 @@ module Flow = struct
           delivered = 0;
           written = 0;
           closed = false;
+          reset_reported = false;
         },
         handler )
 end

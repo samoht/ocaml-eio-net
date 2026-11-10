@@ -112,8 +112,47 @@ let test_flow_reset_both_ends () =
   | exception e when is_reset e -> ()
   | _ -> Alcotest.fail "the peer's write went through");
   match read1 client with
-  | exception e when is_reset e -> ()
+  | exception End_of_file -> ()
   | s -> Alcotest.failf "the peer read %S" s
+
+(* A reset is reported once, by the first read or write that meets it: reads
+   after it return end of file and writes keep raising it, as on Linux and
+   macOS. *)
+let test_flow_reset_reported_once () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let client, server = Chaos.pair ~clock:env#clock (nth `Read 1 Fault.Reset) in
+  let read flow =
+    match read1 flow with
+    | exception e when is_reset e -> "reset"
+    | exception End_of_file -> "end"
+    | s -> s
+  in
+  let write flow =
+    match Eio.Flow.single_write flow [ Cstruct.of_string "x" ] with
+    | exception e when is_reset e -> "reset"
+    | _ -> "written"
+  in
+  let in_order ops = List.map (fun op -> op ()) ops in
+  Alcotest.(check (list string))
+    "server"
+    [ "reset"; "end"; "reset"; "reset"; "end" ]
+    (in_order
+       [
+         (fun () -> read server);
+         (fun () -> read server);
+         (fun () -> write server);
+         (fun () -> write server);
+         (fun () -> read server);
+       ]);
+  Alcotest.(check (list string))
+    "client"
+    [ "reset"; "end"; "reset" ]
+    (in_order
+       [
+         (fun () -> read client);
+         (fun () -> read client);
+         (fun () -> write client);
+       ])
 
 (* An end drops the bytes not yet read, at both ends. *)
 let test_flow_eof_both_ends () =
@@ -661,6 +700,8 @@ let suite =
       Alcotest.test_case "flow torn write" `Quick test_flow_torn_write;
       Alcotest.test_case "flow reset at both ends" `Quick
         test_flow_reset_both_ends;
+      Alcotest.test_case "flow reset reported once" `Quick
+        test_flow_reset_reported_once;
       Alcotest.test_case "flow end at both ends" `Quick test_flow_eof_both_ends;
       Alcotest.test_case "accept reset" `Quick test_accept_reset;
       Alcotest.test_case "accept EMFILE" `Quick test_accept_emfile;

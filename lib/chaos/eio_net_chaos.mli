@@ -175,11 +175,13 @@ module Fault : sig
             on it, so {!check} hangs reads only. A datagram taken by a receive
             that hangs goes to the next receive. *)
     | Reset
-        (** The connection is reset at both ends: reads and writes raise
-            [Connection_reset] from now on, and the bytes not yet read are lost.
-            On an accept, the accept succeeds and the connection it returns is
-            reset, as Linux hands over one whose client left first. On a
-            connect, it is a refusal, as a reset answering the handshake is. *)
+        (** The connection is reset at both ends, and the bytes not yet read are
+            lost. At each end the first read or write that follows raises
+            [Connection_reset]; later reads return end of file and writes keep
+            raising it, as on Linux and macOS. On an accept, the accept succeeds
+            and the connection it returns is reset, as Linux hands over one
+            whose client left first. On a connect, it is a refusal, as a reset
+            answering the handshake is. *)
     | Eof
         (** The connection ends at both ends: reads raise [End_of_file] from now
             on, writes raise [Connection_reset], and the bytes not yet read are
