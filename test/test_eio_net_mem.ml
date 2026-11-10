@@ -1583,6 +1583,40 @@ let test_fin_wait2_times_out () =
   at 89;
   Alcotest.(check bool) "TIME_WAIT from 29 s" false (in_use (listens net b))
 
+(* A Unix-domain datagram socket bound at "" takes an abstract address of its
+   own, as Linux autobinds it: "\000" and five hexadecimal digits, which a
+   reply reaches, and which leaves no file behind. *)
+let test_datagram_autobind () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let server = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/autobind.sock") in
+  let a = Eio.Net.datagram_socket ~sw net (`Unix "") in
+  let b = Eio.Net.datagram_socket ~sw net (`Unix "") in
+  let buf = Cstruct.create 8 in
+  let from sock =
+    Eio.Net.send sock ~dst:(`Unix "/tmp/autobind.sock")
+      [ Cstruct.of_string "x" ];
+    match Eio.Net.recv server buf with
+    | `Unix name, _ -> name
+    | `Udp _, _ -> Alcotest.fail "a UDP sender"
+  in
+  let na = from a and nb = from b in
+  List.iter
+    (fun name ->
+      Alcotest.(check bool)
+        (Fmt.str "%S is abstract" name)
+        true
+        (String.length name = 6 && name.[0] = '\000'))
+    [ na; nb ];
+  Alcotest.(check bool) "two addresses" true (na <> nb);
+  Eio.Net.send server ~dst:(`Unix na) [ Cstruct.of_string "ok" ];
+  let _, n = Eio.Net.recv a buf in
+  Alcotest.(check string) "the reply" "ok" (Cstruct.to_string ~len:n buf);
+  Eio.Switch.run (fun inner ->
+      ignore (Eio.Net.datagram_socket ~sw:inner net (`Unix "\000named")));
+  ignore (Eio.Net.datagram_socket ~sw net (`Unix "\000named"))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1906,6 +1940,8 @@ let suite =
       Alcotest.test_case "TIME_WAIT follows the first FIN" `Quick
         test_time_wait_follows_the_first_fin;
       Alcotest.test_case "FIN_WAIT2 times out" `Quick test_fin_wait2_times_out;
+      Alcotest.test_case "a datagram socket at \"\" autobinds" `Quick
+        test_datagram_autobind;
       Alcotest.test_case "addresses no interface has" `Quick
         test_unavailable_addresses;
       Alcotest.test_case "bind_to another family" `Quick

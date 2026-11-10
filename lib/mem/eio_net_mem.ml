@@ -311,13 +311,17 @@ module Files = struct
       true
     end
 
+  (* A path that starts with a NUL is in Linux's abstract namespace, which has
+     no files. *)
+  let abstract path = String.length path > 0 && path.[0] = '\000'
+
   (* The socket of [kind] at [path] closes and leaves its file, or with
-     [remove] takes it away. *)
+     [remove], or at an abstract address, takes it away. *)
   let leave ?(remove = false) t path kind =
     Mutex.protect t.mutex @@ fun () ->
     match Hashtbl.find_opt t.files path with
     | Some k when k = kind ->
-        if remove then Hashtbl.remove t.files path
+        if remove || abstract path then Hashtbl.remove t.files path
         else Hashtbl.replace t.files path Stale
     | Some _ | None -> ()
 end
@@ -1051,6 +1055,7 @@ module Datagram_socket = struct
     ports : Ports.t;
     files : Files.t;
     mutex : Mutex.t;
+    mutable autobind : int;
   }
 
   and t = {
@@ -1072,6 +1077,16 @@ module Datagram_socket = struct
     | None ->
         failwith "eio-net.mem: every port of 49152-65535 has a datagram socket"
 
+  (* The empty path binds an abstract address no socket holds, as Linux
+     autobinds one: a NUL and five hexadecimal digits. *)
+  let autobind hub =
+    let rec next () =
+      let name = Fmt.str "\000%05x" hub.autobind in
+      hub.autobind <- (hub.autobind + 1) land 0xfffff;
+      if Files.find hub.files name = None then name else next ()
+    in
+    next ()
+
   let v hub addr =
     (match addr with
     | `Udp (ip, _) -> check_local ip
@@ -1085,6 +1100,7 @@ module Datagram_socket = struct
       | `UdpV4 -> `Udp (Eio.Net.Ipaddr.V4.any, free_port hub)
       | `UdpV6 -> `Udp (Eio.Net.Ipaddr.V6.any, free_port hub)
       | `Udp (ip, 0) -> `Udp (ip, free_port hub)
+      | `Unix "" -> `Unix (autobind hub)
       | (`Udp _ | `Unix _) as addr -> addr
     in
     let in_use =
@@ -1795,6 +1811,7 @@ let v ?capacity ?clock ~sw () =
       ports = Ports.v ();
       files;
       mutex = Mutex.create ();
+      autobind = 0;
     }
   in
   Eio.Resource.T (Network.{ sw; hub; datagrams; capacity }, handler)

@@ -325,6 +325,12 @@ val connection : _ Eio.Net.stream_socket -> int option
     then, and until then a [connect] there is refused and a [listen] there finds
     it in use; eio_posix keeps the file of a listener closed by hand.
 
+    A datagram socket at the empty path binds an abstract address of its own, a
+    NUL and five hexadecimal digits, as Linux autobinds it, and a reply sent
+    there reaches it. An address that starts with a NUL is in Linux's abstract
+    namespace, which has no files: a socket there leaves nothing behind when it
+    closes.
+
     A closed Unix-domain datagram socket leaves its path behind, as Eio's
     backends leave the file: a datagram sent there is refused with the
     connection failure that {!No_listener} marks, and a socket bound there
