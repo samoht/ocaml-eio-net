@@ -247,6 +247,7 @@ module Flow = struct
     mutable closed : bool;
     mutable reset_reported : bool;
     mutable wrote_after_end : bool;
+    mutable cut_short : bool;
   }
 
   (* Under [t.lock]. A reset drops what is buffered, and is reported once, by
@@ -375,6 +376,15 @@ module Flow = struct
     (* The bytes are counted before they are written, so a write in another
        domain meanwhile sees them. *)
     let single_write_ t bufs =
+      (* A write cut short found the socket's buffer full: on eio_posix the
+         next one waits until it has room, and other fibers run meanwhile. *)
+      let waits =
+        Mutex.protect t.lock (fun () ->
+            let waits = t.cut_short in
+            t.cut_short <- false;
+            waits)
+      in
+      if waits then Eio.Fiber.yield ();
       let total = Cstruct.lenv bufs in
       let fault, n =
         Mutex.protect t.lock @@ fun () ->
@@ -397,6 +407,7 @@ module Flow = struct
                   total
             in
             t.written <- t.written + n;
+            t.cut_short <- n < total;
             (fault, n)
       in
       let write () =
@@ -470,6 +481,7 @@ module Flow = struct
           closed = false;
           reset_reported = false;
           wrote_after_end = false;
+          cut_short = false;
         },
         handler )
 end

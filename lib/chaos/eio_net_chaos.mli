@@ -208,7 +208,10 @@ module Fault : sig
       datagram. [Reset] on the accept of a Unix-domain connection is a client
       that closed, as [Eof]. *)
   type t =
-    | Short of int  (** A read or a write moves at most [max 1 n] bytes. *)
+    | Short of int
+        (** A read or a write moves at most [max 1 n] bytes. A write cut short
+            found the socket's buffer full, so the next write on that end waits,
+            as on eio_posix, and other fibers run meanwhile. *)
     | Stall of float
         (** The operation waits that many seconds of the clock, then runs. *)
     | Hang

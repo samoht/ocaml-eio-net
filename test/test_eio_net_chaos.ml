@@ -262,6 +262,23 @@ let test_accept_emfile () =
   let server, _ = Eio.Net.accept ~sw l in
   Alcotest.(check string) "the queued connection" "hi" (read1 server)
 
+(* A write cut short found the buffer full, so the next one waits, as on
+   eio_posix: two fibers that write without a lock interleave their bytes. *)
+let test_flow_short_write_waits () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let f (op : Op.t) =
+    if op.kind = `Write && op.side = `Client then Some (Fault.Short 1) else None
+  in
+  let client, server = Chaos.pair ~clock:env#clock f in
+  Eio.Fiber.both
+    (fun () -> Eio.Flow.copy_string "AAAA" client)
+    (fun () -> Eio.Flow.copy_string "BBBB" client);
+  let buf = Cstruct.create 8 in
+  Eio.Flow.read_exact server buf;
+  let got = Cstruct.to_string buf in
+  if got = "AAAABBBB" || got = "BBBBAAAA" then
+    Alcotest.failf "the writes did not interleave: %S" got
+
 (* An accept that [f] fails, by raising or by hanging until a cancel, leaves
    its connection queued: the next accept takes it, with its data. *)
 let test_accept_keeps_connection () =
@@ -830,6 +847,8 @@ let suite =
       Alcotest.test_case "flow end on a write" `Quick test_flow_eof_on_write;
       Alcotest.test_case "accept reset" `Quick test_accept_reset;
       Alcotest.test_case "accept EMFILE" `Quick test_accept_emfile;
+      Alcotest.test_case "a write cut short waits for room" `Quick
+        test_flow_short_write_waits;
       Alcotest.test_case "a failed accept keeps its connection" `Quick
         test_accept_keeps_connection;
       Alcotest.test_case "flow write after close" `Quick
