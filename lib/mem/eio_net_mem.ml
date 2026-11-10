@@ -580,9 +580,12 @@ module Flow = struct
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
 
+    (* An empty read is end-of-file, as Eio's backends report the 0 that
+       read(2) returns for it. *)
     let single_read t buf =
       check t "read";
-      if Cstruct.length buf = 0 then 0 else Pipe.read t.from_peer buf
+      if Cstruct.length buf = 0 then raise End_of_file
+      else Pipe.read t.from_peer buf
 
     let shutdown t cmd =
       check t "shutdown";

@@ -730,6 +730,16 @@ let test_cancelled_close_frees_its_port () =
             Eio.Fiber.yield ()
           done))
 
+(* A read into an empty buffer raises [End_of_file], as Eio's backends turn
+   the 0 that read(2) returns then, since Eio's flows never return 0. *)
+let test_empty_read () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Flow.copy_string "queued" server;
+  match Eio.Flow.single_read client (Cstruct.create 0) with
+  | exception End_of_file -> ()
+  | n -> Alcotest.failf "an empty read returned %d" n
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -1211,6 +1221,7 @@ let suite =
       Alcotest.test_case "a capacity bounds the queue" `Quick test_capacity;
       Alcotest.test_case "write after own shutdown" `Quick
         test_write_after_own_shutdown;
+      Alcotest.test_case "an empty read" `Quick test_empty_read;
       Alcotest.test_case "read after peer close" `Quick
         test_read_after_peer_close;
       Alcotest.test_case "connect ignores a latency hint" `Quick

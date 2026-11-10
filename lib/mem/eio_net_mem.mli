@@ -37,9 +37,10 @@ type Eio.Exn.Backend.t +=
             [End_of_file] once the queued bytes are read. A read after this end
             shut its receive side returns the bytes queued and those that arrive
             after, as on Linux, and raises [End_of_file] once none is queued;
-            macOS drops them. On TCP, a write after the peer shut its receive
-            side, and only that, is queued and read in the same way. A read, a
-            write or a shutdown on a flow after its own close raises
+            macOS drops them. A read into an empty buffer raises [End_of_file],
+            as Eio's backends do. On TCP, a write after the peer shut its
+            receive side, and only that, is queued and read in the same way. A
+            read, a write or a shutdown on a flow after its own close raises
             [Invalid_argument], as Eio's own sockets do. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
