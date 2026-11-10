@@ -267,6 +267,16 @@ val connection : _ Eio.Net.stream_socket -> int option
     Unix-domain socket, IPv4 for IPv6 or TCP for a path; macOS says EAFNOSUPPORT
     for both.
 
+    A connection follows Linux, and macOS differs from it in more than the two
+    cases {!Closed} names, the empty write after a shutdown and the bytes read
+    after a receive shutdown. Once a peer has closed and a reset has come, macOS
+    keeps raising [ECONNRESET] on every read, where Linux reports the reset once
+    and then end-of-file, and a read after the peer's close can raise the reset
+    where Linux reads end-of-file. Writes after a shutdown of either end differ
+    too: an empty write after a reset raises it on macOS and returns 0 on Linux,
+    and a write after the peer shut down can succeed on one and fail on the
+    other. A test that must hold on macOS needs a real socket there.
+
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and
     [TCP_QUICKACK], which ask that writes not be coalesced and that
