@@ -210,8 +210,9 @@ module Flow = struct
     type tag = [ `Generic ]
 
     (* [lock] guards the buffer and the read side's state, which a close or a
-       shutdown in another domain changes while a read runs. It is never held
-       across a read of the base socket. *)
+       shutdown in another domain changes while a read runs, and the count of
+       bytes written, which writers in several domains share. It is never held
+       across a read or a write of the base socket. *)
     type t = {
       base : base;
       driver : driver;
@@ -288,12 +289,21 @@ module Flow = struct
       let total = Cstruct.lenv bufs in
       if total = 0 then 0
       else
-        match t.driver.write ~written:t.written with
-        | Fail -> raise (reset_exn ())
-        | Accept cap ->
-            let n = if cap <= 0 then total else max 1 (min cap total) in
+        (* The bytes are counted before they are written, so a write in
+           another domain meanwhile sees them. *)
+        let n =
+          Mutex.protect t.lock @@ fun () ->
+          match t.driver.write ~written:t.written with
+          | Fail -> None
+          | Accept cap ->
+              let n = if cap <= 0 then total else max 1 (min cap total) in
+              t.written <- t.written + n;
+              Some n
+        in
+        match n with
+        | None -> raise (reset_exn ())
+        | Some n ->
             t.base.write_all (takev n bufs);
-            t.written <- t.written + n;
             n
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src

@@ -443,6 +443,35 @@ let test_flow_buffer_follows_read_side () =
     [ "Invalid_argument"; "End_of_file"; "End_of_file" ]
     [ closed; receive; all ]
 
+(* Writers in two domains share one count of bytes written: with the write
+   fault after one byte less than they write in all, exactly one write fails,
+   in each of three rounds. *)
+let test_flow_writes_counted_across_domains () =
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let per_domain = 100_000 in
+  for _ = 1 to 3 do
+    let c, _s =
+      Flow.pair
+        ~client:
+          (Flow.Schedule.seeded ~fail_write_after:((2 * per_domain) - 1) 1)
+        ()
+    in
+    let failed = Atomic.make 0 in
+    let one = Cstruct.of_string "x" in
+    let writer () =
+      Eio.Domain_manager.run domain_mgr (fun () ->
+          for _ = 1 to per_domain do
+            match Eio.Flow.single_write c [ one ] with
+            | _ -> ()
+            | exception Eio.Io (Eio.Net.E (Connection_reset _), _) ->
+                Atomic.incr failed
+          done)
+    in
+    Eio.Fiber.both writer writer;
+    Alcotest.(check int) "failed writes" 1 (Atomic.get failed)
+  done
+
 (* A printed schedule is the call that builds it, every parameter included. *)
 let test_schedules_print_every_parameter () =
   let check what expected pp v =
@@ -536,6 +565,8 @@ let suite =
         test_net_max_accepts_concurrent;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
+      Alcotest.test_case "flow writes counted across domains" `Quick
+        test_flow_writes_counted_across_domains;
       Alcotest.test_case "schedules print every parameter" `Quick
         test_schedules_print_every_parameter;
       Alcotest.test_case "datagram seeded refuses odds past one" `Quick
