@@ -355,6 +355,28 @@ let test_empty_write_after_peer_close () =
   | "", End_of_file -> ()
   | got, e -> Alcotest.failf "read %S then %a" got Fmt.exn e
 
+(* A TCP write after this end's own send shutdown reports a pending reset, as
+   Linux reports its pending error before EPIPE: a read after it returns end
+   of file. *)
+let test_write_after_shutdown_reports_reset () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8090) in
+  let client =
+    Eio.Switch.run (fun lsw ->
+        ignore (Eio.Net.listen ~sw:lsw ~backlog:4 net addr);
+        Eio.Net.connect ~sw net addr)
+  in
+  Eio.Flow.shutdown client `All;
+  (match Eio.Flow.single_write client [ Cstruct.of_string "ab" ] with
+  | exception e when is_reset e -> ()
+  | (_ : int) -> Alcotest.fail "the write went through");
+  match Eio.Flow.single_read client (Cstruct.create 1) with
+  | exception End_of_file -> ()
+  | exception e -> Alcotest.failf "the read raised %a" Fmt.exn e
+  | (_ : int) -> Alcotest.fail "the read returned bytes"
+
 (* A connection reset before it is read reports the reset to one read, and end
    of file to the reads after it, as a socket clears its pending error once it
    reports it. *)
@@ -1186,6 +1208,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a write after shutdown reports a reset" `Quick
+        test_write_after_shutdown_reports_reset;
       Alcotest.test_case "a cancelled connect frees its port" `Quick
         test_cancelled_connect_frees_its_port;
       Alcotest.test_case "a cancelled close frees its port" `Quick

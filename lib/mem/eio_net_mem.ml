@@ -445,7 +445,7 @@ module Pipe = struct
       (* An empty write sends nothing, so it meets no shutdown or closed
          peer, as on Linux. *)
       if n = 0 then leave (`Done 0)
-      else if t.shut then leave (`Raise (reset_exn ()))
+      else if t.shut then leave `Shut
       else if t.refused then leave `Refused
       else if t.gone then begin
         t.refused <- true;
@@ -473,6 +473,11 @@ module Pipe = struct
         await t t.writers w;
         write ~turn:true t ~back bufs
     | `Raise e -> raise e
+    | `Shut ->
+        (* EPIPE after our own send shutdown; on TCP it reports a pending
+           reset first, as Linux reports its pending error. *)
+        if not t.local then consume_reset back;
+        raise (reset_exn ())
     | `Refused ->
         (* A TCP write reports the pending reset; a Unix-domain one fails
            with EPIPE and leaves it to the next read. *)
