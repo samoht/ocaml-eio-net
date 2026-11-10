@@ -750,6 +750,29 @@ let test_write_after_own_shutdown () =
       Alcotest.failf "write after own shutdown leaked Failure %S" msg
   | (_ : int) -> Alcotest.fail "write after own shutdown should raise"
 
+(* A write to a full queue whose reader shut down both ways waits for room,
+   as Linux holds data its peer's closed window refuses, and raises the reset
+   once the reader makes room, as the data then reaches a peer in FIN-WAIT. *)
+let test_full_write_after_peer_shutdown_all () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe ~capacity:1 () in
+  Eio.Flow.copy_string "a" client;
+  Eio.Flow.shutdown server `All;
+  let blocked = ref true in
+  Eio.Fiber.both
+    (fun () ->
+      (match Eio.Flow.single_write client [ Cstruct.of_string "b" ] with
+      | exception e when is_reset e -> ()
+      | n -> Alcotest.failf "the write returned %d" n);
+      blocked := false)
+    (fun () ->
+      Eio.Fiber.yield ();
+      Alcotest.(check bool) "the write waits" true !blocked;
+      let buf = Cstruct.create 1 in
+      Eio.Flow.read_exact server buf;
+      Eio.Fiber.yield ();
+      Alcotest.(check bool) "room wakes the write" false !blocked)
+
 let test_read_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe () in
@@ -1245,6 +1268,8 @@ let suite =
       Alcotest.test_case "write after own shutdown" `Quick
         test_write_after_own_shutdown;
       Alcotest.test_case "an empty read" `Quick test_empty_read;
+      Alcotest.test_case "a full write after the peer shut down both ways"
+        `Quick test_full_write_after_peer_shutdown_all;
       Alcotest.test_case "read after peer close" `Quick
         test_read_after_peer_close;
       Alcotest.test_case "connect ignores a latency hint" `Quick

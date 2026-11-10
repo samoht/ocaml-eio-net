@@ -23,7 +23,9 @@ type Eio.Exn.Backend.t +=
               accepting it.
             - A write to a TCP peer that shut down both ways: the first is lost
               and resets the connection, as Linux resets it then, so the peer's
-              next read raises the reset and every later write does.
+              next read raises the reset and every later write does. A write to
+              a full queue first waits for room, as Linux holds data the peer's
+              window refuses, and then raises the reset.
             - A write on a Unix-domain connection whose peer shut its receive
               side, as EPIPE.
 

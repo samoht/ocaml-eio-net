@@ -452,13 +452,15 @@ module Pipe = struct
         if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
       end
       else if t.rcv_shut && t.local then leave (`Raise (reset_exn ()))
-      else if t.rcv_shut && t.fin_sent then begin
-        t.reset <- true;
-        t.refused <- true;
-        leave (`Lost n)
-      end
       else if Waiters.must_wait t.writers ~turn || t.size >= t.capacity then
         (`Wait (Waiters.queue t.writers ~turn), [])
+      else if t.rcv_shut && t.fin_sent then begin
+        (* Data a full queue held back resets the connection once it is
+           sent; a write that waited for room reports the reset. *)
+        t.reset <- true;
+        t.refused <- true;
+        if turn then leave (`Raise (reset_exn ())) else leave (`Lost n)
+      end
       else begin
         if turn then t.writers.turn <- false;
         let k = min n (t.capacity - t.size) in
