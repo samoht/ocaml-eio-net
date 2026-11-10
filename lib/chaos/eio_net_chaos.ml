@@ -511,7 +511,12 @@ module Datagram = struct
     (* A datagram [Dup] or [Reorder] keeps for a later receive. A held one
        is kept in the state before the receive waits for the next, so a
        cancelled receive loses neither. *)
-    type kept = Nothing | Next of datagram | Held of datagram
+    type kept =
+      | Nothing
+      | Next of datagram
+      | Held of datagram
+      | Dropping of int
+          (** Datagrams left to drop before the next passes with no fault. *)
 
     type t = {
       base : base;
@@ -540,11 +545,8 @@ module Datagram = struct
       match fault with
       | Pass | Drop 0 -> put buf a d
       | Drop n ->
-          for _ = 2 to n do
-            ignore (recv_raw t buf)
-          done;
-          let a, d = recv_raw t buf in
-          put buf a d
+          t.kept <- Dropping (n - 1);
+          recv t buf
       | Dup ->
           t.kept <- Next (a, d);
           put buf a d
@@ -580,6 +582,16 @@ module Datagram = struct
           let a, d = recv_raw t buf in
           t.kept <- Next held;
           put buf a d
+      | Dropping 0 ->
+          let a, d = recv_raw t buf in
+          t.kept <- Nothing;
+          put buf a d
+      | Dropping n ->
+          (* Each drop is counted in the state once it is taken, so a receive
+             cancelled while it waits keeps what is left to drop. *)
+          ignore (recv_raw t buf);
+          t.kept <- Dropping (n - 1);
+          recv t buf
       | Nothing -> (
           let datagram = recv_raw t buf in
           match t.driver.next () with

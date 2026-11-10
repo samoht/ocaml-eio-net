@@ -309,6 +309,22 @@ let test_dgram_close_drops_held () =
   | exception Invalid_argument _ -> ()
   | got -> Alcotest.failf "received %S after close" got
 
+(* A receive cancelled in the middle of a Drop keeps its count: the datagrams
+   left to drop are dropped by the next receive, which delivers the one after
+   them with no fault; the next fault applies to the datagram after that. *)
+let test_dgram_cancelled_drop_keeps_count () =
+  with_datagrams [] @@ fun ~send base ->
+  let sock =
+    Datagram.wrap (Datagram.Schedule.script [ Drop 2; Truncate 1 ]) base
+  in
+  send "one";
+  Eio.Fiber.first (fun () -> ignore (recv1 sock)) Eio.Fiber.yield;
+  send "two";
+  send "three";
+  send "four";
+  Alcotest.(check (list string))
+    "two dropped, three whole, four truncated" [ "three"; "f" ] (recv_n sock 2)
+
 (* Seeded [loss] is the fraction of datagrams lost: over 20000 datagrams,
    [loss:0.3] loses 30% of them, within 2 points. *)
 let test_dgram_loss_rate () =
@@ -649,6 +665,8 @@ let suite =
         test_flow_write_after_close;
       Alcotest.test_case "dgram loss is the fraction lost" `Quick
         test_dgram_loss_rate;
+      Alcotest.test_case "dgram cancelled drop keeps its count" `Quick
+        test_dgram_cancelled_drop_keeps_count;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
       Alcotest.test_case "flow writes counted across domains" `Quick

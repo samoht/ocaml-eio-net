@@ -130,7 +130,8 @@ module Datagram : sig
   type fault =
     | Pass  (** Deliver the next datagram unchanged. *)
     | Drop of int
-        (** Drop [n] datagrams from the base, then deliver the one after them.
+        (** Drop [n] datagrams from the base, then deliver the one after them. A
+            receive cancelled midway leaves the rest to the next receive.
             {!Schedule.script} refuses a negative [n]. *)
     | Dup  (** Deliver the next datagram now and again on the following recv. *)
     | Reorder
