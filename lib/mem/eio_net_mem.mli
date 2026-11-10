@@ -28,7 +28,9 @@ type Eio.Exn.Backend.t +=
 
             The first read or write that raises the reset reports it, as a
             socket clears its pending error: reads after it raise [End_of_file],
-            and writes keep raising the reset.
+            and writes keep raising the reset. On a Unix-domain connection only
+            a read reports it: a write raises the reset as EPIPE and leaves it
+            to the next read.
 
             A read after the peer closed or shut its send otherwise raises
             [End_of_file] once the queued bytes are read. A read after this end

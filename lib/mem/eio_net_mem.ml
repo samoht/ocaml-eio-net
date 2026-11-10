@@ -470,7 +470,9 @@ module Pipe = struct
         write ~turn:true t ~back bufs
     | `Raise e -> raise e
     | `Refused ->
-        consume_reset back;
+        (* A TCP write reports the pending reset; a Unix-domain one fails
+           with EPIPE and leaves it to the next read. *)
+        if not t.local then consume_reset back;
         raise (reset_exn ())
     | `Lost n ->
         reset back;

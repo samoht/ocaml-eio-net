@@ -29,8 +29,6 @@ let documented = []
 (* Divergences from Linux not fixed yet. *)
 let known =
   [
-    ex "M5: a Unix-domain EPIPE write leaves the pending reset to the read"
-      [ Unix_stream ] "read" ~mem:"EOF" ~linux:"Reset";
     ex "M6: a datagram send after our own send shutdown is EPIPE" dgrams "send"
       ~mem:"ok" ~linux:"Reset";
     ex "M6: a datagram send after our own send shutdown is EPIPE (closed peer)"
