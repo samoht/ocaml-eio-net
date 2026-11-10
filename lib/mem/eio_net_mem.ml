@@ -407,8 +407,11 @@ module Pipe = struct
         f t;
         ((), Waiters.take_all t.readers @ Waiters.take_all t.writers))
 
-  (* The reset reaches the reader once it has read what is queued. *)
-  let reset t = update t (fun t -> t.reset <- true)
+  (* The reset reaches the reader once it has read what is queued. A TCP
+     reader that has the writer's end-of-file keeps reading end-of-file, as
+     Linux reports the end of a stream before a reset that came after it. *)
+  let reset t =
+    update t (fun t -> if t.local || not t.shut then t.reset <- true)
 
   (* The reset was reported: the stream has ended. *)
   let consume_reset t =

@@ -13,8 +13,9 @@ type Eio.Exn.Backend.t +=
             - A write after this end shut its send. An empty write returns 0
               instead, as on Linux; macOS fails it with EPIPE.
             - A write after the peer closed: the first is lost and answered with
-              a reset, which every later write raises. On a Unix-domain
-              connection the first write raises it, as EPIPE.
+              a reset, which every later write raises; reads keep returning end
+              of file, which came first. On a Unix-domain connection the first
+              write raises the reset, as EPIPE.
             - A read, once the queued bytes are read, and a write after the peer
               closed with bytes of ours unread.
             - A read and a write on a connection its listener closed before

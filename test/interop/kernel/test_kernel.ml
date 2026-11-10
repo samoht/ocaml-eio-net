@@ -20,7 +20,6 @@ type exception_ = {
   linux : string;
 }
 
-let tcp = [ Tcp4; Tcp6 ]
 let dgrams = [ Udp4; Udp6; Unix_dgram ]
 let ex why transports op ~mem ~linux = { why; transports; op; mem; linux }
 
@@ -30,8 +29,6 @@ let documented = []
 (* Divergences from Linux not fixed yet. *)
 let known =
   [
-    ex "M4: a TCP read after the peer's end of file stays end of file" tcp
-      "read" ~mem:"Reset" ~linux:"EOF";
     ex "M5: a Unix-domain EPIPE write leaves the pending reset to the read"
       [ Unix_stream ] "read" ~mem:"EOF" ~linux:"Reset";
     ex "M6: a datagram send after our own send shutdown is EPIPE" dgrams "send"
