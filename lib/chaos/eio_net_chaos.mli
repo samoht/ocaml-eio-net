@@ -187,7 +187,8 @@ module Fault : sig
         (** The operation never completes; only a cancel ends it. A read from a
             silent peer does that; a connect never does, as the kernel gives up
             on it, so {!check} hangs reads only. A datagram taken by a receive
-            that hangs goes to the next receive. *)
+            that hangs goes to the next receive, and a connection taken by an
+            accept that hangs to the next accept. *)
     | Reset
         (** The connection is reset at both ends, and the bytes not yet read are
             lost. At each end the first read or write that follows raises
@@ -255,7 +256,8 @@ val wrap :
     several domains at once. [f] is called by one of them at a time, in the
     order of {!Op.index}, while a lock is held: it must not wait, and must not
     use the network. If [f] raises, the operation raises that exception and does
-    nothing else; its index and its socket number stay used.
+    nothing else: an accept leaves its connection queued for the next. The
+    operation's index and its socket number stay used.
 
     A fault reaches both ends of a connection when [net] is an {!Eio_net_mem}
     network, which tells the wrapper which accepted socket a connect made. On

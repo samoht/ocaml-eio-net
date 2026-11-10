@@ -262,6 +262,38 @@ let test_accept_emfile () =
   let server, _ = Eio.Net.accept ~sw l in
   Alcotest.(check string) "the queued connection" "hi" (read1 server)
 
+(* An accept that [f] fails, by raising or by hanging until a cancel, leaves
+   its connection queued: the next accept takes it, with its data. *)
+let test_accept_keeps_connection () =
+  let accept_after first =
+    Eio_mock.Backend.run_full @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Chaos.wrap ~clock:env#clock first (Eio_net_mem.v ~sw ()) in
+    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+    let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    Eio.Flow.copy_string "hi" client;
+    (match
+       Eio.Fiber.first
+         (fun () -> `Accepted (Eio.Net.accept ~sw l))
+         (fun () ->
+           Eio.Time.sleep env#clock 1.0;
+           `Cancelled)
+     with
+    | `Accepted _ -> Alcotest.fail "the first accept went through"
+    | `Cancelled -> ()
+    | exception Failure _ -> ());
+    let server, _ = Eio.Net.accept ~sw l in
+    read1 server
+  in
+  let raises (op : Op.t) =
+    if op.kind = `Accept && op.offset = 0 then failwith "f raised" else None
+  in
+  Alcotest.(check string) "after f raised" "hi" (accept_after raises);
+  Alcotest.(check string)
+    "after a hang was cancelled" "hi"
+    (accept_after (nth `Accept 1 Fault.Hang))
+
 (* A write after the flow's own close raises [Invalid_argument], as on the
    socket it wraps, before [f] is asked. *)
 let test_flow_write_after_close () =
@@ -740,6 +772,8 @@ let suite =
       Alcotest.test_case "flow end on a write" `Quick test_flow_eof_on_write;
       Alcotest.test_case "accept reset" `Quick test_accept_reset;
       Alcotest.test_case "accept EMFILE" `Quick test_accept_emfile;
+      Alcotest.test_case "a failed accept keeps its connection" `Quick
+        test_accept_keeps_connection;
       Alcotest.test_case "flow write after close" `Quick
         test_flow_write_after_close;
       Alcotest.test_case "flow buffer follows the read side" `Quick

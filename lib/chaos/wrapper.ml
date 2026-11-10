@@ -598,13 +598,17 @@ module Datagram = struct
 end
 
 module Listener = struct
-  (* [held] is the connection an accept failed with EMFILE took, which stays
-     queued until a descriptor is freed. *)
+  (* [held] holds the connections an accept took and did not return, oldest
+     first: one failed with EMFILE, which stays queued until a descriptor is
+     freed, or one whose accept [f] raised in or hung until a cancel. The next
+     accepts return them, as the kernel's queue would. *)
   type t = {
     ctx : ctx;
     l : [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
-    mutable held : (stream * Eio.Net.Sockaddr.stream) option;
+    mutable held : (stream * Eio.Net.Sockaddr.stream) list;
   }
+
+  let hold t c = locked t.ctx (fun () -> t.held <- c :: t.held)
 
   module Impl = struct
     type tag = [ `Generic ]
@@ -617,10 +621,10 @@ module Listener = struct
             if ctx.exhausted then `Exhausted
             else
               match t.held with
-              | Some c ->
-                  t.held <- None;
+              | c :: rest ->
+                  t.held <- rest;
                   `Held c
-              | None -> `Accept)
+              | [] -> `Accept)
       in
       match queued with
       | `Exhausted -> raise (Posix.emfile ())
@@ -634,10 +638,17 @@ module Listener = struct
       let socket, conn = server_conn ctx sock in
       let flow = Flow.v ctx ~socket ~side:`Server ~conn sock in
       let fault =
-        locked ctx (fun () ->
-            let offset = ctx.accepts in
-            ctx.accepts <- offset + 1;
-            ask_locked ctx `Accept ~socket ~side:`Server ~offset ~length:0)
+        match
+          locked ctx (fun () ->
+              let offset = ctx.accepts in
+              ctx.accepts <- offset + 1;
+              ask_locked ctx `Accept ~socket ~side:`Server ~offset ~length:0)
+        with
+        | fault -> fault
+        | exception e ->
+            let bt = Printexc.get_raw_backtrace () in
+            hold t (flow, peer);
+            Printexc.raise_with_backtrace e bt
       in
       match fault with
       | Some Fault.Reset ->
@@ -651,9 +662,11 @@ module Listener = struct
       | Some Emfile ->
           locked ctx (fun () ->
               ctx.exhausted <- true;
-              t.held <- Some (flow, peer));
+              t.held <- (flow, peer) :: t.held);
           raise (Posix.emfile ())
-      | Some Hang -> Eio.Fiber.await_cancel ()
+      | Some Hang ->
+          hold t (flow, peer);
+          Eio.Fiber.await_cancel ()
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;
           (flow, peer)
@@ -728,7 +741,7 @@ module Network = struct
         ( {
             Listener.ctx = t.ctx;
             l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
-            held = None;
+            held = [];
           },
           Listener.handler )
 
