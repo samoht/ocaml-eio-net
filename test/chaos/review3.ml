@@ -139,6 +139,34 @@ let accept_loop () =
       if not !shed then failwith "no connection was shed";
       Eio.Promise.resolve set_stop ())
 
+(* [n] lines of lengths from 1 to 11 bytes, echoed back. *)
+let echo n env =
+  let lines = List.init n (fun i -> String.make (1 + (i * 7 mod 11)) 'x') in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7040) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let r = Eio.Buf_read.of_flow flow ~max_size:256 in
+          try
+            while true do
+              let line =
+                Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+                    strict_line r)
+              in
+              Eio.Flow.copy_string (line ^ "\n") flow
+            done
+          with End_of_file -> ()));
+  attempts env (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect ~sw env#net (tcp 7040) in
+      let r = Eio.Buf_read.of_flow flow ~max_size:256 in
+      snd
+        (Eio.Fiber.pair
+           (fun () ->
+             List.iter (fun l -> Eio.Flow.copy_string (l ^ "\n") flow) lines)
+           (fun () -> List.map (fun _ -> strict_line r) lines)))
+  |> expect env (fun ppf _ -> Fmt.string ppf "a wrong echo") lines
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in

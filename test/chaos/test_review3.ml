@@ -27,6 +27,9 @@ let suite =
       Alcotest.test_case "accept loop that spins on EMFILE" `Quick spins;
       Alcotest.test_case "Eio_net_accept.run recovers from EMFILE" `Quick
         (Expect.passes accept_loop);
+      Alcotest.test_case "200 lines of varying length fit the default budget"
+        `Quick
+        (Expect.passes (check (echo 200)));
       Alcotest.test_case "pipelined batch: correct" `Quick
         (Expect.passes (check pipelined));
     ] )

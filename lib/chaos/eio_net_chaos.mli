@@ -14,9 +14,10 @@
 
     - the linear tier always runs whole. On each end of each connection it cuts
       the bytes around the ends of the first three of the peer's writes, its
-      last, and each whose length differs from the one before; it fails each
-      connect, accept and datagram; and it runs each lasting condition. It grows
-      with the structure of the exchange, not with its bytes;
+      last, and the first of each length class, a length rounded down to a power
+      of two; it fails each connect, accept and datagram; and it runs each
+      lasting condition. It grows with the structure of the exchange, not with
+      its bytes;
     - the sampled tier spends the rest, at most half as much as the linear tier
       and at least 200 runs: the other write ends, and pairs of faults, the
       second at a position of the run the first one changed. That is where a

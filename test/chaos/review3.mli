@@ -18,6 +18,9 @@ val accept_loop : unit -> unit
     second accept with [Fault.Emfile], with an idle client to shed and a client
     to serve. *)
 
+val echo : int -> Eio_net_chaos.env -> unit
+(** [echo n env] echoes [n] lines of varying length. *)
+
 val pipelined : Eio_net_chaos.env -> unit
 (** [pipelined env] runs a client that writes its whole batch of requests before
     it reads a reply. *)

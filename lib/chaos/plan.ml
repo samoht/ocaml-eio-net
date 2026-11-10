@@ -81,14 +81,23 @@ let reached trace ((s, side) as e) =
   let spans b (op : Op.t) = op.offset < b && b < op.offset + op.length in
   fun b -> b >= 0 && (b <= extent || (b < sent && List.exists (spans b) reads))
 
+(* The length class of a write: its length rounded down to a power of two. *)
+let length_class n =
+  let rec go c n = if n <= 1 then c else go (c + 1) (n lsr 1) in
+  go 0 n
+
 (* The writes of an end that make its structure: the first three, the last,
-   and each whose length differs from the one before. *)
+   and the first of each length class, so an exchange of many messages of
+   varying length costs runs by its classes, not its messages. *)
 let structural writes =
-  let a = Array.of_list writes in
-  let n = Array.length a in
+  let n = List.length writes in
+  let seen = Hashtbl.create 8 in
   List.filteri
     (fun i (op : Op.t) ->
-      i < 3 || i = n - 1 || (i > 0 && a.(i - 1).Op.length <> op.length))
+      let c = length_class op.length in
+      let first = not (Hashtbl.mem seen c) in
+      Hashtbl.replace seen c ();
+      i < 3 || i = n - 1 || first)
     writes
 
 let around l = List.concat_map (fun b -> [ b - 1; b; b + 1 ]) l
