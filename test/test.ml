@@ -6,5 +6,6 @@ let () =
       Test_datagram.suite;
       Test_eio_net_chaos.suite;
       Test_relay.suite;
+      Test_conc.suite;
       Test_progress.suite;
     ]
