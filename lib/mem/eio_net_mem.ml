@@ -982,7 +982,10 @@ module Network = struct
           Ports.add ports (ip, port);
           Ok (ip, port)
 
+  (* Not cancelled, even while it waits for the mutex: a release that gave up
+     would hold the port for good. *)
   let release t local =
+    Eio.Cancel.protect @@ fun () ->
     Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
         Ports.remove t.hub.Listening_socket.ports local)
 

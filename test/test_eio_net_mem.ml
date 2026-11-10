@@ -628,6 +628,68 @@ let test_capacity_first_come () =
   Alcotest.(check string)
     "bytes in the order the writers came" "x12" (Buffer.contents got)
 
+(* Runs [f i] for [i] from 1 to [n] while another domain takes the network's
+   mutex over and over, listening and closing, so that a fiber cancelled on
+   its way into the mutex meets it held; then checks that [port] binds
+   again. *)
+let contended ~port n f =
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let stop = Atomic.make false in
+  Eio.Fiber.both
+    (fun () ->
+      Eio.Domain_manager.run domain_mgr (fun () ->
+          while not (Atomic.get stop) do
+            Eio.Fiber.yield ();
+            Eio.Switch.run (fun sw ->
+                ignore
+                  (Eio.Net.listen ~sw ~backlog:1 net
+                     (`Tcp (Eio.Net.Ipaddr.V6.loopback, 0))))
+          done))
+    (fun () ->
+      Fun.protect
+        ~finally:(fun () -> Atomic.set stop true)
+        (fun () ->
+          for i = 1 to n do
+            f ~sw net i
+          done));
+  match
+    Eio.Switch.run (fun sw ->
+        Eio.Net.listen ~sw ~backlog:1 net
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)))
+  with
+  | _ -> ()
+  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) ->
+      Alcotest.failf "port %d is still held after %d cancelled fibers" port n
+
+(* A connect cancelled while it releases its bound port releases it all the
+   same: the port is free again after 2000 such connects. *)
+let test_cancelled_connect_frees_its_port () =
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 0) in
+  let bind_to = `Tcp (Eio.Net.Ipaddr.V4.loopback, 40000) in
+  let listener = ref None in
+  let connect ~sw net =
+    let l =
+      match !listener with
+      | Some l -> l
+      | None ->
+          let l = Eio.Net.listen ~sw ~backlog:4096 net addr in
+          listener := Some l;
+          l
+    in
+    Eio.Switch.run @@ fun csw ->
+    ignore (Eio.Net.connect ~sw:csw ~bind_to net (Eio.Net.listening_addr l))
+  in
+  contended ~port:40000 2000 (fun ~sw net i ->
+      Eio.Fiber.first
+        (fun () -> connect ~sw net)
+        (fun () ->
+          for _ = 1 to i mod 3 do
+            Eio.Fiber.yield ()
+          done))
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -1106,6 +1168,8 @@ let suite =
       Alcotest.test_case "a closed listener resets its queue" `Quick
         test_a_closed_listener_resets_its_queue;
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
+      Alcotest.test_case "a cancelled connect frees its port" `Quick
+        test_cancelled_connect_frees_its_port;
       Alcotest.test_case "a listener's path freed at switch end" `Quick
         test_listener_path_freed_at_switch_end;
       Alcotest.test_case "a client's port is free" `Quick
