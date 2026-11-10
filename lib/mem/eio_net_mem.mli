@@ -152,7 +152,12 @@ val v :
     the host's addresses and its [/etc/hosts]: glibc leaves them out on a host
     with no IPv6 address but loopback, and turns ["localhost"]'s [::1] into
     [127.0.0.1]. The order here is the one glibc and macOS give on a dual-stack
-    host, fixed so that a test sees the same addresses everywhere. *)
+    host, fixed so that a test sees the same addresses everywhere.
+
+    [getnameinfo] names [127.0.0.1] and [::1] ["localhost"], as [/etc/hosts]
+    does, and gives any other address as a number, as glibc gives one that no
+    name server knows. The service stays a number, ["80"] where glibc says
+    ["http"], as there is no services database. *)
 
 val pipe :
   ?capacity:int ->

@@ -1636,8 +1636,19 @@ module Network = struct
           (fun ip -> [ `Tcp (ip, port); `Udp (ip, port) ])
           (Resolve.host node)
 
+  (* The loopback addresses are "localhost", as /etc/hosts names them, and
+     any other a number, as glibc gives one no name server knows; a service
+     is a number, as there is no services database. *)
   let getnameinfo _ = function
-    | `Tcp (_, port) | `Udp (_, port) -> ("localhost", string_of_int port)
+    | `Tcp (ip, port) | `Udp (ip, port) ->
+        let host =
+          if
+            same ip Eio.Net.Ipaddr.V4.loopback
+            || same ip Eio.Net.Ipaddr.V6.loopback
+          then "localhost"
+          else Fmt.str "%a" Eio.Net.Ipaddr.pp ip
+        in
+        (host, string_of_int port)
     | `Unix path -> ("localhost", path)
 end
 

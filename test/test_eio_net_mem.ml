@@ -120,6 +120,28 @@ let test_resolve_numbers () =
   Alcotest.(check string)
     "a bad service first" "SERVICE" (resolve "nowhere" "-1")
 
+(* getnameinfo names the loopback addresses "localhost", as /etc/hosts does,
+   and gives any other address as a number; a service stays a number, as
+   there is no services database. *)
+let test_name_info () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let ip = Eio.Net.Ipaddr.of_raw in
+  List.iter
+    (fun (addr, expected) ->
+      let host, service = Eio.Net.getnameinfo net addr in
+      Alcotest.(check string)
+        (Fmt.str "%a" Eio.Net.Sockaddr.pp addr)
+        expected
+        (host ^ "/" ^ service))
+    [
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80), "localhost/80");
+      (`Udp (Eio.Net.Ipaddr.V6.loopback, 53), "localhost/53");
+      (`Tcp (ip "\010\001\002\003", 80), "10.1.2.3/80");
+      (`Tcp (ip "\127\000\000\002", 8080), "127.0.0.2/8080");
+    ]
+
 let test_connect_to_wildcard_listener () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -1657,6 +1679,7 @@ let suite =
       Alcotest.test_case "tcp roundtrip" `Quick test_tcp_roundtrip;
       Alcotest.test_case "localhost resolution" `Quick test_resolve_localhost;
       Alcotest.test_case "numeric resolution" `Quick test_resolve_numbers;
+      Alcotest.test_case "name information" `Quick test_name_info;
       Alcotest.test_case "connect to wildcard listener" `Quick
         test_connect_to_wildcard_listener;
       Alcotest.test_case "listen on port 0 binds a free port" `Quick
