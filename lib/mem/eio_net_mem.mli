@@ -164,26 +164,27 @@ val v :
     that way is lost, as UDP loses it; one sent to a Unix path no socket binds
     raises [Eio.Fs.Not_found], and one sent to a listener's or a client's path
     raises the error that {!Wrong_socket_type} marks. A closed Unix-domain
-    datagram socket leaves its path behind, as Eio's POSIX backend leaves the
-    file: a datagram sent there is refused with the connection failure that
+    datagram socket leaves its path behind, as Eio's backends leave the file: a
+    datagram sent there is refused with the connection failure that
     {!No_listener} marks, and a socket bound there raises the error that
-    {!Address_in_use} marks. A send without a destination raises the error that
-    {!No_destination} marks, since no socket is connected. A datagram longer
-    than 65507 bytes to an IPv4 address, 65527 to an IPv6 one, or 212960 to a
-    Unix path, as Linux's default send buffer allows, raises the error that
-    {!Message_too_long} marks. These are Linux's limits: by default, macOS
-    refuses a UDP datagram longer than 9216 bytes and a Unix-domain one longer
-    than 2048. One sent to UDP port 0 raises the error that {!Invalid_port}
-    marks, as on Linux; macOS sends it over IPv4. One sent from an IPv6 address
-    to an IPv4-mapped one, or the reverse, raises the error that
-    {!Network_unreachable} or {!Address_family} marks. One from an IPv4 socket
-    to an IPv6 address, or between UDP and a Unix path, raises the error that
-    {!Address_family} marks; one from an IPv6 socket to an IPv4 address goes the
-    IPv4 way, as on Linux, so it is sent from the wildcard address and refused
-    from any other. A [recv] into a buffer shorter than the datagram gets its
-    first bytes, as a socket does. The socket is closed, and its address free
-    again, when the switch passed to [datagram_socket] finishes; a send or a
-    receive on it then raises [Invalid_argument]. *)
+    {!Address_in_use} marks, with [reuse_addr] or not, as eio_posix does;
+    eio_linux, given [reuse_addr], removes the file and binds. A send without a
+    destination raises the error that {!No_destination} marks, since no socket
+    is connected. A datagram longer than 65507 bytes to an IPv4 address, 65527
+    to an IPv6 one, or 212960 to a Unix path, as Linux's default send buffer
+    allows, raises the error that {!Message_too_long} marks. These are Linux's
+    limits: by default, macOS refuses a UDP datagram longer than 9216 bytes and
+    a Unix-domain one longer than 2048. One sent to UDP port 0 raises the error
+    that {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. One sent
+    from an IPv6 address to an IPv4-mapped one, or the reverse, raises the error
+    that {!Network_unreachable} or {!Address_family} marks. One from an IPv4
+    socket to an IPv6 address, or between UDP and a Unix path, raises the error
+    that {!Address_family} marks; one from an IPv6 socket to an IPv4 address
+    goes the IPv4 way, as on Linux, so it is sent from the wildcard address and
+    refused from any other. A [recv] into a buffer shorter than the datagram
+    gets its first bytes, as a socket does. The socket is closed, and its
+    address free again, when the switch passed to [datagram_socket] finishes; a
+    send or a receive on it then raises [Invalid_argument]. *)
 
 val pipe :
   ?capacity:int ->
