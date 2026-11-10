@@ -508,9 +508,13 @@ module Datagram = struct
     type kept = Nothing | Next of datagram | Held of datagram
     type t = { base : base; driver : driver; mutable kept : kept }
 
+    (* The whole datagram, up to 64 KiB or the caller's buffer if longer, so
+       a copy kept for a later receive is cut only to the buffer of the
+       receive that delivers it. *)
     let recv_raw t buf =
-      let addr, len = t.base.recv buf in
-      (addr, Cstruct.to_string (Cstruct.sub buf 0 len))
+      let scratch = Cstruct.create_unsafe (max (Cstruct.length buf) 0x10000) in
+      let addr, len = t.base.recv scratch in
+      (addr, Cstruct.to_string ~len scratch)
 
     let put buf addr data =
       let n = min (String.length data) (Cstruct.length buf) in

@@ -270,6 +270,21 @@ let test_dgram_cancelled_recv_takes_no_fault () =
   Alcotest.(check (list string))
     "Dup applies to one" [ "one"; "one" ] (recv_n sock 2)
 
+(* A datagram held back is kept whole: it is cut to the buffer of the receive
+   that delivers it, not of the one that took it. *)
+let test_dgram_held_datagram_kept_whole () =
+  with_datagrams [ "aaaa"; "b" ] @@ fun ~send:_ base ->
+  let sock = Datagram.wrap (Datagram.Schedule.script [ Reorder ]) base in
+  let recv len =
+    let buf = Cstruct.create len in
+    let _, n = Eio.Net.recv sock buf in
+    Cstruct.to_string ~len:n buf
+  in
+  let first = recv 1 in
+  let second = recv 6 in
+  Alcotest.(check (list string))
+    "b, then aaaa whole" [ "b"; "aaaa" ] [ first; second ]
+
 (* A receive cancelled while it holds a datagram back keeps it: the next
    receives deliver the one after it, then the held one. *)
 let test_dgram_reorder_cancelled () =
@@ -576,6 +591,8 @@ let suite =
         test_net_max_accepts_concurrent;
       Alcotest.test_case "dgram cancelled recv takes no fault" `Quick
         test_dgram_cancelled_recv_takes_no_fault;
+      Alcotest.test_case "dgram held datagram kept whole" `Quick
+        test_dgram_held_datagram_kept_whole;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
       Alcotest.test_case "flow writes counted across domains" `Quick
