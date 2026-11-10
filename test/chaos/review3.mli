@@ -26,6 +26,10 @@ val shed : ?bug:[ `None | `Leak ] -> Eio_net_chaos.env -> unit
     and five clients that retry. With [`Leak] a handler that fails is not
     counted out. *)
 
+val rpc : ?bug:[ `None | `Lenient ] -> Eio_net_chaos.env -> unit
+(** [rpc ~bug env] runs length-prefixed requests on one connection. With
+    [`Lenient] the client takes a truncated last frame for a whole one. *)
+
 val pipelined : Eio_net_chaos.env -> unit
 (** [pipelined env] runs a client that writes its whole batch of requests before
     it reads a reply. *)

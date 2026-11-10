@@ -117,7 +117,9 @@ let write_positions ~all trace e =
     List.fold_left (fun m (op : Op.t) -> max m (op.offset + op.length)) 0 w
   in
   let w = if all then w else structural w in
-  around (List.map (fun (op : Op.t) -> op.offset) w)
+  (* Around the start of each write, and the last byte of the stream, where a
+     writer that closes cuts its last message. *)
+  (top - 1) :: around (List.map (fun (op : Op.t) -> op.offset) w)
   |> List.filter (fun b -> b >= 0 && b < top)
   |> List.sort_uniq compare
 

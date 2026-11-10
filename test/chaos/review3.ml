@@ -229,6 +229,49 @@ let shed ?(bug = `None) env =
     end
   else if not (List.for_all Fun.id results) then failwith "a client gave up"
 
+(* Length-prefixed requests and replies on one connection. With [`Lenient]
+   the client takes a truncated last frame for a whole one. *)
+let rpc ?(bug = `None) env =
+  let frame s =
+    let b = Bytes.create (4 + String.length s) in
+    Bytes.set_int32_be b 0 (Int32.of_int (String.length s));
+    Bytes.blit_string s 0 b 4 (String.length s);
+    Bytes.to_string b
+  in
+  let read_frame ~lenient r =
+    let n = Int32.to_int (String.get_int32_be (Eio.Buf_read.take 4 r) 0) in
+    if n < 0 || n > 1024 then failwith "bad frame";
+    if lenient then
+      try Eio.Buf_read.take n r with End_of_file -> Eio.Buf_read.take_all r
+    else Eio.Buf_read.take n r
+  in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7000) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let r = Eio.Buf_read.of_flow flow ~max_size:2048 in
+          let rec loop () =
+            match
+              Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+                  read_frame ~lenient:false r)
+            with
+            | req ->
+                Eio.Flow.copy_string (frame (String.uppercase_ascii req)) flow;
+                loop ()
+            | exception End_of_file -> ()
+          in
+          loop ()));
+  attempts env (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect ~sw env#net (tcp 7000) in
+      let r = Eio.Buf_read.of_flow flow ~max_size:2048 in
+      List.map
+        (fun req ->
+          Eio.Flow.copy_string (frame req) flow;
+          read_frame ~lenient:(bug = `Lenient) r)
+        [ "a"; "bb"; "ccc" ])
+  |> expect env Fmt.Dump.(list string) [ "A"; "BB"; "CCC" ]
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in

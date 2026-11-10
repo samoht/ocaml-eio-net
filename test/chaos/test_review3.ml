@@ -35,6 +35,11 @@ let suite =
       Alcotest.test_case
         "load-shedding server: leaked count, by the sampled tier" `Quick
         (Expect.caught ~tier:"sampled" (check (shed ~bug:`Leak)));
+      Alcotest.test_case "framed requests: correct" `Quick
+        (Expect.passes (check (rpc ?bug:None)));
+      Alcotest.test_case
+        "framed requests: truncated last frame taken, by the linear tier" `Quick
+        (Expect.caught ~tier:"linear" (check (rpc ~bug:`Lenient)));
       Alcotest.test_case "pipelined batch: correct" `Quick
         (Expect.passes (check pipelined));
     ] )
