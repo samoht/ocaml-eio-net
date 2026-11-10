@@ -96,7 +96,8 @@ The tests follow a few rules:
 - Every program on the network meets the faults, the test's own peers
   included. Test servers use `Eio.Net.run_server ~on_error:ignore` and a
   timeout on each read, test clients catch `Eio.Io _ | End_of_file`, and both
-  parse strictly.
+  parse strictly. Two fibers of `Eio.Fiber.both` that both meet a fault fail
+  together with `Eio.Exn.Multiple`, so catch the errors inside each fiber.
 - A connect that times out takes 133 seconds, as on Linux, and then fails
   with the error eio_posix raises, which Eio does not classify as a
   connection failure. A program with no connect timeout still succeeds, so

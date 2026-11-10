@@ -41,7 +41,10 @@
     a timeout on each read, as a client may stall for good; catch
     [Eio.Io _ | End_of_file] in test clients; and parse strictly in both: a peer
     that takes a partial line for a whole one turns an injected end of stream
-    into a wrong answer.
+    into a wrong answer. Under [Eio.Fiber.both] or [Eio.Fiber.all], two fibers
+    that each meet the fault, as both directions of one connection do, fail
+    together with [Eio.Exn.Multiple]: catch the errors inside each fiber, or
+    catch [Eio.Exn.Multiple] too.
 
     {b Ports are held as on Linux.} The end of a connection that closes first
     holds its port for 60 seconds of the run's clock, in TIME_WAIT. A server
@@ -54,6 +57,12 @@
     timeout waits for it and still succeeds. A test that bounds its program's
     latency reads [env#clock] before and after.
 
+    {b What a check does not catch.} A bug that needs a datagram delayed with
+    others, or for longer than 50 ms, may pass: the linear tier delays one
+    datagram at a time. A program that never fails the calls still waiting on a
+    connection that died passes unless the workload waits for every call and
+    checks how each ended.
+
     {2 Failures and replay}
 
     A check is deterministic. A failure raises [Failure] with the scenario, the
@@ -61,8 +70,9 @@
     [~replay:"..."] argument that runs that scenario alone. The scenario is
     found by its position and fault, so a replay still runs after a fix that
     changes the workload's first run, such as the size of its reads: a failure
-    then says the scenario was re-matched. A replay whose scenario the check no
-    longer has fails.
+    then says the scenario was re-matched, and a re-matched replay that passes
+    returns as any passing check does, saying nothing. A replay whose scenario
+    the check no longer has fails.
 
     A check reads no environment variable and prints nothing. A test that wants
     a larger budget at night reads its own:
@@ -112,12 +122,12 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
       the client left first;
     - each datagram received is lost, duplicated, held back behind the next,
       replaced with noise from the same sender, or delivered 50 ms late, alone;
-    - on the first 4 KiB of each end, every read returns one byte, or every
-      write takes one byte; every read waits 5 ms and takes what several writes
-      sent; every connection queues 32 KiB each way, about what a Linux
-      connection holds with both its socket buffers set to their minimum, as its
-      buffering counts per connection, so a writer whose reader does not read
-      blocks;
+    - every read returns one byte until its end has read 4 KiB, or every write
+      takes one byte until its end has written 4 KiB; every read waits 5 ms and
+      takes what several writes sent; every connection queues 32 KiB each way,
+      about what a Linux connection holds with both its socket buffers set to
+      their minimum, as its buffering counts per connection, so a writer whose
+      reader does not read blocks;
     - the outage: every connect is refused and every datagram lost, for the
       whole run. {!outage} is then [true], so [run] checks what its program does
       when it gives up.
@@ -202,11 +212,12 @@ module Fault : sig
     | Stall of float
         (** The operation waits that many seconds of the clock, then runs. *)
     | Hang
-        (** The operation never completes; only a cancel ends it. A read from a
-            silent peer does that; a connect never does, as the kernel gives up
-            on it, so {!check} hangs reads only. A datagram taken by a receive
-            that hangs goes to the next receive, and a connection taken by an
-            accept that hangs to the next accept. *)
+        (** The operation waits until a cancel ends it, as a read from a silent
+            peer does; a connect never does, as the kernel gives up on it, so
+            {!check} hangs reads only. It holds that one operation: a read after
+            the cancel gets the bytes the hung one would have, a datagram taken
+            by a receive that hangs goes to the next receive, and a connection
+            taken by an accept that hangs to the next accept. *)
     | Reset
         (** The connection is reset at both ends, and the bytes not yet read are
             lost. At each end the first read or write that follows raises
