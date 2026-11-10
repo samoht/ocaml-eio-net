@@ -1,0 +1,7 @@
+; The tests of the chaos API's design, and its mutants: each program under
+; test takes a bug, and each test says which tier of the check finds it.
+
+(test
+ (name test)
+ (package eio-net)
+ (libraries eio-net.chaos eio-net.mem eio eio.mock cstruct fmt alcotest))

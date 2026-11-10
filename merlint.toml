@@ -43,3 +43,9 @@ exclude = ["E005"]
 [[rules]]
 files = ["lib/chaos/eio_net_chaos.ml"]
 exclude = ["E105"]
+
+# The design's tests of the chaos API, with the programs and mutants they
+# run: they test check as a whole rather than one library module.
+[[rules]]
+files = ["test/chaos/*"]
+exclude = ["E610"]
