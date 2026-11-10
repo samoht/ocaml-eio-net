@@ -703,7 +703,10 @@ module Listening_socket = struct
     if not (Atomic.exchange t.closed true) then begin
       List.iter Eio.Switch.remove_hook t.hooks;
       t.hooks <- [];
-      (* A path taken over is its new listener's to free. *)
+      (* A path taken over is its new listener's to free. A close in a
+         cancelled fiber frees the address all the same: taking the mutex
+         is not cancelled. *)
+      Eio.Cancel.protect @@ fun () ->
       Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
           match Hashtbl.find_opt t.hub.listeners t.addr with
           | Some held when held == t -> (

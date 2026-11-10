@@ -690,6 +690,23 @@ let test_cancelled_connect_frees_its_port () =
             Eio.Fiber.yield ()
           done))
 
+(* A listener closed by a cancelled fiber frees its port all the same: the
+   address binds again after 2000 such listeners. *)
+let test_cancelled_close_frees_its_port () =
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 41000) in
+  contended ~port:41000 2000 (fun ~sw:_ net i ->
+      Eio.Fiber.first
+        (fun () ->
+          Eio.Switch.run @@ fun sw ->
+          let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+          Fun.protect
+            ~finally:(fun () -> Eio.Net.close l)
+            Eio.Fiber.await_cancel)
+        (fun () ->
+          for _ = 1 to 1 + (i mod 3) do
+            Eio.Fiber.yield ()
+          done))
+
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
   let client, _server = Eio_net_mem.pipe () in
@@ -1170,6 +1187,8 @@ let suite =
       Alcotest.test_case "a reset is read once" `Quick test_reset_read_once;
       Alcotest.test_case "a cancelled connect frees its port" `Quick
         test_cancelled_connect_frees_its_port;
+      Alcotest.test_case "a cancelled close frees its port" `Quick
+        test_cancelled_close_frees_its_port;
       Alcotest.test_case "a listener's path freed at switch end" `Quick
         test_listener_path_freed_at_switch_end;
       Alcotest.test_case "a client's port is free" `Quick
