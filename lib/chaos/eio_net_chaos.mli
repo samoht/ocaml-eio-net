@@ -108,7 +108,8 @@ module Flow : sig
       reads and writes. Shutdown, close, and socket options pass through to
       [sock]. A close or a receive shutdown drops the bytes a short read left
       buffered: a read after the close raises [Invalid_argument], and one after
-      the shutdown raises [End_of_file]. Writers in several domains share the
+      the shutdown raises [End_of_file]. A write after the close raises
+      [Invalid_argument] before any fault. Writers in several domains share the
       count of bytes written that [schedule] follows; reads take one reader at a
       time, as two concurrent readers may each buffer a chunk of the stream out
       of order. *)

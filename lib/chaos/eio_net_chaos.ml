@@ -293,6 +293,8 @@ module Flow = struct
            another domain meanwhile sees them. *)
         let n =
           Mutex.protect t.lock @@ fun () ->
+          (* A closed flow refuses the write before any fault is drawn. *)
+          if t.closed then invalid_arg "Eio_net_chaos: write on a closed flow";
           match t.driver.write ~written:t.written with
           | Fail -> None
           | Accept cap ->

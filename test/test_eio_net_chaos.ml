@@ -210,6 +210,19 @@ let test_flow_seeded_wide_bounds () =
     "all 20 bytes delivered" 20
     (List.fold_left ( + ) 0 !sizes)
 
+(* A write after the flow's own close raises [Invalid_argument], as on the
+   socket it wraps, before any fault: the scripted failure is not reached. *)
+let test_flow_write_after_close () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, _server =
+    Flow.pair ~client:(Flow.Schedule.script ~writes:[ Fail ] ()) ()
+  in
+  Eio.Flow.close client;
+  match Eio.Flow.single_write client [ Cstruct.of_string "x" ] with
+  | exception Invalid_argument _ -> ()
+  | exception e -> Alcotest.failf "a write after close raised %a" Fmt.exn e
+  | (_ : int) -> Alcotest.fail "a write after close went through"
+
 (* --- Datagram faults ----------------------------------------------------- *)
 
 let loopback port = `Udp (Eio.Net.Ipaddr.V4.loopback, port)
@@ -606,6 +619,8 @@ let suite =
         test_dgram_held_datagram_kept_whole;
       Alcotest.test_case "dgram close drops the held datagram" `Quick
         test_dgram_close_drops_held;
+      Alcotest.test_case "flow write after close" `Quick
+        test_flow_write_after_close;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
       Alcotest.test_case "flow writes counted across domains" `Quick
