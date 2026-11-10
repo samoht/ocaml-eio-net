@@ -341,7 +341,9 @@ end
    reader has closed: the first write to it is lost and answered with a reset,
    which [refused] then makes every later write raise; on a Unix-domain
    connection, [local], the first write raises it, as EPIPE. [rcv_shut] says the reader
-   shut its receive side: it reads what is queued, then end-of-file. *)
+   shut its receive side: it reads what is queued, then end-of-file. Once it
+   has also shut its send side, [fin_sent], data reaching a TCP reader resets
+   the connection, as Linux resets it in FIN-WAIT. *)
 module Pipe = struct
   type t = {
     mutex : Mutex.t;
@@ -352,6 +354,7 @@ module Pipe = struct
     mutable gone : bool;
     mutable refused : bool;
     mutable rcv_shut : bool;
+    mutable fin_sent : bool;
     local : bool;
     capacity : int;
     mutable size : int; (* Bytes queued and not yet read. *)
@@ -370,6 +373,7 @@ module Pipe = struct
       gone = false;
       refused = false;
       rcv_shut = false;
+      fin_sent = false;
       capacity;
       size = 0;
       readers = Waiters.v ();
@@ -438,6 +442,11 @@ module Pipe = struct
       else if t.gone then begin
         t.refused <- true;
         if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
+      end
+      else if t.rcv_shut && t.fin_sent && not t.local then begin
+        t.reset <- true;
+        t.refused <- true;
+        leave (`Lost n)
       end
       else if Waiters.must_wait t.writers ~turn || t.size >= t.capacity then
         (`Wait (Waiters.queue t.writers ~turn), [])
@@ -514,6 +523,9 @@ module Pipe = struct
      what arrives, as on Linux, and end-of-file once nothing is. *)
   let shut_receive t = update t (fun t -> t.rcv_shut <- true)
 
+  (* The reader shut its send side. *)
+  let fin_sent t = update t (fun t -> t.fin_sent <- true)
+
   (* The reader closes: bytes it left unread answer the writer with a reset,
      which refuses its writes at once. *)
   let leave t =
@@ -558,10 +570,13 @@ module Flow = struct
     let shutdown t cmd =
       check t "shutdown";
       match cmd with
-      | `Send -> Pipe.shut t.to_peer
+      | `Send ->
+          Pipe.shut t.to_peer;
+          Pipe.fin_sent t.from_peer
       | `Receive -> Pipe.shut_receive t.from_peer
       | `All ->
           Pipe.shut t.to_peer;
+          Pipe.fin_sent t.from_peer;
           Pipe.shut_receive t.from_peer
 
     (* [abort] resets the peer, as a connection a listener drops unaccepted

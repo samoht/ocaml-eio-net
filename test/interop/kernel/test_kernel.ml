@@ -30,12 +30,6 @@ let documented = []
 (* Divergences from Linux not fixed yet. *)
 let known =
   [
-    ex "M2: data reaching a TCP end shut both ways resets it (write)" tcp
-      "write" ~mem:"2" ~linux:"Reset";
-    ex "M2: data reaching a TCP end shut both ways resets it (read 1)" tcp
-      "read" ~mem:"r1" ~linux:"Reset";
-    ex "M2: data reaching a TCP end shut both ways resets it (read 4)" tcp
-      "read" ~mem:"r2" ~linux:"Reset";
     ex "M3: a Unix-domain write after the peer's receive shutdown is EPIPE"
       [ Unix_stream ] "write" ~mem:"2" ~linux:"Reset";
     ex "M4: a TCP read after the peer's end of file stays end of file" tcp
