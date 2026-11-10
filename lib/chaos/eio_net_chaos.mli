@@ -64,7 +64,9 @@
     Each run has its own event loop, inside or outside another one. Its clocks
     start at [0.] and move only when every fiber waits, so a timeout of an hour
     takes no time. A run in which every fiber waits and no timer is due fails as
-    a hang, and so does one still running after an hour of its clock. *)
+    a hang, and so does one still running after an hour of its clock, and one in
+    which 10000 network operations fail in a row while its clock stands still,
+    as a client that retries a refused connect at once does in the outage. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
@@ -222,6 +224,10 @@ val wrap :
     {!Eio_net_mem} network, which tells the wrapper which accepted socket a
     connect made. On another network, the two ends are two sockets to the
     wrapper, numbered apart, and a fault breaks only the end that meets it.
+
+    After 10000 operations that fail in a row while [clock] stands still, the
+    next raises [Failure], as the program that makes them spins for ever, and
+    after 20000 an operation waits for ever.
 
     A read or a write after the flow's own close raises [Invalid_argument]
     before [f] is asked, as Eio's own sockets do. A close drops the bytes a read

@@ -79,6 +79,9 @@ type ctx = {
   mutable sockets : int;
   mutable connects : int;
   mutable accepts : int;
+  mutable streak : int;
+  mutable streak_at : float;
+  livelocked : bool Atomic.t;
   pending : (int, pending) Hashtbl.t;
 }
 
@@ -92,6 +95,9 @@ let ctx ~clock ~outage f =
     sockets = 0;
     connects = 0;
     accepts = 0;
+    streak = 0;
+    streak_at = 0.;
+    livelocked = Atomic.make false;
     pending = Hashtbl.create 7;
   }
 
@@ -101,6 +107,47 @@ let ask_locked ctx kind ~socket ~side ~offset ~length =
   ctx.f { Op.index = ctx.index; kind; socket; side; offset; length }
 
 let locked (ctx : ctx) f = Mutex.protect ctx.lock f
+
+(* A program that retries a failed operation at once, with no time passing,
+   spins for ever: an outage refuses each connect at once. After [threshold]
+   failures in a row while the clock stands still, the operation raises
+   [Failure] instead, and after twice as many it waits for ever, as nothing
+   the program does can get it out. *)
+let threshold = 10_000
+
+let livelock_message =
+  Fmt.str "%d network operations failed in a row while its clock stood still"
+    threshold
+
+let failed ctx =
+  let n =
+    locked ctx (fun () ->
+        let now = Eio.Time.now ctx.clock in
+        if now <> ctx.streak_at then begin
+          ctx.streak_at <- now;
+          ctx.streak <- 0
+        end;
+        ctx.streak <- ctx.streak + 1;
+        ctx.streak)
+  in
+  if n >= threshold then begin
+    Atomic.set ctx.livelocked true;
+    if n >= 2 * threshold then
+      Eio.Cancel.protect (fun () ->
+          Eio.Promise.await (fst (Eio.Promise.create ())));
+    failwith ("Eio_net_chaos: " ^ livelock_message)
+  end
+
+let guard ctx f =
+  match f () with
+  | v ->
+      locked ctx (fun () -> ctx.streak <- 0);
+      v
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception e ->
+      let bt = Printexc.get_raw_backtrace () in
+      failed ctx;
+      Printexc.raise_with_backtrace e bt
 
 let ask ctx kind ~socket ~side ~offset ~length =
   locked ctx (fun () -> ask_locked ctx kind ~socket ~side ~offset ~length)
@@ -223,7 +270,7 @@ module Flow = struct
     type tag = [ `Generic ]
     type nonrec t = t
 
-    let single_read t dst =
+    let single_read_ t dst =
       let fault =
         Mutex.protect t.lock (fun () ->
             check_read t;
@@ -252,7 +299,7 @@ module Flow = struct
 
     (* The bytes are counted before they are written, so a write in another
        domain meanwhile sees them. *)
-    let single_write t bufs =
+    let single_write_ t bufs =
       let total = Cstruct.lenv bufs in
       let fault, n =
         Mutex.protect t.lock @@ fun () ->
@@ -300,6 +347,8 @@ module Flow = struct
         | None ->
             write ()
 
+    let single_read t dst = guard t.ctx (fun () -> single_read_ t dst)
+    let single_write t bufs = guard t.ctx (fun () -> single_write_ t bufs)
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
     let read_methods = []
 
@@ -388,7 +437,7 @@ module Datagram = struct
 
     (* The fault is drawn once a datagram is taken, so a receive cancelled
        while it waits for one draws none. *)
-    let rec recv t buf =
+    let rec recv_ t buf =
       let next =
         Mutex.protect t.lock (fun () ->
             check t;
@@ -442,12 +491,13 @@ module Datagram = struct
           match action with
           | `Pass -> put buf d
           | `Deliver d -> put buf d
-          | `Again -> recv t buf
+          | `Again -> recv_ t buf
           | `Wait (Some s) ->
               Eio.Time.sleep t.ctx.clock s;
-              recv t buf
+              recv_ t buf
           | `Wait None -> Eio.Fiber.await_cancel ())
 
+    let recv t buf = guard t.ctx (fun () -> recv_ t buf)
     let send t ?dst bufs = Eio.Net.send t.sock ?dst bufs
     let shutdown t cmd = shutdown_of t.sock cmd
 
@@ -491,7 +541,7 @@ module Listener = struct
     type tag = [ `Generic ]
     type nonrec t = t
 
-    let accept t ~sw =
+    let accept_ t ~sw =
       let ctx = t.ctx in
       let sock, peer = Eio.Net.accept ~sw t.l in
       let sock = (sock :> stream) in
@@ -524,6 +574,7 @@ module Listener = struct
       | None ->
           (flow, peer)
 
+    let accept t ~sw = guard t.ctx (fun () -> accept_ t ~sw)
     let close t = Eio.Resource.close t.l
     let listening_addr t = Eio.Net.listening_addr t.l
     let setsockopt t opt v = Eio.Net.setsockopt t.l opt v
@@ -535,6 +586,7 @@ end
 
 type (_, _, _) Eio.Resource.pi +=
   | Outage : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
+  | Livelocked : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
 
 module Network = struct
   type t = { ctx : ctx; net : [ `Generic ] Eio.Net.ty Eio.Resource.t }
@@ -543,7 +595,7 @@ module Network = struct
     type tag = [ `Generic ]
     type nonrec t = t
 
-    let connect t ~bind_to ~options ~sw addr =
+    let connect_ t ~bind_to ~options ~sw addr =
       let ctx = t.ctx in
       let socket, fault =
         locked ctx (fun () ->
@@ -573,6 +625,9 @@ module Network = struct
         ->
           go ()
 
+    let connect t ~bind_to ~options ~sw addr =
+      guard t.ctx (fun () -> connect_ t ~bind_to ~options ~sw addr)
+
     let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
       let l = Eio.Net.listen ~reuse_addr ~reuse_port ~backlog ~sw t.net addr in
       Eio.Resource.T
@@ -594,6 +649,7 @@ module Network = struct
   let handler =
     Eio.Resource.handler
       (H (Outage, fun t -> t.ctx.outage)
+      :: H (Livelocked, fun t -> Atomic.get t.ctx.livelocked)
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
@@ -617,3 +673,7 @@ let pair ~clock f =
 let outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
   match Eio.Resource.get_opt ops Outage with Some f -> f t | None -> false
+
+let livelocked (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
+  let (Eio.Resource.T (t, ops)) = net in
+  match Eio.Resource.get_opt ops Livelocked with Some f -> f t | None -> false

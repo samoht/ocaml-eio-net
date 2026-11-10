@@ -30,6 +30,7 @@ let exec run (s : Plan.scenario) =
     trace := (op, fault) :: !trace;
     fault
   in
+  let wrapped = ref None in
   let failed =
     match
       Quiet_mock.run ~limit:3600. @@ fun clock mono_clock ->
@@ -39,6 +40,7 @@ let exec run (s : Plan.scenario) =
       in
       let base = Eio_net_mem.v ?capacity ~sw () in
       let net = Wrapper.v ~clock ~outage:(s.lasting = Some Outage) f base in
+      wrapped := Some net;
       run
         object
           method net = net
@@ -52,6 +54,12 @@ let exec run (s : Plan.scenario) =
     | exception Quiet_mock.Time_limit ->
         Some "the run hangs: it is still running after an hour of its clock"
     | exception x -> Some (Printexc.to_string x)
+  in
+  let failed =
+    match !wrapped with
+    | Some net when Wrapper.livelocked net ->
+        Some ("the run hangs: " ^ Wrapper.livelock_message)
+    | _ -> failed
   in
   (List.rev !trace, failed)
 

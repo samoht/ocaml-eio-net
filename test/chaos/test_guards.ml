@@ -135,6 +135,23 @@ let test_nested () =
   After.test_d ~read ();
   ignore (Expect.report (fun () -> mutant ()))
 
+(* A client that retries a refused connect at once spins in the outage,
+   where every connect is refused and no time passes. *)
+let spin () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
+  let rec go () =
+    match
+      Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
+    with
+    | () -> ()
+    | exception Eio.Io _ -> go ()
+  in
+  go ()
+
 let suite =
   ( "guards",
     [
@@ -145,6 +162,11 @@ let suite =
         (error_is
            "the run hangs: it is still running after an hour of its clock"
            ticking);
+      Alcotest.test_case "a run that fails with the clock stopped hangs" `Quick
+        (error_is
+           "the run hangs: 10000 network operations failed in a row while its \
+            clock stood still"
+           spin);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
         (Expect.passes (transfer 25 4096));
       Alcotest.test_case "a linear tier past the budget fails" `Quick

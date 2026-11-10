@@ -21,3 +21,10 @@ val pair :
 val outage : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
 (** [outage net] is the [outage] [net] was made with by {!v}, and [false] for
     any other network. *)
+
+val livelocked : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
+(** [livelocked net] is [true] iff an operation of [net] failed after many
+    others in a row while the clock stood still. *)
+
+val livelock_message : string
+(** [livelock_message] says what {!val-livelocked} means, for a report. *)
