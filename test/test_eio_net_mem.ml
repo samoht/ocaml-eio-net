@@ -750,6 +750,11 @@ let test_capacity_first_come () =
    mutex over and over, listening and closing, so that a fiber cancelled on
    its way into the mutex meets it held; then checks that [port] binds
    again. *)
+(* The races across domains run a few hundred times by default;
+   [dune build @test/conc-long] sets EIO_NET_LONG for the full counts. *)
+let long = Sys.getenv_opt "EIO_NET_LONG" <> None
+let iterations = if long then 2000 else 200
+
 let contended ~port n f =
   Eio_main.run @@ fun env ->
   let domain_mgr = Eio.Stdenv.domain_mgr env in
@@ -783,7 +788,7 @@ let contended ~port n f =
       Alcotest.failf "port %d is still held after %d cancelled fibers" port n
 
 (* A connect cancelled while it releases its bound port releases it all the
-   same: the port is free again after 2000 such connects. Each listener
+   same: the port is free again after [iterations] such connects. Each listener
    closes with its switch and resets the connection it queued, which lets go
    of the client's port. *)
 let test_cancelled_connect_frees_its_port () =
@@ -794,7 +799,7 @@ let test_cancelled_connect_frees_its_port () =
     let l = Eio.Net.listen ~sw:csw ~backlog:1 net addr in
     ignore (Eio.Net.connect ~sw:csw ~bind_to net (Eio.Net.listening_addr l))
   in
-  contended ~port:40000 2000 (fun ~sw:_ net i ->
+  contended ~port:40000 iterations (fun ~sw:_ net i ->
       Eio.Fiber.first
         (fun () -> connect net)
         (fun () ->
@@ -803,10 +808,10 @@ let test_cancelled_connect_frees_its_port () =
           done))
 
 (* A listener closed by a cancelled fiber frees its port all the same: the
-   address binds again after 2000 such listeners. *)
+   address binds again after [iterations] such listeners. *)
 let test_cancelled_close_frees_its_port () =
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 41000) in
-  contended ~port:41000 2000 (fun ~sw:_ net i ->
+  contended ~port:41000 iterations (fun ~sw:_ net i ->
       Eio.Fiber.first
         (fun () ->
           Eio.Switch.run @@ fun sw ->
@@ -1026,13 +1031,14 @@ let test_connect_closes_at_switch_end () =
    join this domain's run queue in that order, so a read still suspended once
    the word has arrived and the domain has run what was queued before it is a
    wake-up that was lost. Each round the writer starts a different number of
-   spins after the reader asks, so the write falls at every point of the
-   reader's path from finding nothing to suspending. *)
+   spins after the reader asks, 0 to 63, so the write falls at every point of
+   the reader's path from finding nothing to suspending: 256 rounds try each
+   four times, 4096 under [@conc-long]. *)
 let test_a_write_in_another_domain_wakes_the_read () =
   Eio_main.run @@ fun env ->
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let near, far = Eio_net_mem.pipe () in
-  let rounds = 4096 in
+  let rounds = if long then 4096 else 256 in
   let turn = Atomic.make (-1) in
   let over = Atomic.make false in
   let written = Array.init rounds (fun _ -> Eio.Promise.create ()) in

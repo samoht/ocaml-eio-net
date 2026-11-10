@@ -18,3 +18,16 @@
   fmt
   mtime
   alcotest))
+
+; The races across domains run a few seeds and rounds in @runtest. For the
+; full counts (2000 seeds per workload, as the kernel's outcome sets were
+; measured, and 4096 rounds of the cross-domain wake-up), run by hand:
+;   dune build @test/conc-long
+
+(rule
+ (alias conc-long)
+ (action
+  (setenv
+   EIO_NET_LONG
+   1
+   (run %{dep:test.exe}))))

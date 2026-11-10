@@ -63,30 +63,34 @@ let read_race pool how seed =
 
 (* A write loop on one domain while another closes the same end: each write
    in flight finishes, later ones raise [Invalid_argument], and the peer
-   reads end-of-file. *)
+   reads end-of-file. The queue holds one write, so the second waits for
+   room, in flight, when the close comes after the first, and the peer
+   drains only once the close has returned. *)
 let close_vs_write pool seed =
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~capacity:8 ~sw () in
   let _, a, b = pair ~sw net in
   let st = Random.State.make [| seed |] in
+  let first = Atomic.make false in
   let run f = Eio.Executor_pool.submit_exn pool ~weight:1.0 f in
   let writer () =
     let rec loop k =
       if k = 0 then "all-ok"
       else
         match Eio.Flow.single_write a [ Cstruct.create 8 ] with
-        | _ -> loop (k - 1)
+        | _ ->
+            Atomic.set first true;
+            loop (k - 1)
         | exception e -> classify e
     in
     loop 2000
   in
-  let w, () =
-    Eio.Fiber.pair
-      (fun () -> run writer)
-      (fun () ->
-        run (fun () ->
-            spin st;
-            Eio.Flow.close a))
+  let closer () =
+    while not (Atomic.get first) do
+      Domain.cpu_relax ()
+    done;
+    spin st;
+    Eio.Flow.close a
   in
   let buf = Cstruct.create 65536 in
   let rec drain () =
@@ -94,7 +98,13 @@ let close_vs_write pool seed =
     | _ -> drain ()
     | exception e -> classify e
   in
-  let peer = drain () in
+  let w, peer =
+    Eio.Fiber.pair
+      (fun () -> run writer)
+      (fun () ->
+        run closer;
+        drain ())
+  in
   if not (List.mem w [ "all-ok"; "INVAL" ] && peer = "EOF") then
     Alcotest.failf "seed %d: writer=%s peer=%s" seed w peer
 
@@ -128,7 +138,7 @@ let accept_race pool seed =
   in
   let client () =
     Eio.Switch.run @@ fun csw ->
-    List.init 3 (fun _ ->
+    List.init 8 (fun _ ->
         spin st2;
         match Eio.Net.connect ~sw:csw net addr with
         | c ->
@@ -169,7 +179,9 @@ let accept_race pool seed =
     Alcotest.failf "seed %d: %d accepted connections wrote, %d clients read"
       seed (Atomic.get written) read_x
 
-let seeds = 200
+(* A few seeds by default; [dune build @test/conc-long] sets EIO_NET_LONG and
+   runs 2000, as the kernel's outcome sets were measured. *)
+let seeds = if Sys.getenv_opt "EIO_NET_LONG" = None then 10 else 2000
 
 let with_pool f () =
   Eio_main.run @@ fun env ->
