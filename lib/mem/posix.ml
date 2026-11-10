@@ -1,0 +1,10 @@
+(* Outside the Hermetic prelude, which refuses Unix: eio_posix raises a raw
+   Unix.Unix_error from listen and datagram_socket when bind(2) or the
+   sockaddr conversion fails, and this builds the same exception. It reaches
+   nothing. *)
+
+let bind_error = function
+  | `In_use -> Unix.Unix_error (Unix.EADDRINUSE, "bind", "")
+  | `Not_available -> Unix.Unix_error (Unix.EADDRNOTAVAIL, "bind", "")
+  | `Invalid -> Unix.Unix_error (Unix.EINVAL, "bind", "")
+  | `Name_too_long path -> Unix.Unix_error (Unix.ENAMETOOLONG, "", path)

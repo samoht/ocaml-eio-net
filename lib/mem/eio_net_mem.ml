@@ -165,27 +165,42 @@ let unroutable b d =
   && first_byte d <> 127
   && not (multicast_v4 d)
 
+(* eio_posix raises bind(2)'s errors from [listen] and [datagram_socket] as a
+   raw [Unix.Unix_error], and a [connect]'s as an {!Eio.Io} error. *)
+let bind_fail code =
+  raise
+    (Posix.bind_error
+       (match code with
+       | Address_in_use -> `In_use
+       | Address_not_available -> `Not_available
+       | _ -> `Invalid))
+
 (* The network has the loopback interface only: an IPv4 socket binds an
    address of 127.0.0.0/8, the broadcast address or a multicast one, an IPv6
    one ::1, either the wildcard address of its family, and an IPv6 one the
    IPv4-mapped form of an IPv4 address it binds, as on Linux. An IPv6
    address that needs a scope fails with EINVAL, and so does an IPv6
    multicast one for TCP. *)
-let check_local ?(tcp = false) ip =
+let check_local ?(tcp = false) ?(fail = fail) ip =
   let ip = unmap ip in
   if needs_scope ip then fail Invalid_address;
   let local =
     if is_v4 ip then
       first_byte ip = 127 || same ip (any ip) || multicast_v4 ip || broadcast ip
-    else if (ip :> string).[0] = '\xff' then
-      if tcp then fail Invalid_address else true
+    else if (ip :> string).[0] = '\xff' then begin
+      if tcp then fail Invalid_address;
+      true
+    end
     else same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip)
   in
   if not local then fail Address_not_available
 
 (* OCaml's [Unix] refuses a path that [sun_path], 108 bytes on Linux, cannot
    hold with its NUL. *)
-let check_path path = if String.length path >= 108 then fail Name_too_long
+let check_path ?(raw = false) path =
+  if String.length path >= 108 then
+    if raw then raise (Posix.bind_error (`Name_too_long path))
+    else fail Name_too_long
 
 (* The error a socket at [src] meets reaching [dst] across address families,
    IPv6 against IPv4-mapped, as on Linux. *)
@@ -969,14 +984,14 @@ module Listening_socket = struct
      inside it would poison. *)
   let v hub ~reuse_addr ~backlog addr =
     (match addr with
-    | `Tcp (ip, _) -> check_local ~tcp:true ip
-    | `Unix path -> check_path path);
+    | `Tcp (ip, _) -> check_local ~tcp:true ~fail:bind_fail ip
+    | `Unix path -> check_path ~raw:true path);
     match
       Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
           bind hub ~reuse_addr ~backlog addr)
     with
     | Ok t -> t
-    | Error `In_use -> raise (address_in_use ())
+    | Error `In_use -> bind_fail Address_in_use
     | Error `No_port ->
         failwith "eio-net.mem: every port of 49152-65535 has a listener"
 
@@ -1123,8 +1138,8 @@ module Datagram_socket = struct
 
   let v hub ~reuse addr =
     (match addr with
-    | `Udp (ip, _) -> check_local ip
-    | `Unix path -> check_path path
+    | `Udp (ip, _) -> check_local ~fail:bind_fail ip
+    | `Unix path -> check_path ~raw:true path
     | `UdpV4 | `UdpV6 -> ());
     Mutex.protect hub.mutex @@ fun () ->
     let addr : Eio.Net.Sockaddr.datagram =
@@ -1142,7 +1157,7 @@ module Datagram_socket = struct
       | `Unix path -> not (Files.bind hub.files path Files.Datagram)
       | `Udp a -> Ports.in_use hub.ports ~reuse a
     in
-    if in_use then raise (address_in_use ());
+    if in_use then bind_fail Address_in_use;
     let hold =
       match addr with
       | `Udp a -> Some (Ports.add hub.ports ~reuse a)

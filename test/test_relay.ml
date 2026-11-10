@@ -276,7 +276,7 @@ let test_forward_unix_path_in_use () =
     Eio_net.Relay.forward ~sw ~net ~max_connections:4 ~listen:path
       ~connect:(loopback 1) ()
   with
-  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
   | _ -> Alcotest.fail "the relay took over a live listener's path"
 
 let suite =

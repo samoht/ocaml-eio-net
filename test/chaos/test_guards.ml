@@ -211,8 +211,8 @@ let test_restart () =
     not
       (String.starts_with
          ~prefix:
-           "Eio_net_chaos.check: the run with no fault failed: Eio.Io Address \
-            in use"
+           "Eio_net_chaos.check: the run with no fault failed: \
+            Unix.Unix_error(Unix.EADDRINUSE, \"bind\""
          m)
   then Alcotest.failf "failed with %S" m
 

@@ -211,9 +211,8 @@ let test_listen_on_port_zero () =
   reaches a pa "a";
   reaches b pb "b"
 
-(* A listen at an address a listener holds is refused with the Eio.Io error
-   Address_in_use, unclassified as the EADDRINUSE that Eio_net_unix.Tcp.listen
-   raises over a real network is; the listener there keeps the address. A
+(* A listen at an address a listener holds is refused with the raw
+   EADDRINUSE eio_posix raises; the listener there keeps the address. A
    wildcard address and another address of the same port overlap, as they do
    for bind(2). *)
 let test_listen_on_an_address_in_use () =
@@ -224,7 +223,7 @@ let test_listen_on_an_address_in_use () =
   let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
   let in_use addr =
     match Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr with
-    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
     | _ -> Alcotest.failf "listened twice at %a" Eio.Net.Sockaddr.pp addr
   in
   in_use addr;
@@ -270,7 +269,7 @@ let test_listen_on_a_unix_path_in_use () =
   let addr = `Unix "/tmp/in-use.sock" in
   ignore (Eio.Net.listen ~sw ~backlog:1 net addr);
   (match Eio.Net.listen ~sw ~backlog:1 net addr with
-  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
   | _ -> Alcotest.fail "listened twice at a Unix path");
   let second = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
   Eio.Fiber.both
@@ -412,7 +411,7 @@ let test_listener_path_freed_at_switch_end () =
   Eio.Switch.run (fun lsw ->
       Eio.Net.close (Eio.Net.listen ~sw:lsw ~backlog:1 net addr);
       match Eio.Net.listen ~sw:lsw ~backlog:1 net addr with
-      | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+      | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
       | _ -> Alcotest.fail "listened at a path whose file is still there");
   ignore (Eio.Net.listen ~sw ~backlog:1 net addr)
 
@@ -577,7 +576,7 @@ let test_closed_datagram_path () =
       ()
   | () -> Alcotest.fail "sent to a closed socket's path");
   match Eio.Net.datagram_socket ~sw net path with
-  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
   | _ -> Alcotest.fail "bound a path whose file is still there"
 
 let test_capacity () =
@@ -784,7 +783,7 @@ let contended ~port n f =
           (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)))
   with
   | _ -> ()
-  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) ->
+  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
       Alcotest.failf "port %d is still held after %d cancelled fibers" port n
 
 (* A connect cancelled while it releases its bound port releases it all the
@@ -1185,8 +1184,11 @@ let test_backlog () =
         (backlog + 2) !connected)
     [ 0; 1; 2; 5 ]
 
+(* A listen raises EADDRINUSE raw, as eio_posix does, and a connect as an
+   [Eio.Io] error. *)
 let in_use f =
   match f () with
+  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> true
   | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> true
   | () -> false
 
@@ -1294,13 +1296,18 @@ let test_unavailable_addresses () =
   let net = Eio_net_mem.v ~sw () in
   let ip = Eio.Net.Ipaddr.of_raw in
   let lo = Eio.Net.Ipaddr.V4.loopback in
-  let fails code f =
+  (* A connect raises an [Eio.Io] error, and a bind in [listen] or
+     [datagram_socket] the raw one eio_posix raises. *)
+  let fails (code, errno) f =
     match f () with
     | exception Eio.Io (Eio.Exn.X c, _) when c = code -> true
+    | exception Unix.Unix_error (e, _, _) when e = errno -> true
     | exception e -> Alcotest.failf "raised %a" Fmt.exn e
     | _ -> false
   in
-  let unavailable = fails Eio_net_mem.Address_not_available in
+  let unavailable =
+    fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL)
+  in
   List.iter
     (fun raw ->
       let a = ip raw in
@@ -1336,7 +1343,7 @@ let test_unavailable_addresses () =
            (Eio.Net.listen ~sw ~backlog:1 net
               (`Tcp (ip "\127\000\000\002", 8121)))));
   let long = `Unix ("/tmp/" ^ String.make 103 'x') in
-  let too_long = fails Eio_net_mem.Name_too_long in
+  let too_long = fails (Eio_net_mem.Name_too_long, Unix.ENAMETOOLONG) in
   Alcotest.(check bool)
     "listen at a long path" true
     (too_long (fun () -> ignore (Eio.Net.listen ~sw ~backlog:1 net long)));
@@ -1674,7 +1681,7 @@ let test_datagram_reuse_addr () =
     [ Cstruct.of_string "y" ];
   ignore (Eio.Net.recv first (Cstruct.create 1));
   match Eio.Net.datagram_socket ~sw net (`Udp (ip "127.0.0.1", 8185)) with
-  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
   | _ -> Alcotest.fail "bound without reuse_addr"
 
 (* A datagram's errors come in Linux's order: a Unix-domain socket refuses a
@@ -1755,7 +1762,8 @@ let test_edge_addresses () =
     match f () with
     | () -> "ok"
     | exception Eio.Io (Eio.Exn.X Eio_net_mem.Invalid_address, _) -> "EINVAL"
-    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_not_available, _) ->
+    | exception Unix.Unix_error (Unix.EINVAL, "bind", _) -> "EINVAL"
+    | exception Unix.Unix_error (Unix.EADDRNOTAVAIL, "bind", _) ->
         "EADDRNOTAVAIL"
     | exception Eio.Io (Eio.Exn.X Eio_net_mem.Network_unreachable, _) ->
         "ENETUNREACH"
@@ -2007,7 +2015,7 @@ let test_datagram_address_freed_at_switch_end () =
     (snd (recv_string again))
 
 (* A datagram socket at an address another holds is refused as a listen is,
-   with the [Eio.Io] error {!Eio_net_mem.Address_in_use}; the wildcard address
+   with the raw EADDRINUSE eio_posix raises; the wildcard address
    of a port overlaps every address of it. *)
 let test_datagram_address_in_use () =
   Eio_mock.Backend.run @@ fun () ->
@@ -2015,7 +2023,7 @@ let test_datagram_address_in_use () =
   let net = Eio_net_mem.v ~sw () in
   let in_use addr =
     match Eio.Net.datagram_socket ~sw net addr with
-    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> true
+    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> true
     | (_ : _ Eio.Net.datagram_socket) -> false
   in
   ignore (Eio.Net.datagram_socket ~sw net (udp 9004));
