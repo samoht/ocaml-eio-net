@@ -78,7 +78,52 @@ let test_replay () =
 
 let hash replay = List.nth (String.split_on_char '/' replay) 1
 
-(* A workload whose first run is not the one a replay names refuses it. *)
+(* A client that reads a message of ten bytes in reads of [size] bytes. With
+   [bug] it takes a reset for the end of the message. *)
+let message ?replay ~size ~bug () =
+  Eio_net_chaos.check ?replay @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          Eio.Flow.copy_string "0123456789" flow));
+  let got = Buffer.create 10 in
+  let buf = Cstruct.create size in
+  let rec read flow =
+    match Eio.Flow.single_read flow buf with
+    | n ->
+        Buffer.add_string got (Cstruct.to_string ~len:n buf);
+        if Buffer.length got < 10 then read flow
+    | exception Eio.Io (Eio.Net.E (Connection_reset _), _) when bug -> ()
+  in
+  match
+    Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+    Eio.Switch.run @@ fun sw -> read (Eio.Net.connect ~sw env#net addr)
+  with
+  | () ->
+      if Buffer.contents got <> "0123456789" then
+        Fmt.failwith "got %S" (Buffer.contents got)
+  | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) -> ()
+
+(* A replay whose workload's first run changed, but which still has the
+   scenario, runs it: the fix changed the size of the client's reads. *)
+let test_rematched_replay () =
+  let report = Expect.report (message ~size:64 ~bug:true) in
+  let replay = replay_of report in
+  message ~replay ~size:4 ~bug:false ();
+  let again = Expect.report (message ~replay ~size:4 ~bug:true) in
+  Alcotest.(check string)
+    "faults"
+    (Expect.field "faults" report)
+    (Expect.field "faults" again);
+  Alcotest.(check string)
+    "re-matched"
+    (Fmt.str "the replay named first run %s, and the workload's is now %s"
+       (hash replay)
+       (hash (replay_of again)))
+    (Expect.field "matched" again)
+
+(* A replay whose scenario the workload no longer has is refused. *)
 let test_stale_replay () =
   let replay = replay_of (Expect.report (fun () -> mutant ())) in
   let other env =
@@ -86,7 +131,9 @@ let test_stale_replay () =
     try ignore (Eio.Net.connect ~sw env#net addr) with Eio.Io _ -> ()
   in
   refused_with
-    (Fmt.str "Eio_net_chaos.check: the replay names first run %s, but"
+    (Fmt.str
+       "Eio_net_chaos.check: the replay names read1c@8.reset, a scenario this \
+        check no longer has: its first run was %s and is now"
        (hash replay))
     (fun () -> Eio_net_chaos.check ~replay other)
     ()
@@ -181,6 +228,8 @@ let suite =
       Alcotest.test_case "determinism" `Quick test_determinism;
       Alcotest.test_case "a cut lands at its byte" `Quick test_cut_positions;
       Alcotest.test_case "replay" `Quick test_replay;
+      Alcotest.test_case "a replay after a fix is re-matched" `Quick
+        test_rematched_replay;
       Alcotest.test_case "a stale replay is refused" `Quick test_stale_replay;
       Alcotest.test_case "an unknown replay is refused" `Quick
         test_unknown_replay;

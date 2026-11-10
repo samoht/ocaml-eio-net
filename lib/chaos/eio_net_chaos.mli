@@ -47,9 +47,11 @@
 
     A check is deterministic. A failure raises [Failure] with the scenario, the
     tier that found it, the operations of the failing run, and the
-    [~replay:"..."] argument that runs that scenario alone. A replay fails if
-    the workload's first run is no longer the one it names, or if the check no
-    longer has the scenario.
+    [~replay:"..."] argument that runs that scenario alone. The scenario is
+    found by its position and fault, so a replay still runs after a fix that
+    changes the workload's first run, such as the size of its reads: a failure
+    then says the scenario was re-matched. A replay whose scenario the check no
+    longer has fails.
 
     A check reads no environment variable and prints nothing. A test that wants
     a larger budget at night reads its own:

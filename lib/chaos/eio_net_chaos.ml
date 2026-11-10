@@ -69,17 +69,18 @@ let pp_trace ppf trace =
       | Some f -> Fmt.pf ppf "    %a  <- %a@\n" Op.pp op Fault.pp f)
     trace
 
-let report ~hash ~tier s trace error =
+let report ?matched ~hash ~tier s trace error =
   Fmt.failwith
     "%s: the workload failed under a fault.@\n\
     \  faults:   %s@\n\
     \  tier:     %s@\n\
-    \  error:    %s@\n\
+     %a  error:    %s@\n\
     \  trace:@\n\
      %a  replay:   ~replay:\"net/%s/%s\""
     name (Plan.text s)
     (match tier with `Linear -> "linear" | `Sampled -> "sampled")
-    error pp_trace trace hash (Plan.key s)
+    Fmt.(option (any "  matched:  " ++ string ++ any "@\n"))
+    matched error pp_trace trace hash (Plan.key s)
 
 let digest (trace : Plan.trace) =
   let ops = List.map fst trace in
@@ -134,22 +135,32 @@ let check ?(budget = 2_000) ?replay run =
       (diverge first again);
   let hash = digest first in
   let linear = Plan.linear first in
-  let attempt tier s =
+  let attempt ?matched tier s =
     let trace, failed = exec run s in
-    Option.iter (report ~hash ~tier s trace) failed;
+    Option.iter (report ?matched ~hash ~tier s trace) failed;
     trace
   in
   match replay with
-  | Some (h, _) when h <> hash ->
-      fail
-        "the replay names first run %s, but the workload's first run is now \
-         %s. Run the check without ~replay and paste the new one."
-        h hash
-  | Some (_, k) -> (
+  | Some (h, k) -> (
+      (* After a fix the first run may differ: the scenario is found by its
+         position and fault, which the key names. *)
+      let matched =
+        if h = hash then None
+        else
+          Some
+            (Fmt.str
+               "the replay named first run %s, and the workload's is now %s" h
+               hash)
+      in
       match scenario run ~first ~linear k with
-      | Some (s, tier) -> ignore (attempt tier s : Plan.trace)
+      | Some (s, tier) -> ignore (attempt ?matched tier s : Plan.trace)
+      | None when h = hash ->
+          fail "the replay names %s, a scenario this check no longer has" k
       | None ->
-          fail "the replay names %s, a scenario this check no longer has" k)
+          fail
+            "the replay names %s, a scenario this check no longer has: its \
+             first run was %s and is now %s. Run the check without ~replay."
+            k h hash)
   | None ->
       let n = List.length linear in
       if n > budget then
