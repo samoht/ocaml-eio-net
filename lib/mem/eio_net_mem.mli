@@ -141,7 +141,9 @@ val pipe :
     [Invalid_argument]. A listener is closed, and its address free again, when
     it is closed or when the switch passed to [listen] or to {!v} finishes; the
     connections waiting to be accepted are reset with it, as a kernel resets
-    them.
+    them. An [accept] begun after its listener closed, whoever closed it, raises
+    [Invalid_argument], as Eio's own sockets do; one already waiting when it
+    closes keeps waiting, as on eio_posix.
 
     A [connect] reaches the listener at its address, or at the wildcard address
     of its family and port, or, for an IPv4 address, at the IPv6 wildcard
