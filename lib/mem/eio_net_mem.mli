@@ -4,6 +4,8 @@
     code to talk through the normal {!Eio.Net} APIs without binding OS sockets.
     It supports stream sockets and datagram sockets. *)
 
+(** {1 Errors} *)
+
 type Eio.Exn.Backend.t +=
   | Closed
         (** The backend code carried by the connection reset a mem flow raises,
@@ -32,7 +34,8 @@ type Eio.Exn.Backend.t +=
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes
-            while the connection waits for it, as a real socket raises
+            while the connection waits for it, or at a Unix path whose socket
+            has closed or that a client is bound at, as a real socket raises
             [Connection_failure (Refused _)], and of the one a datagram [send]
             raises at the path of a closed Unix-domain datagram socket. It is
             also the code of the [Eio.Fs.Not_found] error a [connect] or a
@@ -72,119 +75,29 @@ type Eio.Exn.Backend.t +=
             path of a datagram socket, where a socket fails with [EPROTOTYPE].
         *)
 
+(** {1 Networks} *)
+
 val v :
   ?capacity:int ->
   sw:Eio.Switch.t ->
   unit ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~capacity ~sw ()] is a network whose [listen] and [connect] operations
-    are paired in memory.
+    are paired in memory, and whose datagram sockets deliver to each other.
+    {!section-streams}, {!section-datagrams} and {!section-paths} say how its
+    sockets behave.
 
-    A connection is closed when the switch passed to [connect] finishes, so the
-    accepting end then reads EOF. The two ends of a connection may be used from
-    different domains: a write in one wakes a read waiting in the other. Each
-    direction of a connection queues at most [capacity] bytes (defaults to no
-    bound): a write takes what fits and waits while the queue is full, as a
+    Each direction of a connection queues at most [capacity] bytes (defaults to
+    no bound): a write takes what fits and waits while the queue is full, as a
     socket's send buffer makes it wait, so a test with a small capacity shows a
     peer that writes without reading. Raises [Invalid_argument] if [capacity] is
     not positive.
 
-    A [listen] binds the TCP or Unix stream address it is given. One on TCP port
-    [0] binds the lowest port of the dynamic range, 49152-65535 (RFC 6335,
-    section 6), that no listener holds, as a socket's bind does, and
-    [listening_addr] reports it; it raises [Failure] if every port of the range
-    is held. A [listen] at an address a listener holds raises the error that
-    {!Address_in_use} marks; a TCP address overlaps an address of the same port
-    that is equal to it or is the wildcard address of its family, and the IPv6
-    wildcard address overlaps every address of its port, as bind(2) has it on
-    Linux for a dual-stack socket. Listeners, datagram sockets and clients bound
-    with [bind_to] share one namespace of Unix paths, as they share a file
-    system: a path one holds is in use to the others. With [reuse_addr], a
-    [listen] at a Unix-domain path takes the path over instead, as Eio's POSIX
-    backend removes the socket file there before it binds: the listener that
-    held it stays open, and no [connect] reaches it. A [listen] with
-    [reuse_port] raises [Invalid_argument]. A listener is closed, and its
-    address free again, when it is closed or when the switch passed to [listen]
-    or to {!v} finishes; the connections waiting to be accepted are reset with
-    it, as a kernel resets them. A [connect] reaches the listener at its
-    address, or at the wildcard address of its family and port, or, for an IPv4
-    address, at the IPv6 wildcard address of its port, as a dual-stack listener
-    takes it. An IPv4-mapped IPv6 address stands for the IPv4 address it maps,
-    and a wildcard destination for the loopback address of its family, as both
-    kernels route them. It waits while [128] connections wait to be accepted
-    there; with no listener, or one that closes while it waits, it raises the
-    connection failure that {!No_listener} marks, as a connect to a closed port
-    is refused. At a datagram socket's path it raises the error that
-    {!Wrong_socket_type} marks. At a Unix path no socket holds it raises
-    [Eio.Fs.Not_found]: a listener leaves its file until the switch passed to
-    [listen] finishes, as eio_linux removes it then, and until then a [connect]
-    there is refused and a [listen] there finds it in use. eio_posix keeps the
-    file of a listener closed by hand. An accepted connection is closed when it
-    is closed or when the switch passed to [accept] finishes. An accepted
-    connection's peer address is the client's: the loopback address its
-    destination reaches, IPv4-mapped for an IPv4 client of an IPv6 listener, at
-    a port of the dynamic range no socket holds, counted down from its top,
-    which the client holds until its flow closes, or [`Unix ""] for a
-    Unix-domain client, which binds no path. Host resolution maps ["127.0.0.1"]
-    and ["::1"] with a numeric service to the loopback address of their family
-    at that port, once as a stream address and once as a datagram address, and
-    ["localhost"] to both families, IPv6 first, as glibc and macOS order them.
-    Any other host or service maps to no address.
-
-    [connect], and [setsockopt] on a connection or a listener, accept and ignore
-    the socket options whose effect these queues already have: [TCP_NODELAY] and
-    [TCP_QUICKACK], which ask that writes not be coalesced and that
-    acknowledgements not be delayed, neither of which happens here. They refuse
-    every other option with [Invalid_argument], naming it, because ignoring one
-    that would change what a caller observes is a wrong answer with no symptom;
-    [setsockopt] on a datagram socket refuses every option. A caller cannot tell
-    an ignored option from an applied one, so a test that must know an option
-    took effect needs a real socket. A [connect] bound with [bind_to] holds that
-    address, which the listener sees as its peer's, at a port of the dynamic
-    range for port 0; one at an address a listener or another client holds
-    raises the error that {!Address_in_use} marks, and one bound to an IPv6
-    address connecting to an IPv4-mapped one, or the reverse, raises the error
-    that {!Network_unreachable} or {!Address_family} marks; one bound to an
-    address of another family, IPv4 for IPv6 or a path for TCP, raises the error
-    that {!Address_family} marks, as macOS fails it with EAFNOSUPPORT where
-    Linux says EINVAL. [getsockopt] raises [Invalid_argument] on every socket.
-
-    A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
-    bind the wildcard address of their family, as a kernel binds an unbound
-    socket on its first send, and an address with port [0] binds its IP address,
-    each at the lowest port of the dynamic range that no datagram socket holds.
-    An address that overlaps one a datagram socket holds, by the rule [listen]
-    follows, raises the error that {!Address_in_use} marks; [reuse_port] raises
-    [Invalid_argument]. A datagram sent to it arrives whole, with the sender's
-    address as this socket sees it, the loopback address the datagram reached
-    for a wildcard sender and IPv4-mapped for an IPv4 sender to an IPv6 socket,
-    after every datagram sent to it before: the network never drops, cuts or
-    reorders one, and a send never waits. A datagram reaches a socket by the
-    rule a [connect] reaches a listener. One sent to an address no socket binds
-    that way is lost, as UDP loses it; one sent to a Unix path no socket binds
-    raises [Eio.Fs.Not_found], and one sent to a listener's or a client's path
-    raises the error that {!Wrong_socket_type} marks. A closed Unix-domain
-    datagram socket leaves its path behind, as Eio's backends leave the file: a
-    datagram sent there is refused with the connection failure that
-    {!No_listener} marks, and a socket bound there raises the error that
-    {!Address_in_use} marks, with [reuse_addr] or not, as eio_posix does;
-    eio_linux, given [reuse_addr], removes the file and binds. A send without a
-    destination raises the error that {!No_destination} marks, since no socket
-    is connected. A datagram longer than 65507 bytes to an IPv4 address, 65527
-    to an IPv6 one, or 212960 to a Unix path, as Linux's default send buffer
-    allows, raises the error that {!Message_too_long} marks. These are Linux's
-    limits: by default, macOS refuses a UDP datagram longer than 9216 bytes and
-    a Unix-domain one longer than 2048. One sent to UDP port 0 raises the error
-    that {!Invalid_port} marks, as on Linux; macOS sends it over IPv4. One sent
-    from an IPv6 address to an IPv4-mapped one, or the reverse, raises the error
-    that {!Network_unreachable} or {!Address_family} marks. One from an IPv4
-    socket to an IPv6 address, or between UDP and a Unix path, raises the error
-    that {!Address_family} marks; one from an IPv6 socket to an IPv4 address
-    goes the IPv4 way, as on Linux, so it is sent from the wildcard address and
-    refused from any other. A [recv] into a buffer shorter than the datagram
-    gets its first bytes, as a socket does. The socket is closed, and its
-    address free again, when the switch passed to [datagram_socket] finishes; a
-    send or a receive on it then raises [Invalid_argument]. *)
+    Host resolution maps ["127.0.0.1"] and ["::1"] with a numeric service to the
+    loopback address of their family at that port, once as a stream address and
+    once as a datagram address, and ["localhost"] to both families, IPv6 first,
+    as glibc and macOS order them. Any other host or service maps to no address.
+*)
 
 val pipe :
   ?capacity:int ->
@@ -200,3 +113,119 @@ val pipe :
     does. Blocking reads suspend the calling fiber until data arrives, so both
     ends must run under an Eio event loop; the two ends may be in different
     domains. No switch closes them: the caller does. *)
+
+(** {1:streams Streams}
+
+    A [listen] binds the TCP or Unix stream address it is given. One on TCP port
+    [0] binds the lowest port of the dynamic range, 49152-65535 (RFC 6335,
+    section 6), that no listener holds, as a socket's bind does, and
+    [listening_addr] reports it; it raises [Failure] if every port of the range
+    is held. A [listen] at an address a listener holds raises the error that
+    {!Address_in_use} marks; a TCP address overlaps an address of the same port
+    that is equal to it or is the wildcard address of its family, and the IPv6
+    wildcard address overlaps every address of its port, as bind(2) has it on
+    Linux for a dual-stack socket. A [listen] with [reuse_port] raises
+    [Invalid_argument]. A listener is closed, and its address free again, when
+    it is closed or when the switch passed to [listen] or to {!v} finishes; the
+    connections waiting to be accepted are reset with it, as a kernel resets
+    them.
+
+    A [connect] reaches the listener at its address, or at the wildcard address
+    of its family and port, or, for an IPv4 address, at the IPv6 wildcard
+    address of its port, as a dual-stack listener takes it. An IPv4-mapped IPv6
+    address stands for the IPv4 address it maps, and a wildcard destination for
+    the loopback address of its family, as both kernels route them. It waits
+    while [128] connections wait to be accepted there; with no listener, or one
+    that closes while it waits, it raises the connection failure that
+    {!No_listener} marks, as a connect to a closed port is refused.
+
+    A connection is closed when the switch passed to [connect] finishes, so the
+    accepting end then reads EOF, and an accepted connection when it is closed
+    or when the switch passed to [accept] finishes. The two ends of a connection
+    may be used from different domains: a write in one wakes a read waiting in
+    the other. An accepted connection's peer address is the client's: the
+    loopback address its destination reaches, IPv4-mapped for an IPv4 client of
+    an IPv6 listener, at a port of the dynamic range no socket holds, counted
+    down from its top, which the client holds until its flow closes, or
+    [`Unix ""] for a Unix-domain client, which binds no path.
+
+    A [connect] bound with [bind_to] holds that address, which the listener sees
+    as its peer's, at a port of the dynamic range for port 0. One at an address
+    a listener or another client holds raises the error that {!Address_in_use}
+    marks; one bound to an IPv6 address connecting to an IPv4-mapped one, or the
+    reverse, raises the error that {!Network_unreachable} or {!Address_family}
+    marks; one bound to an address of another family, IPv4 for IPv6 or a path
+    for TCP, raises the error that {!Address_family} marks, as macOS fails it
+    with EAFNOSUPPORT where Linux says EINVAL.
+
+    [connect], and [setsockopt] on a connection or a listener, accept and ignore
+    the socket options whose effect these queues already have: [TCP_NODELAY] and
+    [TCP_QUICKACK], which ask that writes not be coalesced and that
+    acknowledgements not be delayed, neither of which happens here. They refuse
+    every other option with [Invalid_argument], naming it, because ignoring one
+    that would change what a caller observes is a wrong answer with no symptom.
+    A caller cannot tell an ignored option from an applied one, so a test that
+    must know an option took effect needs a real socket. [getsockopt] raises
+    [Invalid_argument] on every socket.
+
+    {1:datagrams Datagrams}
+
+    A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
+    bind the wildcard address of their family, as a kernel binds an unbound
+    socket on its first send, and an address with port [0] binds its IP address,
+    each at the lowest port of the dynamic range that no datagram socket holds.
+    An address that overlaps one a datagram socket holds, by the rule [listen]
+    follows, raises the error that {!Address_in_use} marks; [reuse_port] raises
+    [Invalid_argument], and [setsockopt] refuses every option. The socket is
+    closed, and its address free again, when the switch passed to
+    [datagram_socket] finishes; a send or a receive on it then raises
+    [Invalid_argument].
+
+    A datagram reaches a socket by the rule a [connect] reaches a listener, and
+    arrives whole, after every datagram sent to it before: the network never
+    drops, cuts or reorders one, and a send never waits. It comes with the
+    sender's address as the receiver sees it: the loopback address the datagram
+    reached for a wildcard sender, and IPv4-mapped for an IPv4 sender to an IPv6
+    socket. One sent to an address no socket binds is lost, as UDP loses it. A
+    [recv] into a buffer shorter than the datagram gets its first bytes, as a
+    socket does.
+
+    A send without a destination raises the error that {!No_destination} marks,
+    since no socket is connected. A datagram longer than 65507 bytes to an IPv4
+    address, 65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default
+    send buffer allows, raises the error that {!Message_too_long} marks. These
+    are Linux's limits: by default, macOS refuses a UDP datagram longer than
+    9216 bytes and a Unix-domain one longer than 2048. One sent to UDP port 0
+    raises the error that {!Invalid_port} marks, as on Linux; macOS sends it
+    over IPv4.
+
+    A datagram sent from an IPv6 address to an IPv4-mapped one, or the reverse,
+    raises the error that {!Network_unreachable} or {!Address_family} marks. One
+    from an IPv4 socket to an IPv6 address, or between UDP and a Unix path,
+    raises the error that {!Address_family} marks. One from an IPv6 socket to an
+    IPv4 address goes the IPv4 way, as on Linux: it is refused, with the error
+    that {!Network_unreachable} marks, from an IPv6 address other than the
+    wildcard or an IPv4-mapped one.
+
+    {1:paths Unix paths}
+
+    Listeners, datagram sockets and clients bound with [bind_to] share one
+    namespace of Unix paths, as they share a file system: a path one holds is in
+    use to the others. A [connect] at a datagram socket's path raises the error
+    that {!Wrong_socket_type} marks, and so does a datagram sent to a listener's
+    or a client's path. A [connect] or a datagram sent at a path no socket holds
+    raises [Eio.Fs.Not_found].
+
+    With [reuse_addr], a [listen] at a Unix-domain path takes the path over, as
+    Eio's backends remove the socket file there before they bind: the listener
+    that held it stays open, and no [connect] reaches it. A listener leaves its
+    file until the switch passed to [listen] finishes, as eio_linux removes it
+    then, and until then a [connect] there is refused and a [listen] there finds
+    it in use; eio_posix keeps the file of a listener closed by hand.
+
+    A closed Unix-domain datagram socket leaves its path behind, as Eio's
+    backends leave the file: a datagram sent there is refused with the
+    connection failure that {!No_listener} marks, and a socket bound there
+    raises the error that {!Address_in_use} marks, with [reuse_addr] or not, as
+    eio_posix does; eio_linux, given [reuse_addr], removes the file and binds.
+*)

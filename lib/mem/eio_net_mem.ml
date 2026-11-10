@@ -958,10 +958,6 @@ module Network = struct
         Sockopt.stream opt;
         check_options rest
 
-  (* The address of a client that connects to [ip]: the address its
-     destination reaches, in the destination's family, at the next port of the
-     dynamic range, counted down from the top of the range as listeners count
-     up from its bottom. *)
   (* Holds the address of a client that connects to [ip] in the listeners'
      ports, until [release]: the address its destination reaches, in the
      destination's family, or the one it is bound at, at a free port counted
