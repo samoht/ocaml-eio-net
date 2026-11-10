@@ -733,18 +733,33 @@ module Listening_socket = struct
     mutex : Eio.Mutex.t;
   }
 
+  (* The connections waiting to be accepted, at most [backlog] of them, and
+     [closed], guarded by [lock] so a connect queues one only while the
+     listener is open, and a close resets every one it queued. *)
   and t = {
     hub : hub;
     addr : Eio.Net.Sockaddr.stream;
-    incoming : (Flow.t * Eio.Net.Sockaddr.stream) Eio.Stream.t;
-    closed : bool Atomic.t;
+    lock : Mutex.t;
+    incoming : (Flow.t * Eio.Net.Sockaddr.stream) Queue.t;
+    backlog : int;
+    acceptable : Eio.Condition.t;
+    room : Eio.Condition.t;
+    mutable closed : bool;
     mutable hooks : Eio.Switch.hook list;
   }
+
+  (* Linux's accept queue takes one connection more than the backlog, which
+     it caps at [net.core.somaxconn], 4096 by default, as it takes a negative
+     one. *)
+  let queue_length backlog =
+    if backlog < 0 || backlog > 4096 then 4097 else backlog + 1
+
+  let is_closed t = Mutex.protect t.lock (fun () -> t.closed)
 
   (* A Unix-domain path is taken over with [reuse_addr], as Eio's POSIX backend
      removes the socket file there before it binds; the listener that held it
      stays open, unreachable. *)
-  let bind hub ~reuse_addr addr =
+  let bind hub ~reuse_addr ~backlog addr =
     let addr =
       match addr with
       | `Tcp (ip, 0) ->
@@ -766,8 +781,12 @@ module Listening_socket = struct
             {
               hub;
               addr;
-              incoming = Eio.Stream.create 128;
-              closed = Atomic.make false;
+              lock = Mutex.create ();
+              incoming = Queue.create ();
+              backlog = queue_length backlog;
+              acceptable = Eio.Condition.create ();
+              room = Eio.Condition.create ();
+              closed = false;
               hooks = [];
             }
           in
@@ -777,10 +796,10 @@ module Listening_socket = struct
 
   (* The refusals are raised once the mutex is released, which an exception
      inside it would poison. *)
-  let v hub ~reuse_addr addr =
+  let v hub ~reuse_addr ~backlog addr =
     match
       Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
-          bind hub ~reuse_addr addr)
+          bind hub ~reuse_addr ~backlog addr)
     with
     | Ok t -> t
     | Error `In_use -> raise (address_in_use ())
@@ -788,16 +807,41 @@ module Listening_socket = struct
         failwith "eio-net.mem: every port of 49152-65535 has a listener"
 
   let accept t ~sw =
-    if Atomic.get t.closed then
-      invalid_arg "accept on closed in-memory listener";
-    let flow, client_addr = Eio.Stream.take t.incoming in
+    if is_closed t then invalid_arg "accept on closed in-memory listener";
+    let flow, client_addr =
+      Eio.Condition.loop_no_mutex t.acceptable @@ fun () ->
+      Mutex.protect t.lock (fun () -> Queue.take_opt t.incoming)
+    in
+    Eio.Condition.broadcast t.room;
     (Flow.close_with sw flow, client_addr)
+
+  (* Queues a connection, waiting while [backlog] do; [false] if the
+     listener is closed. *)
+  let offer t conn =
+    let queued =
+      Eio.Condition.loop_no_mutex t.room @@ fun () ->
+      Mutex.protect t.lock @@ fun () ->
+      if t.closed then Some false
+      else if Queue.length t.incoming < t.backlog then begin
+        Queue.push conn t.incoming;
+        Some true
+      end
+      else None
+    in
+    if queued then Eio.Condition.broadcast t.acceptable;
+    queued
 
   (* The connections waiting to be accepted are reset with the listener, as
      a kernel resets them. A connect that queues one after this is
      refused ([Network.connect]). *)
   let close t =
-    if not (Atomic.exchange t.closed true) then begin
+    let was_open =
+      Mutex.protect t.lock @@ fun () ->
+      let was_open = not t.closed in
+      t.closed <- true;
+      was_open
+    in
+    if was_open then begin
       List.iter Eio.Switch.remove_hook t.hooks;
       t.hooks <- [];
       (* A path taken over is its new listener's to free. A close in a
@@ -812,14 +856,14 @@ module Listening_socket = struct
               | `Tcp a -> Ports.remove t.hub.ports a
               | `Unix path -> Files.leave t.hub.files path Listener)
           | Some _ | None -> ());
-      let rec drain () =
-        match Eio.Stream.take_nonblocking t.incoming with
-        | Some (flow, _) ->
-            Flow.abort flow;
-            drain ()
-        | None -> ()
+      let queued =
+        Mutex.protect t.lock @@ fun () ->
+        let queued = List.of_seq (Queue.to_seq t.incoming) in
+        Queue.clear t.incoming;
+        queued
       in
-      drain ()
+      List.iter (fun (flow, _) -> Flow.abort flow) queued;
+      Eio.Condition.broadcast t.room
     end
 
   let listening_addr t = t.addr
@@ -1067,11 +1111,11 @@ module Network = struct
   (* One listener per address: there is no kernel to spread connections
      across several, so [reuse_port] is refused. A listener is closed by
      whichever of [sw] and the network's switch finishes first. *)
-  let listen t ~reuse_addr ~reuse_port ~backlog:_ ~sw addr =
+  let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
     if reuse_port then
       invalid_arg "eio-net.mem does not support SO_REUSEPORT listeners";
     Eio.Switch.check sw;
-    let listener = Listening_socket.v t.hub ~reuse_addr addr in
+    let listener = Listening_socket.v t.hub ~reuse_addr ~backlog addr in
     (* The file a listener leaves goes when the listen's switch finishes, as
        eio_linux removes it then, closed by hand or not; eio_posix keeps the
        file of a listener closed by hand. This runs after the close the hooks
@@ -1170,8 +1214,8 @@ module Network = struct
         | Some (Stale | Client | Listener) -> refused ()
         | None -> raise (no_file ()))
     | None, `Tcp _ -> refused ()
-    | Some listener, _ when Atomic.get listener.closed -> refused ()
-    | Some listener, _ ->
+    | Some listener, _ when Listening_socket.is_closed listener -> refused ()
+    | Some listener, _ -> (
         let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
         let client, server = Flow.pair ~local:unix ~capacity:t.capacity in
         Flow.on_close client release;
@@ -1184,19 +1228,17 @@ module Network = struct
         (* The switch takes the client before the listener sees it, so a
            finished switch queues nothing. *)
         let flow = Flow.close_with sw client in
-        (match Eio.Stream.add listener.incoming (server, peer) with
-        | () -> ()
-        | exception e ->
+        match Listening_socket.offer listener (server, peer) with
+        | true -> flow
+        | false ->
+            (* The listener closed while the connection waited for room. *)
+            Flow.close server;
             Flow.close client;
-            raise e);
-        (* The listener closed while the connection waited for room: its
-           queue was closed before this connection joined it. *)
-        if Atomic.get listener.closed then begin
-          Flow.close server;
-          Flow.close client;
-          refused ()
-        end;
-        flow
+            refused ()
+        | exception e ->
+            Flow.close server;
+            Flow.close client;
+            raise e)
 
   (* A connection is a pair of queues. A TCP client holds its address until
      its flow closes; one bound at an address a socket holds finds it in

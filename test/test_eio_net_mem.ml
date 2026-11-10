@@ -1030,7 +1030,7 @@ let test_a_closed_listener_refuses_connects () =
   let waiting = ref None in
   Eio.Switch.run (fun lsw ->
       let listener = Eio.Net.listen ~sw:lsw ~backlog:4 net addr in
-      for _ = 1 to 128 do
+      for _ = 1 to 5 do
         ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket)
       done;
       Eio.Fiber.fork ~sw (fun () -> waiting := Some (refused ()));
@@ -1061,6 +1061,34 @@ let test_connect_under_a_finished_switch () =
         false)
   in
   Alcotest.(check bool) "a connection waits" false accepted
+
+(* A listener queues [backlog + 1] connections, as Linux's accept queue
+   takes one more than its backlog; a further connect waits until an accept
+   makes room. *)
+let test_backlog () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  List.iteri
+    (fun i backlog ->
+      let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8100 + i) in
+      let listener = Eio.Net.listen ~sw ~backlog net addr in
+      let connected = ref 0 in
+      Eio.Fiber.fork ~sw (fun () ->
+          for _ = 1 to backlog + 2 do
+            ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket);
+            incr connected
+          done);
+      Eio.Fiber.yield ();
+      Alcotest.(check int)
+        (Fmt.str "backlog %d queues" backlog)
+        (backlog + 1) !connected;
+      ignore (Eio.Net.accept ~sw listener);
+      Eio.Fiber.yield ();
+      Alcotest.(check int)
+        (Fmt.str "backlog %d, an accept makes room" backlog)
+        (backlog + 2) !connected)
+    [ 0; 1; 2; 5 ]
 
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
@@ -1374,6 +1402,7 @@ let suite =
         test_unix_write_after_peer_close;
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
+      Alcotest.test_case "a listener's backlog" `Quick test_backlog;
       Alcotest.test_case "a connect under a finished switch" `Quick
         test_connect_under_a_finished_switch;
       Alcotest.test_case "a closed connection leaves its switch" `Quick
