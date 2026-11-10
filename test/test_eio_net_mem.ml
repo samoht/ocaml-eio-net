@@ -1491,6 +1491,33 @@ let test_port_choice () =
   let _, p = udp () in
   Alcotest.(check int) "a datagram socket, again" 49152 p
 
+(* A listener's close defers to the accept waiting on it, as Eio defers a
+   descriptor's close to its users: the listener takes connections until
+   that accept returns one, and only then closes, so a later accept raises
+   [Invalid_argument] and a later connect is refused. *)
+let test_close_defers_to_an_accept () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8150) in
+  let l = Eio.Net.listen ~sw ~backlog:4 net addr in
+  let accepted = ref false in
+  Eio.Fiber.both
+    (fun () ->
+      ignore (Eio.Net.accept ~sw l);
+      accepted := true)
+    (fun () ->
+      Eio.Fiber.yield ();
+      Eio.Resource.close l;
+      ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket));
+  Alcotest.(check bool) "the waiting accept" true !accepted;
+  (match Eio.Net.accept ~sw l with
+  | exception Invalid_argument _ -> ()
+  | _ -> Alcotest.fail "accepted after close");
+  match Eio.Net.connect ~sw net addr with
+  | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> ()
+  | _ -> Alcotest.fail "connected after close"
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1806,6 +1833,8 @@ let suite =
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
       Alcotest.test_case "a listener's backlog" `Quick test_backlog;
+      Alcotest.test_case "a close defers to an accept" `Quick
+        test_close_defers_to_an_accept;
       Alcotest.test_case "an accepted connection holds the port" `Quick
         test_accepted_holds_the_port;
       Alcotest.test_case "TIME_WAIT" `Quick test_time_wait;

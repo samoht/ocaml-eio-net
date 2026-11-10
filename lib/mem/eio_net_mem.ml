@@ -846,7 +846,10 @@ module Listening_socket = struct
 
   (* The connections waiting to be accepted, at most [backlog] of them, and
      [closed], guarded by [lock] so a connect queues one only while the
-     listener is open, and a close resets every one it queued. *)
+     listener is open, and a close resets every one it queued. A close
+     defers to the accepts in flight, [users], as Eio's [Rcfd] defers a
+     descriptor's: [closing] refuses new ones at once, and the last one
+     closes the listener. *)
   and t = {
     hub : hub;
     addr : Eio.Net.Sockaddr.stream;
@@ -855,6 +858,8 @@ module Listening_socket = struct
     backlog : int;
     acceptable : Eio.Condition.t;
     room : Eio.Condition.t;
+    mutable users : int;
+    mutable closing : bool;
     mutable closed : bool;
     mutable hooks : Eio.Switch.hook list;
     reuse : bool;
@@ -905,6 +910,8 @@ module Listening_socket = struct
               backlog = queue_length backlog;
               acceptable = Eio.Condition.create ();
               room = Eio.Condition.create ();
+              users = 0;
+              closing = false;
               closed = false;
               hooks = [];
               reuse = reuse_addr;
@@ -929,14 +936,60 @@ module Listening_socket = struct
     | Error `No_port ->
         failwith "eio-net.mem: every port of 49152-65535 has a listener"
 
+  (* The connections waiting to be accepted are reset with the listener, as
+     a kernel resets them. A connect that queues one after this is
+     refused ([Network.connect]). *)
+  let shut t =
+    (* A path taken over is its new listener's to free. A close in a
+       cancelled fiber frees the address all the same: taking the mutex is
+       not cancelled. *)
+    Eio.Cancel.protect @@ fun () ->
+    Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
+        match Hashtbl.find_opt t.hub.listeners t.addr with
+        | Some held when held == t -> (
+            Hashtbl.remove t.hub.listeners t.addr;
+            match (t.addr, t.hold) with
+            | `Tcp (_, port), Some h -> Ports.remove t.hub.ports port h
+            | `Tcp _, None -> ()
+            | `Unix path, _ -> Files.leave t.hub.files path Listener)
+        | Some _ | None -> ());
+    let queued =
+      Mutex.protect t.lock @@ fun () ->
+      let queued = List.of_seq (Queue.to_seq t.incoming) in
+      Queue.clear t.incoming;
+      queued
+    in
+    List.iter (fun (flow, _) -> Flow.abort flow) queued;
+    Eio.Condition.broadcast t.room
+
+  let leave t =
+    let last =
+      Mutex.protect t.lock @@ fun () ->
+      t.users <- t.users - 1;
+      t.users = 0 && t.closing && (not t.closed)
+      && begin
+        t.closed <- true;
+        true
+      end
+    in
+    if last then shut t
+
   let accept t ~sw =
-    if is_closed t then invalid_arg "accept on closed in-memory listener";
-    let flow, client_addr =
+    Mutex.protect t.lock (fun () ->
+        if t.closing then invalid_arg "accept on closed in-memory listener";
+        t.users <- t.users + 1);
+    match
       Eio.Condition.loop_no_mutex t.acceptable @@ fun () ->
       Mutex.protect t.lock (fun () -> Queue.take_opt t.incoming)
-    in
-    Eio.Condition.broadcast t.room;
-    (Flow.close_with sw flow, client_addr)
+    with
+    | flow, client_addr ->
+        leave t;
+        Eio.Condition.broadcast t.room;
+        (Flow.close_with sw flow, client_addr)
+    | exception e ->
+        let bt = Printexc.get_raw_backtrace () in
+        leave t;
+        Printexc.raise_with_backtrace e bt
 
   (* Queues a connection, waiting while [backlog] do; [false] if the
      listener is closed. *)
@@ -954,41 +1007,24 @@ module Listening_socket = struct
     if queued then Eio.Condition.broadcast t.acceptable;
     queued
 
-  (* The connections waiting to be accepted are reset with the listener, as
-     a kernel resets them. A connect that queues one after this is
-     refused ([Network.connect]). *)
   let close t =
-    let was_open =
+    let now =
       Mutex.protect t.lock @@ fun () ->
-      let was_open = not t.closed in
-      t.closed <- true;
-      was_open
+      if t.closing then `Again
+      else begin
+        t.closing <- true;
+        if t.users = 0 then begin
+          t.closed <- true;
+          `Now
+        end
+        else `Deferred
+      end
     in
-    if was_open then begin
+    if now <> `Again then begin
       List.iter Eio.Switch.remove_hook t.hooks;
-      t.hooks <- [];
-      (* A path taken over is its new listener's to free. A close in a
-         cancelled fiber frees the address all the same: taking the mutex
-         is not cancelled. *)
-      Eio.Cancel.protect @@ fun () ->
-      Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
-          match Hashtbl.find_opt t.hub.listeners t.addr with
-          | Some held when held == t -> (
-              Hashtbl.remove t.hub.listeners t.addr;
-              match (t.addr, t.hold) with
-              | `Tcp (_, port), Some h -> Ports.remove t.hub.ports port h
-              | `Tcp _, None -> ()
-              | `Unix path, _ -> Files.leave t.hub.files path Listener)
-          | Some _ | None -> ());
-      let queued =
-        Mutex.protect t.lock @@ fun () ->
-        let queued = List.of_seq (Queue.to_seq t.incoming) in
-        Queue.clear t.incoming;
-        queued
-      in
-      List.iter (fun (flow, _) -> Flow.abort flow) queued;
-      Eio.Condition.broadcast t.room
-    end
+      t.hooks <- []
+    end;
+    if now = `Now then shut t
 
   let listening_addr t = t.addr
   let setsockopt _ opt _ = Sockopt.stream opt
