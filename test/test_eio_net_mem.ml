@@ -1617,6 +1617,66 @@ let test_datagram_autobind () =
       ignore (Eio.Net.datagram_socket ~sw:inner net (`Unix "\000named")));
   ignore (Eio.Net.datagram_socket ~sw net (`Unix "\000named"))
 
+(* UDP sockets that both have [reuse_addr] share an address, as on Linux: a
+   datagram reaches the one bound at the most specific address, an IPv4
+   wildcard before an IPv6 one, and the latest bound of equals. *)
+let test_datagram_reuse_addr () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let ip = function
+    | "127.0.0.1" -> Eio.Net.Ipaddr.V4.loopback
+    | "0.0.0.0" -> Eio.Net.Ipaddr.V4.any
+    | _ -> Eio.Net.Ipaddr.V6.any
+  in
+  let sender = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  let reaches name port binds expected =
+    Eio.Switch.run @@ fun sw ->
+    let socks =
+      List.map
+        (fun a ->
+          Eio.Net.datagram_socket ~sw ~reuse_addr:true net (`Udp (ip a, port)))
+        binds
+    in
+    Eio.Net.send sender
+      ~dst:(`Udp (Eio.Net.Ipaddr.V4.loopback, port))
+      [ Cstruct.of_string "x" ];
+    let got =
+      List.mapi
+        (fun i s ->
+          Eio.Fiber.first
+            (fun () ->
+              ignore (Eio.Net.recv s (Cstruct.create 1));
+              Some i)
+            (fun () ->
+              Eio.Fiber.yield ();
+              None))
+        socks
+      |> List.filter_map Fun.id
+    in
+    Alcotest.(check (list int)) name [ expected ] got
+  in
+  reaches "two at 127.0.0.1" 8180 [ "127.0.0.1"; "127.0.0.1" ] 1;
+  reaches "the wildcard first" 8181 [ "0.0.0.0"; "127.0.0.1" ] 1;
+  reaches "the address first" 8182 [ "127.0.0.1"; "0.0.0.0" ] 0;
+  reaches "IPv6 then IPv4 wildcard" 8183 [ "::"; "0.0.0.0" ] 1;
+  reaches "IPv4 then IPv6 wildcard" 8184 [ "0.0.0.0"; "::" ] 0;
+  let first =
+    Eio.Net.datagram_socket ~sw ~reuse_addr:true net
+      (`Udp (ip "127.0.0.1", 8185))
+  in
+  Eio.Switch.run (fun inner ->
+      ignore
+        (Eio.Net.datagram_socket ~sw:inner ~reuse_addr:true net
+           (`Udp (ip "127.0.0.1", 8185))));
+  Eio.Net.send sender
+    ~dst:(`Udp (Eio.Net.Ipaddr.V4.loopback, 8185))
+    [ Cstruct.of_string "y" ];
+  ignore (Eio.Net.recv first (Cstruct.create 1));
+  match Eio.Net.datagram_socket ~sw net (`Udp (ip "127.0.0.1", 8185)) with
+  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> ()
+  | _ -> Alcotest.fail "bound without reuse_addr"
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1942,6 +2002,8 @@ let suite =
       Alcotest.test_case "FIN_WAIT2 times out" `Quick test_fin_wait2_times_out;
       Alcotest.test_case "a datagram socket at \"\" autobinds" `Quick
         test_datagram_autobind;
+      Alcotest.test_case "datagram sockets with reuse_addr" `Quick
+        test_datagram_reuse_addr;
       Alcotest.test_case "addresses no interface has" `Quick
         test_unavailable_addresses;
       Alcotest.test_case "bind_to another family" `Quick

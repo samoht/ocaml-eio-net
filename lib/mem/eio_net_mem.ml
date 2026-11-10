@@ -1087,7 +1087,7 @@ module Datagram_socket = struct
     in
     next ()
 
-  let v hub addr =
+  let v hub ~reuse addr =
     (match addr with
     | `Udp (ip, _) -> check_local ip
     | `Unix path -> check_path path
@@ -1106,11 +1106,13 @@ module Datagram_socket = struct
     let in_use =
       match addr with
       | `Unix path -> not (Files.bind hub.files path Files.Datagram)
-      | `Udp a -> Ports.in_use hub.ports a
+      | `Udp a -> Ports.in_use hub.ports ~reuse a
     in
     if in_use then raise (address_in_use ());
     let hold =
-      match addr with `Udp a -> Some (Ports.add hub.ports a) | `Unix _ -> None
+      match addr with
+      | `Udp a -> Some (Ports.add hub.ports ~reuse a)
+      | `Unix _ -> None
     in
     let t =
       {
@@ -1126,7 +1128,9 @@ module Datagram_socket = struct
         hold;
       }
     in
-    Hashtbl.replace hub.sockets addr t;
+    (* The latest bound of sockets sharing an address takes its datagrams,
+       as on Linux. *)
+    Hashtbl.add hub.sockets addr t;
     t
 
   (* The socket a datagram sent to [addr] reaches ([reaching]). *)
@@ -1267,7 +1271,15 @@ module Datagram_socket = struct
       Eio.Switch.remove_hook t.release;
       t.release <- Eio.Switch.null_hook;
       Mutex.protect t.hub.mutex (fun () ->
-          Hashtbl.remove t.hub.sockets t.addr;
+          let others =
+            List.filter
+              (fun s -> s != t)
+              (Hashtbl.find_all t.hub.sockets t.addr)
+          in
+          while Hashtbl.mem t.hub.sockets t.addr do
+            Hashtbl.remove t.hub.sockets t.addr
+          done;
+          List.iter (Hashtbl.add t.hub.sockets t.addr) (List.rev others);
           match (t.addr, t.hold) with
           | `Unix path, _ -> Files.leave t.hub.files path Datagram
           | `Udp (_, port), Some h -> Ports.remove t.hub.ports port h
@@ -1741,10 +1753,10 @@ module Network = struct
 
   (* One socket per address: there is no kernel to spread datagrams across
      several, so [reuse_port] is refused. *)
-  let datagram_socket t ~reuse_addr:_ ~reuse_port ~sw addr =
+  let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
     if reuse_port then
       invalid_arg "eio-net.mem does not support SO_REUSEPORT datagram sockets";
-    let datagram = Datagram_socket.v t.datagrams addr in
+    let datagram = Datagram_socket.v t.datagrams ~reuse:reuse_addr addr in
     let socket = Eio.Resource.T (datagram, datagram_handler) in
     datagram.release <-
       Eio.Switch.on_release_cancellable sw (fun () -> Eio.Resource.close socket);

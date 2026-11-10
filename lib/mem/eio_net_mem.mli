@@ -266,7 +266,11 @@ val connection : _ Eio.Net.stream_socket -> int option
     socket on its first send, and an address with port [0] binds its IP address,
     each at the lowest port of the dynamic range that no datagram socket holds.
     An address that overlaps one a datagram socket holds, by the rule [listen]
-    follows, raises the error that {!Address_in_use} marks; [reuse_port] raises
+    follows, raises the error that {!Address_in_use} marks, unless both UDP
+    sockets have [reuse_addr]. Those then share it, as on Linux: a datagram
+    reaches the one bound at the most specific address, the address itself, then
+    the IPv4 wildcard, then the IPv6 one, and of those bound at the same address
+    the latest, and once it closes the one before. [reuse_port] raises
     [Invalid_argument], and [setsockopt] refuses every option. The socket is
     closed, and its address free again, when the switch passed to
     [datagram_socket] finishes; a send, a receive or a shutdown on it then
