@@ -1524,6 +1524,37 @@ let test_close_defers_to_an_accept () =
   | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> ()
   | _ -> Alcotest.fail "connected after close"
 
+(* TIME_WAIT goes to the end whose FIN went first, as on Linux: a shutdown of
+   the send side sends it, whoever closes first. *)
+let test_time_wait_follows_the_first_fin () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.Mono.make () in
+  let net = Eio_net_mem.v ~clock ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let case port first second =
+    let addr = `Tcp (lo, port) in
+    let client, server = connection ~sw net addr in
+    first client server;
+    second client server;
+    Eio.Resource.close server;
+    Eio.Resource.close client;
+    in_use (listens net addr)
+  in
+  let shut flow = Eio.Flow.shutdown flow `Send in
+  Alcotest.(check bool)
+    "the client shuts its send, the server closes first" false
+    (case 8160 (fun c _ -> shut c) (fun _ _ -> ()));
+  Alcotest.(check bool)
+    "the client shuts down, the server closes first" false
+    (case 8161 (fun c _ -> Eio.Flow.shutdown c `All) (fun _ _ -> ()));
+  Alcotest.(check bool)
+    "the server shuts its send, then the client" true
+    (case 8162 (fun _ s -> shut s) (fun c _ -> shut c));
+  Alcotest.(check bool)
+    "the client shuts its receive side only" true
+    (case 8163 (fun c _ -> Eio.Flow.shutdown c `Receive) (fun _ _ -> ()))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1844,6 +1875,8 @@ let suite =
       Alcotest.test_case "an accepted connection holds the port" `Quick
         test_accepted_holds_the_port;
       Alcotest.test_case "TIME_WAIT" `Quick test_time_wait;
+      Alcotest.test_case "TIME_WAIT follows the first FIN" `Quick
+        test_time_wait_follows_the_first_fin;
       Alcotest.test_case "addresses no interface has" `Quick
         test_unavailable_addresses;
       Alcotest.test_case "bind_to another family" `Quick

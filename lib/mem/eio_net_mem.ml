@@ -241,11 +241,11 @@ module Ports = struct
         freed t port
     | holds -> Hashtbl.replace t.held port holds
 
-  (* [h] lingers in TIME_WAIT; without a clock it lets go at once. *)
-  let linger t port h =
-    match t.now with
-    | None -> remove t port h
-    | Some now -> h.until <- Mtime.add_span (now ()) time_wait
+  (* [h] lets go at [until], or later if it already would. *)
+  let set_until h until =
+    match h.until with
+    | Some u when Mtime.is_later u ~than:until -> ()
+    | _ -> h.until <- Some until
 
   (* A bind at [ip] conflicts with a hold at an overlapping address, unless
      both sockets have [SO_REUSEADDR] and the held one does not listen, as
@@ -687,6 +687,7 @@ module Flow = struct
       mutable abort : bool;
       mutable release : Eio.Switch.hook;
       mutable on_close : reset:bool -> unit;
+      mutable on_fin : unit -> unit;
       connection : int;
     }
 
@@ -745,12 +746,14 @@ module Flow = struct
       match cmd with
       | `Send ->
           Pipe.shut t.to_peer;
-          Pipe.fin_sent t.from_peer
+          Pipe.fin_sent t.from_peer;
+          t.on_fin ()
       | `Receive -> Pipe.shut_receive t.from_peer
       | `All ->
           Pipe.shut t.to_peer;
           Pipe.fin_sent t.from_peer;
-          Pipe.shut_receive t.from_peer
+          Pipe.shut_receive t.from_peer;
+          t.on_fin ()
 
     let close_with ~abort t =
       let now =
@@ -803,6 +806,7 @@ module Flow = struct
           abort = false;
           release = Eio.Switch.null_hook;
           on_close = (fun ~reset:_ -> ());
+          on_fin = ignore;
           connection;
         }
     in
@@ -831,6 +835,7 @@ module Flow = struct
 
   let close ((_, flow) : t) = Eio.Flow.close flow
   let on_close ((impl, _) : t) f = impl.Impl.on_close <- f
+  let on_fin ((impl, _) : t) f = impl.Impl.on_fin <- f
   let abort ((impl, _) : t) = Impl.close_with ~abort:true impl
 end
 
@@ -1409,6 +1414,77 @@ module Resolve = struct
           | Error _ -> [])
 end
 
+(* The two ends of a TCP connection, and when each lets go of its address.
+   An end holds it while open. Once closed, the end whose FIN went first, by
+   a shutdown of its send side or by its close, holds it in TIME_WAIT for 60
+   seconds from the peer's FIN, as Linux does, and the other lets go at once.
+   After a reset, and without a clock, each lets go once both have closed. *)
+module Ends = struct
+  type side = [ `Client | `Server ]
+  type decision = [ `Held | `Release | `Until of Mtime.t ]
+
+  type t = {
+    lock : Mutex.t;
+    now : (unit -> Mtime.t) option;
+    mutable seq : int;
+    fin : (int * Mtime.t) option array;
+    closed : Mtime.t option array;
+    mutable reset : bool;
+  }
+
+  let v (ports : Ports.t) =
+    {
+      lock = Mutex.create ();
+      now = ports.now;
+      seq = 0;
+      fin = [| None; None |];
+      closed = [| None; None |];
+      reset = false;
+    }
+
+  let index : side -> int = function `Client -> 0 | `Server -> 1
+  let now t = match t.now with Some now -> now () | None -> Mtime.min_stamp
+
+  let decide t i : decision =
+    let o = 1 - i in
+    match t.closed.(i) with
+    | None -> `Held
+    | Some closed -> (
+        let both = Option.is_some t.closed.(o) in
+        if Option.is_none t.now || t.reset then if both then `Release else `Held
+        else
+          match (t.fin.(i), t.fin.(o)) with
+          | Some (mine, _), Some (theirs, _) when theirs < mine -> `Release
+          | _, Some (_, peer) -> (
+              match Mtime.add_span peer Ports.time_wait with
+              | Some u when Mtime.is_later u ~than:closed -> `Until u
+              | _ -> `Release)
+          | _, None -> `Held)
+
+  (* Changes the state, and gives what the client and the server now do. *)
+  let update t f =
+    Mutex.protect t.lock @@ fun () ->
+    f ();
+    (decide t 0, decide t 1)
+
+  let send_fin t i =
+    if Option.is_none t.fin.(i) then begin
+      t.seq <- t.seq + 1;
+      t.fin.(i) <- Some (t.seq, now t)
+    end
+
+  let fin t side = update t (fun () -> send_fin t (index side))
+
+  let close t side ~reset =
+    update t (fun () ->
+        let i = index side in
+        send_fin t i;
+        t.closed.(i) <- Some (now t);
+        if reset then t.reset <- true)
+
+  let reset t = Mutex.protect t.lock (fun () -> t.reset <- true)
+end
+
 module Network = struct
   type tag = [ `Generic ]
 
@@ -1474,14 +1550,15 @@ module Network = struct
       | None -> Error `No_port
       | Some port -> Ok ((ip, port), Ports.add ports (ip, port))
 
-  (* Lets go of [h], or with [linger] keeps it in TIME_WAIT. Not cancelled,
-     even while it waits for the mutex: a release that gave up would hold the
-     port for good. *)
-  let release_port t ?(linger = false) port h =
+  (* Lets go of [h] now, or at [until]. Not cancelled, even while it waits
+     for the mutex: a release that gave up would hold the port for good. *)
+  let release_port t ?until port h =
     Eio.Cancel.protect @@ fun () ->
     Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
         let ports = t.hub.Listening_socket.ports in
-        if linger then Ports.linger ports port h else Ports.remove ports port h)
+        match until with
+        | Some until -> Ports.set_until h until
+        | None -> Ports.remove ports port h)
 
   (* A connect's socket has its destination's family, and fails to bind an
      address of another as Linux's bind(2) does: an IPv4 socket with
@@ -1509,8 +1586,8 @@ module Network = struct
     | `Tcp (lip, _) -> `Tcp (seen_by lip ip, port)
 
   (* A connect for a client that holds [local], if it is a TCP one. *)
-  let connect_held t ~sw ~bind_to ~(release : ?linger:bool -> unit -> unit) addr
-      local =
+  let connect_held t ~sw ~bind_to ~(release : ?until:Mtime.t -> unit -> unit)
+      addr local =
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
           match addr with
@@ -1548,32 +1625,27 @@ module Network = struct
                       Ports.add t.hub.Listening_socket.ports
                         ~reuse:listener.reuse (reached, port) ))
         in
-        (* Each end holds its address until both have closed; the first to
-           close, unless one reset the connection, then holds it in
-           TIME_WAIT. *)
-        let lock = Mutex.create () in
-        let ends = ref 2 and first = ref None and reset = ref false in
-        let ended side ~reset:r =
-          let last =
-            Mutex.protect lock @@ fun () ->
-            decr ends;
-            if Option.is_none !first then first := Some side;
-            if r then reset := true;
-            !ends = 0
+        let ends = Ends.v t.hub.Listening_socket.ports in
+        let settle (client, server) =
+          let apply f = function
+            | `Held -> ()
+            | `Release -> f None
+            | `Until u -> f (Some u)
           in
-          if last then begin
-            let first = if !reset then None else !first in
-            release ~linger:(first = Some `Client) ();
-            Option.iter
-              (fun (port, h) ->
-                release_port t ~linger:(first = Some `Server) port h)
-              child
-          end
+          apply (fun until -> release ?until ()) client;
+          Option.iter
+            (fun (port, h) ->
+              apply (fun until -> release_port t ?until port h) server)
+            child
         in
-        Flow.on_close client (ended `Client);
-        Flow.on_close server (ended `Server);
+        Flow.on_close client (fun ~reset ->
+            settle (Ends.close ends `Client ~reset));
+        Flow.on_close server (fun ~reset ->
+            settle (Ends.close ends `Server ~reset));
+        Flow.on_fin client (fun () -> settle (Ends.fin ends `Client));
+        Flow.on_fin server (fun () -> settle (Ends.fin ends `Server));
         let fail () =
-          Mutex.protect lock (fun () -> reset := true);
+          Ends.reset ends;
           Flow.close server;
           Flow.close client
         in
@@ -1630,15 +1702,13 @@ module Network = struct
     let local =
       match held with `Port (a, _) -> Some a | `Path _ | `Nothing -> None
     in
-    (* Released once, by the connection's close or by a failed connect; a
-       bound path leaves its file. *)
-    let released = Atomic.make false in
-    let release ?(linger = false) () =
-      if not (Atomic.exchange released true) then
-        match held with
-        | `Port ((_, port), h) -> release_port t ~linger port h
-        | `Path path -> Files.leave t.hub.files path Client
-        | `Nothing -> ()
+    (* Released by the connection's ends, or by a failed connect; a bound path
+       leaves its file. *)
+    let release ?until () =
+      match held with
+      | `Port ((_, port), h) -> release_port t ?until port h
+      | `Path path -> Files.leave t.hub.files path Client
+      | `Nothing -> ()
     in
     match connect_held t ~sw ~bind_to ~release addr local with
     | flow -> flow

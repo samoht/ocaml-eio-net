@@ -133,9 +133,10 @@ val v :
     peer that writes without reading. Raises [Invalid_argument] if [capacity] is
     not positive.
 
-    On [clock], the end of a TCP connection that closes first holds its address
-    in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}). Without
-    a clock there is no TIME_WAIT: an address is free once both ends close.
+    On [clock], the end of a TCP connection whose FIN went first holds its
+    address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}).
+    Without a clock there is no TIME_WAIT: an address is free once both ends
+    close.
 
     Host resolution reads numbers as glibc's getaddrinfo(3) does, on a
     dual-stack host with no services database and no name server. The service is
@@ -223,15 +224,17 @@ val connection : _ Eio.Net.stream_socket -> int option
     listener, at a port of the dynamic range no socket holds, counted down from
     its top, or [`Unix ""] for a Unix-domain client, which binds no path.
 
-    Each end of a TCP connection holds its address until both ends have closed:
-    the client its own, and the accepted end, queued or accepted, the listener's
-    port at the address the client reached, as Linux's accepted socket does,
-    even once the listener closed. Then, given a clock, the end that closed
-    first holds it in TIME_WAIT for 60 seconds, unless an end reset the
-    connection. A [listen] or a [connect] bound at an address held this way
-    raises the error that {!Address_in_use} marks, unless both have
-    [reuse_addr]: as on Linux, an accepted end has its listener's, a client has
-    none, and a listener's own hold refuses every other socket.
+    Each end of a TCP connection holds an address while it is open: the client
+    its own, and the accepted end, queued or accepted, the listener's port at
+    the address the client reached, as Linux's accepted socket does, even once
+    the listener closed. Without a clock, or after a reset, each lets go once
+    both ends have closed. Given a clock, the end whose FIN went first, sent by
+    a shutdown of its send side or by its close, holds its address once closed
+    in TIME_WAIT, for 60 seconds from the peer's FIN, as Linux does; the other
+    end lets go when it closes. A [listen] or a [connect] bound at an address
+    held this way raises the error that {!Address_in_use} marks, unless both
+    have [reuse_addr]: as on Linux, an accepted end has its listener's, a client
+    has none, and a listener's own hold refuses every other socket.
 
     A [connect] bound with [bind_to] holds that address, which the listener sees
     as its peer's, at a port of the dynamic range for port 0. One at an address
