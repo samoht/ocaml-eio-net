@@ -506,7 +506,13 @@ module Datagram = struct
        is kept in the state before the receive waits for the next, so a
        cancelled receive loses neither. *)
     type kept = Nothing | Next of datagram | Held of datagram
-    type t = { base : base; driver : driver; mutable kept : kept }
+
+    type t = {
+      base : base;
+      driver : driver;
+      mutable kept : kept;
+      mutable closed : bool;
+    }
 
     (* The whole datagram, up to 64 KiB or the caller's buffer if longer, so
        a copy kept for a later receive is cut only to the buffer of the
@@ -558,6 +564,8 @@ module Datagram = struct
     (* The fault is drawn once a datagram is taken, so a receive cancelled
        while it waits for one draws none. *)
     and recv t buf =
+      if t.closed then
+        invalid_arg "Eio_net_chaos: recv on a closed datagram socket";
       match t.kept with
       | Next (addr, data) ->
           t.kept <- Nothing;
@@ -572,7 +580,13 @@ module Datagram = struct
 
     let send t ?dst bufs = t.base.send ?dst bufs
     let shutdown t cmd = t.base.shutdown cmd
-    let close t = t.base.close ()
+
+    (* A held datagram goes with the socket. *)
+    let close t =
+      t.kept <- Nothing;
+      t.closed <- true;
+      t.base.close ()
+
     let setsockopt t opt v = t.base.setopt opt v
     let getsockopt t opt = t.base.getopt opt
   end
@@ -583,7 +597,12 @@ module Datagram = struct
 
   let wrap schedule (sock : _ Eio.Net.datagram_socket) : socket =
     let state =
-      { Impl.base = base_of sock; driver = driver schedule; kept = Nothing }
+      {
+        Impl.base = base_of sock;
+        driver = driver schedule;
+        kept = Nothing;
+        closed = false;
+      }
     in
     Eio.Resource.T (state, handler)
 end

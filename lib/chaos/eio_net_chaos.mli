@@ -201,7 +201,8 @@ module Datagram : sig
   (** [wrap schedule sock] is [sock] with [schedule]'s faults injected on
       {!Eio.Net.recv}. Sends pass through: the faults model the lossy, hostile
       network a receiver observes. Shutdown, close, and socket options pass
-      through to [sock]. *)
+      through to [sock]; a close drops a datagram held back, and a receive after
+      it raises [Invalid_argument]. *)
 end
 
 (** An adversarial {!Eio.Net.t} for dialers and connection pools: connects

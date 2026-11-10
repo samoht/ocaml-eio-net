@@ -285,6 +285,17 @@ let test_dgram_held_datagram_kept_whole () =
   Alcotest.(check (list string))
     "b, then aaaa whole" [ "b"; "aaaa" ] [ first; second ]
 
+(* A datagram held back goes with the socket: a receive after close raises
+   [Invalid_argument] instead of delivering it. *)
+let test_dgram_close_drops_held () =
+  with_datagrams [ "x" ] @@ fun ~send:_ base ->
+  let sock = Datagram.wrap (Datagram.Schedule.script [ Dup ]) base in
+  Alcotest.(check string) "first copy" "x" (recv1 sock);
+  Eio.Net.close sock;
+  match recv1 sock with
+  | exception Invalid_argument _ -> ()
+  | got -> Alcotest.failf "received %S after close" got
+
 (* A receive cancelled while it holds a datagram back keeps it: the next
    receives deliver the one after it, then the held one. *)
 let test_dgram_reorder_cancelled () =
@@ -593,6 +604,8 @@ let suite =
         test_dgram_cancelled_recv_takes_no_fault;
       Alcotest.test_case "dgram held datagram kept whole" `Quick
         test_dgram_held_datagram_kept_whole;
+      Alcotest.test_case "dgram close drops the held datagram" `Quick
+        test_dgram_close_drops_held;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
       Alcotest.test_case "flow writes counted across domains" `Quick
