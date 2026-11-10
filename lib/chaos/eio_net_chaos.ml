@@ -517,40 +517,42 @@ module Datagram = struct
       Cstruct.blit_from_string data 0 buf 0 n;
       (addr, n)
 
-    let rec apply t buf fault =
+    (* [fault] applied to [(a, d)], the datagram just taken from the base. A
+       datagram delivered later, by [Delay] or [Reorder], is kept in the state
+       while the receive waits, so a cancelled receive loses none. *)
+    let rec apply t buf (a, d) fault =
       match fault with
-      | Pass ->
+      | Pass | Drop 0 -> put buf a d
+      | Drop n ->
+          for _ = 2 to n do
+            ignore (recv_raw t buf)
+          done;
           let a, d = recv_raw t buf in
           put buf a d
-      | Drop 0 -> apply t buf Pass
-      | Drop n ->
-          ignore (recv_raw t buf);
-          apply t buf (Drop (n - 1))
       | Dup ->
-          let a, d = recv_raw t buf in
           t.kept <- Next (a, d);
           put buf a d
       | Reorder ->
-          t.kept <- Held (recv_raw t buf);
+          t.kept <- Held (a, d);
           recv t buf
       | Truncate k ->
-          let a, d = recv_raw t buf in
           let d = if k < String.length d then String.sub d 0 (max 0 k) else d in
           put buf a d
       | Garble k ->
-          let a, _ = recv_raw t buf in
           let d =
             String.init (max 0 k) (fun _ ->
                 Char.chr (Random.State.int t.driver.rng 256))
           in
           put buf a d
       | Delay n ->
+          t.kept <- Next (a, d);
           for _ = 1 to n do
             Eio.Fiber.yield ()
           done;
-          let a, d = recv_raw t buf in
-          put buf a d
+          recv t buf
 
+    (* The fault is drawn once a datagram is taken, so a receive cancelled
+       while it waits for one draws none. *)
     and recv t buf =
       match t.kept with
       | Next (addr, data) ->
@@ -560,7 +562,9 @@ module Datagram = struct
           let a, d = recv_raw t buf in
           t.kept <- Next held;
           put buf a d
-      | Nothing -> apply t buf (t.driver.next ())
+      | Nothing ->
+          let datagram = recv_raw t buf in
+          apply t buf datagram (t.driver.next ())
 
     let send t ?dst bufs = t.base.send ?dst bufs
     let shutdown t cmd = t.base.shutdown cmd

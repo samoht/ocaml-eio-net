@@ -259,6 +259,17 @@ let test_dgram_reorder () =
   Alcotest.(check (list string))
     "datagrams arrive out of order" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
 
+(* A receive cancelled while no datagram has come takes no fault: the script's
+   Dup applies to the first datagram the base delivers. *)
+let test_dgram_cancelled_recv_takes_no_fault () =
+  with_datagrams [] @@ fun ~send base ->
+  let sock = Datagram.wrap (Datagram.Schedule.script [ Dup ]) base in
+  Eio.Fiber.first (fun () -> ignore (recv1 sock)) Eio.Fiber.yield;
+  send "one";
+  send "two";
+  Alcotest.(check (list string))
+    "Dup applies to one" [ "one"; "one" ] (recv_n sock 2)
+
 (* A receive cancelled while it holds a datagram back keeps it: the next
    receives deliver the one after it, then the held one. *)
 let test_dgram_reorder_cancelled () =
@@ -563,6 +574,8 @@ let suite =
         test_net_max_accepts_cancelled;
       Alcotest.test_case "net max accepts shared by concurrent accepts" `Quick
         test_net_max_accepts_concurrent;
+      Alcotest.test_case "dgram cancelled recv takes no fault" `Quick
+        test_dgram_cancelled_recv_takes_no_fault;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
       Alcotest.test_case "flow writes counted across domains" `Quick
