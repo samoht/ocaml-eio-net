@@ -7,6 +7,8 @@
  (libraries
   eio-net.chaos
   eio-net.mem
+  eio-net.accept
+  eio-net.unix
   eio
   eio.mock
   eio.unix

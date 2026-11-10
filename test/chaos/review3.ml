@@ -75,6 +75,70 @@ let connfail ?(bug = `None) env =
   in
   expect env Fmt.Dump.string "hi" (attempt 1)
 
+(* A server whose accept loop, under [Fault.Emfile], retries the accept at
+   once: with no descriptor left it spins. *)
+let busy_accept () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let emfile (op : Eio_net_chaos.Op.t) =
+    if op.kind = `Accept && op.offset = 1 then Some Eio_net_chaos.Fault.Emfile
+    else None
+  in
+  let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
+  let l = Eio.Net.listen ~sw ~backlog:5 net (tcp 7060) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let rec loop () =
+        match Eio.Net.accept ~sw l with
+        | flow, _ ->
+            Eio.Fiber.fork ~sw (fun () ->
+                Eio.Flow.copy_string "hi\n" flow;
+                Eio.Time.sleep env#clock 10.;
+                Eio.Flow.close flow);
+            loop ()
+        | exception Eio.Io _ -> loop ()
+      in
+      loop ());
+  let client () =
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw net (tcp 7060) in
+    Eio.Time.with_timeout_exn env#clock 30. (fun () ->
+        strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
+  in
+  ignore (Eio.Fiber.List.map (fun _ -> client ()) [ 1; 2 ])
+
+(* [Eio_net_accept.run] under [Fault.Emfile]: it sheds an idle connection,
+   whose close frees a descriptor, and takes the queued one. *)
+let accept_loop () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let emfile (op : Eio_net_chaos.Op.t) =
+    if op.kind = `Accept && op.offset = 1 then Some Eio_net_chaos.Fault.Emfile
+    else None
+  in
+  let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
+  let l = Eio.Net.listen ~sw ~backlog:5 net (tcp 7061) in
+  let stop, set_stop = Eio.Promise.create () in
+  let shed = ref false in
+  Eio.Fiber.both
+    (fun () ->
+      Eio_net_accept.run ~stop ~classify:Eio_net_unix.accept_failure
+        ~max_connections:4 l (fun _ flow _ ->
+          match strict_line (Eio.Buf_read.of_flow flow ~max_size:16) with
+          | line -> Eio.Flow.copy_string (line ^ "\n") flow
+          | exception End_of_file -> shed := true))
+    (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let _idle = Eio.Net.connect ~sw net (tcp 7061) in
+      let flow = Eio.Net.connect ~sw net (tcp 7061) in
+      Eio.Flow.copy_string "hello\n" flow;
+      let got =
+        Eio.Time.with_timeout_exn env#clock 5. (fun () ->
+            strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
+      in
+      if got <> "hello" then Fmt.failwith "got %S" got;
+      if not !shed then failwith "no connection was shed";
+      Eio.Promise.resolve set_stop ())
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in

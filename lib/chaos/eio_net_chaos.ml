@@ -1,8 +1,6 @@
 open! Hermetic
 
-type Eio.Exn.Backend.t +=
-  | Injected_fault = Wrapper.Injected_fault
-  | Emfile_fault = Wrapper.Emfile_fault
+type Eio.Exn.Backend.t += Injected_fault = Wrapper.Injected_fault
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t

@@ -153,27 +153,40 @@ let test_accept_reset () =
   | exception e when is_reset e -> ()
   | s -> Alcotest.failf "the server read %S" s
 
+let is_emfile = function
+  | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EMFILE, "accept", "")), _) ->
+      true
+  | _ -> false
+
+(* With no descriptor left, as on Linux: the connection stays queued and its
+   client sees nothing, every accept fails until a descriptor is freed, and the
+   next accept then takes that connection with its data. *)
 let test_accept_emfile () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net =
     Chaos.wrap ~clock:env#clock
-      (nth `Accept 1 Fault.Emfile)
+      (nth `Accept 2 Fault.Emfile)
       (Eio_net_mem.v ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:2 net addr in
   let first = Eio.Net.connect ~sw net addr in
+  let held, _ = Eio.Net.accept ~sw l in
   let second = Eio.Net.connect ~sw net addr in
-  (match Eio.Net.accept ~sw l with
-  | exception Eio.Io (Eio.Exn.X Chaos.Emfile_fault, _) -> ()
-  | _ -> Alcotest.fail "the accept went through");
-  (match read1 first with
-  | exception e when is_reset e -> ()
-  | s -> Alcotest.failf "the first client read %S" s);
+  Eio.Flow.copy_string "hi" second;
+  for _ = 1 to 3 do
+    match Eio.Net.accept ~sw l with
+    | exception e when is_emfile e -> ()
+    | _ -> Alcotest.fail "an accept went through with no descriptor left"
+  done;
+  (match Eio.Time.with_timeout env#clock 1.0 (fun () -> Ok (read1 second)) with
+  | Error `Timeout -> ()
+  | Ok s -> Alcotest.failf "the client read %S" s);
+  Eio.Flow.close held;
+  Eio.Flow.close first;
   let server, _ = Eio.Net.accept ~sw l in
-  Eio.Flow.copy_string "ok" server;
-  Alcotest.(check string) "the next accept" "ok" (read1 second)
+  Alcotest.(check string) "the queued connection" "hi" (read1 server)
 
 (* A write after the flow's own close raises [Invalid_argument], as on the
    socket it wraps, before [f] is asked. *)

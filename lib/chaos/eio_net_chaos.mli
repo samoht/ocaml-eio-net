@@ -125,11 +125,6 @@ type Eio.Exn.Backend.t +=
         (** The backend code carried by the connection errors a wrapper raises,
             so an injected [Connection_reset] or [Connection_failure] is an
             {!Eio.Io} error of the shape a socket raises. *)
-  | Emfile_fault
-        (** The backend code of the error an accept raises under
-            {!Fault.Emfile}, printed as [EMFILE]: the process has no descriptor
-            left. A classifier that matches [Eio_unix.Unix_error] does not see
-            it. *)
 
 (** The operations a wrapper sees. *)
 module Op : sig
@@ -199,9 +194,16 @@ module Fault : sig
             [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (EHOSTUNREACH,
              "connect-in-progress", "")), _)]. *)
     | Emfile
-        (** An accept fails with {!Emfile_fault}: the process has no descriptor
-            left. The connection it took is reset, as if its client had left.
-            {!check} does not try it, as {!Eio.Net.run_server} stops on it. *)
+        (** An accept fails with the error eio_posix raises when the process has
+            no descriptor left:
+            [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (EMFILE, "accept", "")), _)],
+            which [Eio_net_unix.accept_failure] reads as [`Descriptors]. As on
+            Linux, the connection stays queued and its client sees nothing, and
+            every accept on the network fails the same way until the program
+            frees a descriptor, by closing a connection, socket or listener of
+            the network. The next accept then returns that connection, with its
+            data. {!check} does not try it, as {!Eio.Net.run_server} stops on
+            it. *)
     | Drop  (** The datagram is lost; the receive waits for the next one. *)
     | Dup  (** The datagram arrives now and again on the next receive. *)
     | Reorder  (** The datagram arrives after the next one. *)

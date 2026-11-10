@@ -1,6 +1,6 @@
 (** The wrappers that ask about each operation and inject the faults. *)
 
-type Eio.Exn.Backend.t += Injected_fault | Emfile_fault
+type Eio.Exn.Backend.t += Injected_fault
 
 val v :
   clock:_ Eio.Time.clock ->

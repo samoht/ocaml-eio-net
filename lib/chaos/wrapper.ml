@@ -1,14 +1,11 @@
 open! Hermetic
 
-type Eio.Exn.Backend.t += Injected_fault | Emfile_fault
+type Eio.Exn.Backend.t += Injected_fault
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
     | Injected_fault ->
         Fmt.string ppf "Injected_fault (eio-net.chaos)";
-        true
-    | Emfile_fault ->
-        Fmt.string ppf "EMFILE (eio-net.chaos)";
         true
     | _ -> false)
 
@@ -16,8 +13,6 @@ let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Injected_fault)
 
 let refused_exn () =
   Eio.Net.err (Eio.Net.Connection_failure (Eio.Net.Refused Injected_fault))
-
-let emfile_exn () = Eio.Exn.create (Eio.Exn.X Emfile_fault)
 
 let rec takev len = function
   | [] -> []
@@ -78,6 +73,7 @@ type ctx = {
   mutable sockets : int;
   mutable connects : int;
   mutable accepts : int;
+  mutable exhausted : bool;
   mutable streak : int;
   mutable streak_at : float;
   livelocked : bool Atomic.t;
@@ -94,6 +90,7 @@ let ctx ~clock ~outage f =
     sockets = 0;
     connects = 0;
     accepts = 0;
+    exhausted = false;
     streak = 0;
     streak_at = 0.;
     livelocked = Atomic.make false;
@@ -147,6 +144,10 @@ let guard ctx f =
       let bt = Printexc.get_raw_backtrace () in
       failed ctx;
       Printexc.raise_with_backtrace e bt
+
+(* A close frees a descriptor, so the accepts that [Fault.Emfile] fails go
+   through again. *)
+let free ctx = locked ctx (fun () -> ctx.exhausted <- false)
 
 let ask ctx kind ~socket ~side ~offset ~length =
   locked ctx (fun () -> ask_locked ctx kind ~socket ~side ~offset ~length)
@@ -357,10 +358,15 @@ module Flow = struct
       try Eio.Flow.shutdown t.sock cmd with Eio.Io _ when broken t -> ()
 
     let close t =
-      Mutex.protect t.lock (fun () ->
-          t.leftover <- Cstruct.empty;
-          t.closed <- true);
-      Eio.Resource.close t.sock
+      let was_open =
+        Mutex.protect t.lock (fun () ->
+            let was_open = not t.closed in
+            t.leftover <- Cstruct.empty;
+            t.closed <- true;
+            was_open)
+      in
+      Eio.Resource.close t.sock;
+      if was_open then free t.ctx
 
     let setsockopt t opt v = Eio.Net.setsockopt t.sock opt v
     let getsockopt t opt = Eio.Net.getsockopt t.sock opt
@@ -510,7 +516,8 @@ module Datagram = struct
           t.ready <- [];
           t.held <- [];
           t.closed <- true);
-      Eio.Resource.close t.sock
+      Eio.Resource.close t.sock;
+      free t.ctx
 
     let setsockopt t opt v = Eio.Net.setsockopt t.sock opt v
     let getsockopt t opt = Eio.Net.getsockopt t.sock opt
@@ -535,16 +542,36 @@ module Datagram = struct
 end
 
 module Listener = struct
+  (* [held] is the connection an accept failed with EMFILE took, which stays
+     queued until a descriptor is freed. *)
   type t = {
     ctx : ctx;
     l : [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
+    mutable held : (stream * Eio.Net.Sockaddr.stream) option;
   }
 
   module Impl = struct
     type tag = [ `Generic ]
     type nonrec t = t
 
-    let accept_ t ~sw =
+    let rec accept_ t ~sw =
+      let ctx = t.ctx in
+      let queued =
+        locked ctx (fun () ->
+            if ctx.exhausted then `Exhausted
+            else
+              match t.held with
+              | Some c ->
+                  t.held <- None;
+                  `Held c
+              | None -> `Accept)
+      in
+      match queued with
+      | `Exhausted -> raise (Posix.emfile ())
+      | `Held c -> c
+      | `Accept -> accept_base t ~sw
+
+    and accept_base t ~sw =
       let ctx = t.ctx in
       let sock, peer = Eio.Net.accept ~sw t.l in
       let sock = (sock :> stream) in
@@ -566,9 +593,10 @@ module Listener = struct
           break conn `Closed;
           (flow, peer)
       | Some Emfile ->
-          break conn `Reset;
-          Eio.Resource.close sock;
-          raise (emfile_exn ())
+          locked ctx (fun () ->
+              ctx.exhausted <- true;
+              t.held <- Some (flow, peer));
+          raise (Posix.emfile ())
       | Some Hang -> Eio.Fiber.await_cancel ()
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;
@@ -580,7 +608,11 @@ module Listener = struct
           (flow, peer)
 
     let accept t ~sw = guard t.ctx (fun () -> accept_ t ~sw)
-    let close t = Eio.Resource.close t.l
+
+    let close t =
+      Eio.Resource.close t.l;
+      free t.ctx
+
     let listening_addr t = Eio.Net.listening_addr t.l
     let setsockopt t opt v = Eio.Net.setsockopt t.l opt v
     let getsockopt t opt = Eio.Net.getsockopt t.l opt
@@ -642,6 +674,7 @@ module Network = struct
         ( {
             Listener.ctx = t.ctx;
             l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
+            held = None;
           },
           Listener.handler )
 
