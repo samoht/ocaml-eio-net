@@ -1,287 +1,237 @@
-(** Adversarial network capabilities for testing Eio protocol adapters.
+(** Network faults, for tests of Eio programs.
 
-    Wraps an ordinary Eio flow, datagram socket, or {!Eio.Net.t} and injects
-    read, write, datagram and connect faults on a deterministic, inspectable
-    schedule: a test either pins an exact scenario or drives a seeded one and
-    replays it byte for byte. The in-memory transport is reused from
-    {!Eio_net_mem}; this layer only adds the adversarial behaviour. *)
+    {!check} runs a workload on an in-memory network that fails in a different
+    way on each run: a read returns one byte or several messages at once, a
+    connection is reset or ends midway, a peer stalls, a send buffer fills, a
+    connect is refused or times out, a datagram is lost, duplicated, reordered
+    or replaced with noise. It chooses the scenarios from what the workload
+    does.
+
+    {2 Exploration}
+
+    A check runs the workload once with no fault and records its operations. Its
+    scenarios are positions in that run, in two tiers:
+
+    - the linear tier always runs whole. On each end of each connection it cuts
+      the bytes around the ends of the first three of the peer's writes, its
+      last, and each whose length differs from the one before; it fails each
+      connect, accept and datagram; and it runs each lasting condition. It grows
+      with the structure of the exchange, not with its bytes;
+    - the sampled tier spends the rest, at most half as much as the linear tier
+      and at least 200 runs: the other write ends, and pairs of faults, the
+      second at a position of the run the first one changed. That is where a
+      retry, or a second connection after a reset, gets tested.
+
+    A check never passes on a partial linear tier. One that needs more runs than
+    its budget fails and says so: shrink the workload or raise [~budget].
+
+    {2 Contracts}
+
+    {b At most two faults per run}, a 50 ms stall included. A program that tries
+    three times always succeeds, so [run] may demand success. A broker that fans
+    a message out to three subscribers may demand that one of them gets
+    everything: two faults reach two subscribers at most.
+
+    {b Every program on the network meets the faults}, the test's own peers
+    included. Write test servers with [Eio.Net.run_server ~on_error:ignore],
+    catch [Eio.Io _ | End_of_file] in test clients, and parse strictly in both:
+    a peer that takes a partial line for a whole one turns an injected end of
+    stream into a wrong answer.
+
+    {b Assert latency to catch a missing timeout.} A connect that times out
+    takes 127 seconds, as on Linux, and then fails: a program without a connect
+    timeout waits for it and still succeeds. A test that bounds its program's
+    latency reads [env#clock] before and after.
+
+    {2 Failures and replay}
+
+    A check is deterministic. A failure raises [Failure] with the scenario, the
+    tier that found it, the operations of the failing run, and the
+    [~replay:"..."] argument that runs that scenario alone. A replay fails if
+    the workload's first run is no longer the one it names, or if the check no
+    longer has the scenario.
+
+    A check reads no environment variable and prints nothing. A test that wants
+    a larger budget at night reads its own:
+    {[
+    let check run =
+      let budget = Option.map int_of_string (Sys.getenv_opt "CHAOS_BUDGET") in
+      Eio_net_chaos.check ?budget run
+    ]}
+
+    {2 Runs}
+
+    Each run has its own event loop, inside or outside another one. Its clocks
+    start at [0.] and move only when every fiber waits, so a timeout of an hour
+    takes no time. A run in which every fiber waits and no timer is due fails as
+    a hang, and so does one still running after an hour of its clock. *)
+
+type env =
+  < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
+  ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t >
+(** The type for what a workload runs with: a fresh in-memory network and the
+    run's clocks. [Eio_fs.Chaos.env] has the same shape, with [fs] in place of
+    [net]. *)
+
+(** {1:checks Checks} *)
+
+val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
+(** [check ~budget ~replay run] calls [run] many times, each with a fresh
+    in-memory network of {!Eio_net_mem}. The first run has no fault.
+
+    The linear tier tries each of these alone:
+
+    - at each structural position of what one end of a connection reads, the
+      connection is reset, or ends, at both ends as on TCP; or the peer stalls
+      for good;
+    - at each structural position of what one end writes, the connection is
+      reset;
+    - each connect is refused, or times out after 127 seconds; each accepted
+      connection is reset before its first byte, as when the client left first;
+    - each datagram received is lost, duplicated, held back behind the next, or
+      replaced with noise from the same sender;
+    - on the first 4 KiB of each end, every read returns one byte, or every
+      write takes one byte; every read waits 5 ms and takes what several writes
+      sent; every connection queues 4 bytes each way, so a writer whose reader
+      does not read blocks;
+    - the outage: every connect is refused and every datagram lost, for the
+      whole run. {!outage} is then [true], so [run] checks what its program does
+      when it gives up.
+
+    {!Fault.Emfile} is not among them: {!Eio.Net.run_server} stops on it, so a
+    test that wants it asks for it with {!wrap}.
+
+    A run passes if [run] returns. [run] catches the errors its program may
+    raise and checks the results itself: any exception that escapes it fails the
+    check, an injected [Eio.Io] included. So does a hang, a first run that makes
+    no network operation, and two first runs that make different ones.
+
+    [budget] (defaults to [2_000]) bounds the runs. [replay] runs only the
+    scenario a failure named.
+
+    @raise Failure with a report of the first failing run. *)
+
+val outage : env -> bool
+(** [outage env] is [true] iff [env] is that of the outage run of {!check}. *)
+
+(** {1:blocks Building blocks} *)
 
 type Eio.Exn.Backend.t +=
   | Injected_fault
-        (** The backend code carried by every connection error this layer
-            raises, so an injected [Connection_reset] or [Connection_failure] is
-            an {!Eio.Io} error of the same shape a real socket would raise. *)
+        (** The backend code carried by the connection errors a wrapper raises,
+            so an injected [Connection_reset] or [Connection_failure] is an
+            {!Eio.Io} error of the shape a socket raises. *)
+  | Emfile_fault
+        (** The backend code of the error an accept raises under
+            {!Fault.Emfile}, printed as [EMFILE]: the process has no descriptor
+            left. A classifier that matches [Eio_unix.Unix_error] does not see
+            it. *)
 
-(** Adversarial stream flows: dribbled and coalesced reads, stalls, short
-    writes, and a mid-stream reset or end-of-file. *)
-module Flow : sig
-  (** The type for the fault injected on one read. *)
-  type read =
-    | Deliver of int
-        (** Hand up at most [n] buffered bytes on this read ([n <= 0] means all
-            buffered): the dribble / short-read fault. *)
-    | Coalesce of int
-        (** Do [n] base reads, accumulate them, then hand the whole buffer up:
-            several transport reads become one application read. It does them
-            even when bytes are already buffered, so it waits for [n] more base
-            reads. Stops early at end-of-file, which this read raises only when
-            nothing is buffered. *)
-    | Stall of int
-        (** {!Eio.Fiber.yield} [n] times, then deliver all buffered bytes. A
-            cooperative stall: the scheduler runs other fibers in between, so a
-            reader that stalls with no other runnable work trips
-            [Eio_mock.Backend]'s deadlock detector. *)
-    | Reset  (** Raise a connection-reset instead of delivering. *)
+(** The operations a wrapper sees. *)
+module Op : sig
+  type kind =
+    [ `Connect
+    | `Accept
+    | `Read  (** A read from a connection. *)
+    | `Write  (** A write to a connection. *)
+    | `Recv  (** A datagram taken by a receive. *) ]
+  (** The type for operation kinds. *)
+
+  type t = {
+    index : int;  (** The operation's place among all of them, from [1]. *)
+    kind : kind;
+    socket : int;
+        (** The connection or datagram socket, numbered from [1] in the order
+            the network made them, a refused connect included. *)
+    side : [ `Client | `Server ];
+        (** The end of a connection: the one that connected, or the one that
+            accepted. A datagram socket is a [`Client]. *)
+    offset : int;
+        (** The bytes this end read or wrote before, the datagrams this socket
+            took before, or the connects or accepts before. *)
+    length : int;
+        (** The bytes a read asks for or a write offers, or the size of the
+            buffer a datagram is received into. *)
+  }
+  (** The type for operations. *)
+
+  val pp : t Fmt.t
+  (** [pp] formats an operation for logs and reports. *)
+end
+
+(** The faults a wrapper injects. *)
+module Fault : sig
+  (** The type for faults. One that does not apply to an operation does nothing.
+  *)
+  type t =
+    | Short of int  (** A read or a write moves at most [max 1 n] bytes. *)
+    | Stall of float
+        (** The operation waits that many seconds of the clock, then runs. *)
+    | Hang
+        (** The operation never completes; only a cancel ends it. A read from a
+            silent peer does that; a connect never does, as the kernel gives up
+            on it, so {!check} hangs reads only. A datagram taken by a receive
+            that hangs goes to the next receive. *)
+    | Reset
+        (** The connection is reset at both ends: reads and writes raise
+            [Connection_reset] from now on, and the bytes not yet read are lost.
+            On an accept, the accept succeeds and the connection it returns is
+            reset, as Linux hands over one whose client left first. On a
+            connect, it is a refusal, as a reset answering the handshake is. *)
     | Eof
-        (** End the read direction: this read and every later one raise
-            [End_of_file]. *)
-
-  (** The type for the fault injected on one write. *)
-  type write =
-    | Accept of int
-        (** Accept at most [n] of the offered bytes on this write ([n <= 0]
-            means all): the short-write fault. The accepted bytes reach the
-            peer; the caller sees the short count and must retry the rest. *)
-    | Fail  (** Raise a connection-reset instead of writing. *)
-
-  (** A flow's fault schedule: pass-through, an exact per-call script, or a
-      seeded generator. {!Schedule.pp} prints the call that builds it, so a test
-      can report what it pinned or fuzzed and a reader rebuild it. Each flow a
-      schedule wraps runs it from its start. *)
-  module Schedule : sig
-    type t
-    (** The type for flow fault schedules. *)
-
-    val none : t
-    (** [none] injects no faults: reads and writes pass straight through. *)
-
-    val script : ?reads:read list -> ?writes:write list -> unit -> t
-    (** [script ~reads ~writes ()] injects the [i]th element of [reads]
-        (defaults to [[]]) on the [i]th read and the [i]th element of [writes]
-        (defaults to [[]]) on the [i]th write of at least one byte, and passes
-        through once a list is exhausted. *)
-
-    val seeded :
-      ?dribble:int ->
-      ?stall:int ->
-      ?short_write:int ->
-      ?reset_after:int ->
-      ?reset_kind:[ `Reset | `Eof ] ->
-      ?fail_write_after:int ->
-      int ->
-      t
-    (** [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
-         ~fail_write_after seed] derives faults from [seed]:
-        - Each read is, with even odds when [stall] (defaults to [0]) is
-          positive, a {!Stall} of [1] to [stall] scheduler turns, and otherwise
-          a {!Deliver} of [1] to [dribble] bytes (defaults to [0], uncapped).
-        - Each write is an {!Accept} of [1] to [short_write] bytes (defaults to
-          [0], uncapped).
-        - The first read once [reset_after] bytes (defaults to never) have been
-          delivered is a [reset_kind] (defaults to [`Reset]) fault: {!Reset} for
-          [`Reset] and {!Eof} for [`Eof]. No read before it delivers a byte past
-          [reset_after], so the fault lands at that byte exactly.
-        - The first write once [fail_write_after] bytes (defaults to never) have
-          been written is a {!Fail}.
-
-        Read faults and write faults each depend only on [seed], not on how
-        reads and writes interleave. The bytes a read delivers also depend on
-        those the base holds when it runs, so they repeat only when the bytes
-        arrive the same way, as on a single-domain scheduler over
-        {!Eio_net_mem}. *)
-
-    val pp : t Fmt.t
-    (** [pp] formats a schedule as the call that builds it, every parameter
-        given: {!val-none}, [script ~reads:[...] ~writes:[...] ()] with each
-        fault, or
-        [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
-         ~fail_write_after seed] with [reset_after] and [fail_write_after] left
-        out when they are never. The text builds the schedule again where
-        [Eio_net_chaos.Flow] and {!Flow.Schedule} are open. *)
-  end
-
-  type flow = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-  (** The type for wrapped stream sockets, usable anywhere a {!Eio.Flow.two_way}
-      or {!Eio.Net.stream_socket} is expected. *)
-
-  val wrap : Schedule.t -> _ Eio.Net.stream_socket -> flow
-  (** [wrap schedule sock] is [sock] with [schedule]'s faults injected on its
-      reads and writes. Shutdown, close, and socket options pass through to
-      [sock]. A close or a receive shutdown drops the bytes a short read left
-      buffered: a read after the close raises [Invalid_argument], and one after
-      the shutdown raises [End_of_file]. A write after the close raises
-      [Invalid_argument] before any fault. Writers in several domains share the
-      count of bytes written that [schedule] follows; reads take one reader at a
-      time, as two concurrent readers may each buffer a chunk of the stream out
-      of order. *)
-
-  val pair : ?client:Schedule.t -> ?server:Schedule.t -> unit -> flow * flow
-  (** [pair ~client ~server ()] is a connected pair of in-memory flows, the ends
-      of {!Eio_net_mem.pipe}, with the client end wrapped by [client] (defaults
-      to {!Schedule.none}) and the server end by [server] (defaults to
-      {!Schedule.none}). Bytes written on one arrive on the other. Both ends
-      must run under an Eio scheduler ([Eio_mock.Backend.run] suffices), and no
-      switch closes them. *)
-end
-
-(** Adversarial datagram sockets: loss, duplication, reordering, truncation,
-    garbage injection, and a stalled receive, all on the incoming path. *)
-module Datagram : sig
-  (** The type for the fault injected on one receive. *)
-  type fault =
-    | Pass  (** Deliver the next datagram unchanged. *)
-    | Drop of int
-        (** Drop [n] datagrams from the base, then deliver the one after them. A
-            receive cancelled midway leaves the rest to the next receive.
-            {!Schedule.script} refuses a negative [n]. *)
-    | Dup  (** Deliver the next datagram now and again on the following recv. *)
-    | Reorder
-        (** Hold the next datagram back and deliver the one after it first; the
-            held datagram surfaces on the following recv. A receive cancelled
-            while it waits for the one after keeps the held datagram. *)
-    | Truncate of int
-        (** Deliver only the first [n] bytes of the next datagram, none if [n]
-            is negative. *)
+        (** The connection ends at both ends: reads raise [End_of_file] from now
+            on, writes raise [Connection_reset], and the bytes not yet read are
+            lost. On an accept, the connection it returns has ended. *)
+    | Refuse  (** A connect fails with [Connection_failure (Refused _)]. *)
+    | Timeout
+        (** A connect fails with [Connection_failure Timeout] after 127 seconds
+            of the clock, as a lost handshake does on Linux. *)
+    | Emfile
+        (** An accept fails with {!Emfile_fault}: the process has no descriptor
+            left. The connection it took is reset, as if its client had left.
+            {!check} does not try it, as {!Eio.Net.run_server} stops on it. *)
+    | Drop  (** The datagram is lost; the receive waits for the next one. *)
+    | Dup  (** The datagram arrives now and again on the next receive. *)
+    | Reorder  (** The datagram arrives after the next one. *)
     | Garble of int
-        (** Deliver [n] bytes drawn from the schedule's seed, [0] for a script,
-            in place of the next datagram, with its source address. *)
-    | Delay of int
-        (** {!Eio.Fiber.yield} [n] times, then deliver the next datagram. *)
+        (** [n] bytes of noise arrive in place of the datagram, from the same
+            sender. *)
 
-  (** A datagram socket's recv-path fault schedule. *)
-  module Schedule : sig
-    type t
-    (** The type for datagram fault schedules. *)
-
-    val none : t
-    (** [none] injects no faults. *)
-
-    val script : fault list -> t
-    (** [script events] injects the [i]th element of [events] on the [i]th
-        receive that takes a datagram from the base, and passes through once
-        [events] is exhausted. A datagram held back by {!Dup} or {!Reorder} is
-        delivered on the receive after, with no fault, cut to that receive's
-        buffer: it is held whole, up to 64 KiB or the buffer of the receive that
-        took it if longer.
-
-        Raises [Invalid_argument] if [events] has a {!Drop} of a negative count.
-    *)
-
-    val seeded :
-      ?loss:float ->
-      ?dup:float ->
-      ?reorder:float ->
-      ?truncate:float ->
-      ?garble:float ->
-      ?delay:int ->
-      int ->
-      t
-    (** [seeded ~loss ~dup ~reorder ~truncate ~garble ~delay seed] draws one
-        fault per datagram taken from the base, from [seed]: with probability
-        [loss], [dup], [reorder], [truncate] and [garble] (each defaults to
-        [0.]) the datagram is dropped, duplicated, reordered, truncated to fewer
-        than [8] bytes, or replaced with fewer than [16] garbled bytes, so
-        [loss] is the fraction of datagrams lost; otherwise, with even odds when
-        [delay] (defaults to [0]) is positive, the receive stalls [1] to [delay]
-        scheduler turns, and else it passes through.
-
-        Raises [Invalid_argument] if one of [loss], [dup], [reorder], [truncate]
-        and [garble] is outside [[0., 1.]], NaN included, or if they sum to more
-        than [1.]. *)
-
-    val pp : t Fmt.t
-    (** [pp] formats a schedule as the call that builds it, every parameter
-        given: {!val-none}, [script [...]] with each fault, or
-        [seeded ~loss ~dup ~reorder ~truncate ~garble ~delay seed], each
-        probability as a float literal with the fewest digits that read back as
-        it. The text builds the schedule again where [Eio_net_chaos.Datagram]
-        and {!Datagram.Schedule} are open. *)
-  end
-
-  type socket = [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t
-  (** The type for wrapped datagram sockets. *)
-
-  val wrap : Schedule.t -> _ Eio.Net.datagram_socket -> socket
-  (** [wrap schedule sock] is [sock] with [schedule]'s faults injected on
-      {!Eio.Net.recv}. Sends pass through: the faults model the lossy, hostile
-      network a receiver observes. Shutdown, close, and socket options pass
-      through to [sock]; a close drops a datagram held back, and a receive after
-      it raises [Invalid_argument]. *)
+  val pp : t Fmt.t
+  (** [pp] formats a fault for logs and reports. *)
 end
 
-(** An adversarial {!Eio.Net.t} for dialers and connection pools: connects
-    return adversarial flows, connects can be refused, timed out, or slowed, and
-    a keep-alive-style listener drops after a bounded number of accepts. *)
-module Net : sig
-  (** The type for the fault injected on one connect. *)
-  type connect =
-    | Open  (** Connect normally; the flow is wrapped by the flow schedule. *)
-    | Refuse  (** Raise a connection-refused error. *)
-    | Timeout  (** Raise a connection-timeout error. *)
-    | Slow of int  (** {!Eio.Fiber.yield} [n] times, then connect. *)
+val wrap :
+  clock:_ Eio.Time.clock ->
+  (Op.t -> Fault.t option) ->
+  _ Eio.Net.t ->
+  [ `Generic ] Eio.Net.ty Eio.Resource.t
+(** [wrap ~clock f net] is [net] with [f] asked about each operation before it
+    runs, on the connections and the datagram sockets it makes. The operation
+    meets the fault [f] answers; [clock] times stalls and timeouts. [f] may also
+    act: count or log. [getaddrinfo], [getnameinfo] and datagram sends pass
+    through.
 
-  (** A network's fault schedule: the per-flow schedule applied to every
-      connected and accepted flow, an optional per-connect script, and an
-      optional accept budget. *)
-  module Schedule : sig
-    type t
-    (** The type for network fault schedules. *)
+    The network, its connections and its datagram sockets may be used from
+    several domains at once. [f] is called by one of them at a time, in the
+    order of {!Op.index}, while a lock is held: it must not wait, and must not
+    use the network.
 
-    val v :
-      ?flow:Flow.Schedule.t ->
-      ?connect:connect list ->
-      ?max_accepts:int ->
-      unit ->
-      t
-    (** [v ~flow ~connect ~max_accepts ()] applies [flow] (defaults to
-        {!Flow.Schedule.none}) to every connected and accepted flow, injects the
-        [i]th element of [connect] (defaults to [[]]) on the [i]th connect of
-        the network and passes through once it is exhausted, and closes a
-        listener and raises [End_of_file] from each of its accepts past
-        [max_accepts] (defaults to no bound). An accept takes its share of the
-        budget when it starts and gives it back if it raises or is cancelled, so
-        a cancelled one uses none of it; an accept that finds the budget held by
-        accepts still waiting raises [End_of_file] and leaves the listener open.
-    *)
+    A reset or an end breaks both ends of a connection when [net] is an
+    {!Eio_net_mem} network, which tells the wrapper which accepted socket a
+    connect made. On another network, the two ends are two sockets to the
+    wrapper, numbered apart, and a fault breaks only the end that meets it.
 
-    val seeded :
-      ?dribble:int ->
-      ?stall:int ->
-      ?short_write:int ->
-      ?reset_after:int ->
-      ?reset_kind:[ `Reset | `Eof ] ->
-      ?fail_write_after:int ->
-      ?connect:connect list ->
-      ?max_accepts:int ->
-      int ->
-      t
-    (** [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
-         ~fail_write_after ~connect ~max_accepts seed] is
-        [v ~flow ~connect ~max_accepts ()] with [flow] the
-        {!Flow.Schedule.seeded} schedule of [seed] and the flow arguments. *)
+    A read or a write after the flow's own close raises [Invalid_argument]
+    before [f] is asked, as Eio's own sockets do. A close drops the bytes a read
+    has not handed up yet, and the datagrams a socket holds back. *)
 
-    val pp : t Fmt.t
-    (** [pp] formats a schedule as the call that builds it:
-        [v ~flow:(...) ~connect:[...] ~max_accepts ()], with the flow schedule
-        as {!Flow.Schedule.pp} prints it but qualified, as in
-        [Flow.Schedule.seeded ...], and [max_accepts] left out when there is no
-        bound. The text builds the schedule again where [Eio_net_chaos],
-        [Eio_net_chaos.Net] and {!Net.Schedule} are open. *)
-  end
-
-  type t = [ `Generic ] Eio.Net.ty Eio.Resource.t
-  (** The type for wrapped networks. *)
-
-  val wrap : Schedule.t -> _ Eio.Net.t -> t
-  (** [wrap schedule net] is [net] with [schedule]'s faults injected: connects
-      and accepts return {!Flow.wrap}ped flows, connect faults fire per
-      [schedule], and the listener honours [max_accepts]. Datagram sockets are
-      not carried: [datagram_socket] raises [Invalid_argument], and
-      {!Datagram.wrap} wraps one from [net]. [getaddrinfo] and [getnameinfo]
-      pass through. *)
-
-  val v : sw:Eio.Switch.t -> Schedule.t -> t
-  (** [v ~sw schedule] is {!wrap} over a fresh in-memory network
-      ({!Eio_net_mem.v}): a self-contained adversarial network for tests that
-      need no real sockets. *)
-end
+val pair :
+  clock:_ Eio.Time.clock ->
+  (Op.t -> Fault.t option) ->
+  [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
+  * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
+(** [pair ~clock f] is a connected pair of in-memory streams, the client end
+    first, with [f] asked about each read and write of either end, as {!wrap}
+    asks: [socket] is [1]. A fuzzer drives it from its input. *)

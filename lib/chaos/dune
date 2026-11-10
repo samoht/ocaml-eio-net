@@ -4,7 +4,7 @@
 (library
  (name eio_net_chaos)
  (public_name eio-net.chaos)
- (private_modules quiet_mock)
+ (private_modules op fault wrapper plan quiet_mock)
  (libraries
   hermetic
   eio
@@ -15,3 +15,8 @@
   mtime
   psq
   domain-local-await))
+
+(mdx
+ (package eio-net)
+ (files eio_net_chaos.mli)
+ (libraries eio-net.chaos))

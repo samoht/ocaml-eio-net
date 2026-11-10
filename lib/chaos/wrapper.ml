@@ -1,0 +1,619 @@
+open! Hermetic
+
+type Eio.Exn.Backend.t += Injected_fault | Emfile_fault
+
+let () =
+  Eio.Exn.Backend.register_pp (fun ppf -> function
+    | Injected_fault ->
+        Fmt.string ppf "Injected_fault (eio-net.chaos)";
+        true
+    | Emfile_fault ->
+        Fmt.string ppf "EMFILE (eio-net.chaos)";
+        true
+    | _ -> false)
+
+let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Injected_fault)
+
+let refused_exn () =
+  Eio.Net.err (Eio.Net.Connection_failure (Eio.Net.Refused Injected_fault))
+
+let timeout_exn () = Eio.Net.err (Eio.Net.Connection_failure Eio.Net.Timeout)
+let emfile_exn () = Eio.Exn.create (Eio.Exn.X Emfile_fault)
+
+let rec takev len = function
+  | [] -> []
+  | b :: bs ->
+      let n = Cstruct.length b in
+      if len <= 0 then []
+      else if n <= len then b :: takev (len - n) bs
+      else [ Cstruct.sub b 0 len ]
+
+type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
+
+(* A connection, shared by its two ends: a reset or an end breaks both, as on
+   TCP. [broken] changes once, under [lock], which also guards [socks]: an end
+   added after the break is shut at once. *)
+type conn = {
+  lock : Mutex.t;
+  broken : [ `Open | `Reset | `Closed ] Atomic.t;
+  mutable socks : stream list;
+}
+
+let conn () = { lock = Mutex.create (); broken = Atomic.make `Open; socks = [] }
+
+let shut s =
+  try Eio.Flow.shutdown s `All with Eio.Io _ | Invalid_argument _ -> ()
+
+let break conn how =
+  let socks =
+    Mutex.protect conn.lock (fun () ->
+        if Atomic.get conn.broken = `Open then begin
+          Atomic.set conn.broken how;
+          conn.socks
+        end
+        else [])
+  in
+  List.iter shut socks
+
+let join conn sock =
+  let broken =
+    Mutex.protect conn.lock (fun () ->
+        conn.socks <- sock :: conn.socks;
+        Atomic.get conn.broken)
+  in
+  if broken <> `Open then shut sock
+
+(* The client registers its socket number once its connect returns; an accept
+   that sees the connection first waits for it. *)
+type pending = { number : int Eio.Promise.t; set : int Eio.Promise.u; c : conn }
+
+(* What the wrappers of one network share. [lock] guards the counters and
+   [pending], and runs [f], so [f] sees one operation at a time, in the order
+   of [index]. *)
+type ctx = {
+  f : Op.t -> Fault.t option;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
+  outage : bool;
+  lock : Mutex.t;
+  mutable index : int;
+  mutable sockets : int;
+  mutable connects : int;
+  mutable accepts : int;
+  pending : (int, pending) Hashtbl.t;
+}
+
+let ctx ~clock ~outage f =
+  {
+    f;
+    clock :> float Eio.Time.clock_ty Eio.Resource.t;
+    outage;
+    lock = Mutex.create ();
+    index = 0;
+    sockets = 0;
+    connects = 0;
+    accepts = 0;
+    pending = Hashtbl.create 7;
+  }
+
+(* Under [ctx.lock]. *)
+let ask_locked ctx kind ~socket ~side ~offset ~length =
+  ctx.index <- ctx.index + 1;
+  ctx.f { Op.index = ctx.index; kind; socket; side; offset; length }
+
+let locked (ctx : ctx) f = Mutex.protect ctx.lock f
+
+let ask ctx kind ~socket ~side ~offset ~length =
+  locked ctx (fun () -> ask_locked ctx kind ~socket ~side ~offset ~length)
+
+let next_socket ctx =
+  ctx.sockets <- ctx.sockets + 1;
+  ctx.sockets
+
+let pending ctx id =
+  match Hashtbl.find_opt ctx.pending id with
+  | Some p ->
+      Hashtbl.remove ctx.pending id;
+      p
+  | None ->
+      let number, set = Eio.Promise.create () in
+      let p = { number; set; c = conn () } in
+      Hashtbl.replace ctx.pending id p;
+      p
+
+(* The connection a connect made, numbered [socket]. *)
+let client_conn ctx ~socket sock =
+  match Eio_net_mem.connection sock with
+  | None -> conn ()
+  | Some id ->
+      let p = locked ctx (fun () -> pending ctx id) in
+      Eio.Promise.resolve p.set socket;
+      p.c
+
+(* The number and the connection of an accepted socket. *)
+let server_conn ctx sock =
+  match Eio_net_mem.connection sock with
+  | None -> (locked ctx (fun () -> next_socket ctx), conn ())
+  | Some id ->
+      let p = locked ctx (fun () -> pending ctx id) in
+      (Eio.Promise.await p.number, p.c)
+
+module Flow = struct
+  (* [leftover] holds the bytes a base read took and no read has handed up:
+     they stand for the socket's own queue, so a close drops them and a
+     receive shutdown leaves them to read, as the base does with its queue.
+     [lock] guards them, [closed], which a close in another domain changes
+     while a read runs, and the counts of bytes, which readers and writers in
+     several domains share. It is never held across a read or a write of the
+     base socket. *)
+  type t = {
+    ctx : ctx;
+    socket : int;
+    side : Op.side;
+    sock : stream;
+    conn : conn;
+    lock : Mutex.t;
+    mutable leftover : Cstruct.t;
+    mutable delivered : int;
+    mutable written : int;
+    mutable closed : bool;
+  }
+
+  (* Under [t.lock]. A reset or an end drops what is buffered. *)
+  let check_read t =
+    if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
+    match Atomic.get t.conn.broken with
+    | `Reset ->
+        t.leftover <- Cstruct.empty;
+        raise (reset_exn ())
+    | `Closed ->
+        t.leftover <- Cstruct.empty;
+        raise End_of_file
+    | `Open -> ()
+
+  (* Under [t.lock]. A closed flow refuses a write before any fault. *)
+  let check_write t =
+    if t.closed then invalid_arg "Eio_net_chaos: write on a closed flow";
+    if Atomic.get t.conn.broken <> `Open then raise (reset_exn ())
+
+  let broken t = Atomic.get t.conn.broken <> `Open
+
+  (* Appends one base read to the buffer. A base error after a break is the
+     break's. *)
+  let fill t =
+    let scratch = Cstruct.create 0x4000 in
+    let got =
+      match Eio.Flow.single_read t.sock scratch with
+      | n -> n
+      | exception (End_of_file | Eio.Io _) when broken t -> 0
+    in
+    Mutex.protect t.lock @@ fun () ->
+    check_read t;
+    t.leftover <- Cstruct.append t.leftover (Cstruct.sub scratch 0 got)
+
+  (* Hands up at most [cap] buffered bytes, or all of them if [cap <= 0]. A
+     byte is taken from the buffer once, under the lock, so readers in several
+     domains neither lose nor duplicate one. *)
+  let rec deliver t dst ~cap =
+    let empty =
+      Mutex.protect t.lock (fun () ->
+          check_read t;
+          Cstruct.length t.leftover = 0)
+    in
+    if empty then fill t;
+    let n =
+      Mutex.protect t.lock @@ fun () ->
+      check_read t;
+      let avail = Cstruct.length t.leftover in
+      if avail = 0 then None
+      else
+        let want = if cap <= 0 then avail else min cap avail in
+        let n = min want (Cstruct.length dst) in
+        Cstruct.blit t.leftover 0 dst 0 n;
+        t.leftover <- Cstruct.sub t.leftover n (avail - n);
+        t.delivered <- t.delivered + n;
+        Some n
+    in
+    match n with Some n -> n | None -> deliver t dst ~cap
+
+  let raise_broken t =
+    Mutex.protect t.lock (fun () -> check_read t);
+    raise (reset_exn ())
+
+  module Impl = struct
+    type tag = [ `Generic ]
+    type nonrec t = t
+
+    let single_read t dst =
+      let fault =
+        Mutex.protect t.lock (fun () ->
+            check_read t;
+            if Cstruct.length dst = 0 then None
+            else
+              ask t.ctx `Read ~socket:t.socket ~side:t.side ~offset:t.delivered
+                ~length:(Cstruct.length dst))
+      in
+      if Cstruct.length dst = 0 then 0
+      else
+        match fault with
+        | Some (Fault.Short n) -> deliver t dst ~cap:(max 1 n)
+        | Some (Stall d) ->
+            Eio.Time.sleep t.ctx.clock d;
+            deliver t dst ~cap:0
+        | Some Hang -> Eio.Fiber.await_cancel ()
+        | Some Reset ->
+            break t.conn `Reset;
+            raise_broken t
+        | Some Eof ->
+            break t.conn `Closed;
+            raise_broken t
+        | Some (Refuse | Timeout | Emfile | Drop | Dup | Reorder | Garble _)
+        | None ->
+            deliver t dst ~cap:0
+
+    (* The bytes are counted before they are written, so a write in another
+       domain meanwhile sees them. *)
+    let single_write t bufs =
+      let total = Cstruct.lenv bufs in
+      let fault, n =
+        Mutex.protect t.lock @@ fun () ->
+        check_write t;
+        if total = 0 then (None, 0)
+        else
+          let fault =
+            ask t.ctx `Write ~socket:t.socket ~side:t.side ~offset:t.written
+              ~length:total
+          in
+          let n =
+            match fault with
+            | Some (Fault.Short k) -> max 1 (min k total)
+            | Some (Hang | Reset | Eof) -> 0
+            | Some
+                ( Stall _ | Refuse | Timeout | Emfile | Drop | Dup | Reorder
+                | Garble _ )
+            | None ->
+                total
+          in
+          t.written <- t.written + n;
+          (fault, n)
+      in
+      let write () =
+        match Eio.Flow.write t.sock (takev n bufs) with
+        | () -> n
+        | exception Eio.Io _ when broken t -> raise (reset_exn ())
+      in
+      if total = 0 then 0
+      else
+        match fault with
+        | Some Fault.Hang -> Eio.Fiber.await_cancel ()
+        | Some Reset ->
+            break t.conn `Reset;
+            raise (reset_exn ())
+        | Some Eof ->
+            break t.conn `Closed;
+            raise (reset_exn ())
+        | Some (Stall d) ->
+            Eio.Time.sleep t.ctx.clock d;
+            write ()
+        | Some
+            ( Short _ | Refuse | Timeout | Emfile | Drop | Dup | Reorder
+            | Garble _ )
+        | None ->
+            write ()
+
+    let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
+    let read_methods = []
+
+    let shutdown t cmd =
+      try Eio.Flow.shutdown t.sock cmd with Eio.Io _ when broken t -> ()
+
+    let close t =
+      Mutex.protect t.lock (fun () ->
+          t.leftover <- Cstruct.empty;
+          t.closed <- true);
+      Eio.Resource.close t.sock
+
+    let setsockopt t opt v = Eio.Net.setsockopt t.sock opt v
+    let getsockopt t opt = Eio.Net.getsockopt t.sock opt
+  end
+
+  let handler = Eio.Net.Pi.stream_socket (module Impl)
+
+  let v ctx ~socket ~side ~conn sock : stream =
+    join conn sock;
+    Eio.Resource.T
+      ( {
+          ctx;
+          socket;
+          side;
+          sock;
+          conn;
+          lock = Mutex.create ();
+          leftover = Cstruct.empty;
+          delivered = 0;
+          written = 0;
+          closed = false;
+        },
+        handler )
+end
+
+module Datagram = struct
+  type socket = [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t
+  type datagram = Eio.Net.Sockaddr.datagram * string
+
+  (* [ready] holds the datagrams to deliver before the next one the base
+     receives: a duplicate, a held datagram released, or one taken before a
+     stall. [held] holds the datagrams to deliver after the next one. Both are
+     kept in the state while a receive waits, so a cancelled receive loses
+     none, and both go with a close. [lock] guards them, the count and
+     [closed], and is never held across a receive of the base socket. *)
+  type t = {
+    ctx : ctx;
+    socket : int;
+    sock : socket;
+    lock : Mutex.t;
+    mutable ready : datagram list;
+    mutable held : datagram list;
+    mutable received : int;
+    mutable closed : bool;
+  }
+
+  let check t =
+    if t.closed then
+      invalid_arg "Eio_net_chaos: recv on a closed datagram socket"
+
+  (* The whole datagram, up to 64 KiB or the caller's buffer if longer, so a
+     copy kept for a later receive is cut only to the buffer of the receive
+     that delivers it. *)
+  let recv_raw t buf =
+    let scratch = Cstruct.create_unsafe (max (Cstruct.length buf) 0x10000) in
+    let addr, len = Eio.Net.recv t.sock scratch in
+    (addr, Cstruct.to_string ~len scratch)
+
+  let put buf (addr, data) =
+    let n = min (String.length data) (Cstruct.length buf) in
+    Cstruct.blit_from_string data 0 buf 0 n;
+    (addr, n)
+
+  let noise ~socket ~offset k =
+    let rng = Random.State.make [| socket; offset |] in
+    String.init (max 0 k) (fun _ -> Char.chr (Random.State.int rng 256))
+
+  let shutdown_of (Eio.Resource.T (t, ops) : socket) =
+    let module X = (val Eio.Resource.get ops Eio.Flow.Pi.Shutdown) in
+    X.shutdown t
+
+  module Impl = struct
+    type tag = [ `Generic ]
+    type nonrec t = t
+
+    (* The fault is drawn once a datagram is taken, so a receive cancelled
+       while it waits for one draws none. *)
+    let rec recv t buf =
+      let next =
+        Mutex.protect t.lock (fun () ->
+            check t;
+            match t.ready with
+            | d :: rest ->
+                t.ready <- rest;
+                Some d
+            | [] -> None)
+      in
+      match next with
+      | Some d -> put buf d
+      | None -> (
+          let ((addr, _) as d) = recv_raw t buf in
+          let action =
+            Mutex.protect t.lock @@ fun () ->
+            check t;
+            let offset = t.received in
+            t.received <- offset + 1;
+            match t.held with
+            | _ :: _ ->
+                (* The datagram after a held one passes, and the held one
+                   follows it. *)
+                t.ready <- t.ready @ List.rev t.held;
+                t.held <- [];
+                `Pass
+            | [] -> (
+                let fault =
+                  ask t.ctx `Recv ~socket:t.socket ~side:`Client ~offset
+                    ~length:(Cstruct.length buf)
+                in
+                match fault with
+                | Some Fault.Drop -> `Again
+                | Some Dup ->
+                    t.ready <- t.ready @ [ d ];
+                    `Pass
+                | Some Reorder ->
+                    t.held <- d :: t.held;
+                    `Again
+                | Some (Garble k) ->
+                    `Deliver (addr, noise ~socket:t.socket ~offset k)
+                | Some (Stall s) ->
+                    t.ready <- d :: t.ready;
+                    `Wait (Some s)
+                | Some Hang ->
+                    t.ready <- d :: t.ready;
+                    `Wait None
+                | Some (Short _ | Reset | Eof | Refuse | Timeout | Emfile)
+                | None ->
+                    `Pass)
+          in
+          match action with
+          | `Pass -> put buf d
+          | `Deliver d -> put buf d
+          | `Again -> recv t buf
+          | `Wait (Some s) ->
+              Eio.Time.sleep t.ctx.clock s;
+              recv t buf
+          | `Wait None -> Eio.Fiber.await_cancel ())
+
+    let send t ?dst bufs = Eio.Net.send t.sock ?dst bufs
+    let shutdown t cmd = shutdown_of t.sock cmd
+
+    (* A datagram kept back goes with the socket. *)
+    let close t =
+      Mutex.protect t.lock (fun () ->
+          t.ready <- [];
+          t.held <- [];
+          t.closed <- true);
+      Eio.Resource.close t.sock
+
+    let setsockopt t opt v = Eio.Net.setsockopt t.sock opt v
+    let getsockopt t opt = Eio.Net.getsockopt t.sock opt
+  end
+
+  let handler = Eio.Net.Pi.datagram_socket (module Impl)
+
+  let v ctx (sock : socket) : socket =
+    let socket = locked ctx (fun () -> next_socket ctx) in
+    Eio.Resource.T
+      ( {
+          ctx;
+          socket;
+          sock;
+          lock = Mutex.create ();
+          ready = [];
+          held = [];
+          received = 0;
+          closed = false;
+        },
+        handler )
+end
+
+module Listener = struct
+  type t = {
+    ctx : ctx;
+    l : [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
+  }
+
+  module Impl = struct
+    type tag = [ `Generic ]
+    type nonrec t = t
+
+    let accept t ~sw =
+      let ctx = t.ctx in
+      let sock, peer = Eio.Net.accept ~sw t.l in
+      let sock = (sock :> stream) in
+      let socket, conn = server_conn ctx sock in
+      let flow = Flow.v ctx ~socket ~side:`Server ~conn sock in
+      let fault =
+        locked ctx (fun () ->
+            let offset = ctx.accepts in
+            ctx.accepts <- offset + 1;
+            ask_locked ctx `Accept ~socket ~side:`Server ~offset ~length:0)
+      in
+      match fault with
+      | Some Fault.Reset ->
+          (* The client left first: the accept succeeds and the connection
+             is reset at both ends. *)
+          break conn `Reset;
+          (flow, peer)
+      | Some Eof ->
+          break conn `Closed;
+          (flow, peer)
+      | Some Emfile ->
+          break conn `Reset;
+          Eio.Resource.close sock;
+          raise (emfile_exn ())
+      | Some Hang -> Eio.Fiber.await_cancel ()
+      | Some (Stall d) ->
+          Eio.Time.sleep ctx.clock d;
+          (flow, peer)
+      | Some (Short _ | Refuse | Timeout | Drop | Dup | Reorder | Garble _)
+      | None ->
+          (flow, peer)
+
+    let close t = Eio.Resource.close t.l
+    let listening_addr t = Eio.Net.listening_addr t.l
+    let setsockopt t opt v = Eio.Net.setsockopt t.l opt v
+    let getsockopt t opt = Eio.Net.getsockopt t.l opt
+  end
+
+  let handler = Eio.Net.Pi.listening_socket (module Impl)
+end
+
+type (_, _, _) Eio.Resource.pi +=
+  | Outage : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
+
+module Network = struct
+  type t = { ctx : ctx; net : [ `Generic ] Eio.Net.ty Eio.Resource.t }
+
+  module Impl = struct
+    type tag = [ `Generic ]
+    type nonrec t = t
+
+    let connect t ~bind_to ~options ~sw addr =
+      let ctx = t.ctx in
+      let socket, fault =
+        locked ctx (fun () ->
+            let offset = ctx.connects in
+            ctx.connects <- offset + 1;
+            let socket = next_socket ctx in
+            ( socket,
+              ask_locked ctx `Connect ~socket ~side:`Client ~offset ~length:0 ))
+      in
+      let go () =
+        let sock =
+          (Eio.Net.connect ?bind_to ~options ~sw t.net addr :> stream)
+        in
+        let conn = client_conn ctx ~socket sock in
+        Flow.v ctx ~socket ~side:`Client ~conn sock
+      in
+      match fault with
+      | Some (Fault.Refuse | Reset) -> raise (refused_exn ())
+      | Some Timeout ->
+          Eio.Time.sleep ctx.clock 127.;
+          raise (timeout_exn ())
+      | Some Hang -> Eio.Fiber.await_cancel ()
+      | Some (Stall d) ->
+          Eio.Time.sleep ctx.clock d;
+          go ()
+      | Some (Short _ | Eof | Emfile | Drop | Dup | Reorder | Garble _) | None
+        ->
+          go ()
+
+    let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
+      let l = Eio.Net.listen ~reuse_addr ~reuse_port ~backlog ~sw t.net addr in
+      Eio.Resource.T
+        ( {
+            Listener.ctx = t.ctx;
+            l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
+          },
+          Listener.handler )
+
+    let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
+      Datagram.v t.ctx
+        (Eio.Net.datagram_socket ~reuse_addr ~reuse_port ~sw t.net addr
+          :> Datagram.socket)
+
+    let getaddrinfo t ~service node = Eio.Net.getaddrinfo ~service t.net node
+    let getnameinfo t addr = Eio.Net.getnameinfo t.net addr
+  end
+
+  let handler =
+    Eio.Resource.handler
+      (H (Outage, fun t -> t.ctx.outage)
+      :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
+end
+
+let v ~clock ~outage f (net : _ Eio.Net.t) :
+    [ `Generic ] Eio.Net.ty Eio.Resource.t =
+  Eio.Resource.T
+    ( {
+        Network.ctx = ctx ~clock ~outage f;
+        net :> [ `Generic ] Eio.Net.ty Eio.Resource.t;
+      },
+      Network.handler )
+
+let pair ~clock f =
+  let ctx = ctx ~clock ~outage:false f in
+  let c, s = Eio_net_mem.pipe () in
+  let socket = locked ctx (fun () -> next_socket ctx) in
+  let conn = conn () in
+  ( Flow.v ctx ~socket ~side:`Client ~conn (c :> stream),
+    Flow.v ctx ~socket ~side:`Server ~conn (s :> stream) )
+
+let outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
+  let (Eio.Resource.T (t, ops)) = net in
+  match Eio.Resource.get_opt ops Outage with Some f -> f t | None -> false

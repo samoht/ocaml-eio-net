@@ -16,9 +16,13 @@ Initial release.
 - `eio-net.mem`: an in-memory `Eio.Net.t` with TCP, UDP and Unix-domain
   sockets that follow what Linux does, checked against real sockets on Linux
   and macOS by an oracle adapted from gVisor's socket tests.
-- `eio-net.chaos`: replayable fault schedules for flows, datagram sockets and
-  networks: short reads and writes, stalls, resets, refused or slow connects,
-  lost, duplicated or reordered datagrams.
+- `eio-net.chaos`: `Eio_net_chaos.check` runs a workload many times on
+  `eio-net.mem`, each run with faults chosen from what the workload does:
+  reads cut short or coalesced, a connection reset or ended at both ends, a
+  stalled peer, full send buffers, refused or timed-out connects, and lost,
+  duplicated, reordered or garbled datagrams. A failure names its scenario,
+  and `~replay` runs it alone. `wrap` and `pair` inject the faults a function
+  chooses, from one domain or several.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets with long
   paths, the host's interface addresses, and the Unix classifiers of failed
   connects and accepts.

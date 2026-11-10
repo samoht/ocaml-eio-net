@@ -7,58 +7,99 @@ Over a real network, a read may return a few bytes of a message or several
 messages at once. A peer may stall, reset the connection or end the stream
 midway. A connect may be refused or slow, and a datagram lost, duplicated or
 reordered. Loopback sockets in a test rarely do any of this, so the bugs that
-depend on it stay hidden. `eio-net` gives an Eio program an in-memory network
-and a wrapper that injects these faults on a schedule. A seeded schedule prints
-as the OCaml call that builds it, so a failing run replays exactly.
-
-Here a client reads from a server through a network that cuts each read to at
-most 3 bytes and resets the connection after 5 bytes:
-
-```ocaml
-# let schedule = Eio_net_chaos.Net.Schedule.seeded ~dribble:3 ~reset_after:5 42;;
-val schedule : Eio_net_chaos.Net.Schedule.t = <abstr>
-# let fetch schedule =
-    Eio_mock.Backend.run @@ fun () ->
-    Eio.Switch.run @@ fun sw ->
-    let net = Eio_net_chaos.Net.wrap schedule (Eio_net_mem.v ~sw ()) in
-    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
-    let listener = Eio.Net.listen ~sw ~backlog:1 net addr in
-    Eio.Fiber.fork ~sw (fun () ->
-        let flow, _ = Eio.Net.accept ~sw listener in
-        Eio.Flow.copy_string "hello, world" flow);
-    let flow = Eio.Net.connect ~sw net addr in
-    let buf = Cstruct.create 64 in
-    let rec read acc =
-      match Eio.Flow.single_read flow buf with
-      | n -> read (Cstruct.to_string ~len:n buf :: acc)
-      | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> List.rev acc
-    in
-    read [];;
-val fetch : Eio_net_chaos.Net.Schedule.t -> string list = <fun>
-# fetch schedule;;
-- : string list = ["he"; "ll"; "o"]
-# Fmt.pr "%a" Eio_net_chaos.Net.Schedule.pp schedule;;
-v ~flow:(Flow.Schedule.seeded ~dribble:3 ~stall:0 ~short_write:0 ~reset_after:5 ~reset_kind:`Reset 42) ~connect:[] ()
-- : unit = ()
-```
-
-The printed schedule, pasted back, replays the run:
-
-```ocaml
-# fetch
-    Eio_net_chaos.(
-      Net.Schedule.(
-        v
-          ~flow:
-            (Flow.Schedule.seeded ~dribble:3 ~stall:0 ~short_write:0
-               ~reset_after:5 ~reset_kind:`Reset 42)
-          ~connect:[] ()));;
-- : string list = ["he"; "ll"; "o"]
-```
+depend on it stay hidden. `eio-net` gives an Eio program an in-memory network,
+and `Eio_net_chaos.check`, which runs a workload on it many times, each time
+with a different fault chosen from what the workload does.
 
 It also gives a frame channel, where one receive is one frame, over a datagram
 socket, a length-prefixed byte stream or an in-memory pair, and an accept loop
 that bounds the connections it holds.
+
+## Chaos tests
+
+Here a client fetches a line from a server, with a timeout and three
+attempts. The workload checks what the client got, and how long it took:
+
+```ocaml
+# let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080);;
+val addr : [> `Tcp of [> `V4 ] Eio.Net.Ipaddr.t * int ] =
+  `Tcp ("\127\000\000\001", 8080)
+# let strict_line r =
+    let line = Eio.Buf_read.take_while (( <> ) '\n') r in
+    Eio.Buf_read.char '\n' r;
+    line;;
+val strict_line : Eio.Buf_read.t -> string = <fun>
+# let get ~timeout (env : Eio_net_chaos.env) =
+    let once () =
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect ~sw env#net addr in
+      strict_line (Eio.Buf_read.of_flow flow ~max_size:64)
+    in
+    let rec attempt n =
+      match
+        if timeout then Eio.Time.with_timeout_exn env#clock 1.0 once
+        else once ()
+      with
+      | line -> Some line
+      | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) ->
+          if n < 3 then attempt (n + 1) else None
+    in
+    attempt 1;;
+val get : timeout:bool -> Eio_net_chaos.env -> string option = <fun>
+# let workload ~timeout env =
+    Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+            Eio.Flow.copy_string "hello\n" flow));
+    let t0 = Eio.Time.now env#clock in
+    let got = get ~timeout env in
+    if Eio.Time.now env#clock -. t0 > 5. then failwith "too slow";
+    match (got, Eio_net_chaos.outage env) with
+    | Some "hello", false | None, true -> ()
+    | Some line, _ -> Fmt.failwith "got %S" line
+    | None, false -> failwith "gave up";;
+val workload : timeout:bool -> Eio_net_chaos.env -> unit = <fun>
+# Eio_net_chaos.check (workload ~timeout:true);;
+- : unit = ()
+```
+
+Without its timeout, the client waits 127 seconds for a connect whose
+handshake is lost, and the workload's bound on latency fails:
+
+```ocaml
+# let faults f =
+    match f () with
+    | () -> "passed"
+    | exception Failure m -> List.nth (String.split_on_char '\n' m) 1;;
+val faults : (unit -> unit) -> string = <fun>
+# faults (fun () -> Eio_net_chaos.check (workload ~timeout:false));;
+- : string = "  faults:   connect of 1c at 0 times out"
+```
+
+The failure also gives the tier that found it, the operations of the failing
+run, and a `~replay:"..."` argument that runs that scenario alone.
+
+The tests follow a few rules:
+
+- At most two faults reach a run, a 50 ms stall included. A program that tries
+  three times may be asked to succeed, as here. A broker that fans a message
+  out to three subscribers may demand that one of them gets everything.
+- Every program on the network meets the faults, the test's own peers
+  included. Test servers use `Eio.Net.run_server ~on_error:ignore`, test
+  clients catch `Eio.Io _ | End_of_file`, and both parse strictly.
+- A connect that times out takes 127 seconds, as on Linux, and then fails. A
+  program with no connect timeout still succeeds, so the test asserts its
+  latency to catch it.
+- In the outage run every connect is refused and every datagram lost.
+  `Eio_net_chaos.outage env` is then `true`, and the test checks what its
+  program does when it gives up.
+
+Each run has its own event loop, whose clock moves only when every fiber
+waits, so a timeout of an hour takes no time. A check is deterministic, reads
+no environment variable and prints nothing. For a scenario a check does not
+try, `Eio_net_chaos.wrap ~clock f net` asks `f` about each operation, and
+`Eio_net_chaos.pair` gives a fuzzer two connected ends.
 
 ## Libraries
 
@@ -75,7 +116,8 @@ that bounds the connections it holds.
 - `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets.
   Writes never wait unless `?capacity` bounds the bytes a connection queues;
   a small capacity shows a peer that writes without reading.
-- `eio-net.chaos`: fault injection for flows, datagram sockets and networks.
+- `eio-net.chaos`: `check`, which runs a workload under the network faults
+  it may meet, and the wrapper it uses.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's
   interface addresses and the Unix classifiers of failed connects and accepts.
 

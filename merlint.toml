@@ -32,3 +32,14 @@ exclude = ["E105", "E610"]
 [[rules]]
 files = ["test/interop/kernel/*", "test/interop/kernel/*/*"]
 exclude = ["E825", "E105", "E610"]
+
+# A copy of Eio_mock's scheduler, kept as close to it as the changes allow.
+[[rules]]
+files = ["lib/chaos/quiet_mock.ml"]
+exclude = ["E005"]
+
+# A check reports whatever its workload raises as the failure of a run: any
+# exception that escapes the workload fails the check.
+[[rules]]
+files = ["lib/chaos/eio_net_chaos.ml"]
+exclude = ["E105"]

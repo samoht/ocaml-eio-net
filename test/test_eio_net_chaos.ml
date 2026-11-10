@@ -1,70 +1,77 @@
 module Chaos = Eio_net_chaos
-module Flow = Chaos.Flow
-module Datagram = Chaos.Datagram
-module Net = Chaos.Net
+module Op = Chaos.Op
+module Fault = Chaos.Fault
 
 let read1 flow =
   let buf = Cstruct.create 64 in
   let n = Eio.Flow.single_read flow buf in
   Cstruct.to_string (Cstruct.sub buf 0 n)
 
-let read_sizes flow =
-  let buf = Cstruct.create 128 in
-  let sizes = ref [] in
-  (try
-     while true do
-       sizes := Eio.Flow.single_read flow buf :: !sizes
-     done
-   with End_of_file -> ());
-  List.rev !sizes
+let is_reset = function
+  | Eio.Io (Eio.Net.E (Connection_reset _), _) -> true
+  | _ -> false
 
-let is_io = function Eio.Io _ -> true | _ -> false
+(* [nth kind n fault] injects [fault] on the [n]th operation of [kind], from
+   1, and nothing else. *)
+let nth kind n fault =
+  let seen = ref 0 in
+  fun (op : Op.t) ->
+    if op.kind = kind then begin
+      incr seen;
+      if !seen = n then Some fault else None
+    end
+    else None
 
-(* --- Flow faults --------------------------------------------------------- *)
+let script kind faults =
+  let q = ref faults in
+  fun (op : Op.t) ->
+    if op.kind <> kind then None
+    else
+      match !q with
+      | [] -> None
+      | f :: rest ->
+          q := rest;
+          f
 
-let test_flow_dribble () =
-  Eio_mock.Backend.run @@ fun () ->
+(* --- Flows --------------------------------------------------------------- *)
+
+let test_flow_short () =
+  Eio_mock.Backend.run_full @@ fun env ->
   let client, server =
-    Flow.pair
-      ~server:(Flow.Schedule.script ~reads:[ Deliver 2; Deliver 3 ] ())
-      ()
+    Chaos.pair ~clock:env#clock
+      (script `Read [ Some (Fault.Short 2); Some (Short 3) ])
   in
-  let got = ref [] in
-  Eio.Fiber.both
-    (fun () ->
-      Eio.Flow.copy_string "abcdef" client;
-      Eio.Flow.close client)
-    (fun () ->
-      let a = read1 server in
-      let b = read1 server in
-      let c = read1 server in
-      got := [ a; b; c ]);
+  Eio.Flow.copy_string "abcdef" client;
+  Eio.Flow.close client;
+  let a = read1 server in
+  let b = read1 server in
+  let c = read1 server in
   Alcotest.(check (list string))
-    "read split into scripted chunks" [ "ab"; "cde"; "f" ] !got
+    "reads cut to the faults" [ "ab"; "cde"; "f" ] [ a; b; c ]
 
-let test_flow_coalesce () =
-  Eio_mock.Backend.run @@ fun () ->
+(* A read that waits takes what several writes sent meanwhile. *)
+let test_flow_stall_coalesces () =
+  Eio_mock.Backend.run_full @@ fun env ->
   let client, server =
-    Flow.pair ~server:(Flow.Schedule.script ~reads:[ Coalesce 2 ] ()) ()
+    Chaos.pair ~clock:env#clock (nth `Read 1 (Fault.Stall 0.005))
   in
   let got = ref "" in
   Eio.Fiber.both
     (fun () ->
       Eio.Flow.copy_string "aa" client;
-      Eio.Fiber.yield ();
-      Eio.Flow.copy_string "bb" client;
-      Eio.Flow.close client)
+      Eio.Time.sleep env#clock 0.001;
+      Eio.Flow.copy_string "bb" client)
     (fun () -> got := read1 server);
-  Alcotest.(check string) "two writes coalesced into one read" "aabb" !got
+  Alcotest.(check string) "two writes, one read" "aabb" !got;
+  Alcotest.(check (float 0.)) "the read waited" 0.005 (Eio.Time.now env#clock)
 
-(* Bytes buffered by an earlier short read reach the reader before the end of
-   the stream. *)
-let test_flow_coalesce_at_eof () =
-  Eio_mock.Backend.run @@ fun () ->
+(* Bytes a short read left buffered reach the reader before the end of the
+   stream. *)
+let test_flow_buffered_before_eof () =
+  Eio_mock.Backend.run_full @@ fun env ->
   let client, server =
-    Flow.pair
-      ~server:(Flow.Schedule.script ~reads:[ Deliver 1; Coalesce 2 ] ())
-      ()
+    Chaos.pair ~clock:env#clock
+      (script `Read [ Some (Fault.Short 1); Some (Stall 0.005) ])
   in
   Eio.Flow.copy_string "abcdef" client;
   Eio.Flow.shutdown client `Send;
@@ -75,169 +82,160 @@ let test_flow_coalesce_at_eof () =
   | exception End_of_file -> ()
   | s -> Alcotest.failf "read %S past the end" s
 
-let test_flow_stall () =
-  Eio_mock.Backend.run @@ fun () ->
-  let client, server =
-    Flow.pair ~server:(Flow.Schedule.script ~reads:[ Stall 3 ] ()) ()
-  in
-  Eio.Flow.copy_string "data" client;
-  let progress = ref 0 and result = ref "" in
-  Eio.Fiber.both
-    (fun () ->
-      for _ = 1 to 3 do
-        incr progress;
-        Eio.Fiber.yield ()
-      done)
-    (fun () -> result := read1 server);
-  Alcotest.(check string) "stalled read still delivers" "data" !result;
-  Alcotest.(check bool)
-    "competitor advanced during the stall" true (!progress >= 1)
-
+(* A write cut short moves only its prefix; a reset after it reaches both
+   ends. *)
 let test_flow_torn_write () =
-  Eio_mock.Backend.run @@ fun () ->
+  Eio_mock.Backend.run_full @@ fun env ->
   let client, server =
-    Flow.pair ~client:(Flow.Schedule.script ~writes:[ Accept 3; Fail ] ()) ()
+    Chaos.pair ~clock:env#clock
+      (script `Write [ Some (Fault.Short 3); Some Reset ])
   in
-  let accepted = ref 0 and raised = ref false and peer = ref "" in
-  Eio.Fiber.both
-    (fun () ->
-      accepted := Eio.Flow.single_write client [ Cstruct.of_string "abcdef" ];
-      try ignore (Eio.Flow.single_write client [ Cstruct.of_string "def" ])
-      with e when is_io e -> raised := true)
-    (fun () -> peer := read1 server);
-  Alcotest.(check int) "short write accepted only the prefix" 3 !accepted;
-  Alcotest.(check string) "peer received exactly the accepted bytes" "abc" !peer;
-  Alcotest.(check bool) "second write raised a reset" true !raised
+  let n = Eio.Flow.single_write client [ Cstruct.of_string "abcdef" ] in
+  Alcotest.(check int) "the prefix" 3 n;
+  Alcotest.(check string) "the peer reads it" "abc" (read1 server);
+  (match Eio.Flow.single_write client [ Cstruct.of_string "def" ] with
+  | exception e when is_reset e -> ()
+  | _ -> Alcotest.fail "the second write went through");
+  match read1 server with
+  | exception e when is_reset e -> ()
+  | s -> Alcotest.failf "the peer read %S after the reset" s
 
-let test_flow_reset () =
-  Eio_mock.Backend.run @@ fun () ->
-  let client, server =
-    Flow.pair ~server:(Flow.Schedule.script ~reads:[ Deliver 0; Reset ] ()) ()
+let test_flow_reset_both_ends () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let client, server = Chaos.pair ~clock:env#clock (nth `Read 2 Fault.Reset) in
+  Eio.Flow.copy_string "abc" client;
+  Alcotest.(check string) "first read" "abc" (read1 server);
+  (match read1 server with
+  | exception e when is_reset e -> ()
+  | s -> Alcotest.failf "read %S" s);
+  (match Eio.Flow.single_write client [ Cstruct.of_string "x" ] with
+  | exception e when is_reset e -> ()
+  | _ -> Alcotest.fail "the peer's write went through");
+  match read1 client with
+  | exception e when is_reset e -> ()
+  | s -> Alcotest.failf "the peer read %S" s
+
+(* An end drops the bytes not yet read, at both ends. *)
+let test_flow_eof_both_ends () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let client, server = Chaos.pair ~clock:env#clock (nth `Read 2 Fault.Eof) in
+  Eio.Flow.copy_string "abc" client;
+  Alcotest.(check string) "first read" "abc" (read1 server);
+  Eio.Flow.copy_string "lost" client;
+  (match read1 server with
+  | exception End_of_file -> ()
+  | s -> Alcotest.failf "read %S" s);
+  (match Eio.Flow.single_write client [ Cstruct.of_string "x" ] with
+  | exception e when is_reset e -> ()
+  | _ -> Alcotest.fail "the peer's write went through");
+  match read1 client with
+  | exception End_of_file -> ()
+  | s -> Alcotest.failf "the peer read %S" s
+
+(* A reset on an accept is a connection whose client left first: the client
+   reads the reset. *)
+let test_accept_reset () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Accept 1 Fault.Reset)
+      (Eio_net_mem.v ~sw ())
   in
-  let first = ref "" and reset = ref false in
-  Eio.Fiber.both
-    (fun () ->
-      Eio.Flow.copy_string "abc" client;
-      Eio.Flow.close client)
-    (fun () ->
-      first := read1 server;
-      try ignore (read1 server) with e when is_io e -> reset := true);
-  Alcotest.(check string) "first read delivers" "abc" !first;
-  Alcotest.(check bool) "second read resets" true !reset
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let client = Eio.Net.connect ~sw net addr in
+  let server, _ = Eio.Net.accept ~sw l in
+  (match read1 client with
+  | exception e when is_reset e -> ()
+  | s -> Alcotest.failf "the client read %S" s);
+  match read1 server with
+  | exception e when is_reset e -> ()
+  | s -> Alcotest.failf "the server read %S" s
 
-let test_flow_eof () =
-  Eio_mock.Backend.run @@ fun () ->
-  let client, server =
-    Flow.pair ~server:(Flow.Schedule.script ~reads:[ Deliver 0; Eof ] ()) ()
+let test_accept_emfile () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Accept 1 Fault.Emfile)
+      (Eio_net_mem.v ~sw ())
   in
-  let first = ref "" and ended = ref false in
-  Eio.Fiber.both
-    (fun () ->
-      Eio.Flow.copy_string "abc" client;
-      Eio.Flow.close client)
-    (fun () ->
-      first := read1 server;
-      try ignore (read1 server) with End_of_file -> ended := true);
-  Alcotest.(check string) "first read delivers" "abc" !first;
-  Alcotest.(check bool) "second read ends the stream" true !ended
-
-let run_seeded_flow seed =
-  Eio_mock.Backend.run @@ fun () ->
-  let client, server =
-    Flow.pair ~server:(Flow.Schedule.seeded ~dribble:4 ~stall:2 seed) ()
-  in
-  let sizes = ref [] in
-  Eio.Fiber.both
-    (fun () ->
-      Eio.Flow.copy_string (String.make 20 'x') client;
-      Eio.Flow.close client)
-    (fun () -> sizes := read_sizes server);
-  !sizes
-
-let test_flow_seeded_deterministic () =
-  let a = run_seeded_flow 1234 and b = run_seeded_flow 1234 in
-  Alcotest.(check (list int)) "same seed, same chunking" a b;
-  Alcotest.(check int) "all 20 bytes delivered" 20 (List.fold_left ( + ) 0 a);
-  Alcotest.(check bool)
-    "dribble split the payload below 20" true
-    (List.exists (fun n -> n < 20) a);
-  let c = run_seeded_flow 5678 in
-  Alcotest.(check bool) "a different seed chunks differently" true (a <> c)
-
-(* A seeded reset lands at byte [reset_after] exactly, however the bytes
-   arrived: a read before it delivers no byte past it. *)
-let test_flow_seeded_reset_at_byte () =
-  List.iter
-    (fun dribble ->
-      Eio_mock.Backend.run @@ fun () ->
-      let client, server =
-        Flow.pair ~server:(Flow.Schedule.seeded ~dribble ~reset_after:5 1) ()
-      in
-      Eio.Flow.copy_string "0123456789" client;
-      let got = Buffer.create 10 in
-      let buf = Cstruct.create 64 in
-      let rec loop () =
-        match Eio.Flow.single_read server buf with
-        | n ->
-            Buffer.add_string got (Cstruct.to_string ~len:n buf);
-            loop ()
-        | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> ()
-      in
-      loop ();
-      Alcotest.(check string)
-        (Fmt.str "bytes before the reset (dribble %d)" dribble)
-        "01234" (Buffer.contents got))
-    [ 0; 3 ]
-
-(* The dribble and short-write bounds are uncapped, so one past [2^30 - 1]
-   still injects faults. *)
-let test_flow_seeded_wide_bounds () =
-  Eio_mock.Backend.run @@ fun () ->
-  let wide = 1 lsl 30 in
-  let client, server =
-    Flow.pair
-      ~client:(Flow.Schedule.seeded ~short_write:wide 1)
-      ~server:(Flow.Schedule.seeded ~dribble:wide 1)
-      ()
-  in
-  let sizes = ref [] in
-  Eio.Fiber.both
-    (fun () ->
-      Eio.Flow.copy_string (String.make 20 'x') client;
-      Eio.Flow.close client)
-    (fun () -> sizes := read_sizes server);
-  Alcotest.(check int)
-    "all 20 bytes delivered" 20
-    (List.fold_left ( + ) 0 !sizes)
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+  let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+  let first = Eio.Net.connect ~sw net addr in
+  let second = Eio.Net.connect ~sw net addr in
+  (match Eio.Net.accept ~sw l with
+  | exception Eio.Io (Eio.Exn.X Chaos.Emfile_fault, _) -> ()
+  | _ -> Alcotest.fail "the accept went through");
+  (match read1 first with
+  | exception e when is_reset e -> ()
+  | s -> Alcotest.failf "the first client read %S" s);
+  let server, _ = Eio.Net.accept ~sw l in
+  Eio.Flow.copy_string "ok" server;
+  Alcotest.(check string) "the next accept" "ok" (read1 second)
 
 (* A write after the flow's own close raises [Invalid_argument], as on the
-   socket it wraps, before any fault: the scripted failure is not reached. *)
+   socket it wraps, before [f] is asked. *)
 let test_flow_write_after_close () =
-  Eio_mock.Backend.run @@ fun () ->
+  Eio_mock.Backend.run_full @@ fun env ->
+  let asked = ref 0 in
   let client, _server =
-    Flow.pair ~client:(Flow.Schedule.script ~writes:[ Fail ] ()) ()
+    Chaos.pair ~clock:env#clock (fun _ ->
+        incr asked;
+        Some Fault.Reset)
   in
   Eio.Flow.close client;
-  match Eio.Flow.single_write client [ Cstruct.of_string "x" ] with
+  (match Eio.Flow.single_write client [ Cstruct.of_string "x" ] with
   | exception Invalid_argument _ -> ()
-  | exception e -> Alcotest.failf "a write after close raised %a" Fmt.exn e
-  | (_ : int) -> Alcotest.fail "a write after close went through"
+  | (_ : int) -> Alcotest.fail "a write after close went through");
+  Alcotest.(check int) "f was not asked" 0 !asked
 
-(* --- Datagram faults ----------------------------------------------------- *)
+(* Bytes a short read left buffered stand for the socket's queue: after a
+   close, a receive shutdown or both, a read does what it does on
+   eio-net.mem with the same bytes queued. *)
+let test_flow_buffer_follows_read_side () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let after (c, s) shut =
+    Eio.Flow.copy_string "hello" c;
+    let buf = Cstruct.create 16 in
+    let first = Eio.Flow.single_read s (Cstruct.sub buf 0 1) in
+    assert (first = 1);
+    shut s;
+    match Eio.Flow.single_read s buf with
+    | n -> Fmt.str "read %S" (Cstruct.to_string ~len:n buf)
+    | exception Invalid_argument _ -> "Invalid_argument"
+    | exception End_of_file -> "End_of_file"
+  in
+  let wrapped () = Chaos.pair ~clock:env#clock (nth `Read 1 (Fault.Short 1)) in
+  let bare () = Eio_net_mem.pipe () in
+  List.iter
+    (fun (name, shut) ->
+      Alcotest.(check string)
+        name
+        (after (bare ()) shut)
+        (after (wrapped ()) shut))
+    [
+      ("close", Eio.Flow.close);
+      ("receive", fun s -> Eio.Flow.shutdown s `Receive);
+      ("all", fun s -> Eio.Flow.shutdown s `All);
+    ]
+
+(* --- Datagrams ----------------------------------------------------------- *)
 
 let loopback port = `Udp (Eio.Net.Ipaddr.V4.loopback, port)
 
-(* [with_datagrams payloads f] is [f ~tx rx], where [rx] is a datagram socket
-   of an in-memory network that [tx] has sent each of [payloads] to. *)
-let with_datagrams payloads f =
-  Eio_mock.Backend.run @@ fun () ->
+(* [with_datagrams f payloads k] is [k ~send rx], where [rx] is a datagram
+   socket wrapped with [f] that each of [payloads] was sent to. *)
+let with_datagrams f payloads k =
+  Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
   let rx = Eio.Net.datagram_socket ~sw net (loopback 9000) in
   let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
   let send p = Eio.Net.send tx ~dst:(loopback 9000) [ Cstruct.of_string p ] in
   List.iter send payloads;
-  f ~send rx
+  k ~send rx
 
 let recv1 sock =
   let buf = Cstruct.create 64 in
@@ -247,37 +245,33 @@ let recv1 sock =
 let recv_n sock n = List.init n (fun _ -> recv1 sock)
 
 let test_dgram_drop () =
-  with_datagrams [ "d0"; "d1"; "d2"; "d3" ] @@ fun ~send:_ base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Drop 1 ]) base in
+  with_datagrams (nth `Recv 1 Fault.Drop) [ "d0"; "d1"; "d2"; "d3" ]
+  @@ fun ~send:_ sock ->
   Alcotest.(check (list string))
-    "dropped datagram is skipped" [ "d1"; "d2"; "d3" ] (recv_n sock 3)
-
-(* A negative drop count has no datagram to stop at: the receive would drop
-   every datagram the base ever delivers. The script refuses it when it is
-   built, before any receive. *)
-let test_dgram_drop_negative () =
-  match Datagram.Schedule.script [ Pass; Drop (-1) ] with
-  | exception Invalid_argument _ -> ()
-  | _ -> Alcotest.fail "a script with Drop (-1) was built"
+    "the lost datagram is skipped" [ "d1"; "d2"; "d3" ] (recv_n sock 3)
 
 let test_dgram_dup () =
-  with_datagrams [ "d0"; "d1" ] @@ fun ~send:_ base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Dup ]) base in
+  with_datagrams (nth `Recv 1 Fault.Dup) [ "d0"; "d1" ] @@ fun ~send:_ sock ->
   Alcotest.(check (list string))
-    "datagram is delivered twice" [ "d0"; "d0"; "d1" ] (recv_n sock 3)
+    "the datagram arrives twice" [ "d0"; "d0"; "d1" ] (recv_n sock 3)
 
 let test_dgram_reorder () =
-  with_datagrams [ "d0"; "d1"; "d2" ] @@ fun ~send:_ base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Reorder ]) base in
+  with_datagrams (nth `Recv 1 Fault.Reorder) [ "d0"; "d1"; "d2" ]
+  @@ fun ~send:_ sock ->
   Alcotest.(check (list string))
-    "datagrams arrive out of order" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
+    "the datagram arrives after the next" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
 
-(* A receive cancelled while no datagram has come takes no fault: the script's
-   Dup applies to the first datagram the base delivers. *)
-let test_dgram_cancelled_recv_takes_no_fault () =
-  with_datagrams [] @@ fun ~send base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Dup ]) base in
+(* A receive cancelled while no datagram has come draws no fault: the Dup
+   applies to the first datagram the base delivers. *)
+let test_dgram_cancelled_recv_draws_no_fault () =
+  let asked = ref 0 in
+  let f (op : Op.t) =
+    incr asked;
+    if op.offset = 0 then Some Fault.Dup else None
+  in
+  with_datagrams f [] @@ fun ~send sock ->
   Eio.Fiber.first (fun () -> ignore (recv1 sock)) Eio.Fiber.yield;
+  Alcotest.(check int) "no fault drawn" 0 !asked;
   send "one";
   send "two";
   Alcotest.(check (list string))
@@ -285,9 +279,9 @@ let test_dgram_cancelled_recv_takes_no_fault () =
 
 (* A datagram held back is kept whole: it is cut to the buffer of the receive
    that delivers it, not of the one that took it. *)
-let test_dgram_held_datagram_kept_whole () =
-  with_datagrams [ "aaaa"; "b" ] @@ fun ~send:_ base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Reorder ]) base in
+let test_dgram_held_kept_whole () =
+  with_datagrams (nth `Recv 1 Fault.Reorder) [ "aaaa"; "b" ]
+  @@ fun ~send:_ sock ->
   let recv len =
     let buf = Cstruct.create len in
     let _, n = Eio.Net.recv sock buf in
@@ -298,257 +292,172 @@ let test_dgram_held_datagram_kept_whole () =
   Alcotest.(check (list string))
     "b, then aaaa whole" [ "b"; "aaaa" ] [ first; second ]
 
-(* A datagram held back goes with the socket: a receive after close raises
+(* A datagram kept back goes with the socket: a receive after close raises
    [Invalid_argument] instead of delivering it. *)
 let test_dgram_close_drops_held () =
-  with_datagrams [ "x" ] @@ fun ~send:_ base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Dup ]) base in
+  with_datagrams (nth `Recv 1 Fault.Dup) [ "x" ] @@ fun ~send:_ sock ->
   Alcotest.(check string) "first copy" "x" (recv1 sock);
   Eio.Net.close sock;
   match recv1 sock with
   | exception Invalid_argument _ -> ()
   | got -> Alcotest.failf "received %S after close" got
 
-(* A receive cancelled in the middle of a Drop keeps its count: the datagrams
-   left to drop are dropped by the next receive, which delivers the one after
-   them with no fault; the next fault applies to the datagram after that. *)
-let test_dgram_cancelled_drop_keeps_count () =
-  with_datagrams [] @@ fun ~send base ->
-  let sock =
-    Datagram.wrap (Datagram.Schedule.script [ Drop 2; Truncate 1 ]) base
-  in
-  send "one";
-  Eio.Fiber.first (fun () -> ignore (recv1 sock)) Eio.Fiber.yield;
-  send "two";
-  send "three";
-  send "four";
-  Alcotest.(check (list string))
-    "two dropped, three whole, four truncated" [ "three"; "f" ] (recv_n sock 2)
-
-(* Seeded [loss] is the fraction of datagrams lost: over 20000 datagrams,
-   [loss:0.3] loses 30% of them, within 2 points. *)
-let test_dgram_loss_rate () =
-  let n = 20_000 in
-  with_datagrams [] @@ fun ~send base ->
-  let sock = Datagram.wrap (Datagram.Schedule.seeded ~loss:0.3 7) base in
-  for i = 1 to n do
-    send (string_of_int i)
-  done;
-  let rec count k =
-    match
-      Eio.Fiber.first
-        (fun () -> Some (recv1 sock))
-        (fun () ->
-          for _ = 1 to 8 do
-            Eio.Fiber.yield ()
-          done;
-          None)
-    with
-    | Some _ -> count (k + 1)
-    | None -> k
-  in
-  let lost = float (n - count 0) /. float n in
-  if Float.abs (lost -. 0.3) > 0.02 then
-    Alcotest.failf "loss:0.3 lost %.3f of the datagrams" lost
-
 (* A receive cancelled while it holds a datagram back keeps it: the next
    receives deliver the one after it, then the held one. *)
 let test_dgram_reorder_cancelled () =
-  with_datagrams [ "d0" ] @@ fun ~send base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Reorder ]) base in
+  with_datagrams (nth `Recv 1 Fault.Reorder) [ "d0" ] @@ fun ~send sock ->
   Eio.Fiber.first
     (fun () -> Alcotest.failf "received %S alone" (recv1 sock))
-    (fun () -> Eio.Fiber.yield ());
+    Eio.Fiber.yield;
   send "d1";
   send "d2";
   Alcotest.(check (list string))
     "the held datagram survives" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
 
-let test_dgram_truncate () =
-  with_datagrams [ "hello" ] @@ fun ~send:_ base ->
-  let sock = Datagram.wrap (Datagram.Schedule.script [ Truncate 3 ]) base in
-  Alcotest.(check string) "datagram truncated" "hel" (recv1 sock)
+(* A receive cancelled after a Drop, while it waits for the next datagram,
+   keeps the count of datagrams taken: the next fault lands on the datagram
+   it names. *)
+let test_dgram_cancelled_drop_keeps_count () =
+  let f (op : Op.t) =
+    match op.offset with
+    | 0 -> Some Fault.Drop
+    | 2 -> Some (Fault.Garble 1)
+    | _ -> None
+  in
+  with_datagrams f [] @@ fun ~send sock ->
+  send "one";
+  Eio.Fiber.first (fun () -> ignore (recv1 sock)) Eio.Fiber.yield;
+  send "two";
+  send "three";
+  let two = recv1 sock in
+  let three = recv1 sock in
+  Alcotest.(check string) "two whole" "two" two;
+  Alcotest.(check int) "three garbled" 1 (String.length three)
+
+(* A datagram taken by a receive that stalls stays with the socket while the
+   receive waits. *)
+let test_dgram_stall_cancelled () =
+  with_datagrams (nth `Recv 1 (Fault.Stall 1.)) [ "d0"; "d1" ]
+  @@ fun ~send:_ sock ->
+  Eio.Fiber.first
+    (fun () -> Alcotest.failf "received %S" (recv1 sock))
+    Eio.Fiber.yield;
+  Alcotest.(check (list string)) "nothing lost" [ "d0"; "d1" ] (recv_n sock 2)
 
 let test_dgram_garble () =
   let one () =
-    with_datagrams [ "hello" ] @@ fun ~send:_ base ->
-    let sock = Datagram.wrap (Datagram.Schedule.script [ Garble 4 ]) base in
-    recv1 sock
+    with_datagrams (nth `Recv 1 (Fault.Garble 4)) [ "hello" ]
+    @@ fun ~send:_ sock -> recv1 sock
   in
   let a = one () and b = one () in
   Alcotest.(check string) "garble is deterministic" a b;
-  Alcotest.(check int) "garble has the scripted length" 4 (String.length a);
+  Alcotest.(check int) "garble has the given length" 4 (String.length a);
   Alcotest.(check bool) "garble differs from the original" true (a <> "hell")
 
-let run_seeded_dgram seed =
-  let payloads = List.init 30 (fun i -> Fmt.str "%02d" i) in
-  with_datagrams payloads @@ fun ~send:_ base ->
-  let sock =
-    Datagram.wrap
-      (Datagram.Schedule.seeded ~loss:0.4 ~dup:0.2 ~reorder:0.2 seed)
-      base
-  in
-  recv_n sock 8
-
-let test_dgram_seeded_deterministic () =
-  let a = run_seeded_dgram 7 and b = run_seeded_dgram 7 in
-  Alcotest.(check (list string)) "same seed, same datagram sequence" a b;
-  let identity = List.init 8 (fun i -> Fmt.str "%02d" i) in
-  Alcotest.(check bool) "faults perturbed the stream" true (a <> identity)
-
-(* --- Net faults ---------------------------------------------------------- *)
+(* --- Networks ------------------------------------------------------------ *)
 
 let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)
 
-let test_net_connect_dribbles () =
-  Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw ->
-  let net =
-    Net.v ~sw
-      (Net.Schedule.v
-         ~flow:(Flow.Schedule.script ~reads:[ Deliver 2; Deliver 2 ] ())
-         ())
-  in
-  let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
-  let got = ref [] in
-  Eio.Fiber.both
-    (fun () ->
-      let flow, _ = Eio.Net.accept ~sw listener in
-      Eio.Flow.copy_string "abcd" flow;
+let serve ~sw net payload =
+  let l = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
+  Eio.Fiber.fork ~sw (fun () ->
+      let flow, _ = Eio.Net.accept ~sw l in
+      Eio.Flow.copy_string payload flow;
       Eio.Flow.close flow)
-    (fun () ->
-      let flow = Eio.Net.connect ~sw net addr in
-      let a = read1 flow in
-      let b = read1 flow in
-      got := [ a; b ]);
-  Alcotest.(check (list string)) "connected flow dribbles" [ "ab"; "cd" ] !got
+
+let test_net_short_reads () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let f (op : Op.t) =
+    if op.kind = `Read && op.side = `Client then Some (Fault.Short 2) else None
+  in
+  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+  serve ~sw net "abcd";
+  let flow = Eio.Net.connect ~sw net addr in
+  let a = read1 flow in
+  let b = read1 flow in
+  Alcotest.(check (list string)) "connected flow cut" [ "ab"; "cd" ] [ a; b ]
 
 let test_net_connect_refused () =
-  Eio_mock.Backend.run @@ fun () ->
+  Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Net.v ~sw (Net.Schedule.v ~connect:[ Refuse ] ()) in
-  let refused =
-    try
-      ignore (Eio.Net.connect ~sw net addr);
-      false
-    with e when is_io e -> true
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Connect 1 Fault.Refuse)
+      (Eio_net_mem.v ~sw ())
   in
-  Alcotest.(check bool) "connect refused" true refused
+  match Eio.Net.connect ~sw net addr with
+  | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> ()
+  | _ -> Alcotest.fail "the connect went through"
 
-let test_net_connect_slow () =
-  Eio_mock.Backend.run @@ fun () ->
+let test_net_connect_timeout () =
+  Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Net.v ~sw (Net.Schedule.v ~connect:[ Slow 2 ] ()) in
-  let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
-  let got = ref "" in
-  Eio.Fiber.both
-    (fun () ->
-      let flow, _ = Eio.Net.accept ~sw listener in
-      Eio.Flow.copy_string "ok" flow;
-      Eio.Flow.close flow)
-    (fun () ->
-      let flow = Eio.Net.connect ~sw net addr in
-      got := read1 flow);
-  Alcotest.(check string) "slow connect still connects" "ok" !got
-
-let test_net_max_accepts () =
-  Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw ->
-  let net = Net.v ~sw (Net.Schedule.v ~max_accepts:2 ()) in
-  let listener = Eio.Net.listen ~sw ~backlog:4 ~reuse_addr:true net addr in
-  let dropped = ref false in
-  Eio.Fiber.both
-    (fun () ->
-      let _ = Eio.Net.connect ~sw net addr in
-      let _ = Eio.Net.connect ~sw net addr in
-      ())
-    (fun () ->
-      let _ = Eio.Net.accept ~sw listener in
-      let _ = Eio.Net.accept ~sw listener in
-      try ignore (Eio.Net.accept ~sw listener)
-      with End_of_file -> dropped := true);
-  Alcotest.(check bool) "listener drops past its accept budget" true !dropped
-
-(* An accept cancelled before a connection came uses none of the budget. *)
-let test_net_max_accepts_cancelled () =
-  Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw ->
-  let net = Net.v ~sw (Net.Schedule.v ~max_accepts:1 ()) in
-  let listener = Eio.Net.listen ~sw ~backlog:4 net addr in
-  Eio.Fiber.first
-    (fun () -> ignore (Eio.Net.accept ~sw listener))
-    (fun () -> Eio.Fiber.yield ());
-  let _client = Eio.Net.connect ~sw net addr in
-  match Eio.Net.accept ~sw listener with
-  | _ -> ()
-  | exception End_of_file -> Alcotest.fail "the cancelled accept was counted"
-
-(* Accepts waiting side by side share the budget: with one accept allowed,
-   two waiting accepts and two connects give one connection, and the other
-   accept raises [End_of_file]. *)
-let test_net_max_accepts_concurrent () =
-  Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw ->
-  let net = Net.v ~sw (Net.Schedule.v ~max_accepts:1 ()) in
-  let listener = Eio.Net.listen ~sw ~backlog:4 net addr in
-  let accepted = ref 0 and refused = ref 0 in
-  let accept () =
-    match Eio.Net.accept ~sw listener with
-    | _ -> incr accepted
-    | exception End_of_file -> incr refused
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Connect 1 Fault.Timeout)
+      (Eio_net_mem.v ~sw ())
   in
-  Eio.Fiber.all
-    [
-      accept;
-      accept;
-      (fun () ->
-        for _ = 1 to 2 do
-          ignore (Eio.Net.connect ~sw net addr)
-        done);
-    ];
-  Alcotest.(check (pair int int))
-    "accepted, refused" (1, 1) (!accepted, !refused)
+  (match Eio.Net.connect ~sw net addr with
+  | exception Eio.Io (Eio.Net.E (Connection_failure Timeout), _) -> ()
+  | _ -> Alcotest.fail "the connect went through");
+  Alcotest.(check (float 0.)) "after 127 s" 127. (Eio.Time.now env#clock)
 
-(* Bytes a short read left buffered go with the read side: a read after the
-   flow's own close raises [Invalid_argument], and one after it shut its
-   receive side raises [End_of_file], as eio-net.mem raises them. *)
-let test_flow_buffer_follows_read_side () =
-  Eio_mock.Backend.run @@ fun () ->
-  let after shut =
-    let c, s =
-      Flow.pair ~server:(Flow.Schedule.script ~reads:[ Deliver 1 ] ()) ()
-    in
-    Eio.Flow.copy_string "hello" c;
-    let buf = Cstruct.create 16 in
-    ignore (Eio.Flow.single_read s buf : int);
-    shut s;
-    match Eio.Flow.single_read s buf with
-    | n -> Fmt.str "read %S" (Cstruct.to_string ~len:n buf)
-    | exception Invalid_argument _ -> "Invalid_argument"
-    | exception End_of_file -> "End_of_file"
+let test_net_connect_stall () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Connect 1 (Fault.Stall 2.))
+      (Eio_net_mem.v ~sw ())
   in
-  let closed = after Eio.Flow.close in
-  let receive = after (fun s -> Eio.Flow.shutdown s `Receive) in
-  let all = after (fun s -> Eio.Flow.shutdown s `All) in
+  serve ~sw net "ok";
+  let flow = Eio.Net.connect ~sw net addr in
+  Alcotest.(check (float 0.)) "after 2 s" 2. (Eio.Time.now env#clock);
+  Alcotest.(check string) "a stalled connect still connects" "ok" (read1 flow)
+
+(* The operations [f] sees name each socket and end, and count from 1. *)
+let test_ops () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ops = ref [] in
+  let f op =
+    ops := Fmt.str "%a" Op.pp op :: !ops;
+    None
+  in
+  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+  serve ~sw net "abcd";
+  let flow = Eio.Net.connect ~sw net addr in
+  let _ = read1 flow in
   Alcotest.(check (list string))
-    "close, receive, all"
-    [ "Invalid_argument"; "End_of_file"; "End_of_file" ]
-    [ closed; receive; all ]
+    "operations"
+    [
+      "#1 connect 1c @0";
+      "#2 read 1c @0+64";
+      "#3 accept 1s @0";
+      "#4 write 1s @0+4";
+    ]
+    (List.rev !ops)
 
-(* Writers in two domains share one count of bytes written: with the write
-   fault after one byte less than they write in all, exactly one write fails,
-   in each of three rounds. *)
-let test_flow_writes_counted_across_domains () =
+(* --- Domains ------------------------------------------------------------- *)
+
+(* Writers in two domains share one count of bytes written: with a reset on
+   the last byte they write in all, exactly one write fails, and [f] sees each
+   offset once, in each of three rounds. *)
+let test_writes_counted_across_domains () =
   Eio_main.run @@ fun env ->
   let domain_mgr = Eio.Stdenv.domain_mgr env in
-  let per_domain = 100_000 in
+  let per_domain = 50_000 in
   for _ = 1 to 3 do
-    let c, _s =
-      Flow.pair
-        ~client:
-          (Flow.Schedule.seeded ~fail_write_after:((2 * per_domain) - 1) 1)
-        ()
+    let seen = Array.make (2 * per_domain) 0 in
+    let f (op : Op.t) =
+      if op.kind = `Write then begin
+        seen.(op.offset) <- seen.(op.offset) + 1;
+        if op.offset = (2 * per_domain) - 1 then Some Fault.Reset else None
+      end
+      else None
     in
+    let c, s = Chaos.pair ~clock:(Eio_mock.Clock.make ()) f in
     let failed = Atomic.make 0 in
     let one = Cstruct.of_string "x" in
     let writer () =
@@ -556,125 +465,198 @@ let test_flow_writes_counted_across_domains () =
           for _ = 1 to per_domain do
             match Eio.Flow.single_write c [ one ] with
             | _ -> ()
-            | exception Eio.Io (Eio.Net.E (Connection_reset _), _) ->
-                Atomic.incr failed
+            | exception e when is_reset e -> Atomic.incr failed
           done)
     in
     Eio.Fiber.both writer writer;
-    Alcotest.(check int) "failed writes" 1 (Atomic.get failed)
+    Eio.Flow.close s;
+    Alcotest.(check int) "failed writes" 1 (Atomic.get failed);
+    Alcotest.(check bool)
+      "each offset once" true
+      (Array.for_all (fun n -> n = 1) seen)
   done
 
-(* A printed schedule is the call that builds it, every parameter included. *)
-let test_schedules_print_every_parameter () =
-  let check what expected pp v =
-    Alcotest.(check string) what expected (Fmt.str "%a" pp v)
+(* Readers in two domains share a flow whose reads are cut short: together
+   they read each byte once. *)
+let test_reads_shared_across_domains () =
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let n = 200_000 in
+  let f (op : Op.t) =
+    if op.kind = `Read then Some (Fault.Short (1 + (op.index mod 7))) else None
   in
-  check "a flow script"
-    "script ~reads:[Deliver 3; Coalesce 2; Stall 1; Reset; Eof] \
-     ~writes:[Accept 2; Fail] ()"
-    Flow.Schedule.pp
-    (Flow.Schedule.script
-       ~reads:Flow.[ Deliver 3; Coalesce 2; Stall 1; Reset; Eof ]
-       ~writes:Flow.[ Accept 2; Fail ]
-       ());
-  check "a seeded flow"
-    "seeded ~dribble:4 ~stall:2 ~short_write:3 ~reset_after:10 \
-     ~reset_kind:`Eof ~fail_write_after:20 1234"
-    Flow.Schedule.pp
-    (Flow.Schedule.seeded ~dribble:4 ~stall:2 ~short_write:3 ~reset_after:10
-       ~reset_kind:`Eof ~fail_write_after:20 1234);
-  check "a datagram script"
-    "script [Pass; Drop 2; Dup; Reorder; Truncate (-1); Garble 4; Delay 5]"
-    Datagram.Schedule.pp
-    (Datagram.Schedule.script
-       Datagram.[ Pass; Drop 2; Dup; Reorder; Truncate (-1); Garble 4; Delay 5 ]);
-  check "a seeded datagram schedule"
-    "seeded ~loss:0.1 ~dup:0.2 ~reorder:0.05 ~truncate:0.15 ~garble:0.3 \
-     ~delay:3 7"
-    Datagram.Schedule.pp
-    (Datagram.Schedule.seeded ~loss:0.1 ~dup:0.2 ~reorder:0.05 ~truncate:0.15
-       ~garble:0.3 ~delay:3 7);
-  check "a network schedule"
-    "v ~flow:(Flow.Schedule.seeded ~dribble:4 ~stall:0 ~short_write:0 \
-     ~reset_kind:`Reset 9) ~connect:[Refuse; Timeout; Slow 2; Open] \
-     ~max_accepts:3 ()"
-    Net.Schedule.pp
-    (Net.Schedule.seeded ~dribble:4
-       ~connect:Net.[ Refuse; Timeout; Slow 2; Open ]
-       ~max_accepts:3 9)
+  let c, s = Chaos.pair ~clock:(Eio_mock.Clock.make ()) f in
+  let counts = Array.init 256 (fun _ -> Atomic.make 0) in
+  let reader () =
+    Eio.Domain_manager.run domain_mgr (fun () ->
+        let buf = Cstruct.create 64 in
+        try
+          while true do
+            let k = Eio.Flow.single_read s buf in
+            for i = 0 to k - 1 do
+              Atomic.incr counts.(Cstruct.get_uint8 buf i)
+            done
+          done
+        with End_of_file -> ())
+  in
+  let writer () =
+    Eio.Flow.copy_string (String.init n (fun i -> Char.chr (i mod 256))) c;
+    Eio.Flow.shutdown c `Send
+  in
+  Eio.Fiber.all [ reader; reader; writer ];
+  Array.iteri
+    (fun b count ->
+      let expected = (n / 256) + if b < n mod 256 then 1 else 0 in
+      Alcotest.(check int) (Fmt.str "byte %d" b) expected (Atomic.get count))
+    counts
 
-(* Probabilities past [1.] in all describe no distribution. *)
-let test_dgram_seeded_refuses_odds_past_one () =
-  match Datagram.Schedule.seeded ~loss:0.6 ~dup:0.5 7 with
-  | exception Invalid_argument _ -> ()
-  | _ -> Alcotest.fail "odds summing to 1.1 were accepted"
+(* Receivers in two domains share a datagram socket that duplicates and holds
+   back datagrams: together they receive each datagram, and as many twice as
+   [f] duplicated. Which datagram a fault lands on depends on which receive
+   takes the lock first. *)
+let test_datagrams_shared_across_domains () =
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let k = 4_000 in
+  let dups = ref 0 in
+  let f (op : Op.t) =
+    if op.offset >= k then None
+    else
+      match op.offset mod 4 with
+      | 0 ->
+          incr dups;
+          Some Fault.Dup
+      | 1 -> Some Fault.Reorder
+      | _ -> None
+  in
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:(Eio_mock.Clock.make ()) f (Eio_net_mem.v ~sw ())
+  in
+  let rx = Eio.Net.datagram_socket ~sw net (loopback 9000) in
+  let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  let counts = Array.init k (fun _ -> Atomic.make 0) in
+  let receiver () =
+    Eio.Domain_manager.run domain_mgr (fun () ->
+        let rec loop () =
+          match recv1 rx with
+          | "stop" -> ()
+          | s ->
+              Atomic.incr counts.(int_of_string s);
+              loop ()
+        in
+        loop ())
+  in
+  let sender () =
+    for i = 0 to k - 1 do
+      Eio.Net.send tx ~dst:(loopback 9000)
+        [ Cstruct.of_string (string_of_int i) ]
+    done;
+    for _ = 1 to 2 do
+      Eio.Net.send tx ~dst:(loopback 9000) [ Cstruct.of_string "stop" ]
+    done
+  in
+  Eio.Fiber.all [ receiver; receiver; sender ];
+  let times n =
+    Array.fold_left
+      (fun acc c -> if Atomic.get c = n then acc + 1 else acc)
+      0 counts
+  in
+  Alcotest.(check int) "received once" (k - !dups) (times 1);
+  Alcotest.(check int) "received twice" !dups (times 2)
 
-(* A probability outside [0., 1.], NaN among them, describes no distribution,
-   and its printed form would not read back. *)
-let test_dgram_seeded_refuses_odds_outside_unit () =
-  List.iter
-    (fun p ->
-      match Datagram.Schedule.seeded ~dup:p 7 with
-      | exception Invalid_argument _ -> ()
-      | _ -> Alcotest.failf "the probability %g was accepted" p)
-    [ Float.nan; -0.5; Float.neg_infinity ]
+(* Clients in two domains connect to one server: each connection's two ends
+   are paired, so a reset of the server's end of an odd connection reaches
+   its client, and only that one. *)
+let test_connections_paired_across_domains () =
+  Eio_main.run @@ fun env ->
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  let per_domain = 20 in
+  let mine : int ref Eio.Fiber.key = Eio.Fiber.create_key () in
+  let f (op : Op.t) =
+    match op.kind with
+    | `Connect ->
+        Option.iter (fun r -> r := op.socket) (Eio.Fiber.get mine);
+        None
+    | `Read when op.side = `Server && op.socket mod 2 = 1 -> Some Fault.Reset
+    | _ -> None
+  in
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:(Eio_mock.Clock.make ()) f (Eio_net_mem.v ~sw ())
+  in
+  let l = Eio.Net.listen ~sw ~backlog:64 net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          Eio.Flow.copy_string (read1 flow) flow));
+  let wrong = Atomic.make 0 in
+  let client () =
+    Eio.Domain_manager.run domain_mgr (fun () ->
+        for _ = 1 to per_domain do
+          let socket = ref 0 in
+          Eio.Fiber.with_binding mine socket (fun () ->
+              Eio.Switch.run @@ fun sw ->
+              let flow = Eio.Net.connect ~sw net addr in
+              let reset =
+                match
+                  Eio.Flow.copy_string "ping" flow;
+                  read1 flow
+                with
+                | "ping" -> false
+                | _ -> true
+                | exception e when is_reset e -> true
+              in
+              if reset <> (!socket mod 2 = 1) then Atomic.incr wrong)
+        done)
+  in
+  Eio.Fiber.both client client;
+  Alcotest.(check int) "misdirected faults" 0 (Atomic.get wrong)
 
 let suite =
   ( "eio_net_chaos",
     [
-      Alcotest.test_case "flow dribble" `Quick test_flow_dribble;
-      Alcotest.test_case "flow coalesce" `Quick test_flow_coalesce;
-      Alcotest.test_case "flow coalesce at end of stream" `Quick
-        test_flow_coalesce_at_eof;
-      Alcotest.test_case "flow stall" `Quick test_flow_stall;
+      Alcotest.test_case "flow short reads" `Quick test_flow_short;
+      Alcotest.test_case "flow stall coalesces writes" `Quick
+        test_flow_stall_coalesces;
+      Alcotest.test_case "flow buffered bytes before end of stream" `Quick
+        test_flow_buffered_before_eof;
       Alcotest.test_case "flow torn write" `Quick test_flow_torn_write;
-      Alcotest.test_case "flow mid-stream reset" `Quick test_flow_reset;
-      Alcotest.test_case "flow mid-stream eof" `Quick test_flow_eof;
-      Alcotest.test_case "flow seeded determinism" `Quick
-        test_flow_seeded_deterministic;
-      Alcotest.test_case "flow seeded reset at its byte" `Quick
-        test_flow_seeded_reset_at_byte;
-      Alcotest.test_case "flow seeded wide bounds" `Quick
-        test_flow_seeded_wide_bounds;
-      Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
-      Alcotest.test_case "datagram drop refuses a negative count" `Quick
-        test_dgram_drop_negative;
-      Alcotest.test_case "datagram dup" `Quick test_dgram_dup;
-      Alcotest.test_case "datagram reorder" `Quick test_dgram_reorder;
-      Alcotest.test_case "datagram reorder survives a cancelled receive" `Quick
-        test_dgram_reorder_cancelled;
-      Alcotest.test_case "datagram truncate" `Quick test_dgram_truncate;
-      Alcotest.test_case "datagram garble" `Quick test_dgram_garble;
-      Alcotest.test_case "datagram seeded determinism" `Quick
-        test_dgram_seeded_deterministic;
-      Alcotest.test_case "net connect dribbles" `Quick test_net_connect_dribbles;
-      Alcotest.test_case "net connect refused" `Quick test_net_connect_refused;
-      Alcotest.test_case "net connect slow" `Quick test_net_connect_slow;
-      Alcotest.test_case "net max accepts" `Quick test_net_max_accepts;
-      Alcotest.test_case "net max accepts ignores a cancelled accept" `Quick
-        test_net_max_accepts_cancelled;
-      Alcotest.test_case "net max accepts shared by concurrent accepts" `Quick
-        test_net_max_accepts_concurrent;
-      Alcotest.test_case "dgram cancelled recv takes no fault" `Quick
-        test_dgram_cancelled_recv_takes_no_fault;
-      Alcotest.test_case "dgram held datagram kept whole" `Quick
-        test_dgram_held_datagram_kept_whole;
-      Alcotest.test_case "dgram close drops the held datagram" `Quick
-        test_dgram_close_drops_held;
+      Alcotest.test_case "flow reset at both ends" `Quick
+        test_flow_reset_both_ends;
+      Alcotest.test_case "flow end at both ends" `Quick test_flow_eof_both_ends;
+      Alcotest.test_case "accept reset" `Quick test_accept_reset;
+      Alcotest.test_case "accept EMFILE" `Quick test_accept_emfile;
       Alcotest.test_case "flow write after close" `Quick
         test_flow_write_after_close;
-      Alcotest.test_case "dgram loss is the fraction lost" `Quick
-        test_dgram_loss_rate;
-      Alcotest.test_case "dgram cancelled drop keeps its count" `Quick
-        test_dgram_cancelled_drop_keeps_count;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
-      Alcotest.test_case "flow writes counted across domains" `Quick
-        test_flow_writes_counted_across_domains;
-      Alcotest.test_case "schedules print every parameter" `Quick
-        test_schedules_print_every_parameter;
-      Alcotest.test_case "datagram seeded refuses odds past one" `Quick
-        test_dgram_seeded_refuses_odds_past_one;
-      Alcotest.test_case "datagram seeded refuses odds outside [0, 1]" `Quick
-        test_dgram_seeded_refuses_odds_outside_unit;
+      Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
+      Alcotest.test_case "datagram dup" `Quick test_dgram_dup;
+      Alcotest.test_case "datagram reorder" `Quick test_dgram_reorder;
+      Alcotest.test_case "datagram cancelled receive draws no fault" `Quick
+        test_dgram_cancelled_recv_draws_no_fault;
+      Alcotest.test_case "datagram held back kept whole" `Quick
+        test_dgram_held_kept_whole;
+      Alcotest.test_case "datagram close drops the held one" `Quick
+        test_dgram_close_drops_held;
+      Alcotest.test_case "datagram reorder survives a cancelled receive" `Quick
+        test_dgram_reorder_cancelled;
+      Alcotest.test_case "datagram cancelled drop keeps the count" `Quick
+        test_dgram_cancelled_drop_keeps_count;
+      Alcotest.test_case "datagram stall survives a cancelled receive" `Quick
+        test_dgram_stall_cancelled;
+      Alcotest.test_case "datagram garble" `Quick test_dgram_garble;
+      Alcotest.test_case "net short reads" `Quick test_net_short_reads;
+      Alcotest.test_case "net connect refused" `Quick test_net_connect_refused;
+      Alcotest.test_case "net connect timeout" `Quick test_net_connect_timeout;
+      Alcotest.test_case "net connect stall" `Quick test_net_connect_stall;
+      Alcotest.test_case "net operations" `Quick test_ops;
+      Alcotest.test_case "writes counted across domains" `Quick
+        test_writes_counted_across_domains;
+      Alcotest.test_case "reads shared across domains" `Quick
+        test_reads_shared_across_domains;
+      Alcotest.test_case "datagrams shared across domains" `Quick
+        test_datagrams_shared_across_domains;
+      Alcotest.test_case "connections paired across domains" `Quick
+        test_connections_paired_across_domains;
     ] )
