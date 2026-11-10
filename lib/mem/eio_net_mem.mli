@@ -99,19 +99,24 @@ type Eio.Exn.Backend.t +=
 
 val v :
   ?capacity:int ->
+  ?clock:_ Eio.Time.Mono.t ->
   sw:Eio.Switch.t ->
   unit ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~capacity ~sw ()] is a network whose [listen] and [connect] operations
-    are paired in memory, and whose datagram sockets deliver to each other.
-    {!section-streams}, {!section-datagrams} and {!section-paths} say how its
-    sockets behave.
+(** [v ~capacity ~clock ~sw ()] is a network whose [listen] and [connect]
+    operations are paired in memory, and whose datagram sockets deliver to each
+    other. {!section-streams}, {!section-datagrams} and {!section-paths} say how
+    its sockets behave.
 
     Each direction of a connection queues at most [capacity] bytes (defaults to
     no bound): a write takes what fits and waits while the queue is full, as a
     socket's send buffer makes it wait, so a test with a small capacity shows a
     peer that writes without reading. Raises [Invalid_argument] if [capacity] is
     not positive.
+
+    On [clock], the end of a TCP connection that closes first holds its address
+    in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}). Without
+    a clock there is no TIME_WAIT: an address is free once both ends close.
 
     Host resolution maps ["127.0.0.1"] and ["::1"] with a numeric service to the
     loopback address of their family at that port, once as a stream address and
@@ -151,12 +156,12 @@ val connection : _ Eio.Net.stream_socket -> int option
     that is equal to it or is the wildcard address of its family, and the IPv6
     wildcard address overlaps every address of its port, as bind(2) has it on
     Linux for a dual-stack socket. A [listen] with [reuse_port] raises
-    [Invalid_argument]. A listener is closed, and its address free again, when
-    it is closed or when the switch passed to [listen] or to {!v} finishes; the
-    connections waiting to be accepted are reset with it, as a kernel resets
-    them. An [accept] begun after its listener closed, whoever closed it, raises
-    [Invalid_argument], as Eio's own sockets do; one already waiting when it
-    closes keeps waiting, as on eio_posix.
+    [Invalid_argument]. A listener is closed, and frees its own hold on its
+    address, when it is closed or when the switch passed to [listen] or to {!v}
+    finishes; the connections waiting to be accepted are reset with it, as a
+    kernel resets them. An [accept] begun after its listener closed, whoever
+    closed it, raises [Invalid_argument], as Eio's own sockets do; one already
+    waiting when it closes keeps waiting, as on eio_posix.
 
     A [connect] reaches the listener at its address, or at the wildcard address
     of its family and port, or, for an IPv4 address, at the IPv6 wildcard
@@ -176,8 +181,18 @@ val connection : _ Eio.Net.stream_socket -> int option
     the other. An accepted connection's peer address is the client's: the
     loopback address its destination reaches, IPv4-mapped for an IPv4 client of
     an IPv6 listener, at a port of the dynamic range no socket holds, counted
-    down from its top, which the client holds until its flow closes, or
-    [`Unix ""] for a Unix-domain client, which binds no path.
+    down from its top, or [`Unix ""] for a Unix-domain client, which binds no
+    path.
+
+    Each end of a TCP connection holds its address until both ends have closed:
+    the client its own, and the accepted end, queued or accepted, the listener's
+    port at the address the client reached, as Linux's accepted socket does,
+    even once the listener closed. Then, given a clock, the end that closed
+    first holds it in TIME_WAIT for 60 seconds, unless an end reset the
+    connection. A [listen] or a [connect] bound at an address held this way
+    raises the error that {!Address_in_use} marks, unless both have
+    [reuse_addr]: as on Linux, an accepted end has its listener's, a client has
+    none, and a listener's own hold refuses every other socket.
 
     A [connect] bound with [bind_to] holds that address, which the listener sees
     as its peer's, at a port of the dynamic range for port 0. One at an address

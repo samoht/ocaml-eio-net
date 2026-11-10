@@ -688,26 +688,20 @@ let contended ~port n f =
       Alcotest.failf "port %d is still held after %d cancelled fibers" port n
 
 (* A connect cancelled while it releases its bound port releases it all the
-   same: the port is free again after 2000 such connects. *)
+   same: the port is free again after 2000 such connects. Each listener
+   closes with its switch and resets the connection it queued, which lets go
+   of the client's port. *)
 let test_cancelled_connect_frees_its_port () =
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 0) in
   let bind_to = `Tcp (Eio.Net.Ipaddr.V4.loopback, 40000) in
-  let listener = ref None in
-  let connect ~sw net =
-    let l =
-      match !listener with
-      | Some l -> l
-      | None ->
-          let l = Eio.Net.listen ~sw ~backlog:4096 net addr in
-          listener := Some l;
-          l
-    in
+  let connect net =
     Eio.Switch.run @@ fun csw ->
+    let l = Eio.Net.listen ~sw:csw ~backlog:1 net addr in
     ignore (Eio.Net.connect ~sw:csw ~bind_to net (Eio.Net.listening_addr l))
   in
-  contended ~port:40000 2000 (fun ~sw net i ->
+  contended ~port:40000 2000 (fun ~sw:_ net i ->
       Eio.Fiber.first
-        (fun () -> connect ~sw net)
+        (fun () -> connect net)
         (fun () ->
           for _ = 1 to i mod 3 do
             Eio.Fiber.yield ()
@@ -1090,6 +1084,106 @@ let test_backlog () =
         (backlog + 2) !connected)
     [ 0; 1; 2; 5 ]
 
+let in_use f =
+  match f () with
+  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> true
+  | () -> false
+
+let listens net ?(reuse_addr = false) addr () =
+  Eio.Switch.run @@ fun sw ->
+  ignore (Eio.Net.listen ~sw ~reuse_addr ~backlog:1 net addr)
+
+(* A connection opened and accepted under [sw], at [addr]; the listener is
+   closed. *)
+let connection ~sw net ?bind_to ?(reuse_addr = false) addr =
+  let listener = Eio.Net.listen ~sw ~reuse_addr ~backlog:1 net addr in
+  let client = Eio.Net.connect ~sw ?bind_to net addr in
+  let server, _ = Eio.Net.accept ~sw listener in
+  Eio.Resource.close listener;
+  (client, server)
+
+(* An accepted connection holds its listener's port, as on Linux: a listen
+   there is refused, with [reuse_addr] or not, while the connection is open,
+   though its listener closed. *)
+let test_accepted_holds_the_port () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8110) in
+  let client, server = connection ~sw net addr in
+  Alcotest.(check bool) "relisten" true (in_use (listens net addr));
+  Alcotest.(check bool)
+    "relisten with reuse_addr" true
+    (in_use (listens net ~reuse_addr:true addr));
+  Eio.Resource.close client;
+  Eio.Resource.close server;
+  Alcotest.(check bool) "relisten once closed" false (in_use (listens net addr))
+
+(* The end that closes first holds its address in TIME_WAIT for 60 seconds on
+   the network's clock, as Linux does; a bind there is refused unless both
+   sockets have [reuse_addr], which an accepted socket takes from its
+   listener. *)
+let test_time_wait () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.Mono.make () in
+  let net = Eio_net_mem.v ~clock ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let wait secs =
+    Eio_mock.Clock.Mono.set_time clock
+      (Mtime.add_span (Eio.Time.Mono.now clock) Mtime.Span.(secs * s)
+      |> Option.get)
+  in
+  (* The server closes first. *)
+  let addr = `Tcp (lo, 8111) in
+  let client, server = connection ~sw net addr in
+  Eio.Resource.close server;
+  Eio.Resource.close client;
+  Alcotest.(check bool)
+    "server first, relisten" true
+    (in_use (listens net addr));
+  Alcotest.(check bool)
+    "server first, relisten with reuse_addr" true
+    (in_use (listens net ~reuse_addr:true addr));
+  wait 59;
+  Alcotest.(check bool) "after 59 s" true (in_use (listens net addr));
+  wait 1;
+  Alcotest.(check bool) "after 60 s" false (in_use (listens net addr));
+  (* The client closes first. *)
+  let addr = `Tcp (lo, 8112) in
+  let client, server = connection ~sw net addr in
+  Eio.Resource.close client;
+  Eio.Resource.close server;
+  Alcotest.(check bool)
+    "client first, relisten" false
+    (in_use (listens net addr));
+  (* A listener with reuse_addr. *)
+  let addr = `Tcp (lo, 8113) in
+  let client, server = connection ~sw net ~reuse_addr:true addr in
+  Eio.Resource.close server;
+  Eio.Resource.close client;
+  Alcotest.(check bool) "reused, relisten" true (in_use (listens net addr));
+  Alcotest.(check bool)
+    "reused, relisten with reuse_addr" false
+    (in_use (listens net ~reuse_addr:true addr));
+  (* A client bound at a port that closes first. *)
+  let addr = `Tcp (lo, 8114) and bound = `Tcp (lo, 8115) in
+  let client, server = connection ~sw net ~bind_to:bound addr in
+  Eio.Resource.close client;
+  Eio.Resource.close server;
+  Alcotest.(check bool)
+    "bound client first, listen there" true
+    (in_use (listens net ~reuse_addr:true bound));
+  let listener = Eio.Net.listen ~sw ~backlog:1 net addr in
+  Alcotest.(check bool)
+    "bound client first, connect from there" true
+    (in_use (fun () -> ignore (Eio.Net.connect ~sw ~bind_to:bound net addr)));
+  Eio.Resource.close listener;
+  wait 60;
+  Alcotest.(check bool)
+    "bound client, after 60 s" false
+    (in_use (listens net bound))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1403,6 +1497,9 @@ let suite =
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
       Alcotest.test_case "a listener's backlog" `Quick test_backlog;
+      Alcotest.test_case "an accepted connection holds the port" `Quick
+        test_accepted_holds_the_port;
+      Alcotest.test_case "TIME_WAIT" `Quick test_time_wait;
       Alcotest.test_case "a connect under a finished switch" `Quick
         test_connect_under_a_finished_switch;
       Alcotest.test_case "a closed connection leaves its switch" `Quick

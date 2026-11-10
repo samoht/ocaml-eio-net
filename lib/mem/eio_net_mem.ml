@@ -117,42 +117,100 @@ let cross_family (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
   then Some Network_unreachable
   else None
 
-(* The IP addresses at which sockets of one kind hold each port, kept as they
-   bind and close, so a bind checks only the sockets of its port. [lowest] is a
-   port of the dynamic range (RFC 6335, section 6) at or below the lowest one
-   no socket holds: every port below it is held; [highest] is one at or above
-   the highest free one. *)
+(* The holds sockets of one kind have on each port, kept as they bind and
+   close, so a bind checks only the holds on its port. A hold is an address,
+   whether its socket has [SO_REUSEADDR], whether it listens, and, once it
+   lingers in TIME_WAIT, until when on [now]. [lowest] is a port of the
+   dynamic range (RFC 6335, section 6) at or below the lowest one nothing
+   holds: every port below it is held; [highest] is one at or above the
+   highest free one. *)
 module Ports = struct
-  type t = {
-    held : (int, Eio.Net.Ipaddr.v4v6 list) Hashtbl.t;
-    mutable lowest : int;
-    mutable highest : int;
+  type hold = {
+    ip : Eio.Net.Ipaddr.v4v6;
+    reuse : bool;
+    listening : bool;
+    mutable until : Mtime.t option;
   }
 
-  let v () = { held = Hashtbl.create 64; lowest = 49152; highest = 65535 }
-  let at t port = Option.value ~default:[] (Hashtbl.find_opt t.held port)
-  let add t (ip, port) = Hashtbl.replace t.held port (ip :: at t port)
+  type t = {
+    held : (int, hold list) Hashtbl.t;
+    mutable lowest : int;
+    mutable highest : int;
+    now : (unit -> Mtime.t) option;
+  }
 
-  let remove t (ip, port) =
-    let rec drop = function
-      | [] -> []
-      | ip' :: rest -> if same ip ip' then rest else ip' :: drop rest
-    in
-    match drop (at t port) with
+  let v ?now () =
+    { held = Hashtbl.create 64; lowest = 49152; highest = 65535; now }
+
+  (* TCP_TIMEWAIT_LEN on Linux. *)
+  let time_wait = Mtime.Span.(60 * s)
+
+  let freed t port =
+    if port >= 49152 && port < t.lowest then t.lowest <- port;
+    if port <= 65535 && port > t.highest then t.highest <- port
+
+  (* The holds on [port], less those whose TIME_WAIT has ended. *)
+  let at t port =
+    match Hashtbl.find_opt t.held port with
+    | None -> []
+    | Some holds -> (
+        let live =
+          match t.now with
+          | None -> holds
+          | Some now ->
+              let now = now () in
+              List.filter
+                (fun h ->
+                  match h.until with
+                  | None -> true
+                  | Some until -> Mtime.is_earlier now ~than:until)
+                holds
+        in
+        match live with
+        | [] ->
+            Hashtbl.remove t.held port;
+            freed t port;
+            []
+        | _ ->
+            if List.compare_lengths live holds <> 0 then
+              Hashtbl.replace t.held port live;
+            live)
+
+  let add t ?(reuse = false) ?(listening = false) (ip, port) =
+    let h = { ip; reuse; listening; until = None } in
+    Hashtbl.replace t.held port (h :: at t port);
+    h
+
+  let remove t port h =
+    match List.filter (fun h' -> h' != h) (at t port) with
     | [] ->
         Hashtbl.remove t.held port;
-        if port >= 49152 && port < t.lowest then t.lowest <- port;
-        if port <= 65535 && port > t.highest then t.highest <- port
-    | ips -> Hashtbl.replace t.held port ips
+        freed t port
+    | holds -> Hashtbl.replace t.held port holds
 
-  let in_use t (ip, port) =
-    List.exists (fun ip' -> ip_overlaps (ip, port) (ip', port)) (at t port)
+  (* [h] lingers in TIME_WAIT; without a clock it lets go at once. *)
+  let linger t port h =
+    match t.now with
+    | None -> remove t port h
+    | Some now -> h.until <- Mtime.add_span (now ()) time_wait
 
-  (* The lowest port of the dynamic range no socket holds, at any address. *)
+  (* A bind at [ip] conflicts with a hold at an overlapping address, unless
+     both sockets have [SO_REUSEADDR] and the held one does not listen, as
+     Linux has it. *)
+  let in_use t ?(reuse = false) (ip, port) =
+    List.exists
+      (fun h ->
+        ip_overlaps (ip, port) (h.ip, port)
+        && not (reuse && h.reuse && not h.listening))
+      (at t port)
+
+  let is_free t port = at t port = []
+
+  (* The lowest port of the dynamic range nothing holds, at any address. *)
   let free t =
     let rec find port =
       if port > 65535 then None
-      else if Hashtbl.mem t.held port then find (port + 1)
+      else if not (is_free t port) then find (port + 1)
       else begin
         t.lowest <- port;
         Some port
@@ -160,11 +218,11 @@ module Ports = struct
     in
     find t.lowest
 
-  (* The highest port of the dynamic range no socket holds. *)
+  (* The highest port of the dynamic range nothing holds. *)
   let free_down t =
     let rec find port =
       if port < 49152 then None
-      else if Hashtbl.mem t.held port then find (port - 1)
+      else if not (is_free t port) then find (port - 1)
       else begin
         t.highest <- port;
         Some port
@@ -575,7 +633,7 @@ module Flow = struct
       mutable closed : bool;
       mutable abort : bool;
       mutable release : Eio.Switch.hook;
-      mutable on_close : unit -> unit;
+      mutable on_close : reset:bool -> unit;
       connection : int;
     }
 
@@ -587,7 +645,7 @@ module Flow = struct
       if t.abort then Pipe.update t.from_peer (fun p -> p.refused <- true);
       if unread || t.abort then Pipe.reset t.to_peer;
       Pipe.shut t.to_peer;
-      t.on_close ()
+      t.on_close ~reset:(unread || t.abort)
 
     let leave t =
       let last =
@@ -691,7 +749,7 @@ module Flow = struct
           closed = false;
           abort = false;
           release = Eio.Switch.null_hook;
-          on_close = ignore;
+          on_close = (fun ~reset:_ -> ());
           connection;
         }
     in
@@ -746,6 +804,8 @@ module Listening_socket = struct
     room : Eio.Condition.t;
     mutable closed : bool;
     mutable hooks : Eio.Switch.hook list;
+    reuse : bool;
+    hold : Ports.hold option;
   }
 
   (* Linux's accept queue takes one connection more than the backlog, which
@@ -773,10 +833,16 @@ module Listening_socket = struct
           match addr with
           | `Unix path ->
               Files.bind hub.files ~take_over:reuse_addr path Files.Listener
-          | `Tcp a -> not (Ports.in_use hub.ports a)
+          | `Tcp a -> not (Ports.in_use hub.ports ~reuse:reuse_addr a)
         in
         if not bound then Error `In_use
         else
+          let hold =
+            match addr with
+            | `Tcp a ->
+                Some (Ports.add hub.ports ~reuse:reuse_addr ~listening:true a)
+            | `Unix _ -> None
+          in
           let t =
             {
               hub;
@@ -788,10 +854,11 @@ module Listening_socket = struct
               room = Eio.Condition.create ();
               closed = false;
               hooks = [];
+              reuse = reuse_addr;
+              hold;
             }
           in
           Hashtbl.replace hub.listeners addr t;
-          (match addr with `Tcp a -> Ports.add hub.ports a | `Unix _ -> ());
           Ok t
 
   (* The refusals are raised once the mutex is released, which an exception
@@ -852,9 +919,10 @@ module Listening_socket = struct
           match Hashtbl.find_opt t.hub.listeners t.addr with
           | Some held when held == t -> (
               Hashtbl.remove t.hub.listeners t.addr;
-              match t.addr with
-              | `Tcp a -> Ports.remove t.hub.ports a
-              | `Unix path -> Files.leave t.hub.files path Listener)
+              match (t.addr, t.hold) with
+              | `Tcp (_, port), Some h -> Ports.remove t.hub.ports port h
+              | `Tcp _, None -> ()
+              | `Unix path, _ -> Files.leave t.hub.files path Listener)
           | Some _ | None -> ());
       let queued =
         Mutex.protect t.lock @@ fun () ->
@@ -897,6 +965,7 @@ module Datagram_socket = struct
     mutable send_shut : bool;
     mutable recv_shut : bool;
     mutable release : Eio.Switch.hook;
+    hold : Ports.hold option;
   }
 
   let free_port hub =
@@ -922,6 +991,9 @@ module Datagram_socket = struct
       | `Udp a -> Ports.in_use hub.ports a
     in
     if in_use then raise (address_in_use ());
+    let hold =
+      match addr with `Udp a -> Some (Ports.add hub.ports a) | `Unix _ -> None
+    in
     let t =
       {
         hub;
@@ -933,10 +1005,10 @@ module Datagram_socket = struct
         send_shut = false;
         recv_shut = false;
         release = Eio.Switch.null_hook;
+        hold;
       }
     in
     Hashtbl.replace hub.sockets addr t;
-    (match addr with `Udp a -> Ports.add hub.ports a | `Unix _ -> ());
     t
 
   (* The socket a datagram sent to [addr] reaches ([reaching]). *)
@@ -1073,9 +1145,10 @@ module Datagram_socket = struct
       t.release <- Eio.Switch.null_hook;
       Mutex.protect t.hub.mutex (fun () ->
           Hashtbl.remove t.hub.sockets t.addr;
-          match t.addr with
-          | `Unix path -> Files.leave t.hub.files path Datagram
-          | `Udp a -> Ports.remove t.hub.ports a);
+          match (t.addr, t.hold) with
+          | `Unix path, _ -> Files.leave t.hub.files path Datagram
+          | `Udp (_, port), Some h -> Ports.remove t.hub.ports port h
+          | `Udp _, None -> ());
       Eio.Condition.broadcast t.readable
     end
 
@@ -1160,16 +1233,16 @@ module Network = struct
     else
       match if port = 0 then Ports.free_down ports else Some port with
       | None -> Error `No_port
-      | Some port ->
-          Ports.add ports (ip, port);
-          Ok (ip, port)
+      | Some port -> Ok ((ip, port), Ports.add ports (ip, port))
 
-  (* Not cancelled, even while it waits for the mutex: a release that gave up
-     would hold the port for good. *)
-  let release t local =
+  (* Lets go of [h], or with [linger] keeps it in TIME_WAIT. Not cancelled,
+     even while it waits for the mutex: a release that gave up would hold the
+     port for good. *)
+  let release_port t ?(linger = false) port h =
     Eio.Cancel.protect @@ fun () ->
     Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
-        Ports.remove t.hub.Listening_socket.ports local)
+        let ports = t.hub.Listening_socket.ports in
+        if linger then Ports.linger ports port h else Ports.remove ports port h)
 
   (* A connect bound to an address of the other family fails, as macOS fails
      it with EAFNOSUPPORT where Linux says EINVAL; IPv6 against IPv4-mapped
@@ -1194,7 +1267,8 @@ module Network = struct
     | `Tcp (lip, _) -> `Tcp (seen_by lip ip, port)
 
   (* A connect for a client that holds [local], if it is a TCP one. *)
-  let connect_held t ~sw ~bind_to ~release addr local =
+  let connect_held t ~sw ~bind_to ~(release : ?linger:bool -> unit -> unit) addr
+      local =
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
           match addr with
@@ -1218,7 +1292,49 @@ module Network = struct
     | Some listener, _ -> (
         let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
         let client, server = Flow.pair ~local:unix ~capacity:t.capacity in
-        Flow.on_close client release;
+        (* The accepted socket holds the listener's port at the address the
+           client reached, with the listener's [SO_REUSEADDR], as Linux's
+           does. *)
+        let child =
+          match addr with
+          | `Unix _ -> None
+          | `Tcp (ip, port) ->
+              let reached = List.hd (reaching ip) in
+              Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
+                  Some
+                    ( port,
+                      Ports.add t.hub.Listening_socket.ports
+                        ~reuse:listener.reuse (reached, port) ))
+        in
+        (* Each end holds its address until both have closed; the first to
+           close, unless one reset the connection, then holds it in
+           TIME_WAIT. *)
+        let lock = Mutex.create () in
+        let ends = ref 2 and first = ref None and reset = ref false in
+        let ended side ~reset:r =
+          let last =
+            Mutex.protect lock @@ fun () ->
+            decr ends;
+            if Option.is_none !first then first := Some side;
+            if r then reset := true;
+            !ends = 0
+          in
+          if last then begin
+            let first = if !reset then None else !first in
+            release ~linger:(first = Some `Client) ();
+            Option.iter
+              (fun (port, h) ->
+                release_port t ~linger:(first = Some `Server) port h)
+              child
+          end
+        in
+        Flow.on_close client (ended `Client);
+        Flow.on_close server (ended `Server);
+        let fail () =
+          Mutex.protect lock (fun () -> reset := true);
+          Flow.close server;
+          Flow.close client
+        in
         let peer =
           match (local, bind_to) with
           | Some a, _ -> peer_addr listener.addr a
@@ -1232,12 +1348,10 @@ module Network = struct
         | true -> flow
         | false ->
             (* The listener closed while the connection waited for room. *)
-            Flow.close server;
-            Flow.close client;
+            fail ();
             refused ()
         | exception e ->
-            Flow.close server;
-            Flow.close client;
+            fail ();
             raise e)
 
   (* A connection is a pair of queues. A TCP client holds its address until
@@ -1256,21 +1370,21 @@ module Network = struct
       | `Tcp (ip, _), bind -> (
           let bind = match bind with Some (`Tcp b) -> Some b | _ -> None in
           match hold t ?bind ip with
-          | Ok local -> `Port local
+          | Ok (local, h) -> `Port (local, h)
           | Error `In_use -> raise (address_in_use ())
           | Error `No_port ->
               failwith "eio-net.mem: every port of 49152-65535 is held")
     in
     let local =
-      match held with `Port a -> Some a | `Path _ | `Nothing -> None
+      match held with `Port (a, _) -> Some a | `Path _ | `Nothing -> None
     in
-    (* Released once, by the flow's close or by a failed connect; a bound
-       path leaves its file. *)
+    (* Released once, by the connection's close or by a failed connect; a
+       bound path leaves its file. *)
     let released = Atomic.make false in
-    let release () =
+    let release ?(linger = false) () =
       if not (Atomic.exchange released true) then
         match held with
-        | `Port a -> release t a
+        | `Port ((_, port), h) -> release_port t ~linger port h
         | `Path path -> Files.leave t.hub.files path Client
         | `Nothing -> ()
     in
@@ -1329,13 +1443,14 @@ let pipe ?capacity () =
   let (_, client), (_, server) = Flow.pair ~local:false ~capacity in
   (client, server)
 
-let v ?capacity ~sw () =
+let v ?capacity ?clock ~sw () =
   let capacity = check_capacity capacity in
   let files = Files.v () in
+  let now = Option.map (fun clock () -> Eio.Time.Mono.now clock) clock in
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;
-      ports = Ports.v ();
+      ports = Ports.v ?now ();
       files;
       mutex = Eio.Mutex.create ();
     }
