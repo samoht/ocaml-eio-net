@@ -1,0 +1,44 @@
+#!/bin/bash
+# Records the kernel's traces through eio_posix: macOS natively, so this runs
+# on a Mac, and Linux in Docker, in the image pinned below.
+#   generate.sh OUT_DIR RECORD_EXE
+set -euo pipefail
+[ "$(uname -s)" = Darwin ] || {
+  echo "generate.sh records macOS natively: run it on macOS" >&2
+  exit 1
+}
+command -v docker >/dev/null || { echo "docker not on PATH" >&2; exit 1; }
+out="$(cd "$1" && pwd)"
+record="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+src="${DUNE_SOURCEROOT:?run through dune: REGEN=1 dune build @regen-traces}"
+image="ocaml/opam@sha256:d161f099e5d053fe198accc09fda214c6275289570847fd906f9c65f862bf460"
+transports="tcp4 tcp6 unix-stream udp4 udp6 unix-dgram"
+
+# Unix socket paths must stay short.
+work="$(mktemp -d /tmp/kernel-traces.XXXXXX)"
+trap 'rm -rf "$work"' EXIT
+mkdir "$work/sock"
+
+for t in $transports; do
+  KERNEL_DIR="$work/sock" "$record" "$t" >"$work/$t.macos"
+done
+
+docker run --rm \
+  --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+  --sysctl net.ipv6.conf.lo.disable_ipv6=0 \
+  -v "$src:/src:ro" -v "$work:/out" \
+  "$image" bash -euc "
+    mkdir ~/src && tar -C /src --exclude=_build --exclude=.git -cf - . | tar -C ~/src -xf -
+    cd ~/src
+    opam update -y >/dev/null
+    opam install -y . --deps-only >/dev/null
+    opam install -y eio_posix >/dev/null
+    opam exec -- dune build ./test/interop/kernel/scripts/record.exe
+    mkdir -p /tmp/sock
+    for t in $transports; do
+      KERNEL_DIR=/tmp/sock ./_build/default/test/interop/kernel/scripts/record.exe \$t >/out/\$t.linux
+    done"
+
+for t in $transports; do
+  "$record" merge "$work/$t.linux" "$work/$t.macos" >"$out/$t.csv"
+done

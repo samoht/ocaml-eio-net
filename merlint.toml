@@ -24,3 +24,11 @@ exclude = ["E605"]
 [[rules]]
 files = ["test/oracle/*"]
 exclude = ["E105", "E610"]
+
+# The kernel's traces are an unquoted table the recorder writes, read with
+# String.split_on_char, as for the cpython-struct traces. A sequence records
+# whatever an operation raises as its outcome, and the replay tests mem as a
+# whole rather than one library module.
+[[rules]]
+files = ["test/interop/kernel/*", "test/interop/kernel/*/*"]
+exclude = ["E825", "E105", "E610"]

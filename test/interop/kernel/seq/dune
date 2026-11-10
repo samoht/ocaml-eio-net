@@ -1,0 +1,3 @@
+(library
+ (name kernel_seq)
+ (libraries eio-net.mem eio eio.unix cstruct fmt unix))
