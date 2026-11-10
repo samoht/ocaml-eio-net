@@ -1,9 +1,17 @@
-; eio-net.chaos: adversarial/chaos wrappers for Eio flows, datagram sockets,
-; and networks -- shared test infrastructure for fuzzing protocol adapters
-; over a socket that injects deterministic faults. Reuses eio-net.mem's
-; in-memory transport rather than reinventing it.
+; eio-net.chaos: checks that run a workload under network faults chosen from
+; what it does, on eio-net.mem, each run in its own silent event loop.
 
 (library
  (name eio_net_chaos)
  (public_name eio-net.chaos)
- (libraries hermetic eio eio-net.mem cstruct fmt))
+ (private_modules quiet_mock)
+ (libraries
+  hermetic
+  eio
+  eio.utils
+  eio-net.mem
+  cstruct
+  fmt
+  mtime
+  psq
+  domain-local-await))
