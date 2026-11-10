@@ -73,6 +73,8 @@ let classify = function
   | Eio.Io (Eio.Exn.X Eio_net_mem.Address_family, _) -> "EAFNOSUPPORT"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Network_unreachable, _) -> "ENETUNREACH"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Invalid_port, _) -> "EINVAL"
+  | Eio.Io (Eio.Exn.X Eio_net_mem.Address_not_available, _) -> "EADDRNOTAVAIL"
+  | Eio.Io (Eio.Exn.X Eio_net_mem.Name_too_long, _) -> "ENAMETOOLONG"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Message_too_long, _) -> "EMSGSIZE"
   | Eio.Io (Eio.Exn.X Eio_net_mem.No_destination, _) -> "EDESTADDRREQ"
   | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (e, _, _)), _)

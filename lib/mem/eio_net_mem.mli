@@ -94,6 +94,20 @@ type Eio.Exn.Backend.t +=
         (** The backend code of the unclassified {!Eio.Io} error a Unix-domain
             datagram [send] without a destination raises, as Linux fails it with
             [ENOTCONN]; macOS says [EDESTADDRREQ]. *)
+  | Address_not_available
+        (** The backend code of the unclassified {!Eio.Io} error [listen],
+            [datagram_socket] and a [connect] with [bind_to] raise at an IP
+            address no interface has, where bind(2) fails with [EADDRNOTAVAIL].
+            The network has the loopback interface only: an IPv4 socket binds an
+            address of 127.0.0.0/8, an IPv6 one [::1], either the wildcard
+            address of its family, and an IPv6 one the IPv4-mapped form of those
+            IPv4 addresses. *)
+  | Name_too_long
+        (** The backend code of the unclassified {!Eio.Io} error raised for a
+            Unix path of 108 bytes or more, which Linux's [sun_path] cannot hold
+            with its NUL, where OCaml's [Unix] fails with [ENAMETOOLONG]: by
+            [listen], [connect], [bind_to], [datagram_socket] and a datagram
+            [send]. *)
 
 (** {1 Networks} *)
 
@@ -265,6 +279,12 @@ val connection : _ Eio.Net.stream_socket -> int option
     that {!Wrong_socket_type} marks, and so does a datagram sent to a listener's
     or a client's path. A [connect] or a datagram sent at a path no socket holds
     raises [Eio.Fs.Not_found].
+
+    The namespace is not a file system: a socket binds a path whose directory
+    does not exist, or that it may not write, where a real socket fails with
+    [ENOENT] or [EACCES], since modelling them would need the file system the
+    path names. A path of 108 bytes or more raises the error that
+    {!Name_too_long} marks.
 
     With [reuse_addr], a [listen] at a Unix-domain path takes the path over, as
     Eio's backends remove the socket file there before they bind: the listener

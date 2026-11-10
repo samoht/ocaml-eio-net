@@ -11,6 +11,8 @@ type Eio.Exn.Backend.t +=
   | Address_family
   | Wrong_socket_type
   | Not_connected
+  | Address_not_available
+  | Name_too_long
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -43,6 +45,12 @@ let () =
         true
     | Not_connected ->
         Format.pp_print_string ppf "Not connected (eio-net.mem)";
+        true
+    | Address_not_available ->
+        Format.pp_print_string ppf "Address not available (eio-net.mem)";
+        true
+    | Name_too_long ->
+        Format.pp_print_string ppf "File name too long (eio-net.mem)";
         true
     | _ -> false)
 
@@ -105,6 +113,23 @@ let ip_overlaps (ip, port) (ip', port') =
      )
 
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
+let fail code = raise (Eio.Exn.create (Eio.Exn.X code))
+
+(* The network has the loopback interface only: an IPv4 socket binds a
+   loopback address of 127.0.0.0/8, an IPv6 one ::1, either the wildcard
+   address of its family, and an IPv6 one the IPv4-mapped form of an IPv4
+   address it binds. *)
+let check_local ip =
+  let ip = unmap ip in
+  let local =
+    if is_v4 ip then (ip :> string).[0] = '\127' || same ip (any ip)
+    else same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip)
+  in
+  if not local then fail Address_not_available
+
+(* OCaml's [Unix] refuses a path that [sun_path], 108 bytes on Linux, cannot
+   hold with its NUL. *)
+let check_path path = if String.length path >= 108 then fail Name_too_long
 
 (* The error a socket at [src] meets reaching [dst] across address families,
    IPv6 against IPv4-mapped, as on Linux. *)
@@ -864,6 +889,9 @@ module Listening_socket = struct
   (* The refusals are raised once the mutex is released, which an exception
      inside it would poison. *)
   let v hub ~reuse_addr ~backlog addr =
+    (match addr with
+    | `Tcp (ip, _) -> check_local ip
+    | `Unix path -> check_path path);
     match
       Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
           bind hub ~reuse_addr ~backlog addr)
@@ -975,6 +1003,10 @@ module Datagram_socket = struct
         failwith "eio-net.mem: every port of 49152-65535 has a datagram socket"
 
   let v hub addr =
+    (match addr with
+    | `Udp (ip, _) -> check_local ip
+    | `Unix path -> check_path path
+    | `UdpV4 | `UdpV6 -> ());
     Mutex.protect hub.mutex @@ fun () ->
     let addr : Eio.Net.Sockaddr.datagram =
       match addr with
@@ -1100,6 +1132,7 @@ module Datagram_socket = struct
 
   let send t ?dst bufs =
     if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
+    (match dst with Some (`Unix path) -> check_path path | _ -> ());
     let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
     let dst = destination t ~local dst in
     Option.iter
@@ -1249,7 +1282,6 @@ module Network = struct
      fails as on Linux. *)
   let check_bind (bind_to : Eio.Net.Sockaddr.stream option)
       (addr : Eio.Net.Sockaddr.stream) =
-    let fail code = raise (Eio.Exn.create (Eio.Exn.X code)) in
     match (bind_to, addr) with
     | None, _ | Some (`Unix _), `Unix _ -> ()
     | Some (`Tcp (b, _)), `Tcp (d, _)
@@ -1360,7 +1392,12 @@ module Network = struct
   let connect t ~bind_to ~options ~sw addr =
     check_options options;
     Eio.Switch.check sw;
+    (match addr with `Unix path -> check_path path | `Tcp _ -> ());
     check_bind bind_to addr;
+    (match bind_to with
+    | Some (`Tcp (ip, _)) -> check_local ip
+    | Some (`Unix path) -> check_path path
+    | None -> ());
     let held =
       match (addr, bind_to) with
       | `Unix _, Some (`Unix path) ->

@@ -1184,6 +1184,74 @@ let test_time_wait () =
     "bound client, after 60 s" false
     (in_use (listens net bound))
 
+(* An address no interface has fails to bind with EADDRNOTAVAIL, as on
+   Linux: the network has the loopback interface only. A Unix path of 108
+   bytes or more, longer than [sun_path] holds, fails with ENAMETOOLONG. *)
+let test_unavailable_addresses () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let ip = Eio.Net.Ipaddr.of_raw in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let fails code f =
+    match f () with
+    | exception Eio.Io (Eio.Exn.X c, _) when c = code -> true
+    | exception e -> Alcotest.failf "raised %a" Fmt.exn e
+    | _ -> false
+  in
+  let unavailable = fails Eio_net_mem.Address_not_available in
+  List.iter
+    (fun raw ->
+      let a = ip raw in
+      let name = Fmt.str "%a" Eio.Net.Ipaddr.pp a in
+      Alcotest.(check bool)
+        ("listen at " ^ name) true
+        (unavailable (fun () ->
+             ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (a, 8120)))));
+      Alcotest.(check bool)
+        ("datagram socket at " ^ name)
+        true
+        (unavailable (fun () ->
+             ignore (Eio.Net.datagram_socket ~sw net (`Udp (a, 8120))))))
+    [
+      "\010\255\255\001";
+      "\192\000\002\001";
+      "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\002";
+      "\000\000\000\000\000\000\000\000\000\000\255\255\010\255\255\001";
+    ];
+  let addr = `Tcp (lo, 8121) in
+  ignore (Eio.Net.listen ~sw ~backlog:1 net addr);
+  Alcotest.(check bool)
+    "connect bound at 10.255.255.1" true
+    (unavailable (fun () ->
+         ignore
+           (Eio.Net.connect ~sw
+              ~bind_to:(`Tcp (ip "\010\255\255\001", 0))
+              net addr)));
+  Alcotest.(check bool)
+    "listen at 127.0.0.2" false
+    (unavailable (fun () ->
+         ignore
+           (Eio.Net.listen ~sw ~backlog:1 net
+              (`Tcp (ip "\127\000\000\002", 8121)))));
+  let long = `Unix ("/tmp/" ^ String.make 103 'x') in
+  let too_long = fails Eio_net_mem.Name_too_long in
+  Alcotest.(check bool)
+    "listen at a long path" true
+    (too_long (fun () -> ignore (Eio.Net.listen ~sw ~backlog:1 net long)));
+  Alcotest.(check bool)
+    "connect to a long path" true
+    (too_long (fun () -> ignore (Eio.Net.connect ~sw net long)));
+  Alcotest.(check bool)
+    "datagram socket at a long path" true
+    (too_long (fun () -> ignore (Eio.Net.datagram_socket ~sw net long)));
+  Alcotest.(check bool)
+    "listen at a path of 107 bytes" false
+    (too_long (fun () ->
+         ignore
+           (Eio.Net.listen ~sw ~backlog:1 net
+              (`Unix ("/tmp/" ^ String.make 102 'x')))))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1500,6 +1568,8 @@ let suite =
       Alcotest.test_case "an accepted connection holds the port" `Quick
         test_accepted_holds_the_port;
       Alcotest.test_case "TIME_WAIT" `Quick test_time_wait;
+      Alcotest.test_case "addresses no interface has" `Quick
+        test_unavailable_addresses;
       Alcotest.test_case "a connect under a finished switch" `Quick
         test_connect_under_a_finished_switch;
       Alcotest.test_case "a closed connection leaves its switch" `Quick
