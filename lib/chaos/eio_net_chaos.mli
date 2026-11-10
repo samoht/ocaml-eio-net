@@ -43,6 +43,12 @@
     that takes a partial line for a whole one turns an injected end of stream
     into a wrong answer.
 
+    {b Ports are held as on Linux.} The end of a connection that closes first
+    holds its port for 60 seconds of the run's clock, in TIME_WAIT. A server
+    that closes its connections and listens again on the same port within a run
+    fails with an address in use, as it would on Linux: listen with
+    [~reuse_addr:true], as a real server does.
+
     {b Assert latency to catch a missing timeout.} A connect that times out
     takes 133 seconds, as on Linux, and then fails: a program without a connect
     timeout waits for it and still succeeds. A test that bounds its program's

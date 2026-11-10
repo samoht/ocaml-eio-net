@@ -176,6 +176,46 @@ let test_budget () =
           Alcotest.failf "the budget %d was accepted" budget)
     [ 0; -1 ]
 
+(* A server that serves one connection, closes first, and listens again on
+   its port. Its closed end holds the port in TIME_WAIT for 60 s, so the
+   second listen needs [reuse_addr], as on Linux. *)
+let restart ~reuse_addr () =
+  Eio_net_chaos.check @@ fun env ->
+  let serve_once () =
+    Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~reuse_addr ~sw ~backlog:1 env#net addr in
+    Eio.Fiber.both
+      (fun () ->
+        try
+          Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+          Eio.Switch.run @@ fun sw ->
+          let flow, _ = Eio.Net.accept ~sw l in
+          Eio.Flow.copy_string "hi\n" flow
+        with Eio.Io _ | Eio.Time.Timeout -> ())
+      (fun () ->
+        try
+          Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+          Eio.Switch.run @@ fun sw ->
+          let flow = Eio.Net.connect ~sw env#net addr in
+          Eio.Time.sleep env#clock 0.1;
+          ignore (Eio.Flow.read_all flow)
+        with Eio.Io _ | Eio.Time.Timeout -> ())
+  in
+  serve_once ();
+  serve_once ()
+
+let test_restart () =
+  Expect.passes (restart ~reuse_addr:true) ();
+  let m = Expect.report (restart ~reuse_addr:false) in
+  if
+    not
+      (String.starts_with
+         ~prefix:
+           "Eio_net_chaos.check: the run with no fault failed: Eio.Io Address \
+            in use"
+         m)
+  then Alcotest.failf "failed with %S" m
+
 let test_nothing () =
   refused_with "Eio_net_chaos.check: the workload makes no network operation"
     (fun () -> Eio_net_chaos.check ignore)
@@ -261,6 +301,8 @@ let suite =
         test_unknown_replay;
       Alcotest.test_case "a budget that is not positive is refused" `Quick
         test_budget;
+      Alcotest.test_case "a restarted server needs reuse_addr" `Quick
+        test_restart;
       Alcotest.test_case "a workload with no operation is refused" `Quick
         test_nothing;
       Alcotest.test_case "a nondeterministic workload is refused" `Quick

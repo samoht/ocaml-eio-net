@@ -36,7 +36,7 @@ let exec run (s : Plan.scenario) =
       let capacity =
         match s.lasting with Some Tiny_buffers -> Some 4096 | _ -> None
       in
-      let base = Eio_net_mem.v ?capacity ~sw () in
+      let base = Eio_net_mem.v ?capacity ~clock:mono_clock ~sw () in
       let net = Wrapper.v ~clock ~outage:(s.lasting = Some Outage) f base in
       wrapped := Some net;
       run

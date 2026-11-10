@@ -101,6 +101,9 @@ The tests follow a few rules:
   with the error eio_posix raises, which Eio does not classify as a
   connection failure. A program with no connect timeout still succeeds, so
   the test asserts its latency to catch it.
+- Ports are held as on Linux: the end of a connection that closes first
+  holds its port for 60 seconds, so a server that listens again on its port
+  within a run passes `~reuse_addr:true`.
 - In the outage run every connect is refused and every datagram lost.
   `Eio_net_chaos.outage env` is then `true`, and the test checks what its
   program does when it gives up.
