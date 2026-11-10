@@ -256,14 +256,17 @@ let spin () =
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
-  let rec go () =
+  (* Its own bound, well past the guard's: without the guard, the run fails
+     here instead of spinning for ever. *)
+  let rec go n =
+    if n > 50_000 then failwith "the spin was not stopped";
     match
       Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
     with
     | () -> ()
-    | exception Eio.Io _ -> go ()
+    | exception Eio.Io _ -> go (n + 1)
   in
-  go ()
+  go 0
 
 let suite =
   ( "guards",
