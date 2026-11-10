@@ -175,12 +175,13 @@ module Datagram : sig
       int ->
       t
     (** [seeded ~loss ~dup ~reorder ~truncate ~garble ~delay seed] draws one
-        fault per receive from [seed]: with probability [loss], [dup],
-        [reorder], [truncate] and [garble] (each defaults to [0.]) a datagram is
-        dropped, duplicated, reordered, truncated to fewer than [8] bytes, or
-        replaced with fewer than [16] garbled bytes; otherwise, with even odds
-        when [delay] (defaults to [0]) is positive, the receive stalls [1] to
-        [delay] scheduler turns, and else it passes through.
+        fault per datagram taken from the base, from [seed]: with probability
+        [loss], [dup], [reorder], [truncate] and [garble] (each defaults to
+        [0.]) the datagram is dropped, duplicated, reordered, truncated to fewer
+        than [8] bytes, or replaced with fewer than [16] garbled bytes, so
+        [loss] is the fraction of datagrams lost; otherwise, with even odds when
+        [delay] (defaults to [0]) is positive, the receive stalls [1] to [delay]
+        scheduler turns, and else it passes through.
 
         Raises [Invalid_argument] if one of [loss], [dup], [reorder], [truncate]
         and [garble] is outside [[0., 1.]], NaN included, or if they sum to more

@@ -434,19 +434,23 @@ module Datagram = struct
             s.truncate pp_float s.garble pp_int s.delay pp_int s.seed
   end
 
-  type driver = { next : unit -> fault; rng : Random.State.t }
+  (* A seeded loss drops the datagram it is drawn for and draws again for the
+     next, so [loss] is the fraction lost; a scripted [Drop n] delivers the
+     datagram after the ones it drops. *)
+  type event = Fault of fault | Lose
+  type driver = { next : unit -> event; rng : Random.State.t }
 
   let driver (s : Schedule.t) : driver =
     match s with
-    | Pass -> { next = (fun () -> Pass); rng = dgram_rng 0 }
+    | Pass -> { next = (fun () -> Fault Pass); rng = dgram_rng 0 }
     | Script events ->
         let q = ref events in
         let next () =
           match !q with
-          | [] -> Pass
+          | [] -> Fault Pass
           | x :: xs ->
               q := xs;
-              x
+              Fault x
         in
         { next; rng = dgram_rng 0 }
     | Seeded s ->
@@ -458,14 +462,14 @@ module Datagram = struct
           let o = d +. s.reorder in
           let t = o +. s.truncate in
           let g = t +. s.garble in
-          if r < l then Drop 1
-          else if r < d then Dup
-          else if r < o then Reorder
-          else if r < t then Truncate (Random.State.int rng 8)
-          else if r < g then Garble (Random.State.int rng 16)
+          if r < l then Lose
+          else if r < d then Fault Dup
+          else if r < o then Fault Reorder
+          else if r < t then Fault (Truncate (Random.State.int rng 8))
+          else if r < g then Fault (Garble (Random.State.int rng 16))
           else if s.delay > 0 && Random.State.bool rng then
-            Delay (1 + Random.State.full_int rng s.delay)
-          else Pass
+            Fault (Delay (1 + Random.State.full_int rng s.delay))
+          else Fault Pass
         in
         { next; rng }
 
@@ -576,9 +580,11 @@ module Datagram = struct
           let a, d = recv_raw t buf in
           t.kept <- Next held;
           put buf a d
-      | Nothing ->
+      | Nothing -> (
           let datagram = recv_raw t buf in
-          apply t buf datagram (t.driver.next ())
+          match t.driver.next () with
+          | Fault fault -> apply t buf datagram fault
+          | Lose -> recv t buf)
 
     let send t ?dst bufs = t.base.send ?dst bufs
     let shutdown t cmd = t.base.shutdown cmd

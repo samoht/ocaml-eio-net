@@ -309,6 +309,32 @@ let test_dgram_close_drops_held () =
   | exception Invalid_argument _ -> ()
   | got -> Alcotest.failf "received %S after close" got
 
+(* Seeded [loss] is the fraction of datagrams lost: over 20000 datagrams,
+   [loss:0.3] loses 30% of them, within 2 points. *)
+let test_dgram_loss_rate () =
+  let n = 20_000 in
+  with_datagrams [] @@ fun ~send base ->
+  let sock = Datagram.wrap (Datagram.Schedule.seeded ~loss:0.3 7) base in
+  for i = 1 to n do
+    send (string_of_int i)
+  done;
+  let rec count k =
+    match
+      Eio.Fiber.first
+        (fun () -> Some (recv1 sock))
+        (fun () ->
+          for _ = 1 to 8 do
+            Eio.Fiber.yield ()
+          done;
+          None)
+    with
+    | Some _ -> count (k + 1)
+    | None -> k
+  in
+  let lost = float (n - count 0) /. float n in
+  if Float.abs (lost -. 0.3) > 0.02 then
+    Alcotest.failf "loss:0.3 lost %.3f of the datagrams" lost
+
 (* A receive cancelled while it holds a datagram back keeps it: the next
    receives deliver the one after it, then the held one. *)
 let test_dgram_reorder_cancelled () =
@@ -621,6 +647,8 @@ let suite =
         test_dgram_close_drops_held;
       Alcotest.test_case "flow write after close" `Quick
         test_flow_write_after_close;
+      Alcotest.test_case "dgram loss is the fraction lost" `Quick
+        test_dgram_loss_rate;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
       Alcotest.test_case "flow writes counted across domains" `Quick
