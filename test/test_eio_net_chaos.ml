@@ -582,6 +582,35 @@ let test_ops () =
     ]
     (List.rev !ops)
 
+(* A scan that tries 10500 closed ports once each is not a spin: the guard
+   counts the failures of one operation on one target. A client that retries
+   one of them at once is. *)
+let test_scan_is_not_a_spin () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock (fun _ -> None) (Eio_net_mem.v ~sw ())
+  in
+  let connect port =
+    match
+      Eio.Switch.run (fun sw ->
+          ignore
+            (Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))))
+    with
+    | () -> ()
+    | exception Eio.Io _ -> ()
+  in
+  for port = 30000 to 40500 do
+    connect port
+  done;
+  match
+    for _ = 1 to 20_000 do
+      connect 30000
+    done
+  with
+  | () -> Alcotest.fail "a client that retries at once was not stopped"
+  | exception Failure _ -> ()
+
 (* --- Domains ------------------------------------------------------------- *)
 
 (* Writers in two domains share one count of bytes written: with a reset on
@@ -801,6 +830,7 @@ let suite =
         test_net_connect_unreachable;
       Alcotest.test_case "net connect stall" `Quick test_net_connect_stall;
       Alcotest.test_case "net operations" `Quick test_ops;
+      Alcotest.test_case "a scan is not a spin" `Quick test_scan_is_not_a_spin;
       Alcotest.test_case "writes counted across domains" `Quick
         test_writes_counted_across_domains;
       Alcotest.test_case "reads shared across domains" `Quick

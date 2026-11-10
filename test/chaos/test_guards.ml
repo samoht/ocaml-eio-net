@@ -268,6 +268,22 @@ let spin () =
   in
   go 0
 
+(* A scan that tries 10500 closed ports once each, as the clock stands
+   still, is not a spin: the check's first run passes, and only the budget
+   stops it. *)
+let scan () =
+  Eio_net_chaos.check ~budget:50 @@ fun env ->
+  for port = 30000 to 40500 do
+    match
+      Eio.Switch.run (fun sw ->
+          ignore
+            (Eio.Net.connect ~sw env#net
+               (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))))
+    with
+    | () -> ()
+    | exception Eio.Io _ -> ()
+  done
+
 let suite =
   ( "guards",
     [
@@ -280,9 +296,11 @@ let suite =
            ticking);
       Alcotest.test_case "a run that fails with the clock stopped hangs" `Quick
         (error_is
-           "the run hangs: 10000 network operations failed in a row while its \
-            clock stood still"
+           "the run hangs: the same network operation failed 10000 times on \
+            the same target while its clock stood still"
            spin);
+      Alcotest.test_case "a scan of closed ports is not a spin" `Quick
+        (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
         (Expect.passes (transfer 25 4096));
       Alcotest.test_case "a linear tier past the budget fails" `Quick

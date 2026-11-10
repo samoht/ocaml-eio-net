@@ -79,9 +79,11 @@
     the other fibers of that loop wait for it. Its clocks start at [0.] and move
     only when every fiber waits, so a timeout of an hour takes no time. A run in
     which every fiber waits and no timer is due fails as a hang, and so does one
-    still running after an hour of its clock, and one in which 10000 network
-    operations fail in a row while its clock stands still, as a client that
-    retries a refused connect at once does in the outage. *)
+    still running after an hour of its clock, and one in which the same network
+    operation fails 10000 times on the same target, a connect to one address or
+    a read on one connection, while its clock stands still, as a client that
+    retries a refused connect at once does in the outage. Failures on distinct
+    targets, as a scan of many ports makes, do not count together. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
@@ -269,9 +271,10 @@ val wrap :
     Linux this end reads what is queued, then end of file, and on macOS it reads
     end of file at once, as macOS drops what is queued.
 
-    After 10000 operations that fail in a row while [clock] stands still, the
-    next raises [Failure], as the program that makes them spins for ever, and
-    after 20000 an operation waits for ever.
+    After the same operation fails 10000 times on the same target while [clock]
+    stands still, with no success there in between, the next attempt raises
+    [Failure], as the program that makes them spins for ever, and after 20000 it
+    waits for ever.
 
     A read or a write after the flow's own close raises [Invalid_argument]
     before [f] is asked, as Eio's own sockets do. A close drops the bytes a read

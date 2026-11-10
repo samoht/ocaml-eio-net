@@ -82,6 +82,14 @@ let join conn side sock =
    that sees the connection first waits for it. *)
 type pending = { number : int Eio.Promise.t; set : int Eio.Promise.u; c : conn }
 
+(* What an operation is tried on, for the livelock guard. *)
+type target =
+  | Connect of Eio.Net.Sockaddr.stream
+  | Accept of int
+  | Read of int * Op.side
+  | Write of int * Op.side
+  | Recv of int
+
 (* What the wrappers of one network share. [lock] guards the counters and
    [pending], and runs [f], so [f] sees one operation at a time, in the order
    of [index]. *)
@@ -95,7 +103,8 @@ type ctx = {
   mutable connects : int;
   mutable accepts : int;
   mutable exhausted : bool;
-  mutable streak : int;
+  mutable listeners : int;
+  streaks : (target, int) Hashtbl.t;
   mutable streak_at : float;
   livelocked : bool Atomic.t;
   pending : (int, pending) Hashtbl.t;
@@ -112,7 +121,8 @@ let ctx ~clock ~outage f =
     connects = 0;
     accepts = 0;
     exhausted = false;
-    streak = 0;
+    listeners = 0;
+    streaks = Hashtbl.create 7;
     streak_at = 0.;
     livelocked = Atomic.make false;
     pending = Hashtbl.create 7;
@@ -127,25 +137,32 @@ let locked (ctx : ctx) f = Mutex.protect ctx.lock f
 
 (* A program that retries a failed operation at once, with no time passing,
    spins for ever: an outage refuses each connect at once. After [threshold]
-   failures in a row while the clock stands still, the operation raises
-   [Failure] instead, and after twice as many it waits for ever, as nothing
-   the program does can get it out. *)
+   failures of one operation on one target while the clock stands still, with
+   no success there in between, the operation raises [Failure] instead, and
+   after twice as many it waits for ever, as nothing the program does can get
+   it out. Failures on distinct targets, as a scan of many ports makes, do not
+   add up. *)
 let threshold = 10_000
 
 let livelock_message =
-  Fmt.str "%d network operations failed in a row while its clock stood still"
+  Fmt.str
+    "the same network operation failed %d times on the same target while its \
+     clock stood still"
     threshold
 
-let failed ctx =
+let failed ctx target =
   let n =
     locked ctx (fun () ->
         let now = Eio.Time.now ctx.clock in
         if now <> ctx.streak_at then begin
           ctx.streak_at <- now;
-          ctx.streak <- 0
+          Hashtbl.reset ctx.streaks
         end;
-        ctx.streak <- ctx.streak + 1;
-        ctx.streak)
+        let n =
+          1 + Option.value ~default:0 (Hashtbl.find_opt ctx.streaks target)
+        in
+        Hashtbl.replace ctx.streaks target n;
+        n)
   in
   if n >= threshold then begin
     Atomic.set ctx.livelocked true;
@@ -155,15 +172,17 @@ let failed ctx =
     failwith ("Eio_net_chaos: " ^ livelock_message)
   end
 
-let guard ctx f =
+let guard ctx target f =
   match f () with
   | v ->
-      locked ctx (fun () -> ctx.streak <- 0);
+      locked ctx (fun () ->
+          if Hashtbl.length ctx.streaks > 0 then
+            Hashtbl.remove ctx.streaks target);
       v
   | exception (Eio.Cancel.Cancelled _ as e) -> raise e
   | exception e ->
       let bt = Printexc.get_raw_backtrace () in
-      failed ctx;
+      failed ctx target;
       Printexc.raise_with_backtrace e bt
 
 (* A close frees a descriptor, so the accepts that [Fault.Emfile] fails go
@@ -403,8 +422,12 @@ module Flow = struct
         | None ->
             write ()
 
-    let single_read t dst = guard t.ctx (fun () -> single_read_ t dst)
-    let single_write t bufs = guard t.ctx (fun () -> single_write_ t bufs)
+    let single_read t dst =
+      guard t.ctx (Read (t.socket, t.side)) (fun () -> single_read_ t dst)
+
+    let single_write t bufs =
+      guard t.ctx (Write (t.socket, t.side)) (fun () -> single_write_ t bufs)
+
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
     let read_methods = []
 
@@ -562,7 +585,7 @@ module Datagram = struct
               recv_ t buf
           | `Wait None -> Eio.Fiber.await_cancel ())
 
-    let recv t buf = guard t.ctx (fun () -> recv_ t buf)
+    let recv t buf = guard t.ctx (Recv t.socket) (fun () -> recv_ t buf)
     let send t ?dst bufs = Eio.Net.send t.sock ?dst bufs
     let shutdown t cmd = shutdown_of t.sock cmd
 
@@ -606,6 +629,7 @@ module Listener = struct
     ctx : ctx;
     l : [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
     mutable held : (stream * Eio.Net.Sockaddr.stream) list;
+    number : int;
   }
 
   let hold t c = locked t.ctx (fun () -> t.held <- c :: t.held)
@@ -676,7 +700,7 @@ module Listener = struct
       | None ->
           (flow, peer)
 
-    let accept t ~sw = guard t.ctx (fun () -> accept_ t ~sw)
+    let accept t ~sw = guard t.ctx (Accept t.number) (fun () -> accept_ t ~sw)
 
     let close t =
       Eio.Resource.close t.l;
@@ -733,7 +757,8 @@ module Network = struct
           go ()
 
     let connect t ~bind_to ~options ~sw addr =
-      guard t.ctx (fun () -> connect_ t ~bind_to ~options ~sw addr)
+      guard t.ctx (Connect addr) (fun () ->
+          connect_ t ~bind_to ~options ~sw addr)
 
     let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
       let l = Eio.Net.listen ~reuse_addr ~reuse_port ~backlog ~sw t.net addr in
@@ -742,6 +767,10 @@ module Network = struct
             Listener.ctx = t.ctx;
             l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
             held = [];
+            number =
+              locked t.ctx (fun () ->
+                  t.ctx.listeners <- t.ctx.listeners + 1;
+                  t.ctx.listeners);
           },
           Listener.handler )
 
