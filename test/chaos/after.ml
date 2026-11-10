@@ -38,17 +38,19 @@ let test_cut ~read () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let cut (op : Eio_net_chaos.Op.t) =
-    (* Inside the third frame's header, which starts at byte 13. *)
-    if op.kind = `Read && op.side = `Client && op.offset >= 15 then
-      Some Eio_net_chaos.Fault.Eof
-    else None
+    (* The server closes inside the third frame's header, which starts at
+       byte 13: its write there moves 2 bytes, and the next ends the stream. *)
+    match (op.kind, op.side, op.offset) with
+    | `Write, `Server, 13 -> Some (Eio_net_chaos.Fault.Short 2)
+    | `Write, `Server, 15 -> Some Eio_net_chaos.Fault.Eof
+    | _ -> None
   in
   let net = Eio_net_chaos.wrap ~clock:env#clock cut (Eio_net_mem.v ~sw ()) in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:1 net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let flow, _ = Eio.Net.accept ~sw l in
-      List.iter (App.Frame.write flow) msgs;
+      (try List.iter (App.Frame.write flow) msgs with Eio.Io _ -> ());
       `Stop_daemon);
   let flow = Eio.Net.connect ~sw net addr in
   assert (read ~clock:env#clock flow = Some "hello");

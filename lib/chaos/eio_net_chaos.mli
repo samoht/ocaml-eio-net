@@ -88,10 +88,11 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     The linear tier tries each of these alone:
 
     - at each structural position of what one end of a connection reads, the
-      connection is reset, or ends, at both ends as on TCP; or the peer stalls
-      for good;
+      connection is reset at both ends, as on TCP, or the peer closes it, or
+      stalls for good;
     - at each structural position of what one end writes, the connection is
-      reset;
+      reset, or this end closes it, as a process killed in the middle of a
+      message does;
     - each connect is refused, times out after 133 seconds, or finds its host
       unreachable after 3 seconds; each accepted connection is reset before its
       first byte, as when the client left first;
@@ -183,9 +184,15 @@ module Fault : sig
             whose client left first. On a connect, it is a refusal, as a reset
             answering the handshake is. *)
     | Eof
-        (** The connection ends at both ends: reads raise [End_of_file] from now
-            on, writes raise [Connection_reset], and the bytes not yet read are
-            lost. On an accept, the connection it returns has ended. *)
+        (** One end closes, as a FIN does: no byte already written is lost. On a
+            read, the peer closed: the read returns what the peer wrote before,
+            then end of file. On a write, this end closed: the write raises
+            [Connection_reset], and the peer reads the bytes written before,
+            then end of file. On an accept, the client closed. After it, the end
+            that closed reads end of file and its writes raise
+            [Connection_reset]; the other end's first write goes through, its
+            bytes lost, and the next ones raise [Connection_reset], as on Linux
+            after the peer closes. *)
     | Refuse  (** A connect fails with [Connection_failure (Refused _)]. *)
     | Timeout
         (** A connect fails after 133 seconds of the clock, as a lost handshake

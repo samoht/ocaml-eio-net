@@ -154,22 +154,57 @@ let test_flow_reset_reported_once () =
          (fun () -> write client);
        ])
 
-(* An end drops the bytes not yet read, at both ends. *)
-let test_flow_eof_both_ends () =
+let outcome f =
+  match f () with
+  | s -> s
+  | exception End_of_file -> "end"
+  | exception e when is_reset e -> "reset"
+
+let in_order ops = List.map outcome ops
+let read flow () = read1 flow
+
+let write flow () =
+  string_of_int (Eio.Flow.single_write flow [ Cstruct.of_string "x" ])
+
+(* An end of stream on a read is the peer's close, as a FIN: the read gets
+   what the peer already wrote, then end of file. This end's first write after
+   it goes through, and the next ones raise the reset the peer answers with;
+   the peer, which closed, reads end of file and its writes raise. *)
+let test_flow_eof_on_read () =
   Eio_mock.Backend.run_full @@ fun env ->
   let client, server = Chaos.pair ~clock:env#clock (nth `Read 2 Fault.Eof) in
   Eio.Flow.copy_string "abc" client;
   Alcotest.(check string) "first read" "abc" (read1 server);
-  Eio.Flow.copy_string "lost" client;
-  (match read1 server with
-  | exception End_of_file -> ()
-  | s -> Alcotest.failf "read %S" s);
-  (match Eio.Flow.single_write client [ Cstruct.of_string "x" ] with
-  | exception e when is_reset e -> ()
-  | _ -> Alcotest.fail "the peer's write went through");
-  match read1 client with
-  | exception End_of_file -> ()
-  | s -> Alcotest.failf "the peer read %S" s
+  Eio.Flow.copy_string "more" client;
+  Alcotest.(check (list string))
+    "server"
+    [ "more"; "end"; "1"; "reset"; "reset"; "end" ]
+    (in_order
+       [
+         read server;
+         read server;
+         write server;
+         write server;
+         write server;
+         read server;
+       ]);
+  Alcotest.(check (list string))
+    "client, which closed" [ "end"; "reset" ]
+    (in_order [ read client; write client ])
+
+(* An end of stream on a write is this end's close before it: the peer reads
+   the bytes written before, then end of file. *)
+let test_flow_eof_on_write () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let client, server = Chaos.pair ~clock:env#clock (nth `Write 2 Fault.Eof) in
+  Eio.Flow.copy_string "abc" client;
+  Alcotest.(check (list string))
+    "client, which closed" [ "reset"; "end" ]
+    (in_order [ write client; read client ]);
+  Alcotest.(check (list string))
+    "server"
+    [ "abc"; "end"; "1"; "reset" ]
+    (in_order [ read server; read server; write server; write server ])
 
 (* A reset on an accept is a connection whose client left first: the client
    reads the reset. *)
@@ -702,7 +737,8 @@ let suite =
         test_flow_reset_both_ends;
       Alcotest.test_case "flow reset reported once" `Quick
         test_flow_reset_reported_once;
-      Alcotest.test_case "flow end at both ends" `Quick test_flow_eof_both_ends;
+      Alcotest.test_case "flow end on a read" `Quick test_flow_eof_on_read;
+      Alcotest.test_case "flow end on a write" `Quick test_flow_eof_on_write;
       Alcotest.test_case "accept reset" `Quick test_accept_reset;
       Alcotest.test_case "accept EMFILE" `Quick test_accept_emfile;
       Alcotest.test_case "flow write after close" `Quick

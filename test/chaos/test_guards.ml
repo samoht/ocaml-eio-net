@@ -16,7 +16,8 @@ let refused_with prefix f () =
   if not (String.starts_with ~prefix m) then
     Alcotest.failf "the check failed with %S" m
 
-(* A download whose client logs what it got, and when. *)
+(* A download whose client logs what it got before the end or an error,
+   and when. *)
 let logged log () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -24,14 +25,26 @@ let logged log () =
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Eio.Flow.copy_string "0123456789" flow));
-  let got =
+  let got = Buffer.create 10 in
+  let buf = Cstruct.create 64 in
+  let ended =
     try
       Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
       Eio.Switch.run @@ fun sw ->
-      Eio.Flow.read_all (Eio.Net.connect ~sw env#net addr)
-    with Eio.Io _ | Eio.Time.Timeout -> "-"
+      let flow = Eio.Net.connect ~sw env#net addr in
+      let rec loop () =
+        let n = Eio.Flow.single_read flow buf in
+        Buffer.add_string got (Cstruct.to_string ~len:n buf);
+        loop ()
+      in
+      loop ()
+    with
+    | End_of_file -> "end"
+    | Eio.Io _ -> "error"
+    | Eio.Time.Timeout -> "timeout"
   in
-  Fmt.kstr (Buffer.add_string log) "%S at %g\n" got (Eio.Time.now env#clock)
+  Fmt.kstr (Buffer.add_string log) "%S then %s at %g\n" (Buffer.contents got)
+    ended (Eio.Time.now env#clock)
 
 (* Two checks run the same scenarios and see the same results. *)
 let test_determinism () =
@@ -45,17 +58,19 @@ let test_determinism () =
     (Expect.report (fun () -> mutant ()))
 
 (* A cut lands at its byte: some runs read nothing, nine bytes, or all ten
-   before the end. *)
+   before a reset. *)
 let test_cut_positions () =
   let log = Buffer.create 1024 in
   logged log ();
   let lines = String.split_on_char '\n' (Buffer.contents log) in
   List.iter
     (fun got ->
-      let prefix = Fmt.str "%S at" got in
+      let prefix = got in
       if not (List.exists (String.starts_with ~prefix) lines) then
         Alcotest.failf "no run read %S" got)
-    [ ""; "012345678"; "0123456789" ]
+    [
+      "\"\" then error"; "\"012345678\" then error"; "\"0123456789\" then error";
+    ]
 
 let replay_of report =
   Scanf.sscanf (Expect.field "replay" report) "~replay:%S" Fun.id
@@ -130,11 +145,12 @@ let test_stale_replay () =
     Eio.Switch.run @@ fun sw ->
     try ignore (Eio.Net.connect ~sw env#net addr) with Eio.Io _ -> ()
   in
+  let key = List.nth (String.split_on_char '/' replay) 2 in
   refused_with
     (Fmt.str
-       "Eio_net_chaos.check: the replay names read1c@8.reset, a scenario this \
-        check no longer has: its first run was %s and is now"
-       (hash replay))
+       "Eio_net_chaos.check: the replay names %s, a scenario this check no \
+        longer has: its first run was %s and is now"
+       key (hash replay))
     (fun () -> Eio_net_chaos.check ~replay other)
     ()
 
@@ -218,7 +234,7 @@ let suite =
         (Expect.passes (transfer 25 4096));
       Alcotest.test_case "a linear tier past the budget fails" `Quick
         (refused_with
-           "Eio_net_chaos.check: the linear tier needs 56 runs, more than the \
+           "Eio_net_chaos.check: the linear tier needs 67 runs, more than the \
             budget of 20"
            (transfer ~budget:20 25 4096));
       Alcotest.test_case "resume: correct" `Quick

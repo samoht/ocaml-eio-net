@@ -130,9 +130,11 @@ let byte_rules ~all trace =
             (fun fault -> { kind = `Read; socket = s; side; at; fault })
             Fault.[ Reset; Eof; Hang ])
         (read_positions ~all trace e)
-      @ List.map
+      @ List.concat_map
           (fun at ->
-            { kind = `Write; socket = s; side; at; fault = Fault.Reset })
+            List.map
+              (fun fault -> { kind = `Write; socket = s; side; at; fault })
+              Fault.[ Reset; Eof ])
           (write_positions ~all trace e))
     (ends trace)
 
