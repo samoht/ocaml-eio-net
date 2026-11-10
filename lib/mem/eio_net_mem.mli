@@ -198,10 +198,10 @@ val connection : _ Eio.Net.stream_socket -> int option
     or when the switch passed to [accept] finishes. The two ends of a connection
     may be used from different domains: a write in one wakes a read waiting in
     the other. An accepted connection's peer address is the client's: the
-    loopback address its destination reaches, IPv4-mapped for an IPv4 client of
-    an IPv6 listener, at a port of the dynamic range no socket holds, counted
-    down from its top, or [`Unix ""] for a Unix-domain client, which binds no
-    path.
+    loopback address of its destination's family, 127.0.0.1 for any address of
+    127.0.0.0/8 as Linux picks it, IPv4-mapped for an IPv4 client of an IPv6
+    listener, at a port of the dynamic range no socket holds, counted down from
+    its top, or [`Unix ""] for a Unix-domain client, which binds no path.
 
     Each end of a TCP connection holds its address until both ends have closed:
     the client its own, and the accepted end, queued or accepted, the listener's
@@ -250,11 +250,11 @@ val connection : _ Eio.Net.stream_socket -> int option
     A datagram reaches a socket by the rule a [connect] reaches a listener, and
     arrives whole, after every datagram sent to it before: the network never
     drops, cuts or reorders one, and a send never waits. It comes with the
-    sender's address as the receiver sees it: the loopback address the datagram
-    reached for a wildcard sender, and IPv4-mapped for an IPv4 sender to an IPv6
-    socket. One sent to an address no socket binds is lost, as UDP loses it. A
-    [recv] into a buffer shorter than the datagram gets its first bytes, as a
-    socket does.
+    sender's address as the receiver sees it: the loopback address of the
+    destination's family for a wildcard sender, 127.0.0.1 for any address of
+    127.0.0.0/8, and IPv4-mapped for an IPv4 sender to an IPv6 socket. One sent
+    to an address no socket binds is lost, as UDP loses it. A [recv] into a
+    buffer shorter than the datagram gets its first bytes, as a socket does.
 
     After a socket shut its send side, a send raises the connection reset that
     {!Closed} marks, as EPIPE, and so does one to a Unix-domain socket that shut

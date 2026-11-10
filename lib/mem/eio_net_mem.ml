@@ -97,6 +97,13 @@ let reaching ip =
     let ip = if same ip (any ip) then Eio.Net.Ipaddr.V6.loopback else ip in
     [ ip; Eio.Net.Ipaddr.V6.any ]
 
+(* The address a socket that binds none sends from to [ip]: the loopback
+   interface's own address of its family, as Linux picks it for any address
+   of 127.0.0.0/8. *)
+let source_to ip : Eio.Net.Ipaddr.v4v6 =
+  if is_v4 ip then (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6)
+  else (Eio.Net.Ipaddr.V6.loopback :> Eio.Net.Ipaddr.v4v6)
+
 (* [ip] as a socket bound at [own] sees it: IPv4 to an IPv4 socket, and
    IPv4-mapped to an IPv6 one. *)
 let seen_by (own : Eio.Net.Ipaddr.v4v6) ip =
@@ -1082,13 +1089,13 @@ module Datagram_socket = struct
       | `Unix _, `Unix _ -> None
 
   (* The address a datagram from [t] to [dst] comes from, as [peer] sees it: a
-     wildcard sender sends from the loopback address the destination
-     reaches. *)
+     wildcard sender sends from the loopback address of the destination's
+     family. *)
   let source t ~dst peer : Eio.Net.Sockaddr.datagram =
     match (t.addr, dst, peer.addr) with
     | `Udp (ip, port), `Udp (d, _), `Udp (own, _) ->
         let ip = unmap ip in
-        let ip = if same ip (any ip) then List.hd (reaching d) else ip in
+        let ip = if same ip (any ip) then source_to d else ip in
         `Udp (seen_by own ip, port)
     | addr, _, _ -> addr
 
@@ -1250,14 +1257,13 @@ module Network = struct
         check_options rest
 
   (* Holds the address of a client that connects to [ip] in the listeners'
-     ports, until [release]: the address its destination reaches, in the
-     destination's family, or the one it is bound at, at a free port counted
+     ports, until [release]: the loopback address of its destination's
+     family, in the destination's form, or the one it is bound at, at a free port counted
      down from the top of the dynamic range as listeners count up from its
      bottom. *)
-  let hold t ?bind ip =
-    let reached = List.hd (reaching ip) in
+  let hold t ?bind (ip : Eio.Net.Ipaddr.v4v6) =
     let mapped = String.length (ip :> string) = 16 && is_v4 ip in
-    let reached = if mapped then map reached else reached in
+    let reached = if mapped then map (source_to ip) else source_to ip in
     let ip, port =
       match bind with
       | None -> (reached, 0)

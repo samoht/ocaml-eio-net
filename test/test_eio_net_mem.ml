@@ -1281,6 +1281,33 @@ let test_bind_to_another_family () =
     (raises Eio_net_mem.Address_family ~bind_to:(`Unix "/tmp/c.sock")
        (`Tcp (v4, 80)))
 
+(* A client that binds no address sends from 127.0.0.1 to any address of
+   127.0.0.0/8, as Linux picks the loopback interface's own address, for
+   streams and datagrams alike. *)
+let test_source_address () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let other = Eio.Net.Ipaddr.of_raw "\127\000\000\002" in
+  let pp = Fmt.to_to_string Eio.Net.Sockaddr.pp in
+  let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (other, 8130)) in
+  ignore (Eio.Net.connect ~sw net (`Tcp (other, 8130)));
+  (match Eio.Net.accept ~sw l with
+  | _, `Tcp (ip, _) ->
+      Alcotest.(check string)
+        "stream peer" "127.0.0.1"
+        (Fmt.to_to_string Eio.Net.Ipaddr.pp ip)
+  | _, peer -> Alcotest.failf "peer %s" (pp (peer :> Eio.Net.Sockaddr.t)));
+  let r = Eio.Net.datagram_socket ~sw net (`Udp (other, 8131)) in
+  let s = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  Eio.Net.send s ~dst:(`Udp (other, 8131)) [ Cstruct.of_string "x" ];
+  match Eio.Net.recv r (Cstruct.create 1) with
+  | `Udp (ip, _), _ ->
+      Alcotest.(check string)
+        "datagram source" "127.0.0.1"
+        (Fmt.to_to_string Eio.Net.Ipaddr.pp ip)
+  | src, _ -> Alcotest.failf "source %s" (pp (src :> Eio.Net.Sockaddr.t))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1601,6 +1628,7 @@ let suite =
         test_unavailable_addresses;
       Alcotest.test_case "bind_to another family" `Quick
         test_bind_to_another_family;
+      Alcotest.test_case "the source address" `Quick test_source_address;
       Alcotest.test_case "a connect under a finished switch" `Quick
         test_connect_under_a_finished_switch;
       Alcotest.test_case "a closed connection leaves its switch" `Quick
