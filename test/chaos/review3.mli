@@ -21,6 +21,11 @@ val accept_loop : unit -> unit
 val echo : int -> Eio_net_chaos.env -> unit
 (** [echo n env] echoes [n] lines of varying length. *)
 
+val shed : ?bug:[ `None | `Leak ] -> Eio_net_chaos.env -> unit
+(** [shed ~bug env] runs a server that answers BUSY past two requests at once,
+    and five clients that retry. With [`Leak] a handler that fails is not
+    counted out. *)
+
 val pipelined : Eio_net_chaos.env -> unit
 (** [pipelined env] runs a client that writes its whole batch of requests before
     it reads a reply. *)

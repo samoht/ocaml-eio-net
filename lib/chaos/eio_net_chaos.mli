@@ -99,9 +99,9 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     - at each structural position of what one end writes, the connection is
       reset, or this end closes it, as a process killed in the middle of a
       message does;
-    - each connect is refused, times out after 133 seconds, or finds its host
-      unreachable after 3 seconds; each accepted connection is reset before its
-      first byte, as when the client left first;
+    - each connect is refused, times out after 133 seconds, or finds no route to
+      its host; each accepted connection is reset before its first byte, as when
+      the client left first;
     - each datagram received is lost, duplicated, held back behind the next, or
       replaced with noise from the same sender;
     - on the first 4 KiB of each end, every read returns one byte, or every
@@ -208,10 +208,10 @@ module Fault : sig
              "connect-in-progress", "")), _)]. Eio does not classify it as a
             [Connection_failure]. *)
     | Unreachable
-        (** A connect fails after 3 seconds of the clock, as one to a host that
-            does not answer its address lookup does on Linux, with
-            [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (EHOSTUNREACH,
-             "connect-in-progress", "")), _)]. *)
+        (** A connect fails at once, as one with no route to its host does, with
+            the error eio_posix raises then:
+            [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (ENETUNREACH, "connect",
+             "")), _)]. *)
     | Emfile
         (** An accept fails with the error eio_posix raises when the process has
             no descriptor left:

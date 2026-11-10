@@ -710,9 +710,7 @@ module Network = struct
       | Some Timeout ->
           Eio.Time.sleep ctx.clock 133.;
           raise (Posix.timeout ())
-      | Some Unreachable ->
-          Eio.Time.sleep ctx.clock 3.;
-          raise (Posix.unreachable ())
+      | Some Unreachable -> raise (Posix.unreachable ())
       | Some Hang -> Eio.Fiber.await_cancel ()
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;

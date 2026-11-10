@@ -30,6 +30,11 @@ let suite =
       Alcotest.test_case "200 lines of varying length fit the default budget"
         `Quick
         (Expect.passes (check (echo 200)));
+      Alcotest.test_case "load-shedding server: correct" `Quick
+        (Expect.passes (check (shed ?bug:None)));
+      Alcotest.test_case
+        "load-shedding server: leaked count, by the sampled tier" `Quick
+        (Expect.caught ~tier:"sampled" (check (shed ~bug:`Leak)));
       Alcotest.test_case "pipelined batch: correct" `Quick
         (Expect.passes (check pipelined));
     ] )

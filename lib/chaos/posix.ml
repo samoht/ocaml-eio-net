@@ -6,5 +6,5 @@ let error code name =
   Eio.Exn.create (Eio.Exn.X (Eio_unix.Unix_error (code, name, "")))
 
 let timeout () = error Unix.ETIMEDOUT "connect-in-progress"
-let unreachable () = error Unix.EHOSTUNREACH "connect-in-progress"
+let unreachable () = error Unix.ENETUNREACH "connect"
 let emfile () = error Unix.EMFILE "accept"

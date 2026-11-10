@@ -167,6 +167,68 @@ let echo n env =
            (fun () -> List.map (fun _ -> strict_line r) lines)))
   |> expect env (fun ppf _ -> Fmt.string ppf "a wrong echo") lines
 
+(* A server that sheds load: at most two requests served at once, the others
+   answered BUSY; five clients retry on BUSY, each attempt bounded by 3 s.
+   With [`Leak] the count of busy handlers is not decremented when a handler
+   fails. *)
+let shed ?(bug = `None) env =
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:16 env#net (tcp 7009) in
+  let active = ref 0 in
+  let handle flow =
+    let r = Eio.Buf_read.of_flow flow ~max_size:64 in
+    let req =
+      Eio.Time.with_timeout_exn env#clock 5.0 (fun () -> strict_line r)
+    in
+    Eio.Time.sleep env#clock 1.0;
+    let id = String.sub req 5 (String.length req - 5) in
+    Eio.Flow.copy_string ("OK " ^ id ^ "\n") flow
+  in
+  let serve flow =
+    incr active;
+    if bug = `Leak then begin
+      handle flow;
+      decr active
+    end
+    else Fun.protect ~finally:(fun () -> decr active) (fun () -> handle flow)
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let rec loop () =
+        Eio.Net.accept_fork ~sw l ~on_error:ignore (fun flow _ ->
+            if !active >= 2 then Eio.Flow.copy_string "BUSY\n" flow
+            else serve flow);
+        loop ()
+      in
+      loop ());
+  let client i =
+    let t0 = Eio.Time.now env#clock in
+    let rec attempt () =
+      if Eio.Time.now env#clock -. t0 > 20. then false
+      else
+        match
+          Eio.Time.with_timeout_exn env#clock 3.0 (fun () ->
+              Eio.Switch.run @@ fun sw ->
+              let flow = Eio.Net.connect ~sw env#net (tcp 7009) in
+              Eio.Flow.copy_string (Fmt.str "WORK %d\n" i) flow;
+              strict_line (Eio.Buf_read.of_flow flow ~max_size:64))
+        with
+        | "BUSY" ->
+            Eio.Time.sleep env#clock 0.5;
+            attempt ()
+        | s when s = Fmt.str "OK %d" i -> true
+        | s -> Fmt.failwith "client %d got %S" i s
+        | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) ->
+            Eio.Time.sleep env#clock 0.2;
+            attempt ()
+    in
+    attempt ()
+  in
+  let results = Eio.Fiber.List.map client [ 1; 2; 3; 4; 5 ] in
+  if Eio_net_chaos.outage env then
+    begin if List.exists Fun.id results then failwith "served during the outage"
+    end
+  else if not (List.for_all Fun.id results) then failwith "a client gave up"
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in
