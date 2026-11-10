@@ -871,11 +871,32 @@ module Datagram_socket = struct
      send fails with EPIPE, as does one to a Unix-domain socket that shut its
      receive side; Linux checks a Unix-domain socket's shutdown before its
      destination, and a UDP socket's after. *)
-  let send t ?dst bufs =
-    if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
-    let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
-    let send_shut () = Mutex.protect t.lock (fun () -> t.send_shut) in
-    if local && send_shut () then raise (reset_exn ());
+  (* Queues the datagram at [peer], unless [peer] refuses it (a Unix-domain
+     socket that shut its receive side) or has closed. *)
+  let deliver t ~local ~dst peer bufs =
+    let delivered =
+      Mutex.protect peer.lock @@ fun () ->
+      if local && peer.recv_shut then `Refused
+      else if peer.closed then `Lost
+      else begin
+        Queue.push
+          (source t ~dst peer, Cstruct.to_string (Cstruct.concat bufs))
+          peer.queued;
+        `Delivered
+      end
+    in
+    match delivered with
+    | `Delivered -> Eio.Condition.broadcast peer.readable
+    | `Lost -> ()
+    | `Refused -> raise (reset_exn ())
+
+  (* The destination of a send, or the error a send without one raises; a
+     send shutdown first for a Unix-domain socket, after for a UDP one. *)
+  let destination t ~local dst =
+    let shut () =
+      if Mutex.protect t.lock (fun () -> t.send_shut) then raise (reset_exn ())
+    in
+    if local then shut ();
     let dst =
       match dst with
       | Some dst -> dst
@@ -883,7 +904,13 @@ module Datagram_socket = struct
           let code = if local then Not_connected else No_destination in
           raise (Eio.Exn.create (Eio.Exn.X code))
     in
-    if send_shut () then raise (reset_exn ());
+    shut ();
+    dst
+
+  let send t ?dst bufs =
+    if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
+    let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
+    let dst = destination t ~local dst in
     Option.iter
       (fun code -> raise (Eio.Exn.create (Eio.Exn.X code)))
       (refusal t dst bufs);
@@ -900,22 +927,7 @@ module Datagram_socket = struct
     | None, None -> (
         match dst with `Unix _ -> raise (no_file ()) | `Udp _ -> ())
     | Some Datagram, None -> ()
-    | (None | Some Datagram), Some peer -> (
-        let delivered =
-          Mutex.protect peer.lock @@ fun () ->
-          if local && peer.recv_shut then `Refused
-          else if peer.closed then `Lost
-          else begin
-            Queue.push
-              (source t ~dst peer, Cstruct.to_string (Cstruct.concat bufs))
-              peer.queued;
-            `Delivered
-          end
-        in
-        match delivered with
-        | `Delivered -> Eio.Condition.broadcast peer.readable
-        | `Lost -> ()
-        | `Refused -> raise (reset_exn ()))
+    | (None | Some Datagram), Some peer -> deliver t ~local ~dst peer bufs
 
   (* A datagram longer than [buf] is cut to it, as a socket cuts it. *)
   let recv t buf =
