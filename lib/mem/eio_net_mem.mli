@@ -187,8 +187,8 @@ val pipe :
     follows, raises the error that {!Address_in_use} marks; [reuse_port] raises
     [Invalid_argument], and [setsockopt] refuses every option. The socket is
     closed, and its address free again, when the switch passed to
-    [datagram_socket] finishes; a send or a receive on it then raises
-    [Invalid_argument].
+    [datagram_socket] finishes; a send, a receive or a shutdown on it then
+    raises [Invalid_argument].
 
     A datagram reaches a socket by the rule a [connect] reaches a listener, and
     arrives whole, after every datagram sent to it before: the network never

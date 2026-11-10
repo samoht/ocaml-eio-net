@@ -20,7 +20,6 @@ type exception_ = {
   linux : string;
 }
 
-let dgrams = [ Udp4; Udp6; Unix_dgram ]
 let ex why transports op ~mem ~linux = { why; transports; op; mem; linux }
 
 (* Choices the mli documents as following macOS. *)
@@ -29,8 +28,6 @@ let documented = []
 (* Divergences from Linux not fixed yet. *)
 let known =
   [
-    ex "M7: a datagram shutdown after close is Invalid_argument" dgrams
-      "shutdown" ~mem:"ok" ~linux:"Invalid_argument";
     ex "M8: a Unix datagram send without a destination is ENOTCONN"
       [ Unix_dgram ] "send_nodst" ~mem:"EDESTADDRREQ" ~linux:"ENOTCONN";
   ]

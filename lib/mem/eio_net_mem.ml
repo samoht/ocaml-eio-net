@@ -944,6 +944,8 @@ module Datagram_socket = struct
 
   let shutdown t cmd =
     Mutex.protect t.lock @@ fun () ->
+    if t.closed then
+      invalid_arg "eio-net.mem: shutdown on a closed datagram socket";
     match cmd with
     | `Send -> t.send_shut <- true
     | `Receive -> t.recv_shut <- true
