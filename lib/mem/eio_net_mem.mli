@@ -137,11 +137,22 @@ val v :
     in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}). Without
     a clock there is no TIME_WAIT: an address is free once both ends close.
 
-    Host resolution maps ["127.0.0.1"] and ["::1"] with a numeric service to the
-    loopback address of their family at that port, once as a stream address and
-    once as a datagram address, and ["localhost"] to both families, IPv6 first,
-    as glibc and macOS order them. Any other host or service maps to no address.
-*)
+    Host resolution reads numbers as glibc's getaddrinfo(3) does, on a
+    dual-stack host with no services database and no name server. The service is
+    read first: as strtoul(3) reads it in base 10, the whole string, with
+    leading spaces and a sign, the empty one as 0, kept to its low 32 bits and
+    taken modulo 65536; a negative one, or any other string, raises
+    [Address_lookup_failed SERVICE], service names such as ["http"] included.
+    The host is an IPv4 address as inet_aton(3) reads it (["127.1"],
+    ["0x7f.1"]), an IPv6 one, ["localhost"] in any case with an optional final
+    dot, or the empty name, the last two standing for [::1] then [127.0.0.1];
+    any other name maps to no address, and so do an empty host and service. Each
+    address comes once as a stream address and once as a datagram one. On a real
+    system the loopback order, and whether IPv6 addresses come at all, depend on
+    the host's addresses and its [/etc/hosts]: glibc leaves them out on a host
+    with no IPv6 address but loopback, and turns ["localhost"]'s [::1] into
+    [127.0.0.1]. The order here is the one glibc and macOS give on a dual-stack
+    host, fixed so that a test sees the same addresses everywhere. *)
 
 val pipe :
   ?capacity:int ->

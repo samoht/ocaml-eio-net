@@ -49,6 +49,77 @@ let test_resolve_localhost () =
   | exception Eio.Io (Eio.Net.E (Address_lookup_failed _), _) -> ()
   | _ -> Alcotest.fail "another host resolved"
 
+(* Host and service resolution follows glibc's for numbers: a service is
+   read as strtoul(3) reads it in base 10, kept to its low 32 bits, refused
+   when that is negative and otherwise taken modulo 65536; a host is an IPv4
+   address as inet_aton(3) reads it, an IPv6 one, "localhost" in any case
+   with an optional final dot, or the empty name for the loopback
+   addresses. *)
+let test_resolve_numbers () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let resolve name service =
+    match Eio.Net.getaddrinfo_stream net name ~service with
+    | addrs ->
+        String.concat " "
+          (List.map
+             (Fmt.str "%a" Eio.Net.Sockaddr.pp)
+             (addrs :> Eio.Net.Sockaddr.t list))
+    | exception Eio.Io (Eio.Net.E (Address_lookup_failed SERVICE), _) ->
+        "SERVICE"
+    | exception Eio.Io (Eio.Net.E (Address_lookup_failed NONAME), _) -> "NONAME"
+  in
+  List.iter
+    (fun (service, expected) ->
+      Alcotest.(check string)
+        (Fmt.str "service %S" service)
+        expected
+        (resolve "127.0.0.1" service))
+    [
+      ("80", "tcp:127.0.0.1:80");
+      ("", "tcp:127.0.0.1:0");
+      ("65536", "tcp:127.0.0.1:0");
+      ("+80", "tcp:127.0.0.1:80");
+      ("080", "tcp:127.0.0.1:80");
+      (" 80", "tcp:127.0.0.1:80");
+      ("\t7", "tcp:127.0.0.1:7");
+      ("-0", "tcp:127.0.0.1:0");
+      ("4294967296", "tcp:127.0.0.1:0");
+      ("4294967295", "SERVICE");
+      ("2147483648", "SERVICE");
+      ("99999999999999999999", "SERVICE");
+      ("-1", "SERVICE");
+      ("0x50", "SERVICE");
+      ("1_000", "SERVICE");
+      ("0o17", "SERVICE");
+      ("8 ", "SERVICE");
+      ("+", "SERVICE");
+      ("http", "SERVICE");
+    ];
+  List.iter
+    (fun (name, expected) ->
+      Alcotest.(check string)
+        (Fmt.str "host %S" name) expected (resolve name "80"))
+    [
+      ("127.1", "tcp:127.0.0.1:80");
+      ("0x7f.1", "tcp:127.0.0.1:80");
+      ("2130706433", "tcp:127.0.0.1:80");
+      ("10.1.2.3", "tcp:10.1.2.3:80");
+      ("0.0.0.0", "tcp:0.0.0.0:80");
+      ("::", "tcp:[::]:80");
+      ("::ffff:127.0.0.1", "tcp:[::ffff:127.0.0.1]:80");
+      ("LOCALHOST", "tcp:[::1]:80 tcp:127.0.0.1:80");
+      ("localhost.", "tcp:[::1]:80 tcp:127.0.0.1:80");
+      ("", "tcp:[::1]:80 tcp:127.0.0.1:80");
+      ("256.0.0.1", "NONAME");
+      ("127.0.0.1 ", "NONAME");
+      ("example.org", "NONAME");
+    ];
+  Alcotest.(check string) "no host, no service" "NONAME" (resolve "" "");
+  Alcotest.(check string)
+    "a bad service first" "SERVICE" (resolve "nowhere" "-1")
+
 let test_connect_to_wildcard_listener () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -1585,6 +1656,7 @@ let suite =
     [
       Alcotest.test_case "tcp roundtrip" `Quick test_tcp_roundtrip;
       Alcotest.test_case "localhost resolution" `Quick test_resolve_localhost;
+      Alcotest.test_case "numeric resolution" `Quick test_resolve_numbers;
       Alcotest.test_case "connect to wildcard listener" `Quick
         test_connect_to_wildcard_listener;
       Alcotest.test_case "listen on port 0 binds a free port" `Quick
