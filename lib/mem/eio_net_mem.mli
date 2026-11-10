@@ -199,6 +199,11 @@ val pipe :
     [recv] into a buffer shorter than the datagram gets its first bytes, as a
     socket does.
 
+    After a socket shut its send side, a send raises the connection reset that
+    {!Closed} marks, as EPIPE, and so does one to a Unix-domain socket that shut
+    its receive side. A socket that shut its receive side still receives what is
+    queued and, over UDP, what arrives after, as on Linux.
+
     A send without a destination raises the error that {!No_destination} marks,
     since no socket is connected. A datagram longer than 65507 bytes to an IPv4
     address, 65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default

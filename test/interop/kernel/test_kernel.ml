@@ -29,12 +29,6 @@ let documented = []
 (* Divergences from Linux not fixed yet. *)
 let known =
   [
-    ex "M6: a datagram send after our own send shutdown is EPIPE" dgrams "send"
-      ~mem:"ok" ~linux:"Reset";
-    ex "M6: a datagram send after our own send shutdown is EPIPE (closed peer)"
-      [ Unix_dgram ] "send" ~mem:"Refused" ~linux:"Reset";
-    ex "M6: a datagram send after our own send shutdown is EPIPE (no dst)"
-      [ Unix_dgram ] "send_nodst" ~mem:"EDESTADDRREQ" ~linux:"Reset";
     ex "M7: a datagram shutdown after close is Invalid_argument" dgrams
       "shutdown" ~mem:"ok" ~linux:"Invalid_argument";
     ex "M8: a Unix datagram send without a destination is ENOTCONN"

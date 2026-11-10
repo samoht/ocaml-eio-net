@@ -771,6 +771,8 @@ module Datagram_socket = struct
     queued : (Eio.Net.Sockaddr.datagram * string) Queue.t;
     readable : Eio.Condition.t;
     mutable closed : bool;
+    mutable send_shut : bool;
+    mutable recv_shut : bool;
     mutable release : Eio.Switch.hook;
   }
 
@@ -805,6 +807,8 @@ module Datagram_socket = struct
         queued = Queue.create ();
         readable = Eio.Condition.create ();
         closed = false;
+        send_shut = false;
+        recv_shut = false;
         release = Eio.Switch.null_hook;
       }
     in
@@ -859,14 +863,21 @@ module Datagram_socket = struct
 
   (* A datagram to an address no socket binds is lost, as UDP loses it, and
      the sender is not told; at a Unix path, the send finds no file, or one
-     that no socket holds any more and refuses it. *)
+     that no socket holds any more and refuses it. After a send shutdown a
+     send fails with EPIPE, as does one to a Unix-domain socket that shut its
+     receive side; Linux checks a Unix-domain socket's shutdown before its
+     destination, and a UDP socket's after. *)
   let send t ?dst bufs =
     if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
+    let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
+    let send_shut () = Mutex.protect t.lock (fun () -> t.send_shut) in
+    if local && send_shut () then raise (reset_exn ());
     let dst =
       match dst with
       | Some dst -> dst
       | None -> raise (Eio.Exn.create (Eio.Exn.X No_destination))
     in
+    if send_shut () then raise (reset_exn ());
     Option.iter
       (fun code -> raise (Eio.Exn.create (Eio.Exn.X code)))
       (refusal t dst bufs);
@@ -883,16 +894,22 @@ module Datagram_socket = struct
     | None, None -> (
         match dst with `Unix _ -> raise (no_file ()) | `Udp _ -> ())
     | Some Datagram, None -> ()
-    | (None | Some Datagram), Some peer ->
+    | (None | Some Datagram), Some peer -> (
         let delivered =
           Mutex.protect peer.lock @@ fun () ->
-          if not peer.closed then
+          if local && peer.recv_shut then `Refused
+          else if peer.closed then `Lost
+          else begin
             Queue.push
               (source t ~dst peer, Cstruct.to_string (Cstruct.concat bufs))
               peer.queued;
-          not peer.closed
+            `Delivered
+          end
         in
-        if delivered then Eio.Condition.broadcast peer.readable
+        match delivered with
+        | `Delivered -> Eio.Condition.broadcast peer.readable
+        | `Lost -> ()
+        | `Refused -> raise (reset_exn ()))
 
   (* A datagram longer than [buf] is cut to it, as a socket cuts it. *)
   let recv t buf =
@@ -925,7 +942,15 @@ module Datagram_socket = struct
       Eio.Condition.broadcast t.readable
     end
 
-  let shutdown _ _ = ()
+  let shutdown t cmd =
+    Mutex.protect t.lock @@ fun () ->
+    match cmd with
+    | `Send -> t.send_shut <- true
+    | `Receive -> t.recv_shut <- true
+    | `All ->
+        t.send_shut <- true;
+        t.recv_shut <- true
+
   let setsockopt _ opt _ = Sockopt.datagram opt
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =

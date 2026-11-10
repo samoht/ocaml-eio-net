@@ -269,9 +269,7 @@ let unix_dgram_cases =
          nothing after. On macOS the shutdown of an unconnected socket fails
          with ENOTCONN, which Eio ignores, so the second send goes through. *)
       per_dgram ~file:unix_non_stream ~test:"PeerWriteShutdown" [ Unix_dgram ]
-        (fun _ ->
-          expect ~macos:"sent; abc; abc" ~mem:"sent; abc; abc"
-            "reset; abc; blocked")
+        (fun _ -> expect ~macos:"sent; abc; abc" "reset; abc; blocked")
         (fun ctx k ->
           let a, a_addr = dgram_socket ctx k in
           let b, _ = dgram_socket ctx k in
