@@ -272,6 +272,34 @@ let rpc ?(bug = `None) env =
         [ "a"; "bb"; "ccc" ])
   |> expect env Fmt.Dump.(list string) [ "A"; "BB"; "CCC" ]
 
+(* Both ends write a large greeting before they read the other's: 30 KB from
+   the server, 20 KB from the client. A Linux connection holds that much with
+   its buffers at their minimum. *)
+let greetings env =
+  let server_hello = String.make 30_000 's'
+  and client_hello = String.make 20_000 'c' in
+  let read_exactly flow n =
+    let buf = Cstruct.create n in
+    Eio.Flow.read_exact flow buf;
+    Cstruct.to_string buf
+  in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7070) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          Eio.Flow.copy_string server_hello flow;
+          let got =
+            Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+                read_exactly flow 20_000)
+          in
+          if got <> client_hello then failwith "bad client greeting"));
+  attempts env (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect ~sw env#net (tcp 7070) in
+      Eio.Flow.copy_string client_hello flow;
+      read_exactly flow 30_000 = server_hello)
+  |> expect env Fmt.bool true
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in

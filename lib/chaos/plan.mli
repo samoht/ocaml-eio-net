@@ -14,7 +14,7 @@ type lasting =
   | Short_reads  (** Every read of the first 4 KiB returns one byte. *)
   | Short_writes  (** Every write of the first 4 KiB takes one byte. *)
   | Coalesce  (** Every read waits 5 ms first. *)
-  | Tiny_buffers  (** Every connection queues 4 KiB each way. *)
+  | Tiny_buffers  (** Every connection queues 32 KiB each way. *)
   | Outage  (** Every connect is refused and every datagram lost. *)
 
 type scenario = { rules : rule list; lasting : lasting option }

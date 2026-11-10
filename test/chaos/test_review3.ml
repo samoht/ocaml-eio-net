@@ -40,6 +40,8 @@ let suite =
       Alcotest.test_case
         "framed requests: truncated last frame taken, by the linear tier" `Quick
         (Expect.caught ~tier:"linear" (check (rpc ~bug:`Lenient)));
+      Alcotest.test_case "large greetings both ways: correct" `Quick
+        (Expect.passes (check greetings));
       Alcotest.test_case "pipelined batch: correct" `Quick
         (Expect.passes (check pipelined));
     ] )

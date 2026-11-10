@@ -26,7 +26,7 @@ let lasting_text = function
   | Short_reads -> "every read of the first 4 KiB returns one byte"
   | Short_writes -> "every write of the first 4 KiB takes one byte"
   | Coalesce -> "every read waits 5 ms, so it takes what several writes sent"
-  | Tiny_buffers -> "every connection queues 4 KiB each way"
+  | Tiny_buffers -> "every connection queues 32 KiB each way"
   | Outage -> "the outage: every connect refused, every datagram lost"
 
 let rule_key r =

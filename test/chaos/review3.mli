@@ -30,6 +30,10 @@ val rpc : ?bug:[ `None | `Lenient ] -> Eio_net_chaos.env -> unit
 (** [rpc ~bug env] runs length-prefixed requests on one connection. With
     [`Lenient] the client takes a truncated last frame for a whole one. *)
 
+val greetings : Eio_net_chaos.env -> unit
+(** [greetings env] runs an exchange where both ends write tens of kilobytes
+    before they read. *)
+
 val pipelined : Eio_net_chaos.env -> unit
 (** [pipelined env] runs a client that writes its whole batch of requests before
     it reads a reply. *)

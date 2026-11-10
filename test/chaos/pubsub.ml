@@ -88,16 +88,16 @@ let finish ?(bug = `None) t =
         else try Eio.Flow.shutdown s.flow `Send with Eio.Io _ -> ())
     t.subs
 
-(* Five messages of 2 KB: a subscriber that does not read holds two in its
-   socket buffer, and blocks a writer on the third. *)
-let msgs = List.init 5 (fun i -> Fmt.str "m%d %s\n" i (String.make 1996 'x'))
+(* Five messages of 16 KB: a subscriber that does not read holds two in its
+   connection's buffers, and blocks a writer on the third. *)
+let msgs = List.init 5 (fun i -> Fmt.str "m%d %s\n" i (String.make 16_000 'x'))
 
 (* A subscriber: the lines it got, and when it got the last one. *)
 let subscriber ~sw ~clock ?(slow = false) net addr =
   match
     let flow = Eio.Net.connect ~sw net addr in
     Eio.Flow.copy_string "SUB news\n" flow;
-    let r = R.of_flow ~max_size:4096 flow in
+    let r = R.of_flow ~max_size:65536 flow in
     let rec loop acc last =
       if slow then Eio.Time.sleep clock 60.;
       match Eio.Time.with_timeout_exn clock 120. (fun () -> strict_line r) with
