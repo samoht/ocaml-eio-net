@@ -20,19 +20,9 @@ type exception_ = {
   linux : string;
 }
 
-let ex why transports op ~mem ~linux = { why; transports; op; mem; linux }
-
-(* Choices the mli documents as following macOS. *)
-let documented = []
-
-(* Divergences from Linux not fixed yet. *)
-let known =
-  [
-    ex "M8: a Unix datagram send without a destination is ENOTCONN"
-      [ Unix_dgram ] "send_nodst" ~mem:"EDESTADDRREQ" ~linux:"ENOTCONN";
-  ]
-
-let exceptions = documented @ known
+(* Choices the mli documents as following macOS, each listed here: none,
+   as eio-net.mem follows Linux on every sequence these traces hold. *)
+let exceptions : exception_ list = []
 
 type row = { ops : string list; linux : string list; macos : string list }
 

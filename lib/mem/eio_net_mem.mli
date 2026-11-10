@@ -58,9 +58,9 @@ type Eio.Exn.Backend.t +=
             [Unix.Unix_error] from [listen], and [Eio_net_unix.Tcp.listen] as an
             {!Eio.Io} error. *)
   | No_destination
-        (** The backend code of the unclassified {!Eio.Io} error a datagram
-            [send] without a destination raises, as a socket that is not
-            connected fails it with [EDESTADDRREQ]. *)
+        (** The backend code of the unclassified {!Eio.Io} error a UDP [send]
+            without a destination raises, as a socket that is not connected
+            fails it with [EDESTADDRREQ]. *)
   | Message_too_long
         (** The backend code of the unclassified {!Eio.Io} error a datagram
             [send] raises for a datagram longer than a socket sends, where a
@@ -83,6 +83,10 @@ type Eio.Exn.Backend.t +=
             [send] raises at the path of a stream socket, and a [connect] at the
             path of a datagram socket, where a socket fails with [EPROTOTYPE].
         *)
+  | Not_connected
+        (** The backend code of the unclassified {!Eio.Io} error a Unix-domain
+            datagram [send] without a destination raises, as Linux fails it with
+            [ENOTCONN]; macOS says [EDESTADDRREQ]. *)
 
 (** {1 Networks} *)
 
@@ -204,14 +208,14 @@ val pipe :
     its receive side. A socket that shut its receive side still receives what is
     queued and, over UDP, what arrives after, as on Linux.
 
-    A send without a destination raises the error that {!No_destination} marks,
-    since no socket is connected. A datagram longer than 65507 bytes to an IPv4
-    address, 65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default
-    send buffer allows, raises the error that {!Message_too_long} marks. These
-    are Linux's limits: by default, macOS refuses a UDP datagram longer than
-    9216 bytes and a Unix-domain one longer than 2048. One sent to UDP port 0
-    raises the error that {!Invalid_port} marks, as on Linux; macOS sends it
-    over IPv4.
+    A send without a destination raises the error that {!No_destination} marks
+    over UDP, and {!Not_connected} on a Unix path, as Linux says, since no
+    socket is connected. A datagram longer than 65507 bytes to an IPv4 address,
+    65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default send
+    buffer allows, raises the error that {!Message_too_long} marks. These are
+    Linux's limits: by default, macOS refuses a UDP datagram longer than 9216
+    bytes and a Unix-domain one longer than 2048. One sent to UDP port 0 raises
+    the error that {!Invalid_port} marks, as on Linux; macOS sends it over IPv4.
 
     A datagram sent from an IPv6 address to an IPv4-mapped one, or the reverse,
     raises the error that {!Network_unreachable} or {!Address_family} marks. One

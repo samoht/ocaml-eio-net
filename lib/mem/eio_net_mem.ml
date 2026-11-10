@@ -10,6 +10,7 @@ type Eio.Exn.Backend.t +=
   | Network_unreachable
   | Address_family
   | Wrong_socket_type
+  | Not_connected
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -39,6 +40,9 @@ let () =
         true
     | Wrong_socket_type ->
         Format.pp_print_string ppf "Wrong socket type (eio-net.mem)";
+        true
+    | Not_connected ->
+        Format.pp_print_string ppf "Not connected (eio-net.mem)";
         true
     | _ -> false)
 
@@ -875,7 +879,9 @@ module Datagram_socket = struct
     let dst =
       match dst with
       | Some dst -> dst
-      | None -> raise (Eio.Exn.create (Eio.Exn.X No_destination))
+      | None ->
+          let code = if local then Not_connected else No_destination in
+          raise (Eio.Exn.create (Eio.Exn.X code))
     in
     if send_shut () then raise (reset_exn ());
     Option.iter

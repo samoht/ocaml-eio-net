@@ -68,6 +68,7 @@ let classify = function
   | Eio.Io (Eio.Net.E (Connection_failure _), _) -> "connect failed"
   | Eio.Io (Eio.Fs.E (Not_found _), _) -> "ENOENT"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> "EADDRINUSE"
+  | Eio.Io (Eio.Exn.X Eio_net_mem.Not_connected, _) -> "ENOTCONN"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Wrong_socket_type, _) -> "EPROTOTYPE"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Address_family, _) -> "EAFNOSUPPORT"
   | Eio.Io (Eio.Exn.X Eio_net_mem.Network_unreachable, _) -> "ENETUNREACH"

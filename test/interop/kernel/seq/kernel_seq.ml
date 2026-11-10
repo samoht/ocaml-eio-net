@@ -125,6 +125,7 @@ let errno : Unix.error -> string = function
 let mem_errno : Eio.Exn.Backend.t -> string option = function
   | Eio_net_mem.Address_in_use -> Some "EADDRINUSE"
   | Eio_net_mem.No_destination -> Some "EDESTADDRREQ"
+  | Eio_net_mem.Not_connected -> Some "ENOTCONN"
   | Eio_net_mem.Message_too_long -> Some "EMSGSIZE"
   | Eio_net_mem.Invalid_port -> Some "EINVAL"
   | Eio_net_mem.Network_unreachable -> Some "ENETUNREACH"
