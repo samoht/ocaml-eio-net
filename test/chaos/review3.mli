@@ -42,6 +42,10 @@ val unix_datagram : Eio_net_chaos.env -> unit
 (** [unix_datagram env] runs a ping-pong over Unix-domain datagrams, with no
     retry. *)
 
+val lease : ?bug:[ `None | `Receipt ] -> Eio_net_chaos.env -> unit
+(** [lease ~bug env] runs a leader lease over UDP between two clients. With
+    [`Receipt] a client counts its lease from when the grant arrived. *)
+
 val pipelined : Eio_net_chaos.env -> unit
 (** [pipelined env] runs a client that writes its whole batch of requests before
     it reads a reply. *)

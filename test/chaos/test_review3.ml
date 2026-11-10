@@ -46,6 +46,12 @@ let suite =
         (Expect.passes (check unix_stream));
       Alcotest.test_case "Unix-domain datagram ping-pong: correct" `Quick
         (Expect.passes (check unix_datagram));
+      Alcotest.test_case "leader lease: correct" `Quick
+        (Expect.passes (check (lease ?bug:None)));
+      Alcotest.test_case
+        "leader lease: counted from the grant's arrival, by the linear tier"
+        `Quick
+        (Expect.caught ~tier:"linear" (check (lease ~bug:`Receipt)));
       Alcotest.test_case "pipelined batch: correct" `Quick
         (Expect.passes (check pipelined));
     ] )

@@ -169,14 +169,15 @@ let structural_rules (trace : trace) =
       (* A Unix-domain connect has no handshake to lose and no route to
          miss, a Unix-domain client that leaves first closes, and a
          Unix-domain datagram is never lost, duplicated, reordered or
-         garbled (unix(7)). *)
+         garbled (unix(7)); any datagram may arrive late, alone. *)
       match (op.kind, op.family) with
       | `Connect, `Inet -> [ r Refuse; r Timeout; r Unreachable ]
       | `Connect, `Unix -> [ r Refuse ]
       | `Accept, `Inet -> [ r Reset ]
       | `Accept, `Unix -> [ r Eof ]
-      | `Recv, `Inet -> [ r Drop; r Dup; r Reorder; r (Garble 12) ]
-      | `Recv, `Unix -> []
+      | `Recv, `Inet ->
+          [ r Drop; r Dup; r Reorder; r (Garble 12); r (Stall 0.05) ]
+      | `Recv, `Unix -> [ r (Stall 0.05) ]
       | (`Read | `Write), _ -> [])
     trace
 

@@ -362,6 +362,103 @@ let unix_datagram env =
       if got <> "pong" ^ i then Fmt.failwith "got %S" got)
     [ "1"; "2"; "3" ]
 
+(* A leader lease over UDP: a server grants a lease of 1 s; client A renews
+   it until t = 2 s, then stops; B polls and must take over. The leaderships
+   the clients believe in must never overlap. With [`Receipt] a client counts
+   its lease from when the grant arrived, not from when it asked. *)
+let lease ?(bug = `None) env =
+  let server_addr = `Udp (Eio.Net.Ipaddr.V4.loopback, 7100) in
+  let server ~sw =
+    let sock = Eio.Net.datagram_socket ~sw env#net server_addr in
+    let holder = ref None and expiry = ref 0. in
+    let buf = Cstruct.create 64 in
+    let rec loop () =
+      let src, n = Eio.Net.recv sock buf in
+      (match String.split_on_char ' ' (Cstruct.to_string buf ~len:n) with
+      | [ "ACQ"; id; seq ]
+        when (id = "A" || id = "B") && int_of_string_opt seq <> None ->
+          let now = Eio.Time.now env#clock in
+          let free =
+            match !holder with
+            | None -> true
+            | Some h -> h = id || now >= !expiry
+          in
+          let reply =
+            if free then begin
+              holder := Some id;
+              expiry := now +. 1.0;
+              "OK " ^ seq
+            end
+            else "NO " ^ seq
+          in
+          Eio.Net.send sock ~dst:src [ Cstruct.of_string reply ]
+      | _ -> ());
+      loop ()
+    in
+    loop ()
+  in
+  let client ~sw ~id ~port ~start ~stop beliefs =
+    let sock =
+      Eio.Net.datagram_socket ~sw env#net
+        (`Udp (Eio.Net.Ipaddr.V4.loopback, port))
+    in
+    let clock = env#clock in
+    Eio.Time.sleep clock start;
+    let until = ref neg_infinity and since = ref 0. and seq = ref 0 in
+    let buf = Cstruct.create 64 in
+    let rec await s =
+      let _, n = Eio.Net.recv sock buf in
+      match String.split_on_char ' ' (Cstruct.to_string buf ~len:n) with
+      | [ "OK"; k ] when int_of_string_opt k = Some s -> `Ok
+      | [ "NO"; k ] when int_of_string_opt k = Some s -> `No
+      | _ -> await s
+    in
+    let rec loop () =
+      let asked = Eio.Time.now clock in
+      if asked < stop then begin
+        incr seq;
+        let s = !seq in
+        Eio.Net.send sock ~dst:server_addr
+          [ Cstruct.of_string (Fmt.str "ACQ %s %d" id s) ];
+        let r =
+          match Eio.Time.with_timeout_exn clock 0.2 (fun () -> await s) with
+          | r -> r
+          | exception Eio.Time.Timeout -> `Lost
+        in
+        let now = Eio.Time.now clock in
+        (match r with
+        | `Ok ->
+            let base = if bug = `Receipt then now else asked in
+            if !until < now then since := now;
+            until := base +. 1.0
+        | `No | `Lost -> ());
+        let next = if !until > now then 0.3 else 0.02 in
+        Eio.Time.sleep clock
+          (Float.max 0. (next -. (Eio.Time.now clock -. now)));
+        loop ()
+      end
+    in
+    loop ();
+    if !until > !since then beliefs := (id, !since, !until) :: !beliefs
+  in
+  let beliefs = ref [] in
+  Eio.Switch.run (fun sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () -> server ~sw);
+      Eio.Fiber.both
+        (fun () -> client ~sw ~id:"A" ~port:7101 ~start:0. ~stop:2.0 beliefs)
+        (fun () -> client ~sw ~id:"B" ~port:7102 ~start:0.1 ~stop:5.0 beliefs));
+  let of_id i = List.filter (fun (j, _, _) -> i = j) !beliefs in
+  List.iter
+    (fun (_, sa, ea) ->
+      List.iter
+        (fun (_, sb, eb) ->
+          if sa < eb && sb < ea then
+            Fmt.failwith "overlap: A [%.3f,%.3f] B [%.3f,%.3f]" sa ea sb eb)
+        (of_id "B"))
+    (of_id "A");
+  if of_id "B" = [] && not (Eio_net_chaos.outage env) then
+    failwith "B never led"
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in

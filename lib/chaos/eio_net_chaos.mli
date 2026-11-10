@@ -110,8 +110,8 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     - each connect is refused, times out after 133 seconds, or finds no route to
       its host; each accepted connection is reset before its first byte, as when
       the client left first;
-    - each datagram received is lost, duplicated, held back behind the next, or
-      replaced with noise from the same sender;
+    - each datagram received is lost, duplicated, held back behind the next,
+      replaced with noise from the same sender, or delivered 50 ms late, alone;
     - on the first 4 KiB of each end, every read returns one byte, or every
       write takes one byte; every read waits 5 ms and takes what several writes
       sent; every connection queues 32 KiB each way, about what a Linux
