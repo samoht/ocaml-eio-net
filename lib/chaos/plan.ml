@@ -27,7 +27,7 @@ let lasting_text = function
   | Short_writes -> "every write of the first 4 KiB takes one byte"
   | Coalesce -> "every read waits 5 ms, so it takes what several writes sent"
   | Tiny_buffers -> "every connection queues 32 KiB each way"
-  | Outage -> "the outage: every connect refused, every datagram lost"
+  | Outage -> "the outage: every connect refused, every datagram over IP lost"
 
 let rule_key r =
   Fmt.str "%s%d%s@%d.%s" (Op.kind_name r.kind) r.socket (Op.side_name r.side)
@@ -102,12 +102,25 @@ let structural writes =
 
 let around l = List.concat_map (fun b -> [ b - 1; b; b + 1 ]) l
 
+(* The address family of an end. *)
+let family trace (s, side) =
+  List.find_map
+    (fun ((op : Op.t), _) ->
+      if op.socket = s && op.side = side then Some op.family else None)
+    trace
+  |> Option.value ~default:`Inet
+
+(* Over IP a cut may land a byte either side of a write's end, as TCP splits
+   and joins segments. A Unix-domain stream queues each small write whole
+   (unix(7)), so a cut lands between two writes. *)
+let near trace e l = match family trace e with `Inet -> around l | `Unix -> l
+
 (* Where a reader's bytes may be cut: around the ends of the peer's writes.
    [all] takes every write, not only the structural ones. *)
 let read_positions ~all trace ((s, side) as e) =
   let w = ops `Write (s, other side) trace in
   let w = if all then w else structural w in
-  0 :: around (List.map (fun (op : Op.t) -> op.offset + op.length) w)
+  0 :: near trace e (List.map (fun (op : Op.t) -> op.offset + op.length) w)
   |> List.filter (reached trace e)
   |> List.sort_uniq compare
 
@@ -117,9 +130,10 @@ let write_positions ~all trace e =
     List.fold_left (fun m (op : Op.t) -> max m (op.offset + op.length)) 0 w
   in
   let w = if all then w else structural w in
-  (* Around the start of each write, and the last byte of the stream, where a
-     writer that closes cuts its last message. *)
-  (top - 1) :: around (List.map (fun (op : Op.t) -> op.offset) w)
+  (* Around the start of each write and, over IP, the last byte of the
+     stream, where a writer that closes cuts its last message. *)
+  let starts = near trace e (List.map (fun (op : Op.t) -> op.offset) w) in
+  (match family trace e with `Inet -> (top - 1) :: starts | `Unix -> starts)
   |> List.filter (fun b -> b >= 0 && b < top)
   |> List.sort_uniq compare
 
@@ -152,18 +166,37 @@ let structural_rules (trace : trace) =
           fault;
         }
       in
-      match op.kind with
-      | `Connect -> [ r Refuse; r Timeout; r Unreachable ]
-      | `Accept -> [ r Reset ]
-      | `Recv -> [ r Drop; r Dup; r Reorder; r (Garble 12) ]
-      | `Read | `Write -> [])
+      (* A Unix-domain connect has no handshake to lose and no route to
+         miss, a Unix-domain client that leaves first closes, and a
+         Unix-domain datagram is never lost, duplicated, reordered or
+         garbled (unix(7)). *)
+      match (op.kind, op.family) with
+      | `Connect, `Inet -> [ r Refuse; r Timeout; r Unreachable ]
+      | `Connect, `Unix -> [ r Refuse ]
+      | `Accept, `Inet -> [ r Reset ]
+      | `Accept, `Unix -> [ r Eof ]
+      | `Recv, `Inet -> [ r Drop; r Dup; r Reorder; r (Garble 12) ]
+      | `Recv, `Unix -> []
+      | (`Read | `Write), _ -> [])
     trace
 
 let singles trace = structural_rules trace @ byte_rules ~all:false trace
 
+(* One-byte reads and writes happen over IP only: a Unix-domain read returns
+   what is queued, up to its buffer, and a write queues whole. *)
+let applies (trace : trace) = function
+  | Short_reads | Short_writes ->
+      List.exists
+        (fun ((op : Op.t), _) -> Op.is_bytes op.kind && op.family = `Inet)
+        trace
+  | Coalesce | Tiny_buffers | Outage -> true
+
 let linear trace =
   List.map (fun r -> { rules = [ r ]; lasting = None }) (singles trace)
-  @ List.map (fun l -> { rules = []; lasting = Some l }) lastings
+  @ List.filter_map
+      (fun l ->
+        if applies trace l then Some { rules = []; lasting = Some l } else None)
+      lastings
 
 let others trace =
   let lin = singles trace in
@@ -201,10 +234,11 @@ let seconds r1 ~first ~(after : trace) =
                 fault;
               }
             in
-            match op.kind with
-            | `Read | `Write -> [ r (Short 1) ]
-            | `Connect | `Recv -> [ r (Stall 0.05) ]
-            | `Accept -> [])
+            match (op.kind, op.family) with
+            | (`Read | `Write), `Inet -> [ r (Short 1) ]
+            | (`Read | `Write), `Unix -> []
+            | (`Connect | `Recv), _ -> [ r (Stall 0.05) ]
+            | `Accept, _ -> [])
           after
       in
       List.filter_map
@@ -229,11 +263,13 @@ let faults s =
   let pending = ref s.rules in
   fun (op : Op.t) ->
     match (s.lasting, op.kind) with
-    | Some Short_reads, `Read when op.offset < 4096 -> Some (Fault.Short 1)
-    | Some Short_writes, `Write when op.offset < 4096 -> Some (Short 1)
+    | Some Short_reads, `Read when op.offset < 4096 && op.family = `Inet ->
+        Some (Fault.Short 1)
+    | Some Short_writes, `Write when op.offset < 4096 && op.family = `Inet ->
+        Some (Short 1)
     | Some Coalesce, `Read -> Some (Stall 0.005)
     | Some Outage, `Connect -> Some Refuse
-    | Some Outage, `Recv -> Some Drop
+    | Some Outage, `Recv when op.family = `Inet -> Some Drop
     | Some _, _ -> None
     | None, _ -> (
         match !pending with

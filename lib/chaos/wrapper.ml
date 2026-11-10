@@ -129,9 +129,9 @@ let ctx ~clock ~outage f =
   }
 
 (* Under [ctx.lock]. *)
-let ask_locked ctx kind ~socket ~side ~offset ~length =
+let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
   ctx.index <- ctx.index + 1;
-  ctx.f { Op.index = ctx.index; kind; socket; side; offset; length }
+  ctx.f { Op.index = ctx.index; kind; socket; side; family; offset; length }
 
 let locked (ctx : ctx) f = Mutex.protect ctx.lock f
 
@@ -189,8 +189,9 @@ let guard ctx target f =
    through again. *)
 let free ctx = locked ctx (fun () -> ctx.exhausted <- false)
 
-let ask ctx kind ~socket ~side ~offset ~length =
-  locked ctx (fun () -> ask_locked ctx kind ~socket ~side ~offset ~length)
+let ask ctx kind ~socket ~side ~family ~offset ~length =
+  locked ctx (fun () ->
+      ask_locked ctx kind ~socket ~side ~family ~offset ~length)
 
 let next_socket ctx =
   ctx.sockets <- ctx.sockets + 1;
@@ -236,6 +237,7 @@ module Flow = struct
     ctx : ctx;
     socket : int;
     side : Op.side;
+    family : Op.family;
     sock : stream;
     conn : conn;
     lock : Mutex.t;
@@ -347,8 +349,8 @@ module Flow = struct
             check_read t;
             if Cstruct.length dst = 0 then None
             else
-              ask t.ctx `Read ~socket:t.socket ~side:t.side ~offset:t.delivered
-                ~length:(Cstruct.length dst))
+              ask t.ctx `Read ~socket:t.socket ~side:t.side ~family:t.family
+                ~offset:t.delivered ~length:(Cstruct.length dst))
       in
       if Cstruct.length dst = 0 then 0
       else
@@ -381,8 +383,8 @@ module Flow = struct
         | `Write when total = 0 -> (None, 0)
         | `Write ->
             let fault =
-              ask t.ctx `Write ~socket:t.socket ~side:t.side ~offset:t.written
-                ~length:total
+              ask t.ctx `Write ~socket:t.socket ~side:t.side ~family:t.family
+                ~offset:t.written ~length:total
             in
             let n =
               match fault with
@@ -451,13 +453,14 @@ module Flow = struct
 
   let handler = Eio.Net.Pi.stream_socket (module Impl)
 
-  let v ctx ~socket ~side ~conn sock : stream =
+  let v ctx ~socket ~side ~family ~conn sock : stream =
     join conn side sock;
     Eio.Resource.T
       ( {
           ctx;
           socket;
           side;
+          family;
           sock;
           conn;
           lock = Mutex.create ();
@@ -484,6 +487,7 @@ module Datagram = struct
   type t = {
     ctx : ctx;
     socket : int;
+    family : Op.family;
     sock : socket;
     lock : Mutex.t;
     mutable ready : datagram list;
@@ -551,8 +555,15 @@ module Datagram = struct
                 `Pass
             | [] -> (
                 let fault =
-                  ask t.ctx `Recv ~socket:t.socket ~side:`Client ~offset
-                    ~length:(Cstruct.length buf)
+                  ask t.ctx `Recv ~socket:t.socket ~side:`Client
+                    ~family:t.family ~offset ~length:(Cstruct.length buf)
+                in
+                (* A Unix-domain socket loses, duplicates, reorders and
+                   garbles nothing (unix(7)). *)
+                let fault =
+                  match (t.family, fault) with
+                  | `Unix, Some (Fault.Drop | Dup | Reorder | Garble _) -> None
+                  | _ -> fault
                 in
                 match fault with
                 | Some Fault.Drop -> `Again
@@ -604,12 +615,13 @@ module Datagram = struct
 
   let handler = Eio.Net.Pi.datagram_socket (module Impl)
 
-  let v ctx (sock : socket) : socket =
+  let v ctx ~family (sock : socket) : socket =
     let socket = locked ctx (fun () -> next_socket ctx) in
     Eio.Resource.T
       ( {
           ctx;
           socket;
+          family;
           sock;
           lock = Mutex.create ();
           ready = [];
@@ -630,6 +642,7 @@ module Listener = struct
     l : [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
     mutable held : (stream * Eio.Net.Sockaddr.stream) list;
     number : int;
+    family : Op.family;
   }
 
   let hold t c = locked t.ctx (fun () -> t.held <- c :: t.held)
@@ -660,13 +673,15 @@ module Listener = struct
       let sock, peer = Eio.Net.accept ~sw t.l in
       let sock = (sock :> stream) in
       let socket, conn = server_conn ctx sock in
-      let flow = Flow.v ctx ~socket ~side:`Server ~conn sock in
+      let family = t.family in
+      let flow = Flow.v ctx ~socket ~side:`Server ~family ~conn sock in
       let fault =
         match
           locked ctx (fun () ->
               let offset = ctx.accepts in
               ctx.accepts <- offset + 1;
-              ask_locked ctx `Accept ~socket ~side:`Server ~offset ~length:0)
+              ask_locked ctx `Accept ~socket ~side:`Server ~family ~offset
+                ~length:0)
         with
         | fault -> fault
         | exception e ->
@@ -675,10 +690,14 @@ module Listener = struct
             Printexc.raise_with_backtrace e bt
       in
       match fault with
-      | Some Fault.Reset ->
+      | Some Fault.Reset when family = `Inet ->
           (* The client left first: the accept succeeds and the connection
              is reset at both ends. *)
           break conn ~at:`Server `Reset;
+          (flow, peer)
+      | Some Reset ->
+          (* A Unix-domain client that left first closed: no reset. *)
+          break conn ~at:`Server (`Closed `Client);
           (flow, peer)
       | Some Eof ->
           break conn ~at:`Server (`Closed `Client);
@@ -727,23 +746,29 @@ module Network = struct
 
     let connect_ t ~bind_to ~options ~sw addr =
       let ctx = t.ctx in
+      let family = Op.family_of_stream addr in
       let socket, fault =
         locked ctx (fun () ->
             let offset = ctx.connects in
             ctx.connects <- offset + 1;
             let socket = next_socket ctx in
             ( socket,
-              ask_locked ctx `Connect ~socket ~side:`Client ~offset ~length:0 ))
+              ask_locked ctx `Connect ~socket ~side:`Client ~family ~offset
+                ~length:0 ))
       in
       let go () =
         let sock =
           (Eio.Net.connect ?bind_to ~options ~sw t.net addr :> stream)
         in
         let conn = client_conn ctx ~socket sock in
-        Flow.v ctx ~socket ~side:`Client ~conn sock
+        Flow.v ctx ~socket ~side:`Client ~family ~conn sock
       in
       match fault with
       | Some (Fault.Refuse | Reset) -> raise (refused_exn ())
+      | Some (Timeout | Unreachable) when family = `Unix ->
+          (* A Unix-domain connect has no handshake to lose and no route to
+             miss. *)
+          go ()
       | Some Timeout ->
           Eio.Time.sleep ctx.clock 133.;
           raise (Posix.timeout ())
@@ -765,6 +790,7 @@ module Network = struct
       Eio.Resource.T
         ( {
             Listener.ctx = t.ctx;
+            family = Op.family_of_stream addr;
             l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
             held = [];
             number =
@@ -776,6 +802,7 @@ module Network = struct
 
     let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
       Datagram.v t.ctx
+        ~family:(Op.family_of_datagram addr)
         (Eio.Net.datagram_socket ~reuse_addr ~reuse_port ~sw t.net addr
           :> Datagram.socket)
 
@@ -804,8 +831,8 @@ let pair ~clock f =
   let c, s = Eio_net_mem.pipe () in
   let socket = locked ctx (fun () -> next_socket ctx) in
   let conn = conn () in
-  ( Flow.v ctx ~socket ~side:`Client ~conn (c :> stream),
-    Flow.v ctx ~socket ~side:`Server ~conn (s :> stream) )
+  ( Flow.v ctx ~socket ~side:`Client ~family:`Inet ~conn (c :> stream),
+    Flow.v ctx ~socket ~side:`Server ~family:`Inet ~conn (s :> stream) )
 
 let outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in

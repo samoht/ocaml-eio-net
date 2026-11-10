@@ -34,6 +34,14 @@ val greetings : Eio_net_chaos.env -> unit
 (** [greetings env] runs an exchange where both ends write tens of kilobytes
     before they read. *)
 
+val unix_stream : Eio_net_chaos.env -> unit
+(** [unix_stream env] runs a ping-pong over a Unix-domain stream, whose client
+    retries only a refusal or a closed connection. *)
+
+val unix_datagram : Eio_net_chaos.env -> unit
+(** [unix_datagram env] runs a ping-pong over Unix-domain datagrams, with no
+    retry. *)
+
 val pipelined : Eio_net_chaos.env -> unit
 (** [pipelined env] runs a client that writes its whole batch of requests before
     it reads a reply. *)

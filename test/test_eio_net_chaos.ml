@@ -611,6 +611,35 @@ let test_scan_is_not_a_spin () =
   | () -> Alcotest.fail "a client that retries at once was not stopped"
   | exception Failure _ -> ()
 
+(* Faults only IP has do nothing on a Unix-domain socket, which is reliable
+   and ordered (unix(7)): a connect neither times out nor finds no route, and
+   no datagram is lost, duplicated, reordered or garbled. *)
+let test_unix_has_no_ip_faults () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let f (op : Op.t) =
+    match op.kind with
+    | `Connect -> Some (if op.offset = 0 then Fault.Timeout else Unreachable)
+    | `Recv ->
+        Some (List.nth Fault.[ Drop; Dup; Reorder; Garble 3 ] (op.offset mod 4))
+    | _ -> None
+  in
+  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+  let l = Eio.Net.listen ~sw ~backlog:2 net (`Unix "/tmp/s.sock") in
+  let _ = Eio.Net.connect ~sw net (`Unix "/tmp/s.sock") in
+  let _ = Eio.Net.connect ~sw net (`Unix "/tmp/s.sock") in
+  let _ = Eio.Net.accept ~sw l in
+  Alcotest.(check (float 0.)) "no time passed" 0. (Eio.Time.now env#clock);
+  let rx = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/rx.sock") in
+  let tx = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/tx.sock") in
+  let payloads = [ "d0"; "d1"; "d2"; "d3"; "d4" ] in
+  List.iter
+    (fun p ->
+      Eio.Net.send tx ~dst:(`Unix "/tmp/rx.sock") [ Cstruct.of_string p ])
+    payloads;
+  Alcotest.(check (list string))
+    "every datagram, in order" payloads (recv_n rx 5)
+
 (* --- Domains ------------------------------------------------------------- *)
 
 (* Writers in two domains share one count of bytes written: with a reset on
@@ -831,6 +860,8 @@ let suite =
       Alcotest.test_case "net connect stall" `Quick test_net_connect_stall;
       Alcotest.test_case "net operations" `Quick test_ops;
       Alcotest.test_case "a scan is not a spin" `Quick test_scan_is_not_a_spin;
+      Alcotest.test_case "no IP fault on a Unix-domain socket" `Quick
+        test_unix_has_no_ip_faults;
       Alcotest.test_case "writes counted across domains" `Quick
         test_writes_counted_across_domains;
       Alcotest.test_case "reads shared across domains" `Quick

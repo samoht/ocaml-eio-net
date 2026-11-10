@@ -300,6 +300,68 @@ let greetings env =
       read_exactly flow 30_000 = server_hello)
   |> expect env Fmt.bool true
 
+(* A ping-pong over a Unix-domain stream. A Unix-domain socket is reliable
+   and ordered (unix(7)): a connect may be refused, and a peer may close or
+   crash, but no IP error happens, and a small write arrives whole, so the
+   client reads each reply with one read. *)
+let unix_stream env =
+  let path = `Unix "/tmp/pingpong.sock" in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net path in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let r = Eio.Buf_read.of_flow flow ~max_size:64 in
+          match
+            Eio.Time.with_timeout_exn env#clock 5.0 (fun () -> strict_line r)
+          with
+          | "ping" -> Eio.Flow.copy_string "pong\n" flow
+          | _ -> ()));
+  let once () =
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net path in
+    Eio.Flow.copy_string "ping\n" flow;
+    let buf = Cstruct.create 64 in
+    Cstruct.to_string ~len:(Eio.Flow.single_read flow buf) buf
+  in
+  let rec attempt n =
+    match Eio.Time.with_timeout_exn env#clock 1.0 once with
+    | reply -> Some reply
+    | exception
+        ( Eio.Io
+            (Eio.Net.E (Connection_failure (Refused _) | Connection_reset _), _)
+        | End_of_file | Eio.Time.Timeout ) ->
+        if n < 3 then attempt (n + 1) else None
+  in
+  expect env Fmt.Dump.string "pong\n" (attempt 1)
+
+(* A ping-pong over Unix-domain datagrams, with no retry: no datagram is
+   lost, duplicated, reordered or garbled. *)
+let unix_datagram env =
+  Eio.Switch.run @@ fun sw ->
+  let srv = Eio.Net.datagram_socket ~sw env#net (`Unix "/tmp/srv.sock") in
+  let cli = Eio.Net.datagram_socket ~sw env#net (`Unix "/tmp/cli.sock") in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let buf = Cstruct.create 64 in
+      let rec loop () =
+        let src, n = Eio.Net.recv srv buf in
+        let m = Cstruct.to_string ~len:n buf in
+        Eio.Net.send srv ~dst:src
+          [ Cstruct.of_string ("pong" ^ String.sub m 4 1) ];
+        loop ()
+      in
+      loop ());
+  let buf = Cstruct.create 64 in
+  List.iter
+    (fun i ->
+      Eio.Net.send cli ~dst:(`Unix "/tmp/srv.sock")
+        [ Cstruct.of_string ("ping" ^ i) ];
+      let _, n =
+        Eio.Time.with_timeout_exn env#clock 5.0 (fun () -> Eio.Net.recv cli buf)
+      in
+      let got = Cstruct.to_string ~len:n buf in
+      if got <> "pong" ^ i then Fmt.failwith "got %S" got)
+    [ "1"; "2"; "3" ]
+
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in

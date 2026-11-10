@@ -125,6 +125,14 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     {!Fault.Emfile} is not among them: {!Eio.Net.run_server} stops on it, so a
     test that wants it asks for it with {!wrap}.
 
+    A Unix-domain socket meets only what AF_UNIX can do, as it is reliable and
+    ordered (unix(7)). A connect may be refused, but neither times out nor finds
+    no route; an accepted connection may have been closed by its client; a peer
+    may close, crash or stall; reads may take what several writes sent. A small
+    write arrives whole, so there are no one-byte reads or writes, and a cut
+    lands between two writes. No datagram is lost, duplicated, reordered or
+    garbled, and the outage refuses connects only.
+
     A run passes if [run] returns. [run] catches the errors its program may
     raise and checks the results itself: any exception that escapes it fails the
     check, an injected [Eio.Io] included. So does a hang, a first run that makes
@@ -166,6 +174,9 @@ module Op : sig
     side : [ `Client | `Server ];
         (** The end of a connection: the one that connected, or the one that
             accepted. A datagram socket is a [`Client]. *)
+    family : [ `Inet | `Unix ];
+        (** The address family of the socket: TCP or UDP over IP, or a
+            Unix-domain socket, which loses, reorders and garbles nothing. *)
     offset : int;
         (** The bytes this end read or wrote before, the datagrams this socket
             took before, or the connects or accepts before. *)
@@ -181,8 +192,11 @@ end
 
 (** The faults a wrapper injects. *)
 module Fault : sig
-  (** The type for faults. One that does not apply to an operation does nothing.
-  *)
+  (** The type for faults. One that does not apply to an operation does nothing,
+      as one that AF_UNIX cannot produce on a Unix-domain socket: [Timeout] and
+      [Unreachable] on a connect, and [Drop], [Dup], [Reorder] and [Garble] on a
+      datagram. [Reset] on the accept of a Unix-domain connection is a client
+      that closed, as [Eof]. *)
   type t =
     | Short of int  (** A read or a write moves at most [max 1 n] bytes. *)
     | Stall of float

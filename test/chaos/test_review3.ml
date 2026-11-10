@@ -42,6 +42,10 @@ let suite =
         (Expect.caught ~tier:"linear" (check (rpc ~bug:`Lenient)));
       Alcotest.test_case "large greetings both ways: correct" `Quick
         (Expect.passes (check greetings));
+      Alcotest.test_case "Unix-domain stream ping-pong: correct" `Quick
+        (Expect.passes (check unix_stream));
+      Alcotest.test_case "Unix-domain datagram ping-pong: correct" `Quick
+        (Expect.passes (check unix_datagram));
       Alcotest.test_case "pipelined batch: correct" `Quick
         (Expect.passes (check pipelined));
     ] )
