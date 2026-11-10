@@ -13,13 +13,14 @@ record="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 src="${DUNE_SOURCEROOT:?run through dune: REGEN=1 dune build @regen-traces}"
 image="ocaml/opam@sha256:d161f099e5d053fe198accc09fda214c6275289570847fd906f9c65f862bf460"
 transports="tcp4 tcp6 unix-stream udp4 udp6 unix-dgram"
+traces="$transports scenarios"
 
 # Unix socket paths must stay short.
 work="$(mktemp -d /tmp/kernel-traces.XXXXXX)"
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/sock"
 
-for t in $transports; do
+for t in $traces; do
   KERNEL_DIR="$work/sock" "$record" "$t" >"$work/$t.macos"
 done
 
@@ -35,10 +36,10 @@ docker run --rm \
     opam install -y eio_posix >/dev/null
     opam exec -- dune build ./test/interop/kernel/scripts/record.exe
     mkdir -p /tmp/sock
-    for t in $transports; do
+    for t in $traces; do
       KERNEL_DIR=/tmp/sock ./_build/default/test/interop/kernel/scripts/record.exe \$t >/out/\$t.linux
     done"
 
-for t in $transports; do
+for t in $traces; do
   "$record" merge "$work/$t.linux" "$work/$t.macos" >"$out/$t.csv"
 done

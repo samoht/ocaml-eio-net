@@ -104,6 +104,8 @@ let sequences t =
 
 let errno : Unix.error -> string = function
   | EADDRINUSE -> "EADDRINUSE"
+  | EADDRNOTAVAIL -> "EADDRNOTAVAIL"
+  | ENAMETOOLONG -> "ENAMETOOLONG"
   | EDESTADDRREQ -> "EDESTADDRREQ"
   | EMSGSIZE -> "EMSGSIZE"
   | EINVAL -> "EINVAL"
@@ -320,3 +322,386 @@ let run_dgram net t ops =
 
 let run net t ops =
   if is_stream t then run_stream net t ops else run_dgram net t ops
+
+(* Scenarios: the address, backlog, reuse and resolution cases the
+   sequences above do not reach, each run on a fresh network and printed as
+   one line. *)
+
+type net = [ `Generic ] Eio.Net.ty Eio.Resource.t
+
+let ip s = Eio_unix.Net.Ipaddr.of_unix (Unix.inet_addr_of_string s)
+let ip_s a = Fmt.str "%a" Eio.Net.Ipaddr.pp a
+
+let port_of l =
+  match Eio.Net.listening_addr l with `Tcp (_, p) -> p | `Unix _ -> 0
+
+let read_s flow n =
+  now (fun () ->
+      let buf = Cstruct.create n in
+      let got = Eio.Flow.single_read flow buf in
+      Cstruct.to_string ~len:got buf)
+
+let lookup f =
+  match f () with
+  | v -> v
+  | exception (Eio.Io (Eio.Net.E (Address_lookup_failed _), _) as e) ->
+      (* "Net Address_lookup_failed NONAME (...)": its tag. *)
+      let words = String.split_on_char ' ' (Printexc.to_string e) in
+      let rec tag = function
+        | "Address_lookup_failed" :: t :: _ -> t
+        | _ :: r -> tag r
+        | [] -> "lookup failed"
+      in
+      tag words
+
+(* Three clients of one listener: accepts in connect order, one connection's
+   close leaves the others alone, and the listener's close resets the
+   connection it queued and refuses later connects. *)
+let three net =
+  Eio.Switch.run @@ fun sw ->
+  let l =
+    Eio.Net.listen ~sw ~backlog:8 net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let addr = Eio.Net.listening_addr l in
+  let connect () = Eio.Net.connect ~sw net addr in
+  let c1 = connect () and c2 = connect () and c3 = connect () in
+  Eio.Flow.copy_string "1" c1;
+  Eio.Flow.copy_string "2" c2;
+  Eio.Flow.copy_string "3" c3;
+  Eio.Flow.close c2;
+  let accept () = fst (now (fun () -> Eio.Net.accept ~sw l)) in
+  let s1 = accept () in
+  let s2 = accept () in
+  let s3 = accept () in
+  let o f = outcome f in
+  let order = o (fun () -> read_s s1 16 ^ read_s s2 16 ^ read_s s3 16) in
+  let s2_eof = o (fun () -> read_s s2 16) in
+  let s1_blk = o (fun () -> read_s s1 16) in
+  Eio.Flow.close s1;
+  let c1_eof = o (fun () -> read_s c1 16) in
+  Eio.Flow.copy_string "x" c3;
+  let s3_x = o (fun () -> read_s s3 16) in
+  let c4 = connect () in
+  Eio.Flow.copy_string "4" c4;
+  Eio.Resource.close l;
+  let w () = string_of_int (Eio.Flow.single_write c4 [ Cstruct.create 1 ]) in
+  let c4s =
+    List.map o [ (fun () -> read_s c4 16); w; w; (fun () -> read_s c4 16) ]
+  in
+  let refused =
+    o (fun () ->
+        ignore (connect ());
+        "ok")
+  in
+  let s3_w =
+    o (fun () -> string_of_int (Eio.Flow.single_write s3 [ Cstruct.create 1 ]))
+  in
+  let c3_r = o (fun () -> "r" ^ string_of_int (String.length (read_s c3 16))) in
+  String.concat " "
+    ([ order; s2_eof; s1_blk; c1_eof; s3_x ] @ c4s @ [ refused; s3_w; c3_r ])
+
+(* Connects that no accept takes: Linux queues one more than the backlog. *)
+let backlog n net =
+  Eio.Switch.run @@ fun sw ->
+  let l =
+    Eio.Net.listen ~sw ~backlog:n net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let addr = Eio.Net.listening_addr l in
+  let connect () =
+    outcome (fun () ->
+        ignore (now (fun () -> Eio.Net.connect ~sw net addr));
+        "ok")
+  in
+  let connects = List.init (n + 3) (fun _ -> connect ()) in
+  let rec drain k =
+    match now (fun () -> Eio.Net.accept ~sw l) with
+    | _ -> drain (k + 1)
+    | exception Blocked -> k
+  in
+  let accepted = drain 0 in
+  Fmt.str "%s accepted=%d then %s"
+    (String.concat " " connects)
+    accepted (connect ())
+
+let listen_at ?(reuse_addr = false) net addr =
+  outcome (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      ignore (Eio.Net.listen ~sw ~reuse_addr ~backlog:1 net addr);
+      "ok")
+
+(* A connect to [dst] bound at [bind], from a listener at [at]: its outcome
+   and the peer address the accept sees. *)
+let connect_case at dst bind net =
+  Eio.Switch.run @@ fun sw ->
+  match Eio.Net.listen ~sw ~backlog:8 net (`Tcp (ip at, 0)) with
+  | exception e -> "listen " ^ classify e
+  | l ->
+      let bind_to = Option.map (fun b -> `Tcp (ip b, 0)) bind in
+      outcome (fun () ->
+          ignore (Eio.Net.connect ~sw ?bind_to net (`Tcp (ip dst, port_of l)));
+          let _, peer = now (fun () -> Eio.Net.accept ~sw l) in
+          "ok " ^ shape (peer :> Eio.Net.Sockaddr.t))
+
+let udp_port sock fallback =
+  match Eio_unix.Resource.fd_opt sock with
+  | Some fd ->
+      Eio_unix.Fd.use_exn "getsockname" fd (fun u ->
+          match Unix.getsockname u with
+          | Unix.ADDR_INET (_, port) -> port
+          | Unix.ADDR_UNIX _ -> fallback)
+  | None -> fallback
+
+(* A datagram from a socket at [src] to [dst], at the port of a socket at
+   [at]: the send's outcome, and what that socket receives. mem binds the
+   lowest free ports. *)
+let dgram_case at src dst net =
+  Eio.Switch.run @@ fun sw ->
+  let bind a : [ Eio.Net.Sockaddr.datagram | `UdpV4 | `UdpV6 ] =
+    match a with "UdpV4" -> `UdpV4 | "UdpV6" -> `UdpV6 | a -> `Udp (ip a, 0)
+  in
+  match Eio.Net.datagram_socket ~sw net (bind at) with
+  | exception e -> "recv " ^ classify e
+  | r -> (
+      let port = udp_port r 49152 in
+      match Eio.Net.datagram_socket ~sw net (bind src) with
+      | exception e -> "send " ^ classify e
+      | s ->
+          let sent =
+            outcome (fun () ->
+                Eio.Net.send s ~dst:(`Udp (ip dst, port)) [ Cstruct.create 2 ];
+                "sent")
+          in
+          let got =
+            outcome (fun () ->
+                let from, n =
+                  now (fun () -> Eio.Net.recv r (Cstruct.create 4))
+                in
+                Fmt.str "%s n=%d" (shape (from :> Eio.Net.Sockaddr.t)) n)
+          in
+          sent ^ " " ^ got)
+
+let gai name service net =
+  lookup (fun () ->
+      Eio.Net.getaddrinfo ~service net name
+      |> List.map (fun (a : Eio.Net.Sockaddr.t) ->
+          match a with
+          | `Tcp (i, p) -> Fmt.str "tcp:%s:%d" (ip_s i) p
+          | `Udp (i, p) -> Fmt.str "udp:%s:%d" (ip_s i) p
+          | `Unix p -> "unix:" ^ p)
+      |> String.concat " ")
+
+let gni addr net =
+  let host, service = Eio.Net.getnameinfo net addr in
+  host ^ "/" ^ service
+
+(* A port held after a connection closes, by the end that closed first. *)
+let reuse which net =
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let free () =
+    Eio.Switch.run @@ fun sw ->
+    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)))
+  in
+  let addr = `Tcp (lo, free ()) in
+  let relisten a = listen_at net a ^ " " ^ listen_at ~reuse_addr:true net a in
+  match which with
+  | `Server_first | `Client_first | `Open | `None ->
+      Eio.Switch.run @@ fun sw ->
+      let l = Eio.Net.listen ~sw ~backlog:8 net addr in
+      let conn =
+        if which = `None then None
+        else
+          let c = Eio.Net.connect ~sw net addr in
+          Some (c, fst (Eio.Net.accept ~sw l))
+      in
+      (match (which, conn) with
+      | `Server_first, Some (c, s) ->
+          Eio.Flow.close s;
+          Eio.Flow.close c
+      | `Client_first, Some (c, s) ->
+          Eio.Flow.close c;
+          Eio.Flow.close s
+      | _ -> ());
+      Eio.Resource.close l;
+      relisten addr
+  | (`Bound_client_first | `Bound_server_first) as which ->
+      Eio.Switch.run @@ fun sw ->
+      let l = Eio.Net.listen ~sw ~backlog:8 net addr in
+      let bound = `Tcp (lo, free ()) in
+      let c = Eio.Net.connect ~sw ~bind_to:bound net addr in
+      let s, _ = Eio.Net.accept ~sw l in
+      if which = `Bound_client_first then (
+        Eio.Flow.close c;
+        Eio.Flow.close s)
+      else (
+        Eio.Flow.close s;
+        Eio.Flow.close c);
+      let again =
+        outcome (fun () ->
+            Eio.Switch.run @@ fun sw ->
+            ignore (Eio.Net.connect ~sw ~bind_to:bound net addr);
+            let s, _ = Eio.Net.accept ~sw l in
+            Eio.Flow.close s;
+            "ok")
+      in
+      again ^ " " ^ relisten bound
+
+(* Each in its own switch, whose finish is not part of the outcome:
+   eio_posix's listen then unlinks a path it never bound. *)
+let unix_paths net =
+  let long = String.make 120 'x' in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let o f =
+    let r = ref "none" in
+    (try
+       Eio.Switch.run (fun sw ->
+           r :=
+             outcome (fun () ->
+                 f sw;
+                 "ok"))
+     with _ -> ());
+    !r
+  in
+  String.concat " "
+    [
+      o (fun sw -> ignore (Eio.Net.listen ~sw ~backlog:1 net (`Unix long)));
+      o (fun sw -> ignore (Eio.Net.connect ~sw net (`Unix long)));
+      o (fun sw -> ignore (Eio.Net.datagram_socket ~sw net (`Unix long)));
+      o (fun sw ->
+          ignore
+            (Eio.Net.connect ~sw ~bind_to:(`Tcp (lo, 0)) net (`Unix "p.sock")));
+    ]
+
+let stream_ips =
+  [
+    "127.0.0.1";
+    "0.0.0.0";
+    "::1";
+    "::";
+    "::ffff:127.0.0.1";
+    "::ffff:0.0.0.0";
+    "127.0.0.2";
+  ]
+
+let non_local = [ "10.255.255.1"; "192.0.2.1"; "::2"; "::ffff:10.255.255.1" ]
+
+let names =
+  [
+    "localhost";
+    "127.0.0.1";
+    "::1";
+    "LOCALHOST";
+    "localhost.";
+    "0.0.0.0";
+    "::";
+    "127.1";
+    "::ffff:127.0.0.1";
+    "";
+  ]
+
+let services =
+  [
+    "80";
+    "0";
+    "65535";
+    "65536";
+    "http";
+    "";
+    "+80";
+    "080";
+    "0x50";
+    "1_000";
+    " 80";
+    "-1";
+    "-0";
+    "0o17";
+    "4294967296";
+    "4294967295";
+    "2147483648";
+    "99999999999999999999";
+    "\t7";
+    "8 ";
+    "+";
+    "-";
+  ]
+
+let scenario_list : (string * (net -> string)) list =
+  [ ("three", three) ]
+  @ List.map (fun n -> (Fmt.str "backlog %d" n, backlog n)) [ 0; 1; 2; 5 ]
+  @ List.map
+      (fun a -> ("listen " ^ a, fun net -> listen_at net (`Tcp (ip a, 0))))
+      (stream_ips @ non_local)
+  @ List.concat_map
+      (fun x ->
+        List.concat_map
+          (fun y ->
+            List.map
+              (fun (rx, ry) ->
+                ( Fmt.str "listen %s reuse=%b then %s reuse=%b" x rx y ry,
+                  fun net ->
+                    Eio.Switch.run @@ fun sw ->
+                    match
+                      Eio.Net.listen ~sw ~reuse_addr:rx ~backlog:1 net
+                        (`Tcp (ip x, 0))
+                    with
+                    | exception e -> classify e
+                    | l -> listen_at ~reuse_addr:ry net (`Tcp (ip y, port_of l))
+                ))
+              [ (false, false); (true, true) ])
+          [ "127.0.0.1"; "0.0.0.0"; "::1"; "::"; "127.0.0.2" ])
+      [ "127.0.0.1"; "0.0.0.0"; "::1"; "::"; "127.0.0.2" ]
+  @ List.concat_map
+      (fun at ->
+        List.concat_map
+          (fun dst ->
+            List.map
+              (fun bind ->
+                ( Fmt.str "connect %s from %s to %s" dst
+                    (Option.value bind ~default:"-")
+                    at,
+                  connect_case at dst bind ))
+              (None :: List.map Option.some (stream_ips @ [ "10.255.255.1" ])))
+          stream_ips)
+      stream_ips
+  @ List.concat_map
+      (fun at ->
+        List.concat_map
+          (fun src ->
+            List.map
+              (fun dst ->
+                ( Fmt.str "dgram %s from %s to %s" dst src at,
+                  dgram_case at src dst ))
+              (List.filter (fun a -> a <> "::ffff:0.0.0.0") stream_ips))
+          (stream_ips @ [ "UdpV4"; "UdpV6" ]))
+      stream_ips
+  @ List.concat_map
+      (fun n ->
+        List.map (fun s -> (Fmt.str "getaddrinfo %S %S" n s, gai n s)) services)
+      names
+  @ List.map
+      (fun (n, a) -> ("getnameinfo " ^ n, gni a))
+      [
+        ("tcp 127.0.0.1:80", `Tcp (ip "127.0.0.1", 80));
+        ("tcp ::1:22", `Tcp (ip "::1", 22));
+        ("udp 127.0.0.1:53", `Udp (ip "127.0.0.1", 53));
+        ("tcp 127.0.0.1:49999", `Tcp (ip "127.0.0.1", 49999));
+        ("tcp 10.1.2.3:80", `Tcp (ip "10.1.2.3", 80));
+        ("tcp 127.0.0.2:8080", `Tcp (ip "127.0.0.2", 8080));
+      ]
+  @ List.map
+      (fun (n, w) -> ("reuse " ^ n, reuse w))
+      [
+        ("server closes first", `Server_first);
+        ("client closes first", `Client_first);
+        ("connection open", `Open);
+        ("no connection", `None);
+        ("bound client closes first", `Bound_client_first);
+        ("bound server closes first", `Bound_server_first);
+      ]
+  @ [ ("unix paths", unix_paths) ]
+
+let scenarios = List.map fst scenario_list
+
+let scenario net name =
+  let f = List.assoc name scenario_list in
+  let r = try f net with e -> "abort " ^ classify e in
+  String.map (function ',' | '\n' -> ';' | c -> c) r

@@ -25,3 +25,14 @@ val run : _ Eio.Net.t -> transport -> string list -> string list
     of [t] and is the outcome of each operation: a result, ["blk"] for one that
     would wait, or the error it raised. Unix paths are relative to the current
     directory. *)
+
+val scenarios : string list
+(** [scenarios] names the scenarios the traces hold, in a fixed order: three
+    clients of one listener, backlogs, listens, connects and datagrams across
+    the loopback addresses, address reuse after a close, Unix paths, and host
+    and service resolution. *)
+
+val scenario : [ `Generic ] Eio.Net.ty Eio.Resource.t -> string -> string
+(** [scenario net name] runs the scenario [name] on [net] and is its outcome, on
+    one line without commas. Unix paths are relative to the current directory.
+*)
