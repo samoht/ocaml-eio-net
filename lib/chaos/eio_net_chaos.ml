@@ -122,6 +122,7 @@ let scenario run ~first ~linear k =
               | _ -> None)))
 
 let check ?(budget = 2_000) ?replay run =
+  if budget < 1 then Fmt.invalid_arg "%s: the budget is %d" name budget;
   let replay = Option.map parse_replay replay in
   let first, failed = exec run Plan.none in
   Option.iter (fail "the run with no fault failed: %s") failed;

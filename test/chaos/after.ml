@@ -9,8 +9,8 @@ let rec is_prefix p l =
   | x :: p, y :: l -> x = y && is_prefix p l
   | _ -> false
 
-let test_d ?replay ~read () =
-  Eio_net_chaos.check ?replay @@ fun env ->
+let test_d ?budget ?replay ~read () =
+  Eio_net_chaos.check ?budget ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in

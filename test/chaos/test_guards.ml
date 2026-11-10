@@ -4,8 +4,8 @@ open Design
 
 let read ~clock f = App.Frame.read ~clock f
 
-let mutant ?replay () =
-  After.test_d ?replay ~read:(App.Frame.read ~bug:`Single_read) ()
+let mutant ?budget ?replay () =
+  After.test_d ?budget ?replay ~read:(App.Frame.read ~bug:`Single_read) ()
 
 let error_is expected f () =
   let error = Expect.field "error" (Expect.report f) in
@@ -166,6 +166,16 @@ let test_unknown_replay () =
     (fun () -> mutant ~replay:"fs/x/y" ())
     ()
 
+let test_budget () =
+  List.iter
+    (fun budget ->
+      match mutant ~budget () with
+      | exception Invalid_argument _ -> ()
+      | () -> Alcotest.failf "the budget %d was accepted" budget
+      | exception Failure _ ->
+          Alcotest.failf "the budget %d was accepted" budget)
+    [ 0; -1 ]
+
 let test_nothing () =
   refused_with "Eio_net_chaos.check: the workload makes no network operation"
     (fun () -> Eio_net_chaos.check ignore)
@@ -249,6 +259,8 @@ let suite =
       Alcotest.test_case "a stale replay is refused" `Quick test_stale_replay;
       Alcotest.test_case "an unknown replay is refused" `Quick
         test_unknown_replay;
+      Alcotest.test_case "a budget that is not positive is refused" `Quick
+        test_budget;
       Alcotest.test_case "a workload with no operation is refused" `Quick
         test_nothing;
       Alcotest.test_case "a nondeterministic workload is refused" `Quick

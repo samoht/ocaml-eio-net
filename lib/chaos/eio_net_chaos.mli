@@ -28,16 +28,20 @@
 
     {2 Contracts}
 
-    {b At most two faults per run}, a 50 ms stall included. A program that tries
-    three times always succeeds, so [run] may demand success. A broker that fans
-    a message out to three subscribers may demand that one of them gets
-    everything: two faults reach two subscribers at most.
+    {b At most two faults per run.} A program that tries three times always
+    succeeds, so [run] may demand success. A broker that fans a message out to
+    three subscribers may demand that one of them gets everything: two faults
+    reach two subscribers at most. The second fault of a pair may be a mild one,
+    a read or a write that moves one byte, or a connect or a datagram held back
+    for 50 ms, and it counts as one of the two. A lasting condition runs alone
+    and counts as one fault, though it reaches every connection of the run.
 
     {b Every program on the network meets the faults}, the test's own peers
-    included. Write test servers with [Eio.Net.run_server ~on_error:ignore],
-    catch [Eio.Io _ | End_of_file] in test clients, and parse strictly in both:
-    a peer that takes a partial line for a whole one turns an injected end of
-    stream into a wrong answer.
+    included. Write test servers with [Eio.Net.run_server ~on_error:ignore] and
+    a timeout on each read, as a client may stall for good; catch
+    [Eio.Io _ | End_of_file] in test clients; and parse strictly in both: a peer
+    that takes a partial line for a whole one turns an injected end of stream
+    into a wrong answer.
 
     {b Assert latency to catch a missing timeout.} A connect that times out
     takes 133 seconds, as on Linux, and then fails: a program without a connect
@@ -64,12 +68,14 @@
 
     {2 Runs}
 
-    Each run has its own event loop, inside or outside another one. Its clocks
-    start at [0.] and move only when every fiber waits, so a timeout of an hour
-    takes no time. A run in which every fiber waits and no timer is due fails as
-    a hang, and so does one still running after an hour of its clock, and one in
-    which 10000 network operations fail in a row while its clock stands still,
-    as a client that retries a refused connect at once does in the outage. *)
+    Each run has its own event loop, inside or outside another one. A check runs
+    to its end before it returns, so it blocks the event loop it is called from:
+    the other fibers of that loop wait for it. Its clocks start at [0.] and move
+    only when every fiber waits, so a timeout of an hour takes no time. A run in
+    which every fiber waits and no timer is due fails as a hang, and so does one
+    still running after an hour of its clock, and one in which 10000 network
+    operations fail in a row while its clock stands still, as a client that
+    retries a refused connect at once does in the outage. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
@@ -117,7 +123,8 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     [budget] (defaults to [2_000]) bounds the runs. [replay] runs only the
     scenario a failure named.
 
-    @raise Failure with a report of the first failing run. *)
+    @raise Failure with a report of the first failing run.
+    @raise Invalid_argument if [budget] is less than [1]. *)
 
 val outage : env -> bool
 (** [outage env] is [true] iff [env] is that of the outage run of {!check}. *)
@@ -241,12 +248,18 @@ val wrap :
     The network, its connections and its datagram sockets may be used from
     several domains at once. [f] is called by one of them at a time, in the
     order of {!Op.index}, while a lock is held: it must not wait, and must not
-    use the network.
+    use the network. If [f] raises, the operation raises that exception and does
+    nothing else; its index and its socket number stay used.
 
-    A reset or an end breaks both ends of a connection when [net] is an
-    {!Eio_net_mem} network, which tells the wrapper which accepted socket a
-    connect made. On another network, the two ends are two sockets to the
-    wrapper, numbered apart, and a fault breaks only the end that meets it.
+    A fault reaches both ends of a connection when [net] is an {!Eio_net_mem}
+    network, which tells the wrapper which accepted socket a connect made. On
+    another network the wrapper sees the two ends of a connection as two
+    sockets, numbered apart, and a fault shuts down the socket of the end that
+    meets it: a reset on a read gives the real peer end of file, and a reset on
+    an accept gives the real client [ECONNRESET] once it sends. An end of stream
+    on a read shuts this end's receive side, and the real peer sees nothing: on
+    Linux this end reads what is queued, then end of file, and on macOS it reads
+    end of file at once, as macOS drops what is queued.
 
     After 10000 operations that fail in a row while [clock] stands still, the
     next raises [Failure], as the program that makes them spins for ever, and

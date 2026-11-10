@@ -2,6 +2,7 @@
     request-response client. Each takes the program under test. *)
 
 val test_d :
+  ?budget:int ->
   ?replay:string ->
   read:
     (clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -9,8 +10,8 @@ val test_d :
     string option) ->
   unit ->
   unit
-(** [test_d ~replay ~read ()] checks that [read] gets a prefix of the frames a
-    server sends, under {!Eio_net_chaos.check}. *)
+(** [test_d ~budget ~replay ~read ()] checks that [read] gets a prefix of the
+    frames a server sends, under {!Eio_net_chaos.check}. *)
 
 val test_cut :
   read:

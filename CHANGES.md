@@ -18,9 +18,10 @@ Initial release.
   and macOS by an oracle adapted from gVisor's socket tests.
 - `eio-net.chaos`: `Eio_net_chaos.check` runs a workload many times on
   `eio-net.mem`, each run with faults chosen from what the workload does:
-  reads cut short or coalesced, a connection reset or ended at both ends, a
-  stalled peer, full send buffers, refused or timed-out connects, and lost,
-  duplicated, reordered or garbled datagrams. A failure names its scenario,
+  reads cut short or coalesced, a connection reset or closed by one end, a
+  stalled peer, send buffers of 4 KiB, refused, timed-out or unreachable
+  connects, and lost, duplicated, reordered or garbled datagrams. Injected
+  errors have the shape eio_posix gives them. A failure names its scenario,
   and `~replay` runs it alone. `wrap` and `pair` inject the faults a function
   chooses, from one domain or several.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets with long

@@ -17,8 +17,9 @@ that bounds the connections it holds.
 
 ## Chaos tests
 
-Here a client fetches a line from a server, with a timeout and three
-attempts. The workload checks what the client got, and how long it took:
+Here a client asks a server for a line, with a timeout and three attempts.
+The server bounds how long it waits for the request, as a client may stall
+for good. The workload checks what the client got, and how long it took:
 
 ```ocaml
 # let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080);;
@@ -33,6 +34,7 @@ val strict_line : Eio.Buf_read.t -> string = <fun>
     let once () =
       Eio.Switch.run @@ fun sw ->
       let flow = Eio.Net.connect ~sw env#net addr in
+      Eio.Flow.copy_string "GET\n" flow;
       strict_line (Eio.Buf_read.of_flow flow ~max_size:64)
     in
     let rec attempt n =
@@ -51,7 +53,11 @@ val get : timeout:bool -> Eio_net_chaos.env -> string option = <fun>
     let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
     Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
-            Eio.Flow.copy_string "hello\n" flow));
+            let r = Eio.Buf_read.of_flow flow ~max_size:64 in
+            let read () = strict_line r in
+            match Eio.Time.with_timeout_exn env#clock 5.0 read with
+            | "GET" -> Eio.Flow.copy_string "hello\n" flow
+            | _ -> ()));
     let t0 = Eio.Time.now env#clock in
     let got = get ~timeout env in
     if Eio.Time.now env#clock -. t0 > 5. then failwith "too slow";
@@ -82,25 +88,28 @@ run, and a `~replay:"..."` argument that runs that scenario alone.
 
 The tests follow a few rules:
 
-- At most two faults reach a run, a 50 ms stall included. A program that tries
-  three times may be asked to succeed, as here. A broker that fans a message
-  out to three subscribers may demand that one of them gets everything.
+- At most two faults reach a run. A program that tries three times may be
+  asked to succeed, as here. A broker that fans a message out to three
+  subscribers may demand that one of them gets everything. A lasting
+  condition, such as one-byte reads, counts as one fault but reaches every
+  connection.
 - Every program on the network meets the faults, the test's own peers
-  included. Test servers use `Eio.Net.run_server ~on_error:ignore`, test
-  clients catch `Eio.Io _ | End_of_file`, and both parse strictly.
+  included. Test servers use `Eio.Net.run_server ~on_error:ignore` and a
+  timeout on each read, test clients catch `Eio.Io _ | End_of_file`, and both
+  parse strictly.
 - A connect that times out takes 133 seconds, as on Linux, and then fails
   with the error eio_posix raises, which Eio does not classify as a
-  connection failure. A
-  program with no connect timeout still succeeds, so the test asserts its
-  latency to catch it.
+  connection failure. A program with no connect timeout still succeeds, so
+  the test asserts its latency to catch it.
 - In the outage run every connect is refused and every datagram lost.
   `Eio_net_chaos.outage env` is then `true`, and the test checks what its
   program does when it gives up.
 
 Each run has its own event loop, whose clock moves only when every fiber
-waits, so a timeout of an hour takes no time. A check is deterministic, reads
-no environment variable and prints nothing. For a scenario a check does not
-try, `Eio_net_chaos.wrap ~clock f net` asks `f` about each operation, and
+waits, so a timeout of an hour takes no time. A check blocks the event loop it
+is called from until it ends. It is deterministic, reads no environment
+variable and prints nothing. For a scenario a check does not try,
+`Eio_net_chaos.wrap ~clock f net` asks `f` about each operation, and
 `Eio_net_chaos.pair` gives a fuzzer two connected ends.
 
 ## Libraries
