@@ -1130,7 +1130,14 @@ module Network = struct
           | None, Some (`Unix path) -> `Unix path
           | None, _ -> `Unix ""
         in
-        Eio.Stream.add listener.incoming (server, peer);
+        (* The switch takes the client before the listener sees it, so a
+           finished switch queues nothing. *)
+        let flow = Flow.close_with sw client in
+        (match Eio.Stream.add listener.incoming (server, peer) with
+        | () -> ()
+        | exception e ->
+            Flow.close client;
+            raise e);
         (* The listener closed while the connection waited for room: its
            queue was closed before this connection joined it. *)
         if Atomic.get listener.closed then begin
@@ -1138,13 +1145,14 @@ module Network = struct
           Flow.close client;
           refused ()
         end;
-        Flow.close_with sw client
+        flow
 
   (* A connection is a pair of queues. A TCP client holds its address until
      its flow closes; one bound at an address a socket holds finds it in
      use. *)
   let connect t ~bind_to ~options ~sw addr =
     check_options options;
+    Eio.Switch.check sw;
     check_bind bind_to addr;
     let held =
       match (addr, bind_to) with

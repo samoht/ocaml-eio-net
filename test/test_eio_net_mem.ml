@@ -970,6 +970,29 @@ let test_a_closed_listener_refuses_connects () =
   Alcotest.(check (option bool)) "the waiting connect" (Some true) !waiting;
   Alcotest.(check bool) "a later connect" true (refused ())
 
+(* A connect under a finished switch fails before it reaches the listener,
+   as [listen] does: no connection waits there to be accepted. *)
+let test_connect_under_a_finished_switch () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8091) in
+  let listener = Eio.Net.listen ~sw ~backlog:4 net addr in
+  let finished = Eio.Switch.run Fun.id in
+  (match Eio.Net.connect ~sw:finished net addr with
+  | exception Invalid_argument _ -> ()
+  | (_ : _ Eio.Net.stream_socket) -> Alcotest.fail "connected");
+  let accepted =
+    Eio.Fiber.first
+      (fun () ->
+        ignore (Eio.Net.accept ~sw listener);
+        true)
+      (fun () ->
+        Eio.Fiber.yield ();
+        false)
+  in
+  Alcotest.(check bool) "a connection waits" false accepted
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -1276,6 +1299,8 @@ let suite =
         test_unix_write_after_peer_close;
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
+      Alcotest.test_case "a connect under a finished switch" `Quick
+        test_connect_under_a_finished_switch;
       Alcotest.test_case "a closed connection leaves its switch" `Quick
         test_a_closed_connection_leaves_its_switch;
       Alcotest.test_case "a write in another domain wakes the read" `Quick
