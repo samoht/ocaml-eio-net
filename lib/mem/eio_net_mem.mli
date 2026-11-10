@@ -79,7 +79,8 @@ type Eio.Exn.Backend.t +=
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             bound to an IPv6 address raises at an IPv4-mapped one, and a
             datagram [send] from such a socket, where Linux fails with
-            [ENETUNREACH]. *)
+            [ENETUNREACH]; and of the one a [connect] to a broadcast or
+            multicast address raises, which no route reaches. *)
   | Address_family
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             bound to an IPv4-mapped address raises at an IPv6 one, and a
@@ -99,9 +100,10 @@ type Eio.Exn.Backend.t +=
             [datagram_socket] and a [connect] with [bind_to] raise at an IP
             address no interface has, where bind(2) fails with [EADDRNOTAVAIL].
             The network has the loopback interface only: an IPv4 socket binds an
-            address of 127.0.0.0/8, an IPv6 one [::1], either the wildcard
-            address of its family, and an IPv6 one the IPv4-mapped form of those
-            IPv4 addresses. *)
+            address of 127.0.0.0/8, the broadcast address or a multicast one, an
+            IPv6 one [::1], either the wildcard address of its family, and an
+            IPv6 one the IPv4-mapped form of those IPv4 addresses, as on Linux.
+        *)
   | Name_too_long
         (** The backend code of the unclassified {!Eio.Io} error raised for a
             Unix path of 108 bytes or more, which Linux's [sun_path] cannot hold
@@ -112,9 +114,14 @@ type Eio.Exn.Backend.t +=
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             raises when its socket cannot bind the address [bind_to] gives: an
             IPv4 one for an IPv6 destination, or an IP one for a Unix path,
-            where bind(2) fails with [EINVAL] on Linux; and of the one a
-            datagram [send] raises at an address its socket cannot send to,
-            described in {!section-datagrams}. *)
+            where bind(2) fails with [EINVAL] on Linux. It is also the code of
+            the error a bind raises at a link-local IPv6 address, or a multicast
+            one of interface or link scope, which needs a scope that Eio's
+            addresses do not carry, and a TCP one at any IPv6 multicast address;
+            of the one a [connect] raises at a link-local address, or from a
+            loopback address to an IPv4 address outside 127.0.0.0/8, which Linux
+            cannot route; and of the one a datagram [send] raises at an address
+            its socket cannot send to, described in {!section-datagrams}. *)
 
 (** {1 Networks} *)
 
@@ -239,6 +246,10 @@ val connection : _ Eio.Net.stream_socket -> int option
     {!Address_in_use} marks, unless both have [reuse_addr]: as on Linux, an
     accepted end has its listener's, a client has none, and a listener's own
     hold refuses every other socket.
+
+    A [connect] bound with [bind_to] at its own destination, where no listener
+    is, connects to itself, as Linux's simultaneous open does: it reads what it
+    writes, and once closed holds its address in TIME_WAIT.
 
     A [connect] bound with [bind_to] holds that address, which the listener sees
     as its peer's, at a port of the dynamic range for port 0. One at an address

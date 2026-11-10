@@ -1741,6 +1741,99 @@ let test_datagram_error_order () =
         "EAFNOSUPPORT" );
     ]
 
+(* Linux's errors at the edges of the address space: broadcast and IPv4
+   multicast addresses bind; link-local IPv6 ones without a scope do not,
+   and TCP binds no IPv6 multicast one; a connect to broadcast or multicast
+   finds no route, and one from a loopback address to an address outside
+   127.0.0.0/8 cannot be routed. *)
+let test_edge_addresses () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let ip s = Eio_unix.Net.Ipaddr.of_unix (Unix.inet_addr_of_string s) in
+  let outcome f =
+    match f () with
+    | () -> "ok"
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Invalid_address, _) -> "EINVAL"
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_not_available, _) ->
+        "EADDRNOTAVAIL"
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Network_unreachable, _) ->
+        "ENETUNREACH"
+    | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) ->
+        "REFUSED"
+    | exception e -> Printexc.to_string e
+  in
+  let listen a () =
+    Eio.Switch.run @@ fun sw ->
+    ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip a, 8190)))
+  in
+  let dgram a () =
+    Eio.Switch.run @@ fun sw ->
+    ignore (Eio.Net.datagram_socket ~sw net (`Udp (ip a, 8191)))
+  in
+  let connect ?bind d () =
+    Eio.Switch.run @@ fun sw ->
+    let bind_to = Option.map (fun b -> `Tcp (ip b, 0)) bind in
+    ignore (Eio.Net.connect ~sw ?bind_to net (`Tcp (ip d, 8192)))
+  in
+  List.iter
+    (fun (a, l, d) ->
+      Alcotest.(check string) ("listen at " ^ a) l (outcome (listen a));
+      Alcotest.(check string)
+        ("a datagram socket at " ^ a)
+        d
+        (outcome (dgram a)))
+    [
+      ("255.255.255.255", "ok", "ok");
+      ("224.0.0.1", "ok", "ok");
+      ("::ffff:224.0.0.1", "ok", "ok");
+      ("ff02::1", "EINVAL", "EINVAL");
+      ("fe80::1", "EINVAL", "EINVAL");
+      ("ff05::1", "EINVAL", "ok");
+      ("::2", "EADDRNOTAVAIL", "EADDRNOTAVAIL");
+    ];
+  List.iter
+    (fun (d, bind, expected) ->
+      Alcotest.(check string)
+        (Fmt.str "connect to %s from %s" d (Option.value bind ~default:"-"))
+        expected
+        (outcome (connect ?bind d)))
+    [
+      ("255.255.255.255", None, "ENETUNREACH");
+      ("224.0.0.1", None, "ENETUNREACH");
+      ("::ffff:224.0.0.1", None, "ENETUNREACH");
+      ("ff02::1", None, "ENETUNREACH");
+      ("fe80::1", None, "EINVAL");
+      ("10.1.2.3", Some "127.0.0.1", "EINVAL");
+      ("::ffff:10.1.2.3", Some "::ffff:127.0.0.1", "EINVAL");
+      ("127.0.0.2", Some "127.0.0.1", "REFUSED");
+    ]
+
+(* A connect bound at its own destination, where no listener is, connects
+   to itself, as Linux's simultaneous open does: what it writes, it reads,
+   and it holds the address. *)
+let test_self_connect () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8193) in
+  let flow = Eio.Net.connect ~sw ~bind_to:addr net addr in
+  Eio.Flow.copy_string "hi" flow;
+  let buf = Cstruct.create 4 in
+  let n = Eio.Flow.single_read flow buf in
+  Alcotest.(check string)
+    "it reads its own bytes" "hi"
+    (Cstruct.to_string ~len:n buf);
+  Alcotest.(check bool) "it holds the address" true (in_use (listens net addr));
+  Eio.Flow.shutdown flow `Send;
+  (match Eio.Flow.single_read flow buf with
+  | exception End_of_file -> ()
+  | n -> Alcotest.failf "read %d after its own FIN" n);
+  let clock = Eio_mock.Clock.Mono.make () in
+  let net = Eio_net_mem.v ~clock ~sw () in
+  Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw ~bind_to:addr net addr));
+  Alcotest.(check bool) "TIME_WAIT once closed" true (in_use (listens net addr))
+
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)
 let test_a_closed_connection_leaves_its_switch () =
@@ -2070,6 +2163,8 @@ let suite =
         test_datagram_reuse_addr;
       Alcotest.test_case "the order of a datagram's errors" `Quick
         test_datagram_error_order;
+      Alcotest.test_case "addresses at the edges" `Quick test_edge_addresses;
+      Alcotest.test_case "a connect to itself" `Quick test_self_connect;
       Alcotest.test_case "addresses no interface has" `Quick
         test_unavailable_addresses;
       Alcotest.test_case "bind_to another family" `Quick

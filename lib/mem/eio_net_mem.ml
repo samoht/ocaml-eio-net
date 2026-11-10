@@ -142,15 +142,43 @@ let ip_overlaps (ip, port) (ip', port') =
 
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
 let fail code = raise (Eio.Exn.create (Eio.Exn.X code))
+let first_byte (ip : Eio.Net.Ipaddr.v4v6) = Char.code (ip :> string).[0]
+let multicast_v4 ip = first_byte ip >= 224 && first_byte ip <= 239
 
-(* The network has the loopback interface only: an IPv4 socket binds a
-   loopback address of 127.0.0.0/8, an IPv6 one ::1, either the wildcard
-   address of its family, and an IPv6 one the IPv4-mapped form of an IPv4
-   address it binds. *)
-let check_local ip =
+let broadcast (ip : Eio.Net.Ipaddr.v4v6) =
+  String.equal (ip :> string) "\255\255\255\255"
+
+(* A link-local IPv6 address, or a multicast one of interface or link scope,
+   which needs a scope that Eio's addresses do not carry. *)
+let needs_scope (ip : Eio.Net.Ipaddr.v4v6) =
+  let raw = (ip :> string) in
+  String.length raw = 16
+  && ((raw.[0] = '\xfe' && Char.code raw.[1] land 0xc0 = 0x80)
+     || (raw.[0] = '\xff' && Char.code raw.[1] land 0x0f <= 2))
+
+(* A loopback address routes only to loopback and multicast ones. *)
+let unroutable b d =
+  let b = unmap b and d = unmap d in
+  is_v4 b && is_v4 d
+  && (not (same b (any b)))
+  && first_byte b = 127
+  && first_byte d <> 127
+  && not (multicast_v4 d)
+
+(* The network has the loopback interface only: an IPv4 socket binds an
+   address of 127.0.0.0/8, the broadcast address or a multicast one, an IPv6
+   one ::1, either the wildcard address of its family, and an IPv6 one the
+   IPv4-mapped form of an IPv4 address it binds, as on Linux. An IPv6
+   address that needs a scope fails with EINVAL, and so does an IPv6
+   multicast one for TCP. *)
+let check_local ?(tcp = false) ip =
   let ip = unmap ip in
+  if needs_scope ip then fail Invalid_address;
   let local =
-    if is_v4 ip then (ip :> string).[0] = '\127' || same ip (any ip)
+    if is_v4 ip then
+      first_byte ip = 127 || same ip (any ip) || multicast_v4 ip || broadcast ip
+    else if (ip :> string).[0] = '\xff' then
+      if tcp then fail Invalid_address else true
     else same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip)
   in
   if not local then fail Address_not_available
@@ -819,6 +847,12 @@ module Flow = struct
 
   let connections = Atomic.make 0
 
+  (* A connection to itself: what it writes, it reads. *)
+  let self ~capacity =
+    let connection = Atomic.fetch_and_add connections 1 in
+    let pipe = Pipe.v ~local:false ~capacity in
+    v ~connection ~from_peer:pipe ~to_peer:pipe
+
   let pair ~local ~capacity =
     let connection = Atomic.fetch_and_add connections 1 in
     let to_client = Pipe.v ~local ~capacity in
@@ -935,7 +969,7 @@ module Listening_socket = struct
      inside it would poison. *)
   let v hub ~reuse_addr ~backlog addr =
     (match addr with
-    | `Tcp (ip, _) -> check_local ip
+    | `Tcp (ip, _) -> check_local ~tcp:true ip
     | `Unix path -> check_path path);
     match
       Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
@@ -1149,16 +1183,6 @@ module Datagram_socket = struct
   let max_length : Eio.Net.Sockaddr.datagram -> int = function
     | `Unix _ -> 212960
     | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
-
-  (* A loopback address routes only to loopback and multicast ones. *)
-  let unroutable b d =
-    let b = unmap b and d = unmap d in
-    let first ip = Char.code (ip : Eio.Net.Ipaddr.v4v6 :> string).[0] in
-    is_v4 b && is_v4 d
-    && (not (same b (any b)))
-    && first b = 127
-    && first d <> 127
-    && (first d < 224 || first d > 239)
 
   (* A send a socket refuses, in the order Linux checks: a Unix-domain socket
      refuses a UDP address with EINVAL, then a datagram too long. An IPv4
@@ -1665,7 +1689,40 @@ module Network = struct
     let refused () =
       raise (Eio.Net.err (Connection_failure (Refused No_listener)))
     in
+    (* No route reaches broadcast or multicast, nor an address outside
+       127.0.0.0/8 from a loopback one, and a link-local one needs a scope,
+       as on Linux. *)
+    (match addr with
+    | `Tcp (d, _) -> (
+        let d' = unmap d in
+        if
+          (is_v4 d' && (multicast_v4 d' || broadcast d'))
+          || ((not (is_v4 d')) && first_byte d' = 0xff)
+        then fail Network_unreachable;
+        if needs_scope d' then fail Invalid_address;
+        match bind_to with
+        | Some (`Tcp (b, _)) when unroutable b d -> fail Invalid_address
+        | _ -> ())
+    | `Unix _ -> ());
+    (* A connect bound at its own destination opens to itself, as Linux's
+       simultaneous open does. *)
+    let to_itself =
+      match (addr, bind_to, local) with
+      | `Tcp (d, port), Some (`Tcp _), Some (ip, port') ->
+          port = port' && same (unmap ip) (unmap (List.hd (reaching d)))
+      | _ -> false
+    in
     match (listener, addr) with
+    | None, `Tcp _ when to_itself ->
+        let flow = Flow.self ~capacity:t.capacity in
+        let ends = Ends.v t.hub.Listening_socket.ports in
+        (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
+        Flow.on_close flow (fun ~reset ->
+            ignore (Ends.close ends `Client ~reset);
+            match Ends.close ends `Server ~reset with
+            | `Until u, _ -> release ~until:u ()
+            | (`Release | `Held), _ -> release ());
+        Flow.close_with sw flow
     | None, `Unix path -> (
         match Files.find t.hub.files path with
         | Some Datagram -> raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
@@ -1747,7 +1804,7 @@ module Network = struct
     in
     check_bind bind_to addr;
     (match bind_to with
-    | Some (`Tcp (ip, _)) -> check_local ip
+    | Some (`Tcp (ip, _)) -> check_local ~tcp:true ip
     | Some (`Unix path) -> check_path path
     | None -> ());
     let held =
