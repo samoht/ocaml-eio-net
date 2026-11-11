@@ -196,8 +196,6 @@ let scenario_exceptions : scenario_exception list =
               List.exists (fun prefix -> starts_with ~prefix name) prefixes);
         })
       [
-        ( "pending: a listener's close keeps the port of its queued connections",
-          [ "queued close:" ] );
         ("pending: abstract addresses follow the path rules", [ "abstract " ]);
         ( "pending: the empty path autobinds datagram sockets only",
           [ "empty path listen"; "empty path bind_to" ] );

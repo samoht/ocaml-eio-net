@@ -734,7 +734,7 @@ module Flow = struct
       mutable closed : bool;
       mutable abort : bool;
       mutable release : Eio.Switch.hook;
-      mutable on_close : reset:bool -> unit;
+      mutable on_close : reset:bool -> abort:bool -> unit;
       mutable on_fin : unit -> unit;
       connection : int;
     }
@@ -747,7 +747,7 @@ module Flow = struct
       if t.abort then Pipe.update t.from_peer (fun p -> p.refused <- true);
       if unread || t.abort then Pipe.reset t.to_peer;
       Pipe.shut t.to_peer;
-      t.on_close ~reset:(unread || t.abort)
+      t.on_close ~reset:(unread || t.abort) ~abort:t.abort
 
     let leave t =
       let last =
@@ -853,7 +853,7 @@ module Flow = struct
           closed = false;
           abort = false;
           release = Eio.Switch.null_hook;
-          on_close = (fun ~reset:_ -> ());
+          on_close = (fun ~reset:_ ~abort:_ -> ());
           on_fin = ignore;
           connection;
         }
@@ -1520,7 +1520,9 @@ end
    seconds from the peer's FIN, as Linux does, and the other lets go at once.
    Closed with no FIN from its peer, it waits for one in FIN_WAIT2 for 60
    seconds, Linux's tcp_fin_timeout.
-   After a reset, and without a clock, each lets go once both have closed. *)
+   After a reset, and without a clock, each lets go once both have closed.
+   An end its listener dropped unaccepted lets go at once, as Linux destroys
+   it. *)
 module Ends = struct
   type side = [ `Client | `Server ]
   type decision = [ `Held | `Release | `Until of Mtime.t ]
@@ -1531,6 +1533,7 @@ module Ends = struct
     mutable seq : int;
     fin : (int * Mtime.t) option array;
     closed : Mtime.t option array;
+    dropped : bool array;
     mutable reset : bool;
   }
 
@@ -1541,6 +1544,7 @@ module Ends = struct
       seq = 0;
       fin = [| None; None |];
       closed = [| None; None |];
+      dropped = [| false; false |];
       reset = false;
     }
 
@@ -1551,6 +1555,7 @@ module Ends = struct
     let o = 1 - i in
     match t.closed.(i) with
     | None -> `Held
+    | Some _ when t.dropped.(i) -> `Release
     | Some closed -> (
         let both = Option.is_some t.closed.(o) in
         if Option.is_none t.now || t.reset then if both then `Release else `Held
@@ -1579,11 +1584,12 @@ module Ends = struct
 
   let fin t side = update t (fun () -> send_fin t (index side))
 
-  let close t side ~reset =
+  let close t side ~reset ~abort =
     update t (fun () ->
         let i = index side in
         send_fin t i;
         t.closed.(i) <- Some (now t);
+        if abort then t.dropped.(i) <- true;
         if reset then t.reset <- true)
 
   let reset t = Mutex.protect t.lock (fun () -> t.reset <- true)
@@ -1732,9 +1738,9 @@ module Network = struct
         let flow = Flow.self ~capacity:t.capacity in
         let ends = Ends.v t.hub.Listening_socket.ports in
         (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
-        Flow.on_close flow (fun ~reset ->
-            ignore (Ends.close ends `Client ~reset);
-            match Ends.close ends `Server ~reset with
+        Flow.on_close flow (fun ~reset ~abort:_ ->
+            ignore (Ends.close ends `Client ~reset ~abort:false);
+            match Ends.close ends `Server ~reset ~abort:false with
             | `Until u, _ -> release ~until:u ()
             | (`Release | `Held), _ -> release ());
         Flow.close_with sw flow
@@ -1775,10 +1781,10 @@ module Network = struct
               apply (fun until -> release_port t ?until port h) server)
             child
         in
-        Flow.on_close client (fun ~reset ->
-            settle (Ends.close ends `Client ~reset));
-        Flow.on_close server (fun ~reset ->
-            settle (Ends.close ends `Server ~reset));
+        Flow.on_close client (fun ~reset ~abort ->
+            settle (Ends.close ends `Client ~reset ~abort));
+        Flow.on_close server (fun ~reset ~abort ->
+            settle (Ends.close ends `Server ~reset ~abort));
         Flow.on_fin client (fun () -> settle (Ends.fin ends `Client));
         Flow.on_fin server (fun () -> settle (Ends.fin ends `Server));
         let fail () =
