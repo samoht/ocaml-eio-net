@@ -94,10 +94,13 @@
     only when every fiber waits, so a timeout of an hour takes no time. A run in
     which every fiber waits and no timer is due fails as a hang, and so does one
     still running after an hour of its clock, and one in which the same network
-    operation fails 10000 times on the same target, a connect to one address or
-    a read on one connection, while its clock stands still, as a client that
-    retries a refused connect at once does in the outage. Failures on distinct
-    targets, as a scan of many ports makes, do not count together. *)
+    operation fails 10000 times on the same target while its clock stands still,
+    with no success there in between: a connect to one address, or a read or a
+    write on one accepted connection or on any of the connections a client made
+    to one address. A client that retries a refused connect at once does that in
+    the outage, and so does one that reconnects at once after each failed read.
+    Failures on distinct targets, as a scan of many ports makes, do not count
+    together. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t

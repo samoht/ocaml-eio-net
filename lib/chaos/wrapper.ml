@@ -87,12 +87,17 @@ let join conn side sock =
    that sees the connection first waits for it. *)
 type pending = { number : int Eio.Promise.t; set : int Eio.Promise.u; c : conn }
 
+(* The end of a connection, for the livelock guard: the connections a
+   client made to one address count as one, so a client that reconnects at
+   once after each failure retries one target. *)
+type peer = Remote of Eio.Net.Sockaddr.stream | End of int * Op.side
+
 (* What an operation is tried on, for the livelock guard. *)
 type target =
   | Connect of Eio.Net.Sockaddr.stream
   | Accept of int
-  | Read of int * Op.side
-  | Write of int * Op.side
+  | Read of peer
+  | Write of peer
   | Recv of int
 
 (* What the wrappers of one network share. [lock] guards the counters and
@@ -243,6 +248,7 @@ module Flow = struct
     socket : int;
     side : Op.side;
     family : Op.family;
+    peer : peer;
     sock : stream;
     conn : conn;
     lock : Mutex.t;
@@ -444,10 +450,10 @@ module Flow = struct
             write ()
 
     let single_read t dst =
-      guard t.ctx (Read (t.socket, t.side)) (fun () -> single_read_ t dst)
+      guard t.ctx (Read t.peer) (fun () -> single_read_ t dst)
 
     let single_write t bufs =
-      guard t.ctx (Write (t.socket, t.side)) (fun () -> single_write_ t bufs)
+      guard t.ctx (Write t.peer) (fun () -> single_write_ t bufs)
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
     let read_methods = []
@@ -472,7 +478,7 @@ module Flow = struct
 
   let handler = Eio.Net.Pi.stream_socket (module Impl)
 
-  let v ctx ~socket ~side ~family ~conn sock : stream =
+  let v ?remote ctx ~socket ~side ~family ~conn sock : stream =
     join conn side sock;
     Eio.Resource.T
       ( {
@@ -480,6 +486,10 @@ module Flow = struct
           socket;
           side;
           family;
+          peer =
+            (match remote with
+            | Some addr -> Remote addr
+            | None -> End (socket, side));
           sock;
           conn;
           lock = Mutex.create ();
@@ -788,7 +798,7 @@ module Network = struct
           (Eio.Net.connect ?bind_to ~options ~sw t.net addr :> stream)
         in
         let conn = client_conn ctx ~socket ~family sock in
-        Flow.v ctx ~socket ~side:`Client ~family ~conn sock
+        Flow.v ~remote:addr ctx ~socket ~side:`Client ~family ~conn sock
       in
       match fault with
       | Some (Fault.Refuse | Reset) -> raise (refused_exn ())

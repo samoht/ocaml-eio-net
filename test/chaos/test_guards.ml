@@ -268,6 +268,30 @@ let spin () =
   in
   go 0
 
+(* A client that reconnects at once after each failed read, to a server
+   that closes every connection unanswered, spins with its clock stopped:
+   each read fails on a new connection to the same address. *)
+let reconnect () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
+  (* Its own bound, well past the guard's: without the guard, the run fails
+     here instead of spinning for ever. *)
+  let rec go n =
+    if n > 30_000 then failwith "the spin was not stopped";
+    match
+      Eio.Switch.run (fun sw ->
+          let flow = Eio.Net.connect ~sw env#net addr in
+          Eio.Flow.copy_string "hi\n" flow;
+          Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:16))
+    with
+    | _ -> ()
+    | exception (Eio.Io _ | End_of_file) -> go (n + 1)
+  in
+  go 0
+
 (* A scan that tries 10500 closed ports once each, as the clock stands
    still, is not a spin: the check's first run passes, and only the budget
    stops it. *)
@@ -299,6 +323,11 @@ let suite =
            "the run hangs: the same network operation failed 10000 times on \
             the same target while its clock stood still"
            spin);
+      Alcotest.test_case "a client that reconnects at once spins" `Quick
+        (refused_with
+           "Eio_net_chaos.check: the run with no fault failed: the run hangs: \
+            the same network operation failed 10000 times on the same target"
+           reconnect);
       Alcotest.test_case "a scan of closed ports is not a spin" `Quick
         (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
