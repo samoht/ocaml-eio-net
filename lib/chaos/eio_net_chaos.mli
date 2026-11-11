@@ -288,8 +288,8 @@ val wrap :
     several domains at once. [f] is called by one of them at a time, in the
     order of {!Op.index}, while a lock is held: it must not wait, and must not
     use the network. If [f] raises, the operation raises that exception and does
-    nothing else: an accept leaves its connection queued for the next. The
-    operation's index and its socket number stay used.
+    nothing else: an accept leaves its connection queued for the next, and a
+    receive its datagram. The operation's index and its socket number stay used.
 
     A fault reaches both ends of a connection when [net] is an {!Eio_net_mem}
     network, which tells the wrapper which accepted socket a connect made. On

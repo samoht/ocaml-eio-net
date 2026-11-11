@@ -397,6 +397,19 @@ let test_dgram_reorder () =
   Alcotest.(check (list string))
     "the datagram arrives after the next" [ "d1"; "d0"; "d2" ] (recv_n sock 3)
 
+(* A receive that [f] fails by raising leaves its datagram for the next
+   receive. *)
+let test_dgram_failed_recv_keeps_datagram () =
+  let f (op : Op.t) =
+    if op.kind = `Recv && op.offset = 0 then failwith "f raised" else None
+  in
+  with_datagrams f [ "d0"; "d1" ] @@ fun ~send:_ sock ->
+  (match recv1 sock with
+  | _ -> Alcotest.fail "the first receive went through"
+  | exception Failure _ -> ());
+  Alcotest.(check (list string))
+    "the datagram is kept" [ "d0"; "d1" ] (recv_n sock 2)
+
 (* A receive cancelled while no datagram has come draws no fault: the Dup
    applies to the first datagram the base delivers. *)
 let test_dgram_cancelled_recv_draws_no_fault () =
@@ -858,6 +871,8 @@ let suite =
       Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
       Alcotest.test_case "datagram dup" `Quick test_dgram_dup;
       Alcotest.test_case "datagram reorder" `Quick test_dgram_reorder;
+      Alcotest.test_case "a failed receive keeps its datagram" `Quick
+        test_dgram_failed_recv_keeps_datagram;
       Alcotest.test_case "datagram cancelled receive draws no fault" `Quick
         test_dgram_cancelled_recv_draws_no_fault;
       Alcotest.test_case "datagram held back kept whole" `Quick

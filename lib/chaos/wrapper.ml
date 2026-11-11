@@ -538,7 +538,8 @@ module Datagram = struct
     type nonrec t = t
 
     (* The fault is drawn once a datagram is taken, so a receive cancelled
-       while it waits for one draws none. *)
+       while it waits for one draws none. If [f] raises, the datagram goes
+       back for the next receive. *)
     let rec recv_ t buf =
       let next =
         Mutex.protect t.lock (fun () ->
@@ -567,8 +568,14 @@ module Datagram = struct
                 `Pass
             | [] -> (
                 let fault =
-                  ask t.ctx `Recv ~socket:t.socket ~side:`Client
-                    ~family:t.family ~offset ~length:(Cstruct.length buf)
+                  match
+                    ask t.ctx `Recv ~socket:t.socket ~side:`Client
+                      ~family:t.family ~offset ~length:(Cstruct.length buf)
+                  with
+                  | fault -> fault
+                  | exception e ->
+                      t.ready <- d :: t.ready;
+                      raise e
                 in
                 (* A Unix-domain socket loses, duplicates, reorders and
                    garbles nothing (unix(7)). *)
