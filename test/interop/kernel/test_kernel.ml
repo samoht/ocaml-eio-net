@@ -187,13 +187,18 @@ let scenario_rows () =
       | [ name; linux; macos ] -> (name, linux, macos)
       | _ -> Fmt.failwith "%s: bad row %S" file line)
 
-(* mem runs on a clock that does not move, so a TIME_WAIT never ends, as it
-   does not within a scenario on Linux. *)
+(* mem runs on a mock clock, which moves only when a timed scenario waits,
+   as Linux's timers run on a scenario's real time. *)
 let replay_scenario name =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.Mono.make () in
-  Kernel_seq.scenario (Eio_net_mem.v ~clock ~sw ()) name
+  let wait secs =
+    let span = Mtime.Span.of_float_ns (secs *. 1e9) |> Option.get in
+    Eio_mock.Clock.Mono.set_time clock
+      (Mtime.add_span (Eio.Time.Mono.now clock) span |> Option.get)
+  in
+  Kernel_seq.scenario ~wait (Eio_net_mem.v ~clock ~sw ()) name
 
 let test_scenarios () =
   let rows = scenario_rows () in

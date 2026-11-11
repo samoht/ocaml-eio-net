@@ -1117,3 +1117,98 @@ reuse no connection,ok ok,ok ok
 reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok
 reuse bound server closes first,ok ok ok,EADDRINUSE EADDRINUSE ok
 unix paths,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EINVAL,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EAFNOSUPPORT
+bind error shapes,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EINVAL raw:ENAMETOOLONG io:EADDRINUSE,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EAFNOSUPPORT raw:ENAMETOOLONG io:EADDRINUSE
+autobind,abstract6 abstract6 distinct r2,abort EINVAL
+udp reuse two at 127.0.0.1,s0=blk s1=got,abort EADDRINUSE
+udp reuse 0.0.0.0 then 127.0.0.1,s0=blk s1=got,s0=blk s1=got
+udp reuse 127.0.0.1 then 0.0.0.0,s0=got s1=blk,s0=got s1=blk
+udp reuse two at 0.0.0.0,s0=blk s1=got,abort EADDRINUSE
+udp reuse three at 127.0.0.1,s0=blk s1=blk s2=got,abort EADDRINUSE
+udp reuse :: then 0.0.0.0,s0=blk s1=got,abort EADDRINUSE
+udp reuse 0.0.0.0 then ::,s0=got s1=blk,s0=got s1=blk
+udp reuse 127.0.0.1 then ::,s0=got s1=blk,s0=got s1=blk
+udp reuse :: then 127.0.0.1,s0=blk s1=got,s0=blk s1=got
+dgram error v4->v6 len=10,EAFNOSUPPORT,No route to host
+dgram error v4->v6 len=65508,EAFNOSUPPORT,EMSGSIZE
+dgram error v4->v6 len=65536,EMSGSIZE,EMSGSIZE
+dgram error v4->v6 len=300000,EMSGSIZE,EMSGSIZE
+dgram error v6lo->v4 len=10,ENETUNREACH,EINVAL
+dgram error v6lo->v4 len=65508,ENETUNREACH,EMSGSIZE
+dgram error v6lo->v4 len=65536,ENETUNREACH,EMSGSIZE
+dgram error v6lo->v4 len=300000,ENETUNREACH,EMSGSIZE
+dgram error v6lo->mapped len=10,ENETUNREACH,EADDRNOTAVAIL
+dgram error v6lo->mapped len=65508,ENETUNREACH,EMSGSIZE
+dgram error v6lo->mapped len=65536,ENETUNREACH,EMSGSIZE
+dgram error v6lo->mapped len=300000,ENETUNREACH,EMSGSIZE
+dgram error mapped->v6 len=10,EAFNOSUPPORT,No route to host
+dgram error mapped->v6 len=65508,EAFNOSUPPORT,EMSGSIZE
+dgram error mapped->v6 len=65536,EAFNOSUPPORT,EMSGSIZE
+dgram error mapped->v6 len=300000,EAFNOSUPPORT,EMSGSIZE
+dgram error v4->port0 len=10,EINVAL,sent
+dgram error v4->port0 len=65508,EINVAL,EMSGSIZE
+dgram error v4->port0 len=65536,EMSGSIZE,EMSGSIZE
+dgram error v4->port0 len=300000,EMSGSIZE,EMSGSIZE
+dgram error v4->short path len=10,EINVAL,EADDRNOTAVAIL
+dgram error v4->short path len=65508,EINVAL,EMSGSIZE
+dgram error v4->short path len=65536,EMSGSIZE,EMSGSIZE
+dgram error v4->short path len=300000,EMSGSIZE,EMSGSIZE
+dgram error v4->long path len=10,EAFNOSUPPORT,EADDRNOTAVAIL
+dgram error v4->long path len=65508,EAFNOSUPPORT,EMSGSIZE
+dgram error v4->long path len=65536,EMSGSIZE,EMSGSIZE
+dgram error v4->long path len=300000,EMSGSIZE,EMSGSIZE
+dgram error v6->long path len=10,EINVAL,EINVAL
+dgram error v6->long path len=65508,EINVAL,EMSGSIZE
+dgram error v6->long path len=65536,EINVAL,EMSGSIZE
+dgram error v6->long path len=300000,EINVAL,EMSGSIZE
+dgram error unix->v4 len=10,EINVAL,EAFNOSUPPORT
+dgram error unix->v4 len=65508,EINVAL,EMSGSIZE
+dgram error unix->v4 len=65536,EINVAL,EMSGSIZE
+dgram error unix->v4 len=300000,EINVAL,EMSGSIZE
+dgram error unix->v6 len=10,EINVAL,EAFNOSUPPORT
+dgram error unix->v6 len=65508,EINVAL,EMSGSIZE
+dgram error unix->v6 len=65536,EINVAL,EMSGSIZE
+dgram error unix->v6 len=300000,EINVAL,EMSGSIZE
+dgram error unix->missing len=10,Not_found,Not_found
+dgram error unix->missing len=65508,Not_found,EMSGSIZE
+dgram error unix->missing len=65536,Not_found,EMSGSIZE
+dgram error unix->missing len=300000,EMSGSIZE,EMSGSIZE
+dgram error v4->10.1.2.3 len=10,EINVAL,EADDRNOTAVAIL
+dgram error v4->10.1.2.3 len=65508,EINVAL,EMSGSIZE
+dgram error v4->10.1.2.3 len=65536,EMSGSIZE,EMSGSIZE
+dgram error v4->10.1.2.3 len=300000,EMSGSIZE,EMSGSIZE
+dgram error v4 127.0.0.2->10.1.2.3 len=10,EINVAL,abort EADDRNOTAVAIL
+dgram error v4 127.0.0.2->10.1.2.3 len=65508,EINVAL,abort EADDRNOTAVAIL
+dgram error v4 127.0.0.2->10.1.2.3 len=65536,EMSGSIZE,abort EADDRNOTAVAIL
+dgram error v4 127.0.0.2->10.1.2.3 len=300000,EMSGSIZE,abort EADDRNOTAVAIL
+dgram error v4->224.0.0.1 len=10,sent,EADDRNOTAVAIL
+dgram error v4->224.0.0.1 len=65508,EMSGSIZE,EMSGSIZE
+dgram error v4->224.0.0.1 len=65536,EMSGSIZE,EMSGSIZE
+dgram error v4->224.0.0.1 len=300000,EMSGSIZE,EMSGSIZE
+edge bind 255.255.255.255,ok ok,EAFNOSUPPORT EADDRNOTAVAIL
+edge bind 224.0.0.1,ok ok,EAFNOSUPPORT ok
+edge bind ::ffff:224.0.0.1,ok ok,EAFNOSUPPORT ok
+edge bind ff02::1,EINVAL EINVAL,EAFNOSUPPORT ok
+edge bind fe80::1,EINVAL EINVAL,EADDRNOTAVAIL EADDRNOTAVAIL
+edge bind ff05::1,EINVAL ok,EAFNOSUPPORT ok
+edge connect 255.255.255.255 from -,ENETUNREACH,EAFNOSUPPORT
+edge connect 224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT
+edge connect ::ffff:224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT
+edge connect ff02::1 from -,ENETUNREACH,EAFNOSUPPORT
+edge connect fe80::1 from -,EINVAL,No route to host
+edge connect 10.1.2.3 from 127.0.0.1,EINVAL,EADDRNOTAVAIL
+edge connect 10.1.2.3 from 127.0.0.2,EINVAL,EADDRNOTAVAIL
+edge connect ::ffff:10.1.2.3 from ::ffff:127.0.0.1,EINVAL,EADDRNOTAVAIL
+self connect,ok hi EOF EADDRINUSE,EINVAL
+timed: server closes first,EADDRINUSE ok,EADDRINUSE ok
+timed: server closes first and relisten with reuse_addr,EADDRINUSE ok,ok ok
+timed: server closes first with reuse_addr on both,ok ok,ok ok
+timed: client closes first,ok ok,EADDRINUSE ok
+timed: server closes and client stays,EADDRINUSE ok,EADDRINUSE ok
+timed: reset by unread bytes,ok ok,ok ok
+timed: bound client closes first,EADDRINUSE/EADDRINUSE ok/ok,EADDRINUSE/EADDRINUSE ok/ok
+timed: both shut send and server first,EADDRINUSE ok,EADDRINUSE ok
+timed: server shuts send then client closes,EADDRINUSE ok,EADDRINUSE ok
+timed: client shuts send then server closes,ok ok,EADDRINUSE ok
+timed: client shuts down then server closes,ok ok,EADDRINUSE ok
+timed: client shuts receive then server closes,EADDRINUSE ok,EADDRINUSE ok
+timed: server closes and client closes at 30 s,EADDRINUSE EADDRINUSE ok,EADDRINUSE ok ok

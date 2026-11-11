@@ -571,6 +571,260 @@ let unix_paths net =
             (Eio.Net.connect ~sw ~bind_to:(`Tcp (lo, 0)) net (`Unix "p.sock")));
     ]
 
+(* The error a bind raises, with its shape: raw from eio_posix's listen and
+   datagram_socket, or an Eio.Io error. *)
+let shaped f =
+  match f () with
+  | () -> "ok"
+  | exception (Unix.Unix_error _ as e) -> "raw:" ^ classify e
+  | exception (Eio.Io _ as e) -> "io:" ^ classify e
+  | exception e -> classify e
+
+let bind_shapes net =
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)) in
+  let held = `Tcp (lo, port_of l) in
+  let d = Eio.Net.datagram_socket ~sw net (`Udp (lo, 0)) in
+  let dport = udp_port d 49152 in
+  let in_switch f () = Eio.Switch.run (fun sw -> f sw) in
+  String.concat " "
+    (List.map shaped
+       [
+         in_switch (fun sw -> ignore (Eio.Net.listen ~sw ~backlog:1 net held));
+         in_switch (fun sw ->
+             ignore (Eio.Net.datagram_socket ~sw net (`Udp (lo, dport))));
+         in_switch (fun sw ->
+             ignore
+               (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip "10.255.255.1", 0))));
+         in_switch (fun sw ->
+             ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip "ff02::1", 0))));
+         in_switch (fun sw ->
+             ignore
+               (Eio.Net.datagram_socket ~sw net (`Unix (String.make 120 'z'))));
+         in_switch (fun sw ->
+             ignore (Eio.Net.connect ~sw ~bind_to:held net (`Tcp (lo, 1))));
+       ])
+
+(* Two datagram sockets at the empty path send to a named one: each autobinds
+   an abstract address, a NUL and five hexadecimal digits, which a reply
+   reaches. *)
+let autobind net =
+  Eio.Switch.run @@ fun sw ->
+  if Sys.file_exists "ab.sock" then Unix.unlink "ab.sock";
+  let r = Eio.Net.datagram_socket ~sw net (`Unix "ab.sock") in
+  let a = Eio.Net.datagram_socket ~sw net (`Unix "") in
+  let b = Eio.Net.datagram_socket ~sw net (`Unix "") in
+  let buf = Cstruct.create 8 in
+  let from s =
+    Eio.Net.send s ~dst:(`Unix "ab.sock") [ Cstruct.of_string "x" ];
+    fst (now (fun () -> Eio.Net.recv r buf))
+  in
+  let fa = from a and fb = from b in
+  let form = function
+    | `Unix n when String.length n > 0 && n.[0] = '\000' ->
+        Fmt.str "abstract%d" (String.length n)
+    | (`Unix _ | `Udp _) as addr -> shape (addr :> Eio.Net.Sockaddr.t)
+  in
+  let reply =
+    outcome (fun () ->
+        Eio.Net.send r ~dst:fa [ Cstruct.of_string "ok" ];
+        let _, n = now (fun () -> Eio.Net.recv a buf) in
+        "r" ^ string_of_int n)
+  in
+  let r =
+    String.concat " "
+      [ form fa; form fb; (if fa = fb then "same" else "distinct"); reply ]
+  in
+  if Sys.file_exists "ab.sock" then Unix.unlink "ab.sock";
+  r
+
+(* UDP sockets that both have SO_REUSEADDR at one port: which receives a
+   datagram sent to 127.0.0.1. *)
+let udp_reuse binds net =
+  Eio.Switch.run @@ fun sw ->
+  let socks =
+    List.fold_left
+      (fun (port, acc) a ->
+        let addr = match port with None -> 0 | Some p -> p in
+        let s =
+          Eio.Net.datagram_socket ~sw ~reuse_addr:true net (`Udp (ip a, addr))
+        in
+        let port =
+          match port with
+          | Some p -> p
+          | None -> udp_port s (49152 + List.length acc)
+        in
+        (Some port, acc @ [ s ]))
+      (None, []) binds
+  in
+  match socks with
+  | None, _ | _, [] -> "none"
+  | Some port, socks ->
+      let sender = Eio.Net.datagram_socket ~sw net `UdpV4 in
+      Eio.Net.send sender
+        ~dst:(`Udp (Eio.Net.Ipaddr.V4.loopback, port))
+        [ Cstruct.of_string "x" ];
+      String.concat " "
+        (List.mapi
+           (fun i s ->
+             Fmt.str "s%d=%s" i
+               (outcome (fun () ->
+                    ignore (now (fun () -> Eio.Net.recv s (Cstruct.create 4)));
+                    "got")))
+           socks)
+
+(* A datagram of [len] bytes from a socket at [src] to [dst]: the error
+   Linux checks first. "short" and "long" are Unix paths whose address is
+   shorter and longer than an IPv4 one. *)
+let dgram_error src dst len net =
+  Eio.Switch.run @@ fun sw ->
+  if Sys.file_exists "u1.sock" then Unix.unlink "u1.sock";
+  let addr = function
+    | "unix" -> `Unix "u1.sock"
+    | "short" -> `Unix "nowhere"
+    | "long" -> `Unix "abcdefghijklmnop"
+    | "port0" -> `Udp (Eio.Net.Ipaddr.V4.loopback, 0)
+    | a -> `Udp (ip a, 9)
+  in
+  let src = match addr src with `Udp (a, _) -> `Udp (a, 0) | a -> a in
+  let s = Eio.Net.datagram_socket ~sw net src in
+  let r =
+    outcome (fun () ->
+        Eio.Net.send s ~dst:(addr dst) [ Cstruct.create len ];
+        "sent")
+  in
+  if Sys.file_exists "u1.sock" then Unix.unlink "u1.sock";
+  r
+
+let edge_bind a net =
+  let l = listen_at net (`Tcp (ip a, 0)) in
+  let d =
+    outcome (fun () ->
+        Eio.Switch.run @@ fun sw ->
+        ignore (Eio.Net.datagram_socket ~sw net (`Udp (ip a, 0)));
+        "ok")
+  in
+  l ^ " " ^ d
+
+let edge_connect ?bind d net =
+  outcome (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let bind_to = Option.map (fun b -> `Tcp (ip b, 0)) bind in
+      ignore (Eio.Net.connect ~sw ?bind_to net (`Tcp (ip d, 9)));
+      "ok")
+
+(* A connect bound at its own destination opens to itself. *)
+let self_connect net =
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let free =
+    Eio.Switch.run @@ fun sw ->
+    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)))
+  in
+  let addr = `Tcp (lo, free) in
+  Eio.Switch.run @@ fun sw ->
+  outcome (fun () ->
+      let c = Eio.Net.connect ~sw ~bind_to:addr net addr in
+      Eio.Flow.copy_string "hi" c;
+      let got = read_s c 4 in
+      Eio.Flow.shutdown c `Send;
+      let eof = outcome (fun () -> read_s c 4) in
+      let held = listen_at net addr in
+      String.concat " " [ "ok"; got; eof; held ])
+
+(* Timed: TIME_WAIT and FIN_WAIT2. [wait d] lets [d] seconds pass. Each case
+   opens a connection to a listener at a free port, closes it in an order,
+   closes the listener, and listens at the port again now and after 65
+   seconds, past Linux's 60-second timers. *)
+let timed_close order ~wait net =
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let reuse = order = `Both_reuse in
+  let addr, bound =
+    Eio.Switch.run @@ fun sw ->
+    let free () = port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0))) in
+    let a = free () in
+    (`Tcp (lo, a), `Tcp (lo, free ()))
+  in
+  let probe () =
+    match order with
+    | `Bound_client_first ->
+        outcome (fun () ->
+            Eio.Switch.run @@ fun sw ->
+            ignore (Eio.Net.connect ~sw ~bind_to:bound net addr);
+            "ok")
+        ^ "/" ^ listen_at net bound
+    | `Relisten_reuse | `Both_reuse -> listen_at ~reuse_addr:true net addr
+    | _ -> listen_at net addr
+  in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~reuse_addr:reuse ~backlog:4 net addr in
+  let bind_to = if order = `Bound_client_first then Some bound else None in
+  let c = Eio.Net.connect ~sw ?bind_to net addr in
+  let s, _ = Eio.Net.accept ~sw l in
+  let close f = Eio.Flow.close f and shut f cmd = Eio.Flow.shutdown f cmd in
+  let late = ref [] in
+  (match order with
+  | `Server_first | `Relisten_reuse | `Both_reuse ->
+      close s;
+      close c
+  | `Client_first | `Bound_client_first ->
+      close c;
+      close s
+  | `Client_stays -> close s
+  | `Reset ->
+      Eio.Flow.copy_string "unread" c;
+      close s;
+      close c
+  | `Shut_both ->
+      shut s `Send;
+      shut c `Send;
+      close c;
+      close s
+  | `Server_shut_client_close ->
+      shut s `Send;
+      close c;
+      close s
+  | `Client_shut cmd ->
+      shut c cmd;
+      close s;
+      close c
+  | `Client_closes_later ->
+      close s;
+      late := [ c ]);
+  if order <> `Bound_client_first then Eio.Resource.close l;
+  let first = probe () in
+  let rest =
+    match !late with
+    | [ c ] ->
+        wait 30.;
+        close c;
+        wait 35.;
+        let mid = probe () in
+        wait 30.;
+        [ mid; probe () ]
+    | _ ->
+        wait 65.;
+        [ probe () ]
+  in
+  String.concat " " (first :: rest)
+
+let timed_cases =
+  [
+    ("server closes first", `Server_first);
+    ("server closes first and relisten with reuse_addr", `Relisten_reuse);
+    ("server closes first with reuse_addr on both", `Both_reuse);
+    ("client closes first", `Client_first);
+    ("server closes and client stays", `Client_stays);
+    ("reset by unread bytes", `Reset);
+    ("bound client closes first", `Bound_client_first);
+    ("both shut send and server first", `Shut_both);
+    ("server shuts send then client closes", `Server_shut_client_close);
+    ("client shuts send then server closes", `Client_shut `Send);
+    ("client shuts down then server closes", `Client_shut `All);
+    ("client shuts receive then server closes", `Client_shut `Receive);
+    ("server closes and client closes at 30 s", `Client_closes_later);
+  ]
+
 let stream_ips =
   [
     "127.0.0.1";
@@ -624,7 +878,25 @@ let services =
     "-";
   ]
 
-let scenario_list : (string * (net -> string)) list =
+let dgram_error_cases =
+  [
+    ("v4->v6", "127.0.0.1", "::1");
+    ("v6lo->v4", "::1", "127.0.0.1");
+    ("v6lo->mapped", "::1", "::ffff:127.0.0.1");
+    ("mapped->v6", "::ffff:127.0.0.1", "::1");
+    ("v4->port0", "127.0.0.1", "port0");
+    ("v4->short path", "127.0.0.1", "short");
+    ("v4->long path", "127.0.0.1", "long");
+    ("v6->long path", "::1", "long");
+    ("unix->v4", "unix", "127.0.0.1");
+    ("unix->v6", "unix", "::1");
+    ("unix->missing", "unix", "short");
+    ("v4->10.1.2.3", "127.0.0.1", "10.1.2.3");
+    ("v4 127.0.0.2->10.1.2.3", "127.0.0.2", "10.1.2.3");
+    ("v4->224.0.0.1", "127.0.0.1", "224.0.0.1");
+  ]
+
+let untimed_scenarios : (string * (net -> string)) list =
   [ ("three", three) ]
   @ List.map (fun n -> (Fmt.str "backlog %d" n, backlog n)) [ 0; 1; 2; 5 ]
   @ List.map
@@ -697,11 +969,65 @@ let scenario_list : (string * (net -> string)) list =
         ("bound client closes first", `Bound_client_first);
         ("bound server closes first", `Bound_server_first);
       ]
-  @ [ ("unix paths", unix_paths) ]
+  @ [ ("unix paths", unix_paths); ("bind error shapes", bind_shapes) ]
+  @ [ ("autobind", autobind) ]
+  @ List.map
+      (fun (name, binds) -> ("udp reuse " ^ name, udp_reuse binds))
+      [
+        ("two at 127.0.0.1", [ "127.0.0.1"; "127.0.0.1" ]);
+        ("0.0.0.0 then 127.0.0.1", [ "0.0.0.0"; "127.0.0.1" ]);
+        ("127.0.0.1 then 0.0.0.0", [ "127.0.0.1"; "0.0.0.0" ]);
+        ("two at 0.0.0.0", [ "0.0.0.0"; "0.0.0.0" ]);
+        ("three at 127.0.0.1", [ "127.0.0.1"; "127.0.0.1"; "127.0.0.1" ]);
+        (":: then 0.0.0.0", [ "::"; "0.0.0.0" ]);
+        ("0.0.0.0 then ::", [ "0.0.0.0"; "::" ]);
+        ("127.0.0.1 then ::", [ "127.0.0.1"; "::" ]);
+        (":: then 127.0.0.1", [ "::"; "127.0.0.1" ]);
+      ]
+  @ List.concat_map
+      (fun (name, src, dst) ->
+        List.map
+          (fun len ->
+            (Fmt.str "dgram error %s len=%d" name len, dgram_error src dst len))
+          [ 10; 65508; 65536; 300000 ])
+      dgram_error_cases
+  @ List.map
+      (fun a -> ("edge bind " ^ a, edge_bind a))
+      [
+        "255.255.255.255";
+        "224.0.0.1";
+        "::ffff:224.0.0.1";
+        "ff02::1";
+        "fe80::1";
+        "ff05::1";
+      ]
+  @ List.map
+      (fun (d, bind) ->
+        ( Fmt.str "edge connect %s from %s" d (Option.value bind ~default:"-"),
+          fun net -> edge_connect ?bind d net ))
+      [
+        ("255.255.255.255", None);
+        ("224.0.0.1", None);
+        ("::ffff:224.0.0.1", None);
+        ("ff02::1", None);
+        ("fe80::1", None);
+        ("10.1.2.3", Some "127.0.0.1");
+        ("10.1.2.3", Some "127.0.0.2");
+        ("::ffff:10.1.2.3", Some "::ffff:127.0.0.1");
+      ]
+  @ [ ("self connect", self_connect) ]
+
+let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
+  let untimed (name, f) = (name, fun ~wait:_ net -> f net) in
+  List.map untimed untimed_scenarios
+  @ List.map
+      (fun (name, order) -> ("timed: " ^ name, timed_close order))
+      timed_cases
 
 let scenarios = List.map fst scenario_list
+let timed name = String.starts_with ~prefix:"timed: " name
 
-let scenario net name =
+let scenario ?(wait = fun _ -> ()) net name =
   let f = List.assoc name scenario_list in
-  let r = try f net with e -> "abort " ^ classify e in
-  String.map (function ',' | '\n' -> ';' | c -> c) r
+  let r = try f ~wait net with e -> "abort " ^ classify e in
+  String.map (function ',' | '\n' -> ';' | '\000' -> '0' | c -> c) r

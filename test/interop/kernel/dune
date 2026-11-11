@@ -1,7 +1,7 @@
 (test
  (name test)
  (package eio-net)
- (libraries kernel_seq eio-net.mem eio eio.mock fmt alcotest)
+ (libraries kernel_seq eio-net.mem eio eio.mock fmt mtime alcotest)
  (deps
   (source_tree traces)))
 

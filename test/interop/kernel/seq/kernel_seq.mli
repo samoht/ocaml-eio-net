@@ -29,10 +29,19 @@ val run : _ Eio.Net.t -> transport -> string list -> string list
 val scenarios : string list
 (** [scenarios] names the scenarios the traces hold, in a fixed order: three
     clients of one listener, backlogs, listens, connects and datagrams across
-    the loopback addresses, address reuse after a close, Unix paths, and host
-    and service resolution. *)
+    the loopback addresses, address reuse after a close, Unix paths, host and
+    service resolution, bind error shapes, autobind, UDP reuse, datagram error
+    order, edge addresses, a connect to itself, and timed closes. *)
 
-val scenario : [ `Generic ] Eio.Net.ty Eio.Resource.t -> string -> string
-(** [scenario net name] runs the scenario [name] on [net] and is its outcome, on
-    one line without commas. Unix paths are relative to the current directory.
-*)
+val timed : string -> bool
+(** [timed name] is [true] for a scenario that lets time pass: TIME_WAIT and
+    FIN_WAIT2, probed now and after Linux's 60-second timers. *)
+
+val scenario :
+  ?wait:(float -> unit) ->
+  [ `Generic ] Eio.Net.ty Eio.Resource.t ->
+  string ->
+  string
+(** [scenario ~wait net name] runs the scenario [name] on [net] and is its
+    outcome, on one line without commas. [wait d] lets [d] seconds pass: a timed
+    scenario calls it. Unix paths are relative to the current directory. *)

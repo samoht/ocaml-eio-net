@@ -23,19 +23,28 @@ let scenarios () =
   Eio_posix.run @@ fun env ->
   let net = (Eio.Stdenv.net env :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
   print_endline "ops,outcomes";
-  (* macOS has no 127.0.0.2, and a connect there waits 75 s to time out. *)
+  (* macOS has no 127.0.0.2, and a connect there waits 75 s to time out. The
+     timed scenarios run together, each sleeping on the clock. *)
   let clock = Eio.Stdenv.clock env in
+  let run name =
+    if Kernel_seq.timed name then
+      Kernel_seq.scenario ~wait:(Eio.Time.sleep clock) net name
+    else
+      match
+        Eio.Time.with_timeout_exn clock 2. (fun () ->
+            Kernel_seq.scenario net name)
+      with
+      | r -> r
+      | exception Eio.Time.Timeout -> "timeout"
+  in
+  let timed, untimed = List.partition Kernel_seq.timed Kernel_seq.scenarios in
+  let results = Hashtbl.create 16 in
+  List.iter (fun name -> Hashtbl.replace results name (run name)) untimed;
+  Eio.Fiber.List.iter
+    (fun name -> Hashtbl.replace results name (run name))
+    timed;
   List.iter
-    (fun name ->
-      let r =
-        match
-          Eio.Time.with_timeout_exn clock 2. (fun () ->
-              Kernel_seq.scenario net name)
-        with
-        | r -> r
-        | exception Eio.Time.Timeout -> "timeout"
-      in
-      Fmt.pr "%s,%s@." name r)
+    (fun name -> Fmt.pr "%s,%s@." name (Hashtbl.find results name))
     Kernel_seq.scenarios
 
 let rows file =
