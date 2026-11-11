@@ -52,9 +52,11 @@ let test_resolve_localhost () =
 (* Host and service resolution follows glibc's for numbers: a service is
    read as strtoul(3) reads it in base 10, kept to its low 32 bits, refused
    when that is negative and otherwise taken modulo 65536; a host is an IPv4
-   address as inet_aton(3) reads it, an IPv6 one, "localhost" in any case
-   with an optional final dot, or the empty name for the loopback
-   addresses. *)
+   address as inet_aton(3) reads it, an IPv6 one with a scope glibc 2.41
+   takes, "localhost" in any case, or the empty name for the loopback
+   addresses. The scopes are those glibc took on a host whose interfaces
+   include lo, the only one here; a host with no IPv6 address but loopback
+   hides them from the kernel's traces. *)
 let test_resolve_numbers () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -112,19 +114,52 @@ let test_resolve_numbers () =
       ("::", "tcp:[::]:80");
       ("::ffff:127.0.0.1", "tcp:[::ffff:127.0.0.1]:80");
       ("LOCALHOST", "tcp:[::1]:80 tcp:127.0.0.1:80");
-      ("localhost.", "tcp:[::1]:80 tcp:127.0.0.1:80");
+      ("localhost.", "NONAME");
+      ("LocalHost.", "NONAME");
       ("", "tcp:[::1]:80 tcp:127.0.0.1:80");
       ("256.0.0.1", "NONAME");
       ("127.0.0.1 ", "NONAME");
       ("example.org", "NONAME");
+      ("[::1]", "NONAME");
+      ("0x", "NONAME");
+      ("0x.1", "NONAME");
+      ("1.0x", "NONAME");
+      ("0x1.0x2", "tcp:1.0.0.2:80");
+      ("fe80::1%lo", "tcp:[fe80::1]:80");
+      ("fe80::1%1", "tcp:[fe80::1]:80");
+      ("fe80::1%0", "tcp:[fe80::1]:80");
+      ("fe80::1%01", "tcp:[fe80::1]:80");
+      ("fe80::1%4294967295", "tcp:[fe80::1]:80");
+      ("febf::1%lo", "tcp:[febf::1]:80");
+      ("ff02::1%lo", "tcp:[ff02::1]:80");
+      ("ff12::1%lo", "tcp:[ff12::1]:80");
+      ("::1%1", "tcp:[::1]:80");
+      ("::%1", "tcp:[::]:80");
+      ("::ffff:127.0.0.1%1", "tcp:[::ffff:127.0.0.1]:80");
+      ("fe80::1%4294967296", "NONAME");
+      ("fe80::1%-1", "NONAME");
+      ("fe80::1%+1", "NONAME");
+      ("fe80::1% 1", "NONAME");
+      ("fe80::1%1 ", "NONAME");
+      ("fe80::1%", "NONAME");
+      ("fe80::1%nosuch", "NONAME");
+      ("fe80::1%LO", "NONAME");
+      ("fe80::1%lo%lo", "NONAME");
+      ("fec0::1%lo", "NONAME");
+      ("ff05::1%lo", "NONAME");
+      ("::1%lo", "NONAME");
+      ("2001:db8::1%lo", "NONAME");
+      ("::ffff:127.0.0.1%lo", "NONAME");
+      ("127.0.0.1%1", "NONAME");
     ];
   Alcotest.(check string) "no host, no service" "NONAME" (resolve "" "");
   Alcotest.(check string)
     "a bad service first" "SERVICE" (resolve "nowhere" "-1")
 
 (* getnameinfo names the loopback addresses "localhost", as /etc/hosts does,
-   and gives any other address as a number; a service stays a number, as
-   there is no services database. *)
+   127.0.0.1 IPv4-mapped too, and gives any other address as a number; a
+   service stays a number, as there is no services database, and a Unix
+   address's host is "localhost", as there is no host name. *)
 let test_name_info () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -142,6 +177,15 @@ let test_name_info () =
       (`Udp (Eio.Net.Ipaddr.V6.loopback, 53), "localhost/53");
       (`Tcp (ip "\010\001\002\003", 80), "10.1.2.3/80");
       (`Tcp (ip "\127\000\000\002", 8080), "127.0.0.2/8080");
+      ( `Tcp
+          ( ip "\000\000\000\000\000\000\000\000\000\000\255\255\127\000\000\001",
+            80 ),
+        "localhost/80" );
+      ( `Tcp
+          ( ip "\000\000\000\000\000\000\000\000\000\000\255\255\010\001\002\003",
+            80 ),
+        "::ffff:10.1.2.3/80" );
+      (`Unix "x.sock", "localhost/x.sock");
     ]
 
 let test_connect_to_wildcard_listener () =

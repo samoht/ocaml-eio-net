@@ -159,20 +159,26 @@ val v :
     taken modulo 65536; a negative one, or any other string, raises
     [Address_lookup_failed SERVICE], service names such as ["http"] included.
     The host is an IPv4 address as inet_aton(3) reads it (["127.1"],
-    ["0x7f.1"]), an IPv6 one, ["localhost"] in any case with an optional final
-    dot, or the empty name, the last two standing for [::1] then [127.0.0.1];
-    any other name maps to no address, and so do an empty host and service. Each
-    address comes once as a stream address and once as a datagram one. On a real
-    system the loopback order, and whether IPv6 addresses come at all, depend on
-    the host's addresses and its [/etc/hosts]: glibc leaves them out on a host
-    with no IPv6 address but loopback, and turns ["localhost"]'s [::1] into
-    [127.0.0.1]. The order here is the one glibc and macOS give on a dual-stack
-    host, fixed so that a test sees the same addresses everywhere.
+    ["0x7f.1"]), an IPv6 one without brackets, which may name a scope after a
+    [%] as glibc takes one, a number of 32 bits or, for a link-local address,
+    ["lo"], the only interface; or ["localhost"] in any case, or the empty name,
+    the last two standing for [::1] then [127.0.0.1]. Any other name,
+    ["localhost."] included, maps to no address, as [/etc/hosts] does not hold
+    it and there is no name server to ask, and so do an empty host and service;
+    a host with a name server may resolve it. Each address comes once as a
+    stream address and once as a datagram one. On a real system the loopback
+    order, and whether IPv6 addresses come at all, depend on the host's
+    addresses and its [/etc/hosts]: glibc leaves them out on a host with no IPv6
+    address but loopback, and turns ["localhost"]'s [::1] into [127.0.0.1]. The
+    order here is the one glibc and macOS give on a dual-stack host, fixed so
+    that a test sees the same addresses everywhere.
 
-    [getnameinfo] names [127.0.0.1] and [::1] ["localhost"], as [/etc/hosts]
-    does, and gives any other address as a number, as glibc gives one that no
-    name server knows. The service stays a number, ["80"] where glibc says
-    ["http"], as there is no services database. *)
+    [getnameinfo] names [127.0.0.1], IPv4-mapped or not, and [::1]
+    ["localhost"], as [/etc/hosts] does, and gives any other address as a
+    number, as glibc gives one that no name server knows. The service stays a
+    number, ["80"] where glibc says ["http"], as there is no services database.
+    The host of a Unix address is ["localhost"], as there is no host name, where
+    glibc gives the host's. *)
 
 val pipe :
   ?capacity:int ->

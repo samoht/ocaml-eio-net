@@ -186,27 +186,22 @@ let scenario_exceptions : scenario_exception list =
           && starts_with ~prefix:"localhost/" mem
           && starts_with ~prefix:"HOSTNAME/" linux);
     };
+    {
+      why =
+        "mem has no name server: a name /etc/hosts does not hold, such as \
+         localhost. with its final dot, maps to no address, where the \
+         recording host's name server resolves it";
+      holds =
+        (fun name ~mem ~linux ->
+          match String.split_on_char '"' name with
+          | [ "getaddrinfo "; host; " "; _; "" ] ->
+              String.ends_with ~suffix:"." host
+              && mem = "NONAME"
+              && (starts_with ~prefix:"tcp:" linux
+                 || starts_with ~prefix:"udp:" linux)
+          | _ -> false);
+    };
   ]
-  @ List.map
-      (fun (why, prefixes) ->
-        {
-          why;
-          holds =
-            (fun name ~mem:_ ~linux:_ ->
-              List.exists (fun prefix -> starts_with ~prefix name) prefixes);
-        })
-      [
-        ( "pending: names and addresses glibc reads otherwise",
-          [
-            {|getaddrinfo "[|};
-            {|getaddrinfo "0x|};
-            {|getaddrinfo "0X|};
-            {|getaddrinfo "1.0x"|};
-            {|getaddrinfo "fe80::1%|};
-            {|getaddrinfo "::1%|};
-            "getnameinfo tcp ::ffff:127.0.0.1";
-          ] );
-      ]
 
 let scenario_rows () =
   let file = Filename.concat "traces" "scenarios.csv" in

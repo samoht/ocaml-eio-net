@@ -1468,7 +1468,7 @@ module Resolve = struct
         if v >= 0x8000_0000 then None else Some (v land 0xffff)
 
   (* A part of an inet_aton(3) address: hexadecimal after 0x, octal after 0,
-     decimal otherwise. *)
+     decimal otherwise. A bare 0x is no number. *)
   let part s =
     let n = String.length s in
     let value base digits =
@@ -1493,7 +1493,7 @@ module Resolve = struct
           (Some 0) digits
     in
     if n >= 2 && s.[0] = '0' && (s.[1] = 'x' || s.[1] = 'X') then
-      if n = 2 then Some 0 else value 16 (String.sub s 2 (n - 2))
+      value 16 (String.sub s 2 (n - 2))
     else if n >= 1 && s.[0] = '0' then value 8 s
     else value 10 s
 
@@ -1521,12 +1521,43 @@ module Resolve = struct
                (String.init 4 (fun i ->
                     Char.chr ((v lsr (8 * (3 - i))) land 255))))
 
-  let localhost name =
-    let name =
-      let n = String.length name in
-      if n > 0 && name.[n - 1] = '.' then String.sub name 0 (n - 1) else name
+  (* /etc/hosts names the loopback addresses "localhost", in any case. With
+     no name server, "localhost." is another name. *)
+  let localhost name = String.lowercase_ascii name = "localhost"
+
+  (* An IPv6 address, in glibc's form, with no brackets. *)
+  let ipv6 s =
+    if String.length s > 0 && s.[0] = '[' then None
+    else
+      match Ipaddr.V6.of_string s with
+      | Ok ip -> Some (Eio.Net.Ipaddr.of_raw (Ipaddr.V6.to_octets ip))
+      | Error _ -> None
+
+  (* A scope glibc takes after an IPv6 address: a number of 32 bits, or the
+     name of an interface, which only the loopback one has, for an address
+     that needs a scope. *)
+  let scope ip s =
+    let value =
+      String.fold_left
+        (fun v c -> if v > 0xffff_ffff then v else (v * 10) + Char.code c - 48)
+        0 s
     in
-    String.lowercase_ascii name = "localhost"
+    (s <> "" && String.for_all is_digit s && value <= 0xffff_ffff)
+    || (s = "lo" && needs_scope ip)
+
+  let number name =
+    match inet_aton name with
+    | Some ip -> Some ip
+    | None -> (
+        match String.index_opt name '%' with
+        | None -> ipv6 name
+        | Some i -> (
+            match ipv6 (String.sub name 0 i) with
+            | Some ip
+              when scope ip
+                     (String.sub name (i + 1) (String.length name - i - 1)) ->
+                Some ip
+            | Some _ | None -> None))
 
   (* The addresses of a host: a number as it reads, the loopback addresses
      for "localhost" and the empty name, IPv6 first as glibc and macOS order
@@ -1539,13 +1570,7 @@ module Resolve = struct
       ]
     in
     if name = "" || localhost name then loopback
-    else
-      match inet_aton name with
-      | Some ip -> [ ip ]
-      | None -> (
-          match Ipaddr.V6.of_string name with
-          | Ok ip -> [ Eio.Net.Ipaddr.of_raw (Ipaddr.V6.to_octets ip) ]
-          | Error _ -> [])
+    else Option.to_list (number name)
 end
 
 (* The two ends of a TCP connection, and when each lets go of its address.
@@ -1928,12 +1953,13 @@ module Network = struct
 
   (* The loopback addresses are "localhost", as /etc/hosts names them, and
      any other a number, as glibc gives one no name server knows; a service
-     is a number, as there is no services database. *)
+     is a number, as there is no services database. There is no host name to
+     give a Unix address. *)
   let getnameinfo _ = function
     | `Tcp (ip, port) | `Udp (ip, port) ->
         let host =
           if
-            same ip Eio.Net.Ipaddr.V4.loopback
+            same (unmap ip) Eio.Net.Ipaddr.V4.loopback
             || same ip Eio.Net.Ipaddr.V6.loopback
           then "localhost"
           else Fmt.str "%a" Eio.Net.Ipaddr.pp ip
