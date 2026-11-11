@@ -129,7 +129,8 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     - every read returns one byte until its end has read 4 KiB, or every write
       takes one byte until its end has written 4 KiB; every read waits 5 ms and
       takes what several writes sent; every connection queues 32 KiB each way,
-      so a writer whose reader does not read blocks. With both socket buffers at
+      so a writer whose reader does not read blocks, and a write of more takes
+      32 KiB, as a full socket buffer cuts it short. With both socket buffers at
       their minimum, Linux holds as little as about 4 KiB each way over TCP and
       2 KiB over AF_UNIX, so 32 KiB blocks no writer it could not;
     - the outage: every connect is refused and every datagram lost, for the
@@ -143,10 +144,12 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     ordered (unix(7)). A connect may be refused, but neither times out nor finds
     no route; an accepted connection may have been closed by its client; a peer
     may close, crash or stall, and its reader still gets every byte whose write
-    returned; reads may take what several writes sent. A small write arrives
-    whole, so there are no one-byte reads or writes, and a cut lands between two
-    writes. No datagram is lost, duplicated, reordered or garbled, and the
-    outage refuses connects only.
+    returned; reads may take what several writes sent. A write of up to 32 KiB
+    arrives whole, so there are no one-byte reads or writes, and a cut lands
+    between two writes; a larger one is cut short when every connection queues
+    32 KiB, as Linux cuts a 300,000-byte write to what its socket's buffer
+    takes. No datagram is lost, duplicated, reordered or garbled, and the outage
+    refuses connects only.
 
     A run passes if [run] returns. [run] catches the errors its program may
     raise and checks the results itself: any exception that escapes it fails the

@@ -25,4 +25,10 @@ let suite =
       Alcotest.test_case "echo: ignored count, by the linear tier" `Quick
         (Expect.caught ~tier:"linear" (check (echo ~bug:`Ignore_short)));
       Alcotest.test_case "a long report is bounded" `Quick bounded_report;
+      Alcotest.test_case "AF_UNIX upload: correct" `Quick
+        (Expect.passes (check unix_upload));
+      Alcotest.test_case
+        "AF_UNIX upload: ignored count of a large write, by the linear tier"
+        `Quick
+        (Expect.caught ~tier:"linear" (check (unix_upload ~bug:`Ignore_short)));
     ] )

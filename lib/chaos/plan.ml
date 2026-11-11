@@ -13,6 +13,7 @@ type scenario = { rules : rule list; lasting : lasting option }
 type trace = (Op.t * Fault.t option) list
 
 let none = { rules = []; lasting = None }
+let tiny_buffer = 32768
 let lastings = [ Short_reads; Short_writes; Coalesce; Tiny_buffers; Outage ]
 
 let lasting_name = function
@@ -26,7 +27,9 @@ let lasting_text = function
   | Short_reads -> "every read of the first 4 KiB returns one byte"
   | Short_writes -> "every write of the first 4 KiB takes one byte"
   | Coalesce -> "every read waits 5 ms, so it takes what several writes sent"
-  | Tiny_buffers -> "every connection queues 32 KiB each way"
+  | Tiny_buffers ->
+      "every connection queues 32 KiB each way, and a write takes 32 KiB at \
+       most"
   | Outage -> "the outage: every connect refused, every datagram over IP lost"
 
 let rule_key r =
@@ -269,6 +272,8 @@ let faults s =
     | Some Short_writes, `Write when op.offset < 4096 && op.family = `Inet ->
         Some (Short 1)
     | Some Coalesce, `Read -> Some (Stall 0.005)
+    | Some Tiny_buffers, `Write when op.length > tiny_buffer ->
+        Some (Short tiny_buffer)
     | Some Outage, `Connect -> Some Refuse
     | Some Outage, `Recv when op.family = `Inet -> Some Drop
     | Some _, _ -> None

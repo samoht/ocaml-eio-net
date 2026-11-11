@@ -14,7 +14,9 @@ type lasting =
   | Short_reads  (** Every read of the first 4 KiB returns one byte. *)
   | Short_writes  (** Every write of the first 4 KiB takes one byte. *)
   | Coalesce  (** Every read waits 5 ms first. *)
-  | Tiny_buffers  (** Every connection queues 32 KiB each way. *)
+  | Tiny_buffers
+      (** Every connection queues {!tiny_buffer} bytes each way, and a write
+          takes that many at most. *)
   | Outage  (** Every connect is refused and every datagram lost. *)
 
 type scenario = { rules : rule list; lasting : lasting option }
@@ -22,6 +24,10 @@ type scenario = { rules : rule list; lasting : lasting option }
 
 type trace = (Op.t * Fault.t option) list
 (** The type for a run's operations, in order, with the fault each met. *)
+
+val tiny_buffer : int
+(** [tiny_buffer] is what a connection queues each way under [Tiny_buffers]: 32
+    KiB. *)
 
 val none : scenario
 (** [none] is the scenario with no fault. *)

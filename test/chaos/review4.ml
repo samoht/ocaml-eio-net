@@ -69,3 +69,38 @@ let echo ?(bug = `None) (env : Eio_net_chaos.env) =
         n < 3 && go (n + 1)
   in
   if (not (go 1)) && not (Eio_net_chaos.outage env) then failwith "gave up"
+
+(* An upload of 300,000 bytes on a Unix-domain connection, which the server
+   counts and acknowledges. With [`Ignore_short] the client sends it with one
+   [single_write] and ignores the count, as a full AF_UNIX buffer cuts such a
+   write short. *)
+let unix_upload ?(bug = `None) (env : Eio_net_chaos.env) =
+  let addr = `Unix "/run/upload.sock" and size = 300_000 in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:4 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let got =
+            Eio.Time.with_timeout_exn env#clock 10. (fun () ->
+                Eio.Buf_read.(parse_exn take_all) flow ~max_size:(2 * size))
+          in
+          Eio.Flow.copy_string (Fmt.str "%d\n" (String.length got)) flow));
+  let once () =
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net addr in
+    let data = Cstruct.create size in
+    (match bug with
+    | `Ignore_short -> ignore (Eio.Flow.single_write flow [ data ])
+    | `None -> Eio.Flow.write flow [ data ]);
+    Eio.Flow.shutdown flow `Send;
+    App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16)
+  in
+  let rec go n =
+    match Eio.Time.with_timeout_exn env#clock 20. once with
+    | ack ->
+        if ack <> string_of_int size then Fmt.failwith "acknowledged %s" ack
+    | exception (Eio.Io _ | End_of_file | Failure _ | Eio.Time.Timeout) ->
+        if n < 3 then go (n + 1)
+        else if not (Eio_net_chaos.outage env) then failwith "gave up"
+  in
+  go 1
