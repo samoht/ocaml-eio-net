@@ -209,11 +209,11 @@ val connection : _ Eio.Net.stream_socket -> int option
     [Invalid_argument]. A listener is closed, and frees its own hold on its
     address, when it is closed or when the switch passed to [listen] or to {!v}
     finishes; the connections waiting to be accepted are reset with it, as a
-    kernel resets them. An [accept] begun after its listener closed, whoever
-    closed it, raises [Invalid_argument], as Eio's own sockets do; one already
-    waiting when it closes keeps waiting, as on eio_posix, and the listener
-    stays open, taking connections, until that accept returns, as Eio defers a
-    descriptor's close to its users.
+    kernel resets them. An [accept] or a [listening_addr] begun after its
+    listener closed, whoever closed it, raises [Invalid_argument], as Eio's own
+    sockets do; one already waiting when it closes keeps waiting, as on
+    eio_posix, and the listener stays open, taking connections, until that
+    accept returns, as Eio defers a descriptor's close to its users.
 
     A [connect] reaches the listener at its address, or at the wildcard address
     of its family and port, or, for an IPv4 address, at the IPv6 wildcard

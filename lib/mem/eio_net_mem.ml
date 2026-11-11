@@ -1119,7 +1119,12 @@ module Listening_socket = struct
     end;
     if now = `Now then shut t
 
-  let listening_addr t = t.addr
+  (* As Eio's own sockets refuse a descriptor used after close. *)
+  let listening_addr t =
+    if Mutex.protect t.lock (fun () -> t.closing) then
+      invalid_arg "eio-net.mem: listening_addr on a closed listener";
+    t.addr
+
   let setsockopt _ opt _ = Sockopt.stream opt
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =

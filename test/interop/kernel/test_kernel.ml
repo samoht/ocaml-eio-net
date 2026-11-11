@@ -196,8 +196,6 @@ let scenario_exceptions : scenario_exception list =
               List.exists (fun prefix -> starts_with ~prefix name) prefixes);
         })
       [
-        ( "pending: listening_addr answers after the close",
-          [ "listening_addr after close" ] );
         ( "pending: names and addresses glibc reads otherwise",
           [
             {|getaddrinfo "[|};
