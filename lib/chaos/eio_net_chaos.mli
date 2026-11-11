@@ -129,9 +129,9 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     - every read returns one byte until its end has read 4 KiB, or every write
       takes one byte until its end has written 4 KiB; every read waits 5 ms and
       takes what several writes sent; every connection queues 32 KiB each way,
-      about what a Linux connection holds with both its socket buffers set to
-      their minimum, as its buffering counts per connection, so a writer whose
-      reader does not read blocks;
+      so a writer whose reader does not read blocks. With both socket buffers at
+      their minimum, Linux holds as little as about 4 KiB each way over TCP and
+      2 KiB over AF_UNIX, so 32 KiB blocks no writer it could not;
     - the outage: every connect is refused and every datagram lost, for the
       whole run. {!outage} is then [true], so [run] checks what its program does
       when it gives up.
