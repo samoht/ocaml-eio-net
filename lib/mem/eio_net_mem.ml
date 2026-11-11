@@ -341,9 +341,13 @@ module Files = struct
 
   (* A path, and for an abstract address whether its socket is a stream
      one. *)
-  type t = { mutex : Mutex.t; files : (string * bool option, kind) Hashtbl.t }
+  type t = {
+    mutex : Mutex.t;
+    files : (string * bool option, kind) Hashtbl.t;
+    mutable autobind : int;
+  }
 
-  let v () = { mutex = Mutex.create (); files = Hashtbl.create 8 }
+  let v () = { mutex = Mutex.create (); files = Hashtbl.create 8; autobind = 0 }
 
   (* A path that starts with a NUL is in Linux's abstract namespace, which has
      no files, and a name space per socket type. *)
@@ -359,6 +363,21 @@ module Files = struct
   let find t ~stream path =
     Mutex.protect t.mutex (fun () ->
         Hashtbl.find_opt t.files (key ~stream path))
+
+  (* The empty path binds an abstract address no socket holds, as Linux
+     autobinds one: a NUL and five hexadecimal digits. *)
+  let autobind t =
+    Mutex.protect t.mutex @@ fun () ->
+    let rec next () =
+      let name = Fmt.str "\000%05x" t.autobind in
+      t.autobind <- (t.autobind + 1) land 0xfffff;
+      let held stream = Hashtbl.mem t.files (key ~stream name) in
+      if held true || held false then next () else name
+    in
+    next ()
+
+  (* [path], or for the empty path the address it autobinds. *)
+  let bound t path = if path = "" then autobind t else path
 
   (* Binds [path] unless a file is there; [take_over] binds over a file, and
      an abstract address has none. *)
@@ -955,6 +974,7 @@ module Listening_socket = struct
       match addr with
       | `Tcp (ip, 0) ->
           Option.map (fun port -> `Tcp (ip, port)) (Ports.free hub.ports)
+      | `Unix path -> Some (`Unix (Files.bound hub.files path))
       | addr -> Some addr
     in
     match addr with
@@ -1118,7 +1138,6 @@ module Datagram_socket = struct
     ports : Ports.t;
     files : Files.t;
     mutex : Mutex.t;
-    mutable autobind : int;
   }
 
   and t = {
@@ -1140,16 +1159,6 @@ module Datagram_socket = struct
     | None ->
         failwith "eio-net.mem: every port of 49152-65535 has a datagram socket"
 
-  (* The empty path binds an abstract address no socket holds, as Linux
-     autobinds one: a NUL and five hexadecimal digits. *)
-  let autobind hub =
-    let rec next () =
-      let name = Fmt.str "\000%05x" hub.autobind in
-      hub.autobind <- (hub.autobind + 1) land 0xfffff;
-      if Files.find hub.files ~stream:false name = None then name else next ()
-    in
-    next ()
-
   let v hub ~reuse addr =
     (match addr with
     | `Udp (ip, _) -> check_local ~fail:bind_fail ip
@@ -1163,7 +1172,7 @@ module Datagram_socket = struct
       | `UdpV4 -> `Udp (Eio.Net.Ipaddr.V4.any, free_port hub)
       | `UdpV6 -> `Udp (Eio.Net.Ipaddr.V6.any, free_port hub)
       | `Udp (ip, 0) -> `Udp (ip, free_port hub)
-      | `Unix "" -> `Unix (autobind hub)
+      | `Unix "" -> `Unix (Files.autobind hub.files)
       | (`Udp _ | `Unix _) as addr -> addr
     in
     let in_use =
@@ -1638,7 +1647,7 @@ module Network = struct
        eio_linux removes it then, closed by hand or not; eio_posix keeps the
        file of a listener closed by hand. This runs after the close the hooks
        below make. *)
-    (match addr with
+    (match listener.addr with
     | `Unix path ->
         Eio.Switch.on_release sw (fun () ->
             Files.leave ~remove:true t.hub.files path Stale)
@@ -1844,6 +1853,11 @@ module Network = struct
       | addr, _ -> addr
     in
     check_bind bind_to addr;
+    let bind_to =
+      match bind_to with
+      | Some (`Unix path) -> Some (`Unix (Files.bound t.hub.files path))
+      | bind_to -> bind_to
+    in
     (match bind_to with
     | Some (`Tcp (ip, _)) -> check_local ~tcp:true ip
     | Some (`Unix path) -> check_path path
@@ -1953,7 +1967,6 @@ let v ?capacity ?clock ~sw () =
       ports = Ports.v ();
       files;
       mutex = Mutex.create ();
-      autobind = 0;
     }
   in
   Eio.Resource.T (Network.{ sw; hub; datagrams; capacity }, handler)

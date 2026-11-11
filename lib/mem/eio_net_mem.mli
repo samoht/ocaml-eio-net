@@ -370,14 +370,16 @@ val connection : _ Eio.Net.stream_socket -> int option
     refused and a [listen] there finds it in use; eio_posix keeps the file of a
     listener closed by hand.
 
-    A datagram socket at the empty path binds an abstract address of its own, a
-    NUL and five hexadecimal digits, as Linux autobinds it, and a reply sent
-    there reaches it. An address that starts with a NUL is in Linux's abstract
-    namespace, which has no files: a socket there leaves nothing behind when it
-    closes. The namespace is one per socket type, as on Linux: a stream socket
-    and a datagram one may bind the same abstract address, and a [connect] or a
-    datagram sent where no socket of its type binds is refused with the
-    connection failure that {!No_listener} marks.
+    A listener, a datagram socket or a client bound with [bind_to] at the empty
+    path binds an abstract address of its own, a NUL and five hexadecimal
+    digits, as Linux autobinds it: [listening_addr] reports it, an [accept] sees
+    it as its client's address, and a reply sent there reaches it. An address
+    that starts with a NUL is in Linux's abstract namespace, which has no files:
+    a socket there leaves nothing behind when it closes. The namespace is one
+    per socket type, as on Linux: a stream socket and a datagram one may bind
+    the same abstract address, and a [connect] or a datagram sent where no
+    socket of its type binds is refused with the connection failure that
+    {!No_listener} marks.
 
     A closed Unix-domain datagram socket leaves its path behind, as Eio's
     backends leave the file: a datagram sent there is refused with the

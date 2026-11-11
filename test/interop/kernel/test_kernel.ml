@@ -196,8 +196,6 @@ let scenario_exceptions : scenario_exception list =
               List.exists (fun prefix -> starts_with ~prefix name) prefixes);
         })
       [
-        ( "pending: the empty path autobinds datagram sockets only",
-          [ "empty path listen"; "empty path bind_to" ] );
         ( "pending: a connect or a send to the empty path finds no file",
           [ "empty path connect"; "empty path send" ] );
         ( "pending: listening_addr answers after the close",
