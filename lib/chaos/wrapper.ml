@@ -31,11 +31,13 @@ type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
    once. *)
 type conn = {
   lock : Mutex.t;
+  family : Op.family;
   broken : [ `Open | `Reset | `Closed of Op.side ] Atomic.t;
   mutable ends : (Op.side * stream) list;
 }
 
-let conn () = { lock = Mutex.create (); broken = Atomic.make `Open; ends = [] }
+let conn family =
+  { lock = Mutex.create (); family; broken = Atomic.make `Open; ends = [] }
 
 let other : Op.side -> Op.side = function
   | `Client -> `Server
@@ -45,12 +47,15 @@ let shutdown s cmd =
   try Eio.Flow.shutdown s cmd with Eio.Io _ | Invalid_argument _ -> ()
 
 (* What the socket of the end [side] does once [conn] broke: on a close, the
-   closer's sends end, so its peer reads what it wrote, then end of file. *)
-let shut broken (side, s) =
+   closer's sends end, so its peer reads what it wrote, then end of file. A
+   Unix-domain closer's receives end too: it reads what is queued, then end
+   of file. *)
+let shut conn broken (side, s) =
   match broken with
   | `Reset -> shutdown s `All
-  | `Closed closer -> if side = closer then shutdown s `Send
-  | `Open -> ()
+  | `Closed closer when side = closer ->
+      shutdown s (match conn.family with `Inet -> `Send | `Unix -> `All)
+  | `Closed _ | `Open -> ()
 
 (* [at] is the end whose operation met the fault. Over a network that pairs no
    ends, a closer that is not there is the real peer: [at]'s receive side is
@@ -64,7 +69,7 @@ let break conn ~at how =
         end
         else [])
   in
-  List.iter (shut how) ends;
+  List.iter (shut conn how) ends;
   match how with
   | `Closed closer when ends <> [] && not (List.mem_assoc closer ends) ->
       List.iter (fun (side, s) -> if side = at then shutdown s `Receive) ends
@@ -76,7 +81,7 @@ let join conn side sock =
         conn.ends <- (side, sock) :: conn.ends;
         Atomic.get conn.broken)
   in
-  shut broken (side, sock)
+  shut conn broken (side, sock)
 
 (* The client registers its socket number once its connect returns; an accept
    that sees the connection first waits for it. *)
@@ -197,32 +202,32 @@ let next_socket ctx =
   ctx.sockets <- ctx.sockets + 1;
   ctx.sockets
 
-let pending ctx id =
+let pending ctx ~family id =
   match Hashtbl.find_opt ctx.pending id with
   | Some p ->
       Hashtbl.remove ctx.pending id;
       p
   | None ->
       let number, set = Eio.Promise.create () in
-      let p = { number; set; c = conn () } in
+      let p = { number; set; c = conn family } in
       Hashtbl.replace ctx.pending id p;
       p
 
 (* The connection a connect made, numbered [socket]. *)
-let client_conn ctx ~socket sock =
+let client_conn ctx ~socket ~family sock =
   match Eio_net_mem.connection sock with
-  | None -> conn ()
+  | None -> conn family
   | Some id ->
-      let p = locked ctx (fun () -> pending ctx id) in
+      let p = locked ctx (fun () -> pending ctx ~family id) in
       Eio.Promise.resolve p.set socket;
       p.c
 
 (* The number and the connection of an accepted socket. *)
-let server_conn ctx sock =
+let server_conn ctx ~family sock =
   match Eio_net_mem.connection sock with
-  | None -> (locked ctx (fun () -> next_socket ctx), conn ())
+  | None -> (locked ctx (fun () -> next_socket ctx), conn family)
   | Some id ->
-      let p = locked ctx (fun () -> pending ctx id) in
+      let p = locked ctx (fun () -> pending ctx ~family id) in
       (Eio.Promise.await p.number, p.c)
 
 module Flow = struct
@@ -250,22 +255,31 @@ module Flow = struct
     mutable cut_short : bool;
   }
 
-  (* Under [t.lock]. A reset drops what is buffered, and is reported once, by
-     the first read or write that meets it: later reads return end of file,
-     as a socket clears its pending error. An end that closed reads end of
-     file; its peer reads on, to the end its socket now reaches. *)
-  let check_read t =
-    if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
+  (* Under [t.lock]. The end of a broken connection's reads: a reset is
+     reported once, by the first read or write that meets it, and later reads
+     return end of file, as a socket clears its pending error. *)
+  let ended t =
+    t.leftover <- Cstruct.empty;
     match Atomic.get t.conn.broken with
-    | `Reset ->
-        t.leftover <- Cstruct.empty;
-        if t.reset_reported then raise End_of_file;
+    | `Reset when not t.reset_reported ->
         t.reset_reported <- true;
         raise (reset_exn ())
-    | `Closed closer when closer = t.side ->
-        t.leftover <- Cstruct.empty;
-        raise End_of_file
-    | `Closed _ | `Open -> ()
+    | `Reset | `Closed _ | `Open -> raise End_of_file
+
+  (* Whether this end's own reads are cut: a reset, or its own close. *)
+  let cut t =
+    match Atomic.get t.conn.broken with
+    | `Reset -> true
+    | `Closed closer -> closer = t.side
+    | `Open -> false
+
+  (* Under [t.lock]. Over IP, a cut drops what is buffered at once. An
+     AF_UNIX byte whose write returned is in the reader's queue, so the reader
+     reads it first, then meets the cut (unix(7)). The peer of an end that
+     closed reads on, to the end its socket now reaches. *)
+  let check_read t =
+    if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
+    if t.family = `Inet && cut t then ended t
 
   (* Under [t.lock]. A closed flow refuses a write before any fault. After its
      peer closed, an end's first write goes through, its bytes lost, and the
@@ -291,13 +305,6 @@ module Flow = struct
 
   let broken t = Atomic.get t.conn.broken <> `Open
 
-  (* Whether this end's own reads are cut: a reset, or its own close. *)
-  let cut t =
-    match Atomic.get t.conn.broken with
-    | `Reset -> true
-    | `Closed closer -> closer = t.side
-    | `Open -> false
-
   (* Appends one base read to the buffer. A base error after a break is the
      break's. *)
   let fill t =
@@ -309,6 +316,7 @@ module Flow = struct
     in
     Mutex.protect t.lock @@ fun () ->
     check_read t;
+    if got = 0 then ended t;
     t.leftover <- Cstruct.append t.leftover (Cstruct.sub scratch 0 got)
 
   (* Hands up at most [cap] buffered bytes, or all of them if [cap <= 0]. A
@@ -363,7 +371,7 @@ module Flow = struct
         | Some Hang -> Eio.Fiber.await_cancel ()
         | Some Reset ->
             break t.conn ~at:t.side `Reset;
-            raise_broken t
+            if t.family = `Inet then raise_broken t else deliver t dst ~cap:0
         | Some Eof ->
             break t.conn ~at:t.side (`Closed (other t.side));
             deliver t dst ~cap:0
@@ -691,8 +699,8 @@ module Listener = struct
       let ctx = t.ctx in
       let sock, peer = Eio.Net.accept ~sw t.l in
       let sock = (sock :> stream) in
-      let socket, conn = server_conn ctx sock in
       let family = t.family in
+      let socket, conn = server_conn ctx ~family sock in
       let flow = Flow.v ctx ~socket ~side:`Server ~family ~conn sock in
       let fault =
         match
@@ -779,7 +787,7 @@ module Network = struct
         let sock =
           (Eio.Net.connect ?bind_to ~options ~sw t.net addr :> stream)
         in
-        let conn = client_conn ctx ~socket sock in
+        let conn = client_conn ctx ~socket ~family sock in
         Flow.v ctx ~socket ~side:`Client ~family ~conn sock
       in
       match fault with
@@ -849,7 +857,7 @@ let pair ~clock f =
   let ctx = ctx ~clock ~outage:false f in
   let c, s = Eio_net_mem.pipe () in
   let socket = locked ctx (fun () -> next_socket ctx) in
-  let conn = conn () in
+  let conn = conn `Inet in
   ( Flow.v ctx ~socket ~side:`Client ~family:`Inet ~conn (c :> stream),
     Flow.v ctx ~socket ~side:`Server ~family:`Inet ~conn (s :> stream) )
 

@@ -670,6 +670,43 @@ let test_unix_has_no_ip_faults () =
   Alcotest.(check (list string))
     "every datagram, in order" payloads (recv_n rx 5)
 
+(* An AF_UNIX byte whose write returned is in the reader's queue (unix(7)):
+   after a reset or an end of stream that the server's read meets, the client
+   reads what the server wrote, then the cut; over TCP it reads the cut at
+   once. Each end reads the cut once, then end of file. *)
+let test_unix_cut_keeps_written () =
+  let run addr fault =
+    Eio_mock.Backend.run_full @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let f (op : Op.t) =
+      if op.kind = `Read && op.side = `Server then Some fault else None
+    in
+    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    let server, _ = Eio.Net.accept ~sw l in
+    Eio.Flow.copy_string "ab" server;
+    let outcome flow =
+      match read1 flow with
+      | s -> s
+      | exception End_of_file -> "eof"
+      | exception e when is_reset e -> "reset"
+    in
+    let s1 = outcome server in
+    let c1 = outcome client in
+    let c2 = outcome client in
+    let c3 = outcome client in
+    String.concat " " [ s1; c1; c2; c3 ]
+  in
+  let unix = `Unix "/tmp/s.sock"
+  and tcp = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
+  Alcotest.(check string)
+    "AF_UNIX reset" "reset ab reset eof" (run unix Fault.Reset);
+  Alcotest.(check string) "AF_UNIX end" "eof ab eof eof" (run unix Fault.Eof);
+  Alcotest.(check string)
+    "TCP reset" "reset reset eof eof" (run tcp Fault.Reset);
+  Alcotest.(check string) "TCP end" "eof eof eof eof" (run tcp Fault.Eof)
+
 (* --- Domains ------------------------------------------------------------- *)
 
 (* Writers in two domains share one count of bytes written: with a reset on
@@ -894,6 +931,8 @@ let suite =
       Alcotest.test_case "net connect stall" `Quick test_net_connect_stall;
       Alcotest.test_case "net operations" `Quick test_ops;
       Alcotest.test_case "a scan is not a spin" `Quick test_scan_is_not_a_spin;
+      Alcotest.test_case "an AF_UNIX cut keeps the bytes written" `Quick
+        test_unix_cut_keeps_written;
       Alcotest.test_case "no IP fault on a Unix-domain socket" `Quick
         test_unix_has_no_ip_faults;
       Alcotest.test_case "writes counted across domains" `Quick

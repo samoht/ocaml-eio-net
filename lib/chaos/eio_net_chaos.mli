@@ -138,10 +138,11 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     A Unix-domain socket meets only what AF_UNIX can do, as it is reliable and
     ordered (unix(7)). A connect may be refused, but neither times out nor finds
     no route; an accepted connection may have been closed by its client; a peer
-    may close, crash or stall; reads may take what several writes sent. A small
-    write arrives whole, so there are no one-byte reads or writes, and a cut
-    lands between two writes. No datagram is lost, duplicated, reordered or
-    garbled, and the outage refuses connects only.
+    may close, crash or stall, and its reader still gets every byte whose write
+    returned; reads may take what several writes sent. A small write arrives
+    whole, so there are no one-byte reads or writes, and a cut lands between two
+    writes. No datagram is lost, duplicated, reordered or garbled, and the
+    outage refuses connects only.
 
     A run passes if [run] returns. [run] catches the errors its program may
     raise and checks the results itself: any exception that escapes it fails the
@@ -223,7 +224,9 @@ module Fault : sig
             taken by an accept that hangs to the next accept. *)
     | Reset
         (** The connection is reset at both ends, and the bytes not yet read are
-            lost. At each end the first read or write that follows raises
+            lost, except on a Unix-domain connection: AF_UNIX keeps in the
+            reader's queue what a returned write sent, so each end reads that
+            first. At each end the first read or write that follows raises
             [Connection_reset]; later reads return end of file and writes keep
             raising it, as on Linux and macOS. On an accept, the accept succeeds
             and the connection it returns is reset, as Linux hands over one
@@ -238,7 +241,8 @@ module Fault : sig
             that closed reads end of file and its writes raise
             [Connection_reset]; the other end's first write goes through, its
             bytes lost, and the next ones raise [Connection_reset], as on Linux
-            after the peer closes. *)
+            after the peer closes. On a Unix-domain connection the end that
+            closed reads what is queued to it first. *)
     | Refuse  (** A connect fails with [Connection_failure (Refused _)]. *)
     | Timeout
         (** A connect fails after 133 seconds of the clock, as a lost handshake
