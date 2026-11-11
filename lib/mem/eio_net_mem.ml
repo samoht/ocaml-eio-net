@@ -338,34 +338,48 @@ let no_file () = Eio.Fs.err (Not_found No_listener)
    it is removed. *)
 module Files = struct
   type kind = Listener | Datagram | Client | Stale
-  type t = { mutex : Mutex.t; files : (string, kind) Hashtbl.t }
+
+  (* A path, and for an abstract address whether its socket is a stream
+     one. *)
+  type t = { mutex : Mutex.t; files : (string * bool option, kind) Hashtbl.t }
 
   let v () = { mutex = Mutex.create (); files = Hashtbl.create 8 }
 
-  let find t path =
-    Mutex.protect t.mutex (fun () -> Hashtbl.find_opt t.files path)
+  (* A path that starts with a NUL is in Linux's abstract namespace, which has
+     no files, and a name space per socket type. *)
+  let abstract path = String.length path > 0 && path.[0] = '\000'
+  let key ~stream path = (path, if abstract path then Some stream else None)
 
-  (* Binds [path] unless a file is there; [take_over] binds over it. *)
+  let is_stream = function
+    | Datagram -> false
+    | Listener | Client | Stale -> true
+
+  (* What is at [path] for a socket of the type [stream] says: at an abstract
+     address, only a socket of that type. *)
+  let find t ~stream path =
+    Mutex.protect t.mutex (fun () ->
+        Hashtbl.find_opt t.files (key ~stream path))
+
+  (* Binds [path] unless a file is there; [take_over] binds over a file, and
+     an abstract address has none. *)
   let bind t ?(take_over = false) path kind =
+    let k = key ~stream:(is_stream kind) path in
     Mutex.protect t.mutex @@ fun () ->
-    (take_over || not (Hashtbl.mem t.files path))
+    ((take_over && not (abstract path)) || not (Hashtbl.mem t.files k))
     && begin
-      Hashtbl.replace t.files path kind;
+      Hashtbl.replace t.files k kind;
       true
     end
-
-  (* A path that starts with a NUL is in Linux's abstract namespace, which has
-     no files. *)
-  let abstract path = String.length path > 0 && path.[0] = '\000'
 
   (* The socket of [kind] at [path] closes and leaves its file, or with
      [remove], or at an abstract address, takes it away. *)
   let leave ?(remove = false) t path kind =
+    let k = key ~stream:(is_stream kind) path in
     Mutex.protect t.mutex @@ fun () ->
-    match Hashtbl.find_opt t.files path with
-    | Some k when k = kind ->
-        if remove || abstract path then Hashtbl.remove t.files path
-        else Hashtbl.replace t.files path Stale
+    match Hashtbl.find_opt t.files k with
+    | Some k' when k' = kind ->
+        if remove || abstract path then Hashtbl.remove t.files k
+        else Hashtbl.replace t.files k Stale
     | Some _ | None -> ()
 end
 
@@ -1132,7 +1146,7 @@ module Datagram_socket = struct
     let rec next () =
       let name = Fmt.str "\000%05x" hub.autobind in
       hub.autobind <- (hub.autobind + 1) land 0xfffff;
-      if Files.find hub.files name = None then name else next ()
+      if Files.find hub.files ~stream:false name = None then name else next ()
     in
     next ()
 
@@ -1305,16 +1319,21 @@ module Datagram_socket = struct
       (refusal t dst bufs);
     let file =
       match dst with
-      | `Unix path -> Files.find t.hub.files path
+      | `Unix path -> Files.find t.hub.files ~stream:false path
       | `Udp _ -> None
+    in
+    let refused () =
+      raise (Eio.Net.err (Connection_failure (Refused No_listener)))
     in
     match (file, find t.hub dst) with
     | Some (Files.Listener | Client), _ ->
         raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
-    | Some Stale, _ ->
-        raise (Eio.Net.err (Connection_failure (Refused No_listener)))
+    | Some Stale, _ -> refused ()
     | None, None -> (
-        match dst with `Unix _ -> raise (no_file ()) | `Udp _ -> ())
+        match dst with
+        | `Unix path when Files.abstract path -> refused ()
+        | `Unix _ -> raise (no_file ())
+        | `Udp _ -> ())
     | Some Datagram, None -> ()
     | (None | Some Datagram), Some peer -> deliver t ~local ~dst peer bufs
 
@@ -1745,9 +1764,10 @@ module Network = struct
             | (`Release | `Held), _ -> release ());
         Flow.close_with sw flow
     | None, `Unix path -> (
-        match Files.find t.hub.files path with
+        match Files.find t.hub.files ~stream:true path with
         | Some Datagram -> raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
         | Some (Stale | Client | Listener) -> refused ()
+        | None when Files.abstract path -> refused ()
         | None -> raise (no_file ()))
     | None, `Tcp _ -> refused ()
     | Some listener, _ when Listening_socket.is_closed listener -> refused ()

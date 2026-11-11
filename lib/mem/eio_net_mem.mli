@@ -59,10 +59,10 @@ type Eio.Exn.Backend.t +=
             while the connection waits for it, or at a Unix path whose socket
             has closed or that a client is bound at, as a real socket raises
             [Connection_failure (Refused _)], and of the one a datagram [send]
-            raises at the path of a closed Unix-domain datagram socket. It is
-            also the code of the [Eio.Fs.Not_found] error a [connect] or a
-            datagram [send] raises at a Unix path no socket binds, which has no
-            file. *)
+            raises at the path of a closed Unix-domain datagram socket, or at an
+            abstract address no socket of its type binds. It is also the code of
+            the [Eio.Fs.Not_found] error a [connect] or a datagram [send] raises
+            at a Unix path no socket binds, which has no file. *)
   | Address_in_use
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             bound with [bind_to] raises at an address a socket holds, where
@@ -362,18 +362,22 @@ val connection : _ Eio.Net.stream_socket -> int option
     path names. A path of 108 bytes or more raises [ENAMETOOLONG], or the error
     that {!Name_too_long} marks ({!section-errors}).
 
-    With [reuse_addr], a [listen] at a Unix-domain path takes the path over, as
-    Eio's backends remove the socket file there before they bind: the listener
-    that held it stays open, and no [connect] reaches it. A listener leaves its
-    file until the switch passed to [listen] finishes, as eio_linux removes it
-    then, and until then a [connect] there is refused and a [listen] there finds
-    it in use; eio_posix keeps the file of a listener closed by hand.
+    With [reuse_addr], a [listen] at a Unix-domain path, not at an abstract
+    address, takes the path over, as Eio's backends remove the socket file there
+    before they bind: the listener that held it stays open, and no [connect]
+    reaches it. A listener leaves its file until the switch passed to [listen]
+    finishes, as eio_linux removes it then, and until then a [connect] there is
+    refused and a [listen] there finds it in use; eio_posix keeps the file of a
+    listener closed by hand.
 
     A datagram socket at the empty path binds an abstract address of its own, a
     NUL and five hexadecimal digits, as Linux autobinds it, and a reply sent
     there reaches it. An address that starts with a NUL is in Linux's abstract
     namespace, which has no files: a socket there leaves nothing behind when it
-    closes.
+    closes. The namespace is one per socket type, as on Linux: a stream socket
+    and a datagram one may bind the same abstract address, and a [connect] or a
+    datagram sent where no socket of its type binds is refused with the
+    connection failure that {!No_listener} marks.
 
     A closed Unix-domain datagram socket leaves its path behind, as Eio's
     backends leave the file: a datagram sent there is refused with the
