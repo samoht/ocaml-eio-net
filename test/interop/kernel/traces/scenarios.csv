@@ -1199,6 +1199,40 @@ edge connect 10.1.2.3 from 127.0.0.1,EINVAL,EADDRNOTAVAIL
 edge connect 10.1.2.3 from 127.0.0.2,EINVAL,EADDRNOTAVAIL
 edge connect ::ffff:10.1.2.3 from ::ffff:127.0.0.1,EINVAL,EADDRNOTAVAIL
 self connect,ok hi EOF EADDRINUSE,EINVAL
+queued close: relisten,ok Reset,ok Reset
+queued close: relisten with reuse_addr,ok Reset,ok Reset
+queued close: connect bound there,ok Reset,ok Reset
+abstract connect unbound,Refused,Not_found
+abstract send unbound,Refused,Not_found
+abstract send closed,ok Refused,ENOENT Not_found
+abstract connect closed,ok Refused,ENOENT Not_found
+abstract connect at datagram,Refused,ENOENT
+abstract send at listener,Refused,ENOENT
+abstract listen in use,EADDRINUSE EADDRINUSE,ENOENT
+abstract listen at datagram's,ok,ENOENT
+abstract datagram at listener's,ok,ENOENT
+abstract listen after close,ok ok,ENOENT ENOENT
+empty path listen twice,abstract6 abstract6 distinct x,EINVAL
+empty path bind_to,abstract6,EINVAL
+empty path connect,EINVAL,EINVAL
+empty path send,EINVAL,EINVAL
+listening_addr after close,Invalid_argument,Invalid_argument
+getaddrinfo "LocalHost." "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80
+getaddrinfo "[::1]" "80",NONAME,NONAME
+getaddrinfo "0x" "80",NONAME,NONAME
+getaddrinfo "0X" "80",NONAME,NONAME
+getaddrinfo "0x.1" "80",NONAME,udp:0.0.0.1:80 tcp:0.0.0.1:80
+getaddrinfo "1.0x" "80",NONAME,NONAME
+getaddrinfo "fe80::1%lo" "80",ADDRFAMILY,udp:fe80::1:80 tcp:fe80::1:80
+getaddrinfo "fe80::1%1" "80",ADDRFAMILY,udp:fe80::1:80 tcp:fe80::1:80
+getaddrinfo "fe80::1%2" "80",ADDRFAMILY,udp:fe80::1:80 tcp:fe80::1:80
+getaddrinfo "fe80::1%999" "80",ADDRFAMILY,udp:fe80::1:80 tcp:fe80::1:80
+getaddrinfo "::1%1" "80",ADDRFAMILY,udp:::1:80 tcp:::1:80
+getaddrinfo "127.0.0.1%lo" "80",NONAME,NONAME
+getnameinfo tcp ::ffff:127.0.0.1:80,localhost/http,localhost/http
+getnameinfo tcp ::ffff:10.1.2.3:80,::ffff:10.1.2.3/http,::ffff:10.1.2.3/http
+getnameinfo tcp 127.0.0.2:80,127.0.0.2/http,127.0.0.2/http
+getnameinfo unix x.sock,HOSTNAME/x.sock,abort Not_found
 timed: server closes first,EADDRINUSE ok,EADDRINUSE ok
 timed: server closes first and relisten with reuse_addr,EADDRINUSE ok,ok ok
 timed: server closes first with reuse_addr on both,ok ok,ok ok

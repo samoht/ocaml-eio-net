@@ -31,7 +31,9 @@ val scenarios : string list
     clients of one listener, backlogs, listens, connects and datagrams across
     the loopback addresses, address reuse after a close, Unix paths, host and
     service resolution, bind error shapes, autobind, UDP reuse, datagram error
-    order, edge addresses, a connect to itself, and timed closes. *)
+    order, edge addresses, a connect to itself, a listener closed with
+    connections queued, Linux's abstract Unix addresses and the empty path,
+    [listening_addr] after a close, and timed closes. *)
 
 val timed : string -> bool
 (** [timed name] is [true] for a scenario that lets time pass: TIME_WAIT and

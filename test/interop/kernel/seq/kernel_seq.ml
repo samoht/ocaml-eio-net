@@ -732,6 +732,181 @@ let self_connect net =
       let held = listen_at net addr in
       String.concat " " [ "ok"; got; eof; held ])
 
+(* A listener closed with a connection queued, which no accept took: then a
+   listen at its port, with or without reuse_addr, or a connect bound there,
+   and what the queued client reads. *)
+let queued_close how net =
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  Eio.Switch.run @@ fun sw ->
+  let other = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (lo, 0)) in
+  let l = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (lo, 0)) in
+  let addr = Eio.Net.listening_addr l in
+  let c = Eio.Net.connect ~sw net addr in
+  Eio.Resource.close l;
+  let again =
+    match how with
+    | `Relisten -> listen_at net addr
+    | `Relisten_reuse -> listen_at ~reuse_addr:true net addr
+    | `Bind_to ->
+        outcome (fun () ->
+            Eio.Switch.run @@ fun sw ->
+            ignore
+              (Eio.Net.connect ~sw ~bind_to:addr net
+                 (Eio.Net.listening_addr other));
+            "ok")
+  in
+  let read =
+    outcome (fun () -> "r" ^ string_of_int (String.length (read_s c 4)))
+  in
+  again ^ " " ^ read
+
+(* Linux's abstract namespace: a Unix address that starts with a NUL, which
+   has no file. *)
+let abstract name = `Unix ("\000eio-net-" ^ name)
+
+(* Each in its own switch, whose finish is not part of the outcome. *)
+let attempt_s f =
+  let r = ref "none" in
+  (try Eio.Switch.run (fun sw -> r := outcome (fun () -> f sw)) with _ -> ());
+  !r
+
+let attempt f =
+  attempt_s (fun sw ->
+      f sw;
+      "ok")
+
+let abstract_cases =
+  let dgram sw net a = ignore (Eio.Net.datagram_socket ~sw net a) in
+  let listen ?reuse_addr sw net a =
+    ignore (Eio.Net.listen ?reuse_addr ~sw ~backlog:1 net a)
+  in
+  let connect sw net a = ignore (Eio.Net.connect ~sw net a) in
+  (* From a named path, so that the sender binds no abstract address. *)
+  let send sw net a =
+    if Sys.file_exists "as.sock" then Unix.unlink "as.sock";
+    let s = Eio.Net.datagram_socket ~sw net (`Unix "as.sock") in
+    Fun.protect
+      ~finally:(fun () ->
+        if Sys.file_exists "as.sock" then Unix.unlink "as.sock")
+      (fun () -> Eio.Net.send s ~dst:a [ Cstruct.of_string "x" ])
+  in
+  [
+    ( "connect unbound",
+      fun net -> attempt (fun sw -> connect sw net (abstract "a")) );
+    ("send unbound", fun net -> attempt (fun sw -> send sw net (abstract "b")));
+    ( "send closed",
+      fun net ->
+        let a = abstract "c" in
+        let bound = attempt (fun sw -> dgram sw net a) in
+        bound ^ " " ^ attempt (fun sw -> send sw net a) );
+    ( "connect closed",
+      fun net ->
+        let a = abstract "d" in
+        let bound = attempt (fun sw -> listen sw net a) in
+        bound ^ " " ^ attempt (fun sw -> connect sw net a) );
+    ( "connect at datagram",
+      fun net ->
+        attempt (fun sw ->
+            let a = abstract "e" in
+            dgram sw net a;
+            connect sw net a) );
+    ( "send at listener",
+      fun net ->
+        attempt (fun sw ->
+            let a = abstract "f" in
+            listen sw net a;
+            send sw net a) );
+    ( "listen in use",
+      fun net ->
+        attempt_s (fun sw ->
+            let a = abstract "g" in
+            listen sw net a;
+            let again = attempt (fun sw -> listen sw net a) in
+            let reuse = attempt (fun sw -> listen ~reuse_addr:true sw net a) in
+            again ^ " " ^ reuse) );
+    ( "listen at datagram's",
+      fun net ->
+        attempt (fun sw ->
+            let a = abstract "h" in
+            dgram sw net a;
+            listen sw net a) );
+    ( "datagram at listener's",
+      fun net ->
+        attempt (fun sw ->
+            let a = abstract "i" in
+            listen sw net a;
+            dgram sw net a) );
+    ( "listen after close",
+      fun net ->
+        let a = abstract "j" in
+        let first = attempt (fun sw -> listen sw net a) in
+        first ^ " " ^ attempt (fun sw -> listen sw net a) );
+  ]
+
+(* The form of a Unix address: an abstract one by its length. *)
+let unix_form (a : Eio.Net.Sockaddr.t) =
+  match a with
+  | `Unix n when String.length n > 0 && n.[0] = '\000' ->
+      Fmt.str "abstract%d" (String.length n)
+  | a -> shape a
+
+(* The empty Unix path: a listen there and a connect bound there autobind an
+   abstract address, as a datagram socket does; a connect to it is
+   invalid. *)
+let empty_path_cases =
+  [
+    ( "listen twice",
+      fun net ->
+        attempt_s (fun sw ->
+            let l1 = Eio.Net.listen ~sw ~backlog:1 net (`Unix "") in
+            let l2 = Eio.Net.listen ~sw ~backlog:1 net (`Unix "") in
+            let a1 = Eio.Net.listening_addr l1
+            and a2 = Eio.Net.listening_addr l2 in
+            let c = Eio.Net.connect ~sw net a1 in
+            Eio.Flow.copy_string "x" c;
+            let s, _ = now (fun () -> Eio.Net.accept ~sw l1) in
+            let got = read_s s 4 in
+            let same = if a1 = a2 then "same" else "distinct" in
+            String.concat " "
+              [
+                unix_form (a1 :> Eio.Net.Sockaddr.t);
+                unix_form (a2 :> Eio.Net.Sockaddr.t);
+                same;
+                got;
+              ]) );
+    ( "bind_to",
+      fun net ->
+        attempt_s (fun sw ->
+            if Sys.file_exists "eb.sock" then Unix.unlink "eb.sock";
+            let l = Eio.Net.listen ~sw ~backlog:1 net (`Unix "eb.sock") in
+            ignore
+              (Eio.Net.connect ~sw ~bind_to:(`Unix "") net (`Unix "eb.sock"));
+            let _, peer = now (fun () -> Eio.Net.accept ~sw l) in
+            unix_form (peer :> Eio.Net.Sockaddr.t)) );
+    ( "connect",
+      fun net -> attempt (fun sw -> ignore (Eio.Net.connect ~sw net (`Unix "")))
+    );
+    ( "send",
+      fun net ->
+        attempt (fun sw ->
+            let s = Eio.Net.datagram_socket ~sw net (`Unix "") in
+            Eio.Net.send s ~dst:(`Unix "") [ Cstruct.of_string "x" ]) );
+  ]
+
+let listening_addr_closed net =
+  attempt (fun sw ->
+      let l =
+        Eio.Net.listen ~sw ~backlog:1 net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+      in
+      Eio.Resource.close l;
+      ignore (Eio.Net.listening_addr l))
+
+(* A Unix address's host is the host's name. *)
+let gni_host addr net =
+  let host, service = Eio.Net.getnameinfo net addr in
+  let host = if host = Unix.gethostname () then "HOSTNAME" else host in
+  host ^ "/" ^ service
+
 (* Timed: TIME_WAIT and FIN_WAIT2. [wait d] lets [d] seconds pass. Each case
    opens a connection to a listener at a free port, closes it in an order,
    closes the listener, and listens at the port again now and after 65
@@ -850,6 +1025,25 @@ let names =
     "127.1";
     "::ffff:127.0.0.1";
     "";
+  ]
+
+(* Names that are numbers only in part, each with service "80". A host with
+   no IPv6 address but loopback answers ADDRFAMILY for any IPv6 one, so only
+   the scopes glibc takes are here. *)
+let odd_names =
+  [
+    "LocalHost.";
+    "[::1]";
+    "0x";
+    "0X";
+    "0x.1";
+    "1.0x";
+    "fe80::1%lo";
+    "fe80::1%1";
+    "fe80::1%2";
+    "fe80::1%999";
+    "::1%1";
+    "127.0.0.1%lo";
   ]
 
 let services =
@@ -1016,6 +1210,27 @@ let untimed_scenarios : (string * (net -> string)) list =
         ("::ffff:10.1.2.3", Some "::ffff:127.0.0.1");
       ]
   @ [ ("self connect", self_connect) ]
+  @ List.map
+      (fun (name, how) -> ("queued close: " ^ name, queued_close how))
+      [
+        ("relisten", `Relisten);
+        ("relisten with reuse_addr", `Relisten_reuse);
+        ("connect bound there", `Bind_to);
+      ]
+  @ List.map (fun (name, f) -> ("abstract " ^ name, f)) abstract_cases
+  @ List.map (fun (name, f) -> ("empty path " ^ name, f)) empty_path_cases
+  @ [ ("listening_addr after close", listening_addr_closed) ]
+  @ List.map
+      (fun n -> (Fmt.str "getaddrinfo %S %S" n "80", gai n "80"))
+      odd_names
+  @ List.map
+      (fun (n, a) -> ("getnameinfo " ^ n, gni_host a))
+      [
+        ("tcp ::ffff:127.0.0.1:80", `Tcp (ip "::ffff:127.0.0.1", 80));
+        ("tcp ::ffff:10.1.2.3:80", `Tcp (ip "::ffff:10.1.2.3", 80));
+        ("tcp 127.0.0.2:80", `Tcp (ip "127.0.0.2", 80));
+        ("unix x.sock", `Unix "x.sock");
+      ]
 
 let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
   let untimed (name, f) = (name, fun ~wait:_ net -> f net) in

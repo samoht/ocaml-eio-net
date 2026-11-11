@@ -176,7 +176,46 @@ let scenario_exceptions : scenario_exception list =
           && mh = lh && is_number ms
           && not (is_number ls));
     };
+    {
+      why =
+        "mem has no host name: getnameinfo gives a Unix address's host as \
+         localhost";
+      holds =
+        (fun name ~mem ~linux ->
+          starts_with ~prefix:"getnameinfo unix" name
+          && starts_with ~prefix:"localhost/" mem
+          && starts_with ~prefix:"HOSTNAME/" linux);
+    };
   ]
+  @ List.map
+      (fun (why, prefixes) ->
+        {
+          why;
+          holds =
+            (fun name ~mem:_ ~linux:_ ->
+              List.exists (fun prefix -> starts_with ~prefix name) prefixes);
+        })
+      [
+        ( "pending: a listener's close keeps the port of its queued connections",
+          [ "queued close:" ] );
+        ("pending: abstract addresses follow the path rules", [ "abstract " ]);
+        ( "pending: the empty path autobinds datagram sockets only",
+          [ "empty path listen"; "empty path bind_to" ] );
+        ( "pending: a connect or a send to the empty path finds no file",
+          [ "empty path connect"; "empty path send" ] );
+        ( "pending: listening_addr answers after the close",
+          [ "listening_addr after close" ] );
+        ( "pending: names and addresses glibc reads otherwise",
+          [
+            {|getaddrinfo "[|};
+            {|getaddrinfo "0x|};
+            {|getaddrinfo "0X|};
+            {|getaddrinfo "1.0x"|};
+            {|getaddrinfo "fe80::1%|};
+            {|getaddrinfo "::1%|};
+            "getnameinfo tcp ::ffff:127.0.0.1";
+          ] );
+      ]
 
 let scenario_rows () =
   let file = Filename.concat "traces" "scenarios.csv" in
