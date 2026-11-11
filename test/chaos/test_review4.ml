@@ -31,4 +31,11 @@ let suite =
         "AF_UNIX upload: ignored count of a large write, by the linear tier"
         `Quick
         (Expect.caught ~tier:"linear" (check (unix_upload ~bug:`Ignore_short)));
+      Alcotest.test_case "AF_UNIX lines written before a hang: correct" `Quick
+        (Expect.passes (check unix_written));
+      Alcotest.test_case "AF_UNIX request: correct" `Quick
+        (Expect.passes (check unix_ask));
+      Alcotest.test_case "AF_UNIX request: no read timeout, by the linear tier"
+        `Quick
+        (Expect.caught ~tier:"linear" (check (unix_ask ~bug:`No_timeout)));
     ] )

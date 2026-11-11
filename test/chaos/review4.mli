@@ -14,3 +14,14 @@ val echo : ?bug:[ `None | `Ignore_short ] -> Eio_net_chaos.env -> unit
 val unix_upload : ?bug:[ `None | `Ignore_short ] -> Eio_net_chaos.env -> unit
 (** [unix_upload ~bug env] sends 300,000 bytes on a Unix-domain connection. With
     [`Ignore_short] the client ignores the count of its one [single_write]. *)
+
+val unix_written : Eio_net_chaos.env -> unit
+(** [unix_written env] runs a server that writes two lines on a Unix-domain
+    connection, and a client that reads only once both writes returned, so it
+    must read both: AF_UNIX queues what a returned write sent, even from a peer
+    that then stops. *)
+
+val unix_ask : ?bug:[ `None | `No_timeout ] -> Eio_net_chaos.env -> unit
+(** [unix_ask ~bug env] runs one request and its reply on a Unix-domain
+    connection. With [`No_timeout] the client waits for the reply with no
+    timeout, so a server that stops hangs it. *)

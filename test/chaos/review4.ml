@@ -104,3 +104,80 @@ let unix_upload ?(bug = `None) (env : Eio_net_chaos.env) =
         else if not (Eio_net_chaos.outage env) then failwith "gave up"
   in
   go 1
+
+(* The client reads only once both of the server's writes returned, so a
+   read that times out or fails before both lines is a lost byte. *)
+let unix_written (env : Eio_net_chaos.env) =
+  let addr = `Unix "/run/written.sock" in
+  Eio.Switch.run @@ fun sw ->
+  let written, wrote = Eio.Promise.create () in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:4 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          Eio.Flow.copy_string "a\n" flow;
+          Eio.Flow.copy_string "b\n" flow;
+          Eio.Promise.resolve wrote ();
+          let r = Eio.Buf_read.of_flow flow ~max_size:16 in
+          ignore
+            (Eio.Time.with_timeout_exn env#clock 10. (fun () ->
+                 App.strict_line r))));
+  match
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net addr in
+    match
+      Eio.Time.with_timeout_exn env#clock 5. (fun () ->
+          Eio.Promise.await written)
+    with
+    | exception Eio.Time.Timeout -> ()
+    | () ->
+        let r = Eio.Buf_read.of_flow flow ~max_size:16 in
+        let got = ref 0 in
+        (match
+           for _ = 1 to 2 do
+             ignore
+               (Eio.Time.with_timeout_exn env#clock 5. (fun () ->
+                    App.strict_line r));
+             incr got
+           done
+         with
+        | () -> ()
+        | exception
+            ((Eio.Io _ | End_of_file | Failure _ | Eio.Time.Timeout) as e) ->
+            Fmt.failwith "both writes returned, the client read %d line%s: %s"
+              !got
+              (if !got = 1 then "" else "s")
+              (Printexc.to_string e));
+        Eio.Flow.copy_string "ok\n" flow
+  with
+  | () -> ()
+  | exception Eio.Io _ -> ()
+
+(* One request and its reply on a Unix-domain connection. With [`No_timeout]
+   the client waits for the reply with no timeout. *)
+let unix_ask ?(bug = `None) (env : Eio_net_chaos.env) =
+  let addr = `Unix "/run/ask.sock" in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:4 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let r = Eio.Buf_read.of_flow flow ~max_size:16 in
+          let q =
+            Eio.Time.with_timeout_exn env#clock 10. (fun () ->
+                App.strict_line r)
+          in
+          Eio.Flow.copy_string (q ^ "!\n") flow));
+  let reply r =
+    match bug with
+    | `None ->
+        Eio.Time.with_timeout_exn env#clock 5. (fun () -> App.strict_line r)
+    | `No_timeout -> App.strict_line r
+  in
+  match
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net addr in
+    Eio.Flow.copy_string "ping\n" flow;
+    reply (Eio.Buf_read.of_flow flow ~max_size:16)
+  with
+  | "ping!" -> ()
+  | s -> Fmt.failwith "the reply is %S" s
+  | exception (Eio.Io _ | End_of_file | Failure _ | Eio.Time.Timeout) -> ()

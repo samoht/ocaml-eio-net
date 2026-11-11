@@ -146,13 +146,14 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     A Unix-domain socket meets only what AF_UNIX can do, as it is reliable and
     ordered (unix(7)). A connect may be refused, but neither times out nor finds
     no route; an accepted connection may have been closed by its client; a peer
-    may close, crash or stall, and its reader still gets every byte whose write
-    returned; reads may take what several writes sent. A write of up to 32 KiB
-    arrives whole, so there are no one-byte reads or writes, and a cut lands
-    between two writes; a larger one is cut short when every connection queues
-    32 KiB, as Linux cuts a 300,000-byte write to what its socket's buffer
-    takes. No datagram is lost, duplicated, reordered or garbled, and the outage
-    refuses connects only.
+    may close, crash or stop, and its reader still gets every byte whose write
+    returned, while the writes of a peer that stops wait until its reader gives
+    up; reads may take what several writes sent. A write of up to 32 KiB arrives
+    whole, so there are no one-byte reads or writes, and a cut lands between two
+    writes; a larger one is cut short when every connection queues 32 KiB, as
+    Linux cuts a 300,000-byte write to what its socket's buffer takes. No
+    datagram is lost, duplicated, reordered or garbled, and the outage refuses
+    connects only.
 
     A run passes if [run] returns. [run] catches the errors its program may
     raise and checks the results itself: any exception that escapes it fails the
@@ -231,7 +232,19 @@ module Fault : sig
             {!check} hangs reads only. It holds that one operation: a read after
             the cancel gets the bytes the hung one would have, a datagram taken
             by a receive that hangs goes to the next receive, and a connection
-            taken by an accept that hangs to the next accept. *)
+            taken by an accept that hangs to the next accept.
+
+            Over IP a read that hangs holds what is queued, as a path that drops
+            every segment does. On a Unix-domain connection it is a peer that
+            stops, as AF_UNIX keeps in the reader's queue what a returned write
+            sent (unix(7)): the reads return the bytes queued or on their way,
+            then the first that finds none waits until a cancel ends it, and the
+            peer's writes on that connection wait with it. The wait also ends
+            when the peer closes the connection or shuts down its sending, this
+            end shuts down its receiving, or the connection breaks: the read
+            then returns what the socket has, end of file included. On a network
+            other than {!Eio_net_mem}, where the wrapper does not see the peer,
+            the read holds what is queued, as over IP. *)
     | Reset
         (** The connection is reset at both ends, and the bytes not yet read are
             lost, except on a Unix-domain connection: AF_UNIX keeps in the
