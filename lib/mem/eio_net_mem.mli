@@ -124,9 +124,9 @@ type Eio.Exn.Backend.t +=
             multicast one; [listen] and [datagram_socket] raise those raw. It is
             also the code of the one a [connect] raises at a link-local address,
             or from a loopback address to an IPv4 address outside 127.0.0.0/8,
-            which Linux cannot route; and of the one a datagram [send] raises at
-            an address its socket cannot send to, described in
-            {!section-datagrams}. *)
+            which Linux cannot route, or at the empty Unix path; and of the one
+            a datagram [send] raises at an address its socket cannot send to,
+            described in {!section-datagrams}. *)
 
 (** {1 Networks} *)
 
@@ -334,12 +334,12 @@ val connection : _ Eio.Net.stream_socket -> int option
     {!Address_family} marks, and so does one to a Unix path of 14 bytes or more;
     a shorter path, too short to fill a [sockaddr_in], raises the one that
     {!Invalid_address} marks, and so does a Unix path from an IPv6 socket and a
-    UDP address from a Unix-domain one, as on Linux. One from an IPv6 socket to
-    an IPv4 address goes the IPv4 way, as on Linux: it is refused, with the
-    error that {!Network_unreachable} marks, from an IPv6 address other than the
-    wildcard or an IPv4-mapped one. One from a loopback address to an IPv4
-    address outside 127.0.0.0/8, other than a multicast one, raises the error
-    that {!Invalid_address} marks, as Linux cannot route it.
+    UDP address or the empty path from a Unix-domain one, as on Linux. One from
+    an IPv6 socket to an IPv4 address goes the IPv4 way, as on Linux: it is
+    refused, with the error that {!Network_unreachable} marks, from an IPv6
+    address other than the wildcard or an IPv4-mapped one. One from a loopback
+    address to an IPv4 address outside 127.0.0.0/8, other than a multicast one,
+    raises the error that {!Invalid_address} marks, as Linux cannot route it.
 
     A datagram that is both too long and refused for its address meets the
     errors in Linux's order. A Unix-domain socket checks the address family

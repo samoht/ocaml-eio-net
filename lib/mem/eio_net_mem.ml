@@ -1223,7 +1223,7 @@ module Datagram_socket = struct
     | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
 
   (* A send a socket refuses, in the order Linux checks: a Unix-domain socket
-     refuses a UDP address with EINVAL, then a datagram too long. An IPv4
+     refuses a UDP address or the empty path with EINVAL, then a datagram too long. An IPv4
      socket refuses more than 65535 bytes, then a path (EINVAL, or
      EAFNOSUPPORT for one that fills a [sockaddr_in], 14 bytes or more), an
      IPv6 address, port 0, an address its loopback address cannot route to,
@@ -1242,6 +1242,7 @@ module Datagram_socket = struct
     in
     match (t.addr, dst) with
     | `Unix _, `Udp _ -> Some Invalid_address
+    | `Unix _, `Unix "" -> Some Invalid_address
     | `Unix _, `Unix _ -> if too_long then Some Message_too_long else None
     | `Udp (b, _), dst when String.length (b :> string) = 4 -> (
         if len > 0xffff then Some Message_too_long
@@ -1772,6 +1773,7 @@ module Network = struct
             | `Until u, _ -> release ~until:u ()
             | (`Release | `Held), _ -> release ());
         Flow.close_with sw flow
+    | None, `Unix "" -> fail Invalid_address
     | None, `Unix path -> (
         match Files.find t.hub.files ~stream:true path with
         | Some Datagram -> raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
