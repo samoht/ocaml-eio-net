@@ -61,13 +61,124 @@ let exec run (s : Plan.scenario) =
   in
   (List.rev !trace, failed)
 
+(* {1 Reports} *)
+
+let pp_op ppf (op, fault) =
+  match fault with
+  | None -> Fmt.pf ppf "    %a@\n" Op.pp op
+  | Some f -> Fmt.pf ppf "    %a  <- %a@\n" Op.pp op Fault.pp f
+
+(* What a repeated operation keeps: all but its place, offset and length. *)
+let shape ((op : Op.t), fault) = (op.kind, op.socket, op.side, op.family, fault)
+
+(* The lines of a report: an operation, or a block of [period] operations
+   repeated, of which the first and the last are shown. *)
+type line =
+  | Op of (Op.t * Fault.t option)
+  | Repeated of { period : int; times : int; first : int; last : int }
+
+let max_period = 8
+let min_times = 3
+
+(* The times the block of [p] operations at [i] repeats from [i]. *)
+let times a i p =
+  let n = Array.length a in
+  let rec same j k =
+    k = p || (shape a.(j + k) = shape a.(j + k - p) && same j (k + 1))
+  in
+  let rec go r =
+    let j = i + (r * p) in
+    if j + p <= n && same j 0 then go (r + 1) else r
+  in
+  go 1
+
+(* Runs of a repeated block collapse to its first and last instances, so a
+   run of one-byte operations costs a few lines. *)
+let collapse trace =
+  let a = Array.of_list trace in
+  let n = Array.length a in
+  let rec go i acc =
+    if i >= n then List.rev acc
+    else
+      let best =
+        List.fold_left
+          (fun (bp, br) p ->
+            let r = times a i p in
+            if r >= min_times && r * p > bp * br then (p, r) else (bp, br))
+          (1, 1)
+          (List.init max_period (fun k -> k + 1))
+      in
+      match best with
+      | p, r when r >= min_times ->
+          let block j = List.init p (fun k -> Op a.(j + k)) in
+          let last = i + ((r - 1) * p) in
+          let acc =
+            List.rev_append
+              (block i
+              @ [
+                  Repeated
+                    {
+                      period = p;
+                      times = r - 2;
+                      first = (fst a.(i + p)).index;
+                      last = (fst a.(last - 1)).index;
+                    };
+                ]
+              @ block last)
+              acc
+          in
+          go (i + (r * p)) acc
+      | _ -> go (i + 1) (Op a.(i) :: acc)
+  in
+  go 0 []
+
+(* A report shows at most [keep] lines at each end, and those around the
+   first fault, where the run leaves the first one. *)
+let keep = 100
+let context = 10
+
 let pp_trace ppf trace =
-  List.iter
-    (fun (op, fault) ->
-      match fault with
-      | None -> Fmt.pf ppf "    %a@\n" Op.pp op
-      | Some f -> Fmt.pf ppf "    %a  <- %a@\n" Op.pp op Fault.pp f)
-    trace
+  let lines = Array.of_list (collapse trace) in
+  let n = Array.length lines in
+  let first_fault =
+    let rec find i =
+      if i >= n then None
+      else
+        match lines.(i) with
+        | Op (_, Some _) -> Some i
+        | Op (_, None) | Repeated _ -> find (i + 1)
+    in
+    find 0
+  in
+  let shown i =
+    n <= (2 * keep) + (2 * context) + 1
+    || i < keep
+    || i >= n - keep
+    || match first_fault with Some f -> abs (i - f) <= context | None -> false
+  in
+  let rec pp i =
+    if i < n then (
+      if shown i then begin
+        (match lines.(i) with
+        | Op o -> pp_op ppf o
+        | Repeated { period; times; first; last } ->
+            Fmt.pf ppf
+              "    ... the %d operation%s above, %d more time%s, #%d to #%d@\n"
+              period
+              (if period = 1 then "" else "s")
+              times
+              (if times = 1 then "" else "s")
+              first last);
+        pp (i + 1)
+      end
+      else
+        let rec skip j = if j < n && not (shown j) then skip (j + 1) else j in
+        let j = skip i in
+        Fmt.pf ppf "    ... %d more line%s@\n" (j - i)
+          (if j - i = 1 then "" else "s");
+        pp j)
+  in
+  pp 0
 
 let report ?matched ~hash ~tier s trace error =
   Fmt.failwith
