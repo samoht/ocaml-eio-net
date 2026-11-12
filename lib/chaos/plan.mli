@@ -26,8 +26,8 @@ type trace = (Op.t * Fault.t option) list
 (** The type for a run's operations, in order, with the fault each met. *)
 
 val tiny_buffer : int
-(** [tiny_buffer] is the most a connection queues each way under [Tiny_buffers]:
-    32 KiB. *)
+(** [tiny_buffer] is the most a connection queues each way under
+    {!constructor-Tiny_buffers}: 32 KiB. *)
 
 val none : scenario
 (** [none] is the scenario with no fault. *)
