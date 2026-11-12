@@ -4,7 +4,11 @@
 
    record TRANSPORT         records to stdout, with Unix sockets in $KERNEL_DIR
                             (or the current directory)
-   record scenarios         records the scenarios in the same way, one row each
+   record scenarios         records the scenarios in the same way, one row each:
+                            those off the loopback interface only, when
+                            $KERNEL_LOOPBACK_ONLY is set on a host with no
+                            other interface, and the others otherwise
+   record overlay A B       is A, with B's outcome where A has none
    record merge LINUX MACOS joins two recordings of the same sequences *)
 
 let run t =
@@ -18,6 +22,8 @@ let run t =
       Fmt.pr "%s,%s@." (String.concat ";" ops) (String.concat "|" outcomes))
     (Kernel_seq.sequences t)
 
+let not_recorded = "not recorded"
+
 let scenarios () =
   Option.iter Sys.chdir (Sys.getenv_opt "KERNEL_DIR");
   Eio_posix.run @@ fun env ->
@@ -26,8 +32,10 @@ let scenarios () =
   (* macOS has no 127.0.0.2, and a connect there waits 75 s to time out. The
      timed scenarios run together, each sleeping on the clock. *)
   let clock = Eio.Stdenv.clock env in
+  let loopback_only = Sys.getenv_opt "KERNEL_LOOPBACK_ONLY" <> None in
   let run name =
-    if Kernel_seq.timed name then
+    if Kernel_seq.off_loopback name <> loopback_only then not_recorded
+    else if Kernel_seq.timed name then
       Kernel_seq.scenario ~wait:(Eio.Time.sleep clock) net name
     else
       match
@@ -55,6 +63,14 @@ let rows file =
       | [ ops; outcomes ] -> (ops, outcomes)
       | _ -> failwith ("record merge: " ^ line))
 
+let overlay a b =
+  print_endline "ops,outcomes";
+  List.iter2
+    (fun (ops, x) (ops', y) ->
+      if ops <> ops' then failwith ("record overlay: " ^ ops ^ " / " ^ ops');
+      Fmt.pr "%s,%s@." ops (if x = not_recorded then y else x))
+    (rows a) (rows b)
+
 let merge linux macos =
   print_endline "ops,linux,macos";
   List.iter2
@@ -66,10 +82,11 @@ let merge linux macos =
 let () =
   match Array.to_list Sys.argv with
   | [ _; "merge"; linux; macos ] -> merge linux macos
+  | [ _; "overlay"; a; b ] -> overlay a b
   | [ _; "scenarios" ] -> scenarios ()
   | [ _; t ] -> run (Kernel_seq.transport_of_string t)
   | _ ->
       Fmt.epr
-        "usage: record TRANSPORT | record scenarios | record merge LINUX \
-         MACOS@.";
+        "usage: record TRANSPORT | record scenarios | record overlay A B | \
+         record merge LINUX MACOS@.";
       exit 2

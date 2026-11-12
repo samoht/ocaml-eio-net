@@ -24,21 +24,34 @@ for t in $traces; do
   KERNEL_DIR="$work/sock" "$record" "$t" >"$work/$t.macos"
 done
 
-docker run --rm \
-  --sysctl net.ipv6.conf.all.disable_ipv6=0 \
-  --sysctl net.ipv6.conf.lo.disable_ipv6=0 \
-  -v "$src:/src:ro" -v "$work:/out" \
-  "$image" bash -euc "
+docker run --rm -v "$src:/src:ro" -v "$work:/out" "$image" bash -euc "
     mkdir ~/src && tar -C /src --exclude=_build --exclude=.git -cf - . | tar -C ~/src -xf -
     cd ~/src
     opam update -y >/dev/null
     opam install -y . --deps-only >/dev/null
     opam install -y eio_posix >/dev/null
     opam exec -- dune build ./test/interop/kernel/scripts/record.exe
+    cp ./_build/default/test/interop/kernel/scripts/record.exe /out/record.linux"
+
+docker run --rm \
+  --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+  --sysctl net.ipv6.conf.lo.disable_ipv6=0 \
+  -v "$work:/out" "$image" bash -euc "
     mkdir -p /tmp/sock
     for t in $traces; do
-      KERNEL_DIR=/tmp/sock ./_build/default/test/interop/kernel/scripts/record.exe \$t >/out/\$t.linux
+      KERNEL_DIR=/tmp/sock /out/record.linux \$t >/out/\$t.linux
     done"
+
+# The scenarios off the loopback interface, with no network, so that the
+# host has loopback only and nothing leaves it.
+docker run --rm --network none \
+  --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+  --sysctl net.ipv6.conf.lo.disable_ipv6=0 \
+  -v "$work:/out" "$image" bash -euc "
+    mkdir -p /tmp/sock
+    KERNEL_LOOPBACK_ONLY=1 KERNEL_DIR=/tmp/sock /out/record.linux scenarios >/out/lo.linux"
+"$record" overlay "$work/scenarios.linux" "$work/lo.linux" >"$work/both.linux"
+mv "$work/both.linux" "$work/scenarios.linux"
 
 for t in $traces; do
   "$record" merge "$work/$t.linux" "$work/$t.macos" >"$out/$t.csv"

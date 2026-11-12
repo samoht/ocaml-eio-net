@@ -34,11 +34,19 @@ val scenarios : string list
     order, edge addresses, a connect to itself, a listener closed with
     connections queued, Linux's abstract Unix addresses and the empty path,
     [listening_addr] after a close, the names of IPv4-compatible and abstract
-    addresses, the address a failed connect keeps bound, and timed closes. *)
+    addresses, the address a failed connect keeps bound, a Unix path with a NUL,
+    connects bound at the IPv6 wildcard address next to IPv4 holds on their
+    port, connects and datagrams off the loopback interface, and timed closes.
+*)
 
 val timed : string -> bool
 (** [timed name] is [true] for a scenario that lets time pass: TIME_WAIT and
     FIN_WAIT2, probed now and after Linux's 60-second timers. *)
+
+val off_loopback : string -> bool
+(** [off_loopback name] is [true] for a scenario that sends toward an address
+    off the loopback interface. Only a host with loopback only, as a container
+    with no network, records it: on another host it would leave the machine. *)
 
 val scenario :
   ?wait:(float -> unit) ->

@@ -138,7 +138,10 @@ let mem_errno : Eio.Exn.Backend.t -> string option = function
   | Eio_net_mem.Invalid_address -> Some "EINVAL"
   | _ -> None
 
-let classify = function
+let rec classify = function
+  | Eio.Exn.Multiple l ->
+      Fmt.str "multiple(%s)"
+        (String.concat "+" (List.map (fun (e, _) -> classify e) l))
   | Eio.Io (Eio.Net.E (Connection_reset _), _) -> "Reset"
   | Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> "Refused"
   | Eio.Io (Eio.Net.E _, _) -> "Net"
@@ -570,6 +573,85 @@ let unix_paths net =
           ignore
             (Eio.Net.connect ~sw ~bind_to:(`Tcp (lo, 0)) net (`Unix "p.sock")));
     ]
+
+(* A path with a NUL that is not its first byte: a socket bound there, a
+   connect and a datagram sent there. *)
+let nul_path net =
+  let path = `Unix "nul\000x.sock" in
+  let o f =
+    outcome (fun () ->
+        Eio.Switch.run @@ fun sw ->
+        f sw;
+        "ok")
+  in
+  String.concat " "
+    [
+      o (fun sw -> ignore (Eio.Net.listen ~sw ~backlog:1 net path));
+      o (fun sw -> ignore (Eio.Net.connect ~sw net path));
+      o (fun sw -> ignore (Eio.Net.datagram_socket ~sw net path));
+      o (fun sw ->
+          let d = Eio.Net.datagram_socket ~sw net (`Unix "nul-from.sock") in
+          Eio.Net.send d ~dst:path [ Cstruct.of_string "x" ]);
+      o (fun sw ->
+          let l = Eio.Net.listen ~sw ~backlog:1 net (`Unix "nul-to.sock") in
+          ignore l;
+          ignore (Eio.Net.connect ~sw ~bind_to:path net (`Unix "nul-to.sock")));
+    ]
+
+(* A TCP hold on port [p]: a listener at [a], or a client bound at [a] of a
+   listener at [to4], an IPv4 one. *)
+let hold_at ~sw net ~to4 what p =
+  match what with
+  | `Listen a -> ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip a, p)))
+  | `Client a ->
+      ignore
+        (Eio.Net.connect ~sw
+           ~bind_to:(`Tcp (ip a, p))
+           net
+           (`Tcp (ip "127.0.0.1", port_of to4)))
+
+(* A connect bound at the IPv6 wildcard address and a port [p], and a hold on
+   [p] made before it, [`Hold_first], or after: the outcome of each. The
+   listeners they connect to bind their ports first, so that [p] is none of
+   them. *)
+let wildcard_bind what order net =
+  Eio.Switch.run @@ fun sw ->
+  let to6 = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (ip "::1", 0)) in
+  let to4 = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (ip "127.0.0.1", 0)) in
+  let p =
+    Eio.Switch.run @@ fun sw ->
+    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip "127.0.0.1", 0)))
+  in
+  let bound () =
+    outcome (fun () ->
+        ignore
+          (Eio.Net.connect ~sw
+             ~bind_to:(`Tcp (ip "::", p))
+             net
+             (`Tcp (ip "::1", port_of to6)));
+        "ok")
+  in
+  let held () =
+    outcome (fun () ->
+        hold_at ~sw net ~to4 what p;
+        "ok")
+  in
+  match order with
+  | `Hold_first ->
+      let h = held () in
+      h ^ "/" ^ bound ()
+  | `Bound_first ->
+      let b = bound () in
+      b ^ "/" ^ held ()
+
+(* A connect from a listener at the IPv6 wildcard address to an address off
+   the loopback interface, at the listener's port. *)
+let off_loopback_connect dst net =
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (ip "::", 0)) in
+  outcome (fun () ->
+      ignore (Eio.Net.connect ~sw net (`Tcp (ip dst, port_of l)));
+      "ok")
 
 (* The error a bind raises, with its shape: raw from eio_posix's listen and
    datagram_socket, or an Eio.Io error. *)
@@ -1049,6 +1131,11 @@ let timed_cases =
     ("server closes and client closes at 30 s", `Client_closes_later);
   ]
 
+(* Addresses that loopback does not reach: a host with loopback only has no
+   route to them. *)
+let off_loopback_ips =
+  [ "10.1.2.3"; "2001:db8::1"; "::2"; "::ffff:10.1.2.3"; "::127.0.0.1" ]
+
 let stream_ips =
   [
     "127.0.0.1";
@@ -1288,6 +1375,35 @@ let untimed_scenarios : (string * (net -> string)) list =
   @ List.map
       (fun (name, f) -> ("failed connect: " ^ name, f))
       failed_connect_cases
+  @ [ ("unix path with a NUL", nul_path) ]
+  @ List.concat_map
+      (fun (name, what) ->
+        [
+          ( Fmt.str "wildcard bind: bound at :: after %s" name,
+            wildcard_bind what `Hold_first );
+          ( Fmt.str "wildcard bind: %s after bound at ::" name,
+            wildcard_bind what `Bound_first );
+        ])
+      [
+        ("listen 0.0.0.0", `Listen "0.0.0.0");
+        ("listen 127.0.0.1", `Listen "127.0.0.1");
+        ("listen ::ffff:127.0.0.1", `Listen "::ffff:127.0.0.1");
+        ("listen ::1", `Listen "::1");
+        ("client 127.0.0.1", `Client "127.0.0.1");
+      ]
+  @ List.map
+      (fun d -> ("off loopback: connect " ^ d, off_loopback_connect d))
+      off_loopback_ips
+  @ List.concat_map
+      (fun d ->
+        List.map
+          (fun src ->
+            ( Fmt.str "off loopback: dgram %s from %s to ::" d src,
+              dgram_case "::" src d ))
+          (if String.contains d '.' && not (String.contains d ':') then
+             [ "0.0.0.0"; "::" ]
+           else [ "::" ]))
+      off_loopback_ips
 
 let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
   let untimed (name, f) = (name, fun ~wait:_ net -> f net) in
@@ -1298,6 +1414,7 @@ let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
 
 let scenarios = List.map fst scenario_list
 let timed name = String.starts_with ~prefix:"timed: " name
+let off_loopback name = String.starts_with ~prefix:"off loopback: " name
 
 let scenario ?(wait = fun _ -> ()) net name =
   let f = List.assoc name scenario_list in

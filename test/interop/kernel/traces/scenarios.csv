@@ -884,7 +884,7 @@ dgram ::1 from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL
 dgram :: from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL
 dgram ::ffff:127.0.0.1 from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL
 dgram 127.0.0.2 from UdpV6 to 127.0.0.2,sent udp:127.0.0.1 n=2,recv EADDRNOTAVAIL
-getaddrinfo "localhost" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80
+getaddrinfo "localhost" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,timeout
 getaddrinfo "localhost" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0
 getaddrinfo "localhost" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535
 getaddrinfo "localhost" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME
@@ -1111,11 +1111,11 @@ getnameinfo tcp 127.0.0.1:49999,localhost/49999,localhost/49999
 getnameinfo tcp 10.1.2.3:80,10.1.2.3/http,10.1.2.3/http
 getnameinfo tcp 127.0.0.2:8080,127.0.0.2/http-alt,127.0.0.2/http-alt
 reuse server closes first,EADDRINUSE EADDRINUSE,EADDRINUSE ok
-reuse client closes first,ok ok,EADDRINUSE ok
+reuse client closes first,ok ok,ok ok
 reuse connection open,EADDRINUSE EADDRINUSE,EADDRINUSE ok
 reuse no connection,ok ok,ok ok
 reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok
-reuse bound server closes first,ok ok ok,ok EADDRINUSE ok
+reuse bound server closes first,ok ok ok,EADDRINUSE EADDRINUSE ok
 unix paths,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EINVAL,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EAFNOSUPPORT
 bind error shapes,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EINVAL raw:ENAMETOOLONG io:EADDRINUSE,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EAFNOSUPPORT raw:ENAMETOOLONG io:EADDRINUSE
 autobind,abstract6 abstract6 distinct r2,abort EINVAL
@@ -1242,6 +1242,28 @@ failed connect: tcp,Refused EADDRINUSE EADDRINUSE then ok,Refused Refused ok the
 failed connect: path,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE
 failed connect: abstract,Refused EADDRINUSE EADDRINUSE then ok,Not_found Not_found ENOENT then ENOENT
 failed connect: abstract to the empty path,EINVAL EADDRINUSE EADDRINUSE then ok,Not_found Not_found ENOENT then ENOENT
+unix path with a NUL,multiple(ENOENT+ENOENT) Not_found ENOENT Not_found Not_found,multiple(ENOENT+ENOENT) Not_found ENOENT Not_found Not_found
+wildcard bind: bound at :: after listen 0.0.0.0,ok/EADDRINUSE,ok/ok
+wildcard bind: listen 0.0.0.0 after bound at ::,ok/EADDRINUSE,ok/ok
+wildcard bind: bound at :: after listen 127.0.0.1,ok/EADDRINUSE,ok/EADDRINUSE
+wildcard bind: listen 127.0.0.1 after bound at ::,ok/ok,ok/ok
+wildcard bind: bound at :: after listen ::ffff:127.0.0.1,ok/EADDRINUSE,ok/EADDRINUSE
+wildcard bind: listen ::ffff:127.0.0.1 after bound at ::,ok/ok,ok/ok
+wildcard bind: bound at :: after listen ::1,ok/EADDRINUSE,ok/EADDRINUSE
+wildcard bind: listen ::1 after bound at ::,ok/EADDRINUSE,ok/EADDRINUSE
+wildcard bind: bound at :: after client 127.0.0.1,ok/EADDRINUSE,ok/EADDRINUSE
+wildcard bind: client 127.0.0.1 after bound at ::,ok/ok,ok/ok
+off loopback: connect 10.1.2.3,ENETUNREACH,not recorded
+off loopback: connect 2001:db8::1,ENETUNREACH,not recorded
+off loopback: connect ::2,ENETUNREACH,not recorded
+off loopback: connect ::ffff:10.1.2.3,ENETUNREACH,not recorded
+off loopback: connect ::127.0.0.1,ENETUNREACH,not recorded
+off loopback: dgram 10.1.2.3 from 0.0.0.0 to ::,ENETUNREACH blk,not recorded
+off loopback: dgram 10.1.2.3 from :: to ::,ENETUNREACH blk,not recorded
+off loopback: dgram 2001:db8::1 from :: to ::,ENETUNREACH blk,not recorded
+off loopback: dgram ::2 from :: to ::,ENETUNREACH blk,not recorded
+off loopback: dgram ::ffff:10.1.2.3 from :: to ::,ENETUNREACH blk,not recorded
+off loopback: dgram ::127.0.0.1 from :: to ::,ENETUNREACH blk,not recorded
 timed: server closes first,EADDRINUSE ok,EADDRINUSE ok
 timed: server closes first and relisten with reuse_addr,EADDRINUSE ok,ok ok
 timed: server closes first with reuse_addr on both,ok ok,ok ok
