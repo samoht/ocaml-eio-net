@@ -91,16 +91,19 @@
     Each run has its own event loop, inside or outside another one. A check runs
     to its end before it returns, so it blocks the event loop it is called from:
     the other fibers of that loop wait for it. Its clocks start at [0.] and move
-    only when every fiber waits, so a timeout of an hour takes no time. A run in
-    which every fiber waits and no timer is due fails as a hang, and so does one
-    still running after an hour of its clock, and one in which the same network
-    operation fails 10000 times on the same target while its clock stands still,
-    with no success there in between: a connect to one address, or a read or a
-    write on one accepted connection or on any of the connections a client made
-    to one address. A client that retries a refused connect at once does that in
-    the outage, and so does one that reconnects at once after each failed read.
-    Failures on distinct targets, as a scan of many ports makes, do not count
-    together. *)
+    only when every fiber waits, so a timeout of an hour takes no time, or when
+    the run polls, as real time passes while a program does: after 1000 turns at
+    one instant in which every runnable fiber had just yielded, they move by a
+    tenth of how long the run has polled so far, 10 ms at least, or to the next
+    timer if that comes first. A run in which every fiber waits and no timer is
+    due fails as a hang, and so does one still running after an hour of its
+    clock, and one in which the same network operation fails 10000 times on the
+    same target while its clock stands still, with no success there in between:
+    a connect to one address, or a read or a write on one accepted connection or
+    on any of the connections a client made to one address. A client that
+    retries a refused connect at once does that in the outage, and so does one
+    that reconnects at once after each failed read. Failures on distinct
+    targets, as a scan of many ports makes, do not count together. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t

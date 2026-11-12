@@ -513,7 +513,7 @@ module Flow = struct
             t.cut_short <- false;
             waits)
       in
-      if waits then Eio.Fiber.yield ();
+      if waits then Quiet_mock.wait_io ();
       let total = Cstruct.lenv bufs in
       let fault, n =
         Mutex.protect t.lock @@ fun () ->

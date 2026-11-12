@@ -308,6 +308,46 @@ let scan () =
     | exception Eio.Io _ -> ()
   done
 
+(* A client that pings an echo peer and polls with [Fiber.yield] for the
+   first pong, pinging again on each poll, giving up after [patience]
+   seconds of its clock if it has any. Time passes while it polls, so a pong
+   held back 50 ms arrives, though the peer takes a ping on every poll, and
+   in the outage, where each is lost, a patient client gives up. *)
+let poll ?patience () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
+  let client = Eio.Net.datagram_socket ~sw env#net (udp 5000) in
+  let peer = Eio.Net.datagram_socket ~sw env#net (udp 5001) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let buf = Cstruct.create 8 in
+      while true do
+        let from, _ = Eio.Net.recv peer buf in
+        Eio.Net.send peer ~dst:from [ Cstruct.of_string "pong" ]
+      done;
+      `Stop_daemon);
+  let got = ref false in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      ignore (Eio.Net.recv client (Cstruct.create 8));
+      got := true;
+      `Stop_daemon);
+  let start = Eio.Time.now env#clock in
+  let waited () =
+    match patience with
+    | Some p -> Eio.Time.now env#clock -. start >= p
+    | None -> false
+  in
+  (* Its own bound, well past the polls a check lets through: without time
+     passing, the run fails here instead of spinning for ever. *)
+  let polls = ref 0 in
+  while (not !got) && not (waited ()) do
+    incr polls;
+    if !polls > 1_000_000 then failwith "polled 1000000 times";
+    Eio.Net.send client ~dst:(udp 5001) [ Cstruct.of_string "ping" ];
+    Eio.Fiber.yield ()
+  done;
+  if (not !got) && not (Eio_net_chaos.outage env) then failwith "no reply"
+
 let suite =
   ( "guards",
     [
@@ -328,6 +368,12 @@ let suite =
            "Eio_net_chaos.check: the run with no fault failed: the run hangs: \
             the same network operation failed 10000 times on the same target"
            reconnect);
+      Alcotest.test_case "a client that polls with a deadline" `Quick
+        (Expect.passes (poll ~patience:1.0));
+      Alcotest.test_case "a client that polls for ever hangs" `Quick
+        (error_is
+           "the run hangs: it is still running after an hour of its clock"
+           (poll ?patience:None));
       Alcotest.test_case "a scan of closed ports is not a spin" `Quick
         (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
