@@ -144,11 +144,14 @@ val v :
     other. {!section-streams}, {!section-datagrams} and {!section-paths} say how
     its sockets behave.
 
-    Each direction of a connection queues at most [capacity] bytes (defaults to
-    no bound): a write takes what fits and waits while the queue is full, as a
-    socket's send buffer makes it wait, so a test with a small capacity shows a
-    peer that writes without reading. Raises [Invalid_argument] if [capacity] is
-    not positive.
+    Each direction of a connection queues at most [capacity] bytes: a write
+    takes what fits and waits while the queue is full, as a socket's send buffer
+    makes it wait, so a test with a small capacity shows a peer that writes
+    without reading. It defaults to 4 MiB over TCP and 256 KiB over a Unix path,
+    at least what Linux's default buffers hold on loopback: a writer queues
+    about 2.6 MiB over TCP before it waits, and at most about 250 KiB over
+    AF_UNIX, less in small writes. macOS holds less: about 330 KiB over TCP and
+    8 KiB over AF_UNIX. Raises [Invalid_argument] if [capacity] is not positive.
 
     On [clock], the end of a TCP connection whose FIN went first holds its
     address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}).
@@ -195,13 +198,14 @@ val pipe :
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 (** [pipe ~capacity ()] is a connected pair of in-memory stream sockets: bytes
     written on one are read on the other, and vice versa, preserving order. Each
-    direction queues at most [capacity] bytes, as for {!v}. Unlike {!v} it binds
-    no address and needs no [listen] and [connect] handshake: it is the bare
-    transport for a test, or a wrapper such as an adversarial flow, that needs
-    two ends of a pipe. Its ends take socket options as a connection of {!v}
-    does. Blocking reads suspend the calling fiber until data arrives, so both
-    ends must run under an Eio event loop; the two ends may be in different
-    domains. No switch closes them: the caller does. *)
+    direction queues at most [capacity] bytes (defaults to 4 MiB), as for {!v}.
+    Unlike {!v} it binds no address and needs no [listen] and [connect]
+    handshake: it is the bare transport for a test, or a wrapper such as an
+    adversarial flow, that needs two ends of a pipe. Its ends take socket
+    options as a connection of {!v} does. Blocking reads suspend the calling
+    fiber until data arrives, so both ends must run under an Eio event loop; the
+    two ends may be in different domains. No switch closes them: the caller
+    does. *)
 
 val connection : _ Eio.Net.stream_socket -> int option
 (** [connection s] is [Some n] if [s] is an end of a connection of this library,

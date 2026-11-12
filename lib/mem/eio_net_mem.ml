@@ -895,6 +895,14 @@ module Flow = struct
 
   let connections = Atomic.make 0
 
+  (* What a direction of a connection queues when the network sets no
+     capacity: at least what Linux's default buffers hold on loopback. A TCP
+     send buffer grows to 4 MiB (tcp_wmem), and a writer queues about
+     2.6 MiB to a reader that does not read; an AF_UNIX one queues 208 or
+     224 KiB of the writer's buffer, each write counted with its overhead,
+     at most about 250 KiB. *)
+  let default_capacity ~local = if local then 256 * 1024 else 4 * 1024 * 1024
+
   (* A connection to itself: what it writes, it reads. *)
   let self ~capacity =
     let connection = Atomic.fetch_and_add connections 1 in
@@ -1661,7 +1669,7 @@ module Network = struct
     sw : Eio.Switch.t;
     hub : Listening_socket.hub;
     datagrams : Datagram_socket.hub;
-    capacity : int;
+    capacity : int option;
   }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
@@ -1794,7 +1802,10 @@ module Network = struct
     in
     match (listener, addr) with
     | None, `Tcp _ when to_itself ->
-        let flow = Flow.self ~capacity:t.capacity in
+        let capacity =
+          Option.value t.capacity ~default:(Flow.default_capacity ~local:false)
+        in
+        let flow = Flow.self ~capacity in
         let ends = Ends.v t.hub.Listening_socket.ports in
         (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
         Flow.on_close flow (fun ~reset ~abort:_ ->
@@ -1814,7 +1825,10 @@ module Network = struct
     | Some listener, _ when Listening_socket.is_closed listener -> refused ()
     | Some listener, _ -> (
         let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
-        let client, server = Flow.pair ~local:unix ~capacity:t.capacity in
+        let capacity =
+          Option.value t.capacity ~default:(Flow.default_capacity ~local:unix)
+        in
+        let client, server = Flow.pair ~local:unix ~capacity in
         (* The accepted socket holds the listener's port at the address the
            client reached, with the listener's [SO_REUSEADDR], as Linux's
            does. *)
@@ -2001,14 +2015,17 @@ end
 let handler = Eio.Net.Pi.network (module Network)
 
 let check_capacity = function
-  | None -> max_int
-  | Some c when c >= 1 -> c
+  | None -> None
+  | Some c when c >= 1 -> Some c
   | Some c -> Fmt.invalid_arg "eio-net.mem: the capacity is %d" c
 
 let connection = Flow.connection
 
 let pipe ?capacity () =
-  let capacity = check_capacity capacity in
+  let capacity =
+    Option.value (check_capacity capacity)
+      ~default:(Flow.default_capacity ~local:false)
+  in
   let (_, client), (_, server) = Flow.pair ~local:false ~capacity in
   (client, server)
 
