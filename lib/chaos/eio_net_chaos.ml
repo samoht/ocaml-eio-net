@@ -80,13 +80,25 @@ let exec ~bound run (s : Plan.scenario) =
 
 (* {1 Reports} *)
 
-let pp_op ppf (op, fault) =
+(* A read or a write a rule of [rules] cuts short where its fault lands says
+   which fault that is. *)
+let pp_op rules ppf ((op : Op.t), fault) =
+  let cut_by k (r : Plan.rule) =
+    r.kind = op.kind && r.socket = op.socket && r.side = op.side
+    && r.at = op.offset + k
+  in
   match fault with
   | None -> Fmt.pf ppf "    %a@\n" Op.pp op
+  | Some (Fault.Short k as f) when List.exists (cut_by k) rules ->
+      let r = List.find (cut_by k) rules in
+      Fmt.pf ppf "    %a  <- %a, up to where it %a@\n" Op.pp op Fault.pp f
+        Fault.pp r.fault
   | Some f -> Fmt.pf ppf "    %a  <- %a@\n" Op.pp op Fault.pp f
 
-(* What a repeated operation keeps: all but its place, offset and length. *)
-let shape ((op : Op.t), fault) = (op.kind, op.socket, op.side, op.family, fault)
+(* What a repeated operation keeps: all but its place, socket, offset and
+   length. *)
+let shape ((op : Op.t), fault) = (op.kind, op.side, op.family, fault)
+let socket ((op : Op.t), _) = op.socket
 
 (* The lines of a report: an operation, or a block of [period] operations
    repeated, of which the first and the last are shown. *)
@@ -97,11 +109,17 @@ type line =
 let max_period = 8
 let min_times = 3
 
-(* The times the block of [p] operations at [i] repeats from [i]. *)
+(* The times the block of [p] operations at [i] repeats from [i]: each
+   repeat has the operations of the one before, each on the socket numbered
+   [d] more, as a loop that opens a connection each time makes them. *)
 let times a i p =
   let n = Array.length a in
+  let d = if i + p < n then socket a.(i + p) - socket a.(i) else 0 in
   let rec same j k =
-    k = p || (shape a.(j + k) = shape a.(j + k - p) && same j (k + 1))
+    k = p
+    || shape a.(j + k) = shape a.(j + k - p)
+       && socket a.(j + k) - socket a.(j + k - p) = d
+       && same j (k + 1)
   in
   let rec go r =
     let j = i + (r * p) in
@@ -154,7 +172,7 @@ let collapse trace =
 let keep = 100
 let context = 10
 
-let pp_trace ppf trace =
+let pp_trace rules ppf trace =
   let lines = Array.of_list (collapse trace) in
   let n = Array.length lines in
   let first_fault =
@@ -177,7 +195,7 @@ let pp_trace ppf trace =
     if i < n then (
       if shown i then begin
         (match lines.(i) with
-        | Op o -> pp_op ppf o
+        | Op o -> pp_op rules ppf o
         | Repeated { period; times; first; last } ->
             Fmt.pf ppf
               "    ... the %d operation%s above, %d more time%s, #%d to #%d@\n"
@@ -208,7 +226,7 @@ let report ?matched ~hash ~tier s trace error =
     name (Plan.text s)
     (match tier with `Linear -> "linear" | `Sampled -> "sampled")
     Fmt.(option (any "  matched:  " ++ string ++ any "@\n"))
-    matched error pp_trace trace hash (Plan.key s)
+    matched error (pp_trace s.rules) trace hash (Plan.key s)
 
 let digest (trace : Plan.trace) =
   let ops = List.map fst trace in
@@ -223,10 +241,17 @@ let rec diverge (a : Plan.trace) (b : Plan.trace) =
   | (x, _) :: _, [] | [], (x, _) :: _ -> Fmt.str "%a, then nothing" Op.pp x
   | [], [] -> "nothing"
 
+(* A replay is [net/HASH/KEY], with the 8 hexadecimal digits of a first
+   run's digest. *)
 let parse_replay r =
+  let hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
   match String.split_on_char '/' r with
-  | [ "net"; h; k ] -> (h, k)
-  | _ -> fail "~replay:%S is not a replay of eio-net" r
+  | [ "net"; h; k ] when String.length h = 8 && String.for_all hex h -> (h, k)
+  | _ ->
+      fail
+        "~replay:%S is not a replay of eio-net: one is net/HASH/SCENARIO, HASH \
+         8 hexadecimal digits, as a failure names it"
+        r
 
 let find k = List.find_opt (fun s -> Plan.key s = k)
 
@@ -257,7 +282,7 @@ let first_failed ~hash trace error =
     "%s: the run with no fault failed: %s@\n\
     \  trace:@\n\
      %a  replay:   ~replay:\"net/%s/%s\""
-    name error pp_trace trace hash (Plan.key Plan.none)
+    name error (pp_trace []) trace hash (Plan.key Plan.none)
 
 let check ?(budget = 2_000) ?replay run =
   if budget < 1 then Fmt.invalid_arg "%s: the budget is %d" name budget;
@@ -271,7 +296,9 @@ let check ?(budget = 2_000) ?replay run =
         "the linear tier needs at least %d runs, more than the budget of %d, \
          and a check never passes on a partial one: the run with no fault made \
          that many connects, accepts and receives while its clock stood still, \
-         and was stopped there. Shrink the workload, or raise ~budget."
+         and was stopped there. It looks like a workload that loops for ever, \
+         as a client that reconnects at once does: end the loop. If the \
+         workload ends, shrink it or raise ~budget."
         n budget)
     overrun;
   Option.iter (first_failed ~hash:(digest first) first) failed;
