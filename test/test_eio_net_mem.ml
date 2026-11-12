@@ -1296,6 +1296,17 @@ let listens net ?(reuse_addr = false) addr () =
   Eio.Switch.run @@ fun sw ->
   ignore (Eio.Net.listen ~sw ~reuse_addr ~backlog:1 net addr)
 
+(* A bind in [listen] or [datagram_socket] raises the raw [Unix.Unix_error]
+   eio_posix raises there, and a connect an [Eio.Io] error marked by the code:
+   either form of the pair passes, and any other exception, [Failure] included,
+   fails the test. *)
+let fails (code, errno) f =
+  match f () with
+  | exception Eio.Io (Eio.Exn.X c, _) when c = code -> true
+  | exception Unix.Unix_error (e, _, _) when e = errno -> true
+  | exception e -> Alcotest.failf "raised %a" Fmt.exn e
+  | _ -> false
+
 (* A connection opened and accepted under [sw], at [addr]; the listener is
    closed. *)
 let connection ~sw net ?bind_to ?(reuse_addr = false) addr =
@@ -1396,15 +1407,6 @@ let test_unavailable_addresses () =
   let net = Eio_net_mem.v ~sw () in
   let ip = Eio.Net.Ipaddr.of_raw in
   let lo = Eio.Net.Ipaddr.V4.loopback in
-  (* A connect raises an [Eio.Io] error, and a bind in [listen] or
-     [datagram_socket] the raw one eio_posix raises. *)
-  let fails (code, errno) f =
-    match f () with
-    | exception Eio.Io (Eio.Exn.X c, _) when c = code -> true
-    | exception Unix.Unix_error (e, _, _) when e = errno -> true
-    | exception e -> Alcotest.failf "raised %a" Fmt.exn e
-    | _ -> false
-  in
   let unavailable =
     fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL)
   in
@@ -1603,6 +1605,63 @@ let test_port_choice () =
   Eio.Resource.close s;
   let _, p = udp () in
   Alcotest.(check int) "a datagram socket, again" 49152 p
+
+(* A bind at port 0 when every port of the dynamic range, 16384 of them, is
+   held fails as bind(2) fails it on Linux, with EADDRINUSE raw, as a bind at
+   an address a socket holds does, and not with [Failure]. The range is filled
+   the cheapest way, a listener bound at each port, which holds them all until
+   [sw] finishes and needs no clock; the port the [listen] under test picks is
+   the one left. *)
+let test_no_ephemeral_port_for_a_listen () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  for port = 49152 to 65535 do
+    ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, port)))
+  done;
+  Alcotest.(check bool)
+    "a listen at port 0" true
+    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE)
+       (fun () -> ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)))))
+
+(* A datagram socket at port 0 fails the same way, with EADDRINUSE raw and not
+   with [Failure]. Datagram sockets hold their own ports, apart from the
+   listeners' and the clients', so their range is filled with datagram
+   sockets. *)
+let test_no_ephemeral_port_for_a_datagram_socket () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  for port = 49152 to 65535 do
+    ignore (Eio.Net.datagram_socket ~sw net (`Udp (lo, port)))
+  done;
+  Alcotest.(check bool)
+    "a datagram socket at port 0" true
+    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE)
+       (fun () -> ignore (Eio.Net.datagram_socket ~sw net (`Udp (lo, 0)))))
+
+(* A [connect] whose socket binds no address takes a port of the range counted
+   down from its top, so a range the listeners hold leaves it none: it fails as
+   connect(2) fails it on Linux, with EADDRNOTAVAIL as an [Eio.Io] error, and
+   not with [Failure]. The listener it reaches for is below the range, so it
+   holds no port of it. *)
+let test_no_ephemeral_port_for_a_connect () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let addr = `Tcp (lo, 8170) in
+  ignore (Eio.Net.listen ~sw ~backlog:1 net addr);
+  for port = 49152 to 65535 do
+    ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, port)))
+  done;
+  Alcotest.(check bool)
+    "a connect that binds no port" true
+    (fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL)
+       (fun () ->
+          ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket)))
 
 (* A listener's close defers to the accept waiting on it, as Eio defers a
    descriptor's close to its users: the listener takes connections until
@@ -2387,6 +2446,12 @@ let suite =
         test_bind_to_another_family;
       Alcotest.test_case "the source address" `Quick test_source_address;
       Alcotest.test_case "the choice of ports" `Quick test_port_choice;
+      Alcotest.test_case "no ephemeral port for a listen" `Quick
+        test_no_ephemeral_port_for_a_listen;
+      Alcotest.test_case "no ephemeral port for a datagram socket" `Quick
+        test_no_ephemeral_port_for_a_datagram_socket;
+      Alcotest.test_case "no ephemeral port for a connect" `Quick
+        test_no_ephemeral_port_for_a_connect;
       Alcotest.test_case "a wildcard destination" `Quick
         test_wildcard_destination;
       Alcotest.test_case "a connect under a finished switch" `Quick
