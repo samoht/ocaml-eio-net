@@ -92,7 +92,10 @@ type Eio.Exn.Backend.t +=
             an address off it raises it too, as on a host with loopback only:
             any but 127.0.0.0/8, [::1], the wildcard addresses and their
             IPv4-mapped forms, multicast and broadcast aside. An IPv4-compatible
-            address such as [::127.0.0.1] is off it. *)
+            address such as [::127.0.0.1] is off it. A datagram from an
+            IPv4-mapped address to an IPv6 one off loopback raises it before the
+            error that {!Address_family} marks, as Linux finds no route first.
+        *)
   | Address_family
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             bound to an IPv4-mapped address raises at an IPv6 one, and a

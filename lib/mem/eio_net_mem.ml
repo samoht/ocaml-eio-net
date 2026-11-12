@@ -1304,6 +1304,9 @@ module Datagram_socket = struct
     | `Udp (b, _), `Udp (d, port) -> (
         let d16 = if String.length (d :> string) = 4 then map d else d in
         match cross_family b d16 with
+        (* No route reaches an IPv6 address off loopback: Linux says so
+           before it finds the families apart. *)
+        | Some Address_family when off_loopback d -> Some Network_unreachable
         | Some code -> Some code
         | None -> routed b d port)
 
