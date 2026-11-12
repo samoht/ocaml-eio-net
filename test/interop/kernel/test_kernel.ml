@@ -202,23 +202,6 @@ let scenario_exceptions : scenario_exception list =
           | _ -> false);
     };
   ]
-  @ List.map
-      (fun (why, prefixes) ->
-        {
-          why;
-          holds =
-            (fun name ~mem:_ ~linux:_ ->
-              List.exists (fun prefix -> starts_with ~prefix name) prefixes);
-        })
-      [
-        ( "pending: getnameinfo names IPv4-compatible and abstract addresses \
-           otherwise",
-          [
-            "getnameinfo tcp ::7f00:1";
-            "getnameinfo tcp ::1:0";
-            "getnameinfo unix abstract";
-          ] );
-      ]
 
 let scenario_rows () =
   let file = Filename.concat "traces" "scenarios.csv" in

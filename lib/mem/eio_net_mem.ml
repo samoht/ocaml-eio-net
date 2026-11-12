@@ -1961,17 +1961,41 @@ module Network = struct
      any other a number, as glibc gives one no name server knows; a service
      is a number, as there is no services database. There is no host name to
      give a Unix address. *)
+  (* An IPv4-compatible address, ::a.b.c.d past ::1, which glibc's
+     getnameinfo names as its IPv4 address, and inet_ntop(3) writes dotted
+     unless its first 16 of those bits are zero. *)
+  let compatible (ip : Eio.Net.Ipaddr.v4v6) =
+    let s = (ip :> string) in
+    if
+      String.length s = 16
+      && String.for_all (( = ) '\000') (String.sub s 0 12)
+      && Int32.unsigned_compare (String.get_int32_be s 12) 1l > 0
+    then
+      Some
+        ( Eio.Net.Ipaddr.of_raw (String.sub s 12 4),
+          s.[12] <> '\000' || s.[13] <> '\000' )
+    else None
+
   let getnameinfo _ = function
     | `Tcp (ip, port) | `Udp (ip, port) ->
+        let lo = Eio.Net.Ipaddr.V4.loopback in
         let host =
-          if
-            same (unmap ip) Eio.Net.Ipaddr.V4.loopback
-            || same ip Eio.Net.Ipaddr.V6.loopback
-          then "localhost"
-          else Fmt.str "%a" Eio.Net.Ipaddr.pp ip
+          match compatible ip with
+          | Some (v4, _) when same v4 lo -> "localhost"
+          | Some (v4, true) -> Fmt.str "::%a" Eio.Net.Ipaddr.pp v4
+          | _ when same (unmap ip) lo || same ip Eio.Net.Ipaddr.V6.loopback ->
+              "localhost"
+          | _ -> Fmt.str "%a" Eio.Net.Ipaddr.pp ip
         in
         (host, string_of_int port)
-    | `Unix path -> ("localhost", path)
+    | `Unix path ->
+        (* A C string: an abstract address's ends at its first NUL. *)
+        let service =
+          match String.index_opt path '\000' with
+          | Some i -> String.sub path 0 i
+          | None -> path
+        in
+        ("localhost", service)
 end
 
 let handler = Eio.Net.Pi.network (module Network)

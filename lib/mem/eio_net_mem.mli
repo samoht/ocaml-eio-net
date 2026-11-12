@@ -177,12 +177,15 @@ val v :
     macOS give on a dual-stack host, fixed so that a test sees the same
     addresses everywhere.
 
-    [getnameinfo] names [127.0.0.1], IPv4-mapped or not, and [::1]
-    ["localhost"], as [/etc/hosts] does, and gives any other address as a
-    number, as glibc gives one that no name server knows. The service stays a
-    number, ["80"] where glibc says ["http"], as there is no services database.
-    The host of a Unix address is ["localhost"], as there is no host name, where
-    glibc gives the host's. *)
+    [getnameinfo] names [127.0.0.1], IPv4-mapped, IPv4-compatible ([::7f00:1])
+    or neither, and [::1] ["localhost"], as [/etc/hosts] does, and gives any
+    other address as a number, as glibc gives one that no name server knows: an
+    IPv4-compatible one in inet_ntop(3)'s dotted form, as [::0.1.0.0]. The
+    service stays a number, ["80"] where glibc says ["http"], as there is no
+    services database. The host of a Unix address is ["localhost"], as there is
+    no host name, where glibc gives the host's, and its service is its path up
+    to the first NUL, as glibc reads a C string: an abstract address has none.
+*)
 
 val pipe :
   ?capacity:int ->
