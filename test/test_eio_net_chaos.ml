@@ -712,6 +712,65 @@ let test_unix_cut_keeps_written () =
     "TCP reset" "reset reset eof eof" (run tcp Fault.Reset);
   Alcotest.(check string) "TCP end" "eof eof eof eof" (run tcp Fault.Eof)
 
+(* On AF_UNIX a reset is the crash of one end: the peer, on a read, or this
+   end, on a write. Only the end that survives reads ECONNRESET, once, after
+   what is queued to it, and only if the crashed end left bytes unread, as
+   unix(7) sockets report it; otherwise it reads end of file. Its writes
+   raise EPIPE, a reset to Eio, which leaves the reset to its reads. The
+   crashed end reads what is queued to it, then end of file, and its writes
+   raise EPIPE. *)
+let test_unix_reset_survivor () =
+  let run ~unread ~on =
+    Eio_mock.Backend.run_full @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let fired = ref false in
+    let f (op : Op.t) =
+      if op.kind = on && op.side = `Client && not !fired then (
+        fired := true;
+        Some Fault.Reset)
+      else None
+    in
+    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let addr = `Unix "/tmp/s.sock" in
+    let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    let server, _ = Eio.Net.accept ~sw l in
+    (* What the crashed end leaves unread: the server, on the client's read,
+       or the client, on its write. *)
+    if unread then
+      Eio.Flow.copy_string "u" (if on = `Read then client else server);
+    let first =
+      match on with
+      | `Read -> outcome (read client)
+      | _ -> outcome (write client)
+    in
+    let survivor, crashed =
+      if on = `Read then (client, server) else (server, client)
+    in
+    String.concat " "
+      (first
+      :: in_order
+           [
+             write survivor;
+             read survivor;
+             read survivor;
+             read crashed;
+             write crashed;
+           ])
+  in
+  Alcotest.(check string)
+    "the server crashes with bytes unread" "reset reset end end u reset"
+    (run ~unread:true ~on:`Read);
+  Alcotest.(check string)
+    "the server crashes with none" "end reset end end end reset"
+    (run ~unread:false ~on:`Read);
+  Alcotest.(check string)
+    "the client crashes with bytes unread" "reset reset reset end u reset"
+    (run ~unread:true ~on:`Write);
+  Alcotest.(check string)
+    "the client crashes with none" "reset reset end end end reset"
+    (run ~unread:false ~on:`Write)
+
 (* After the client closes, as an end of stream on the server's first read
    says, the server reads what the client wrote, then writes twice and reads
    twice. AF_UNIX raises EPIPE, a reset to Eio, on each write (Linux and
@@ -1023,6 +1082,8 @@ let suite =
       Alcotest.test_case "net connect stall" `Quick test_net_connect_stall;
       Alcotest.test_case "net operations" `Quick test_ops;
       Alcotest.test_case "a scan is not a spin" `Quick test_scan_is_not_a_spin;
+      Alcotest.test_case "an AF_UNIX reset reaches the survivor only" `Quick
+        test_unix_reset_survivor;
       Alcotest.test_case "an AF_UNIX cut keeps the bytes written" `Quick
         test_unix_cut_keeps_written;
       Alcotest.test_case "an AF_UNIX hang keeps the bytes written" `Quick
