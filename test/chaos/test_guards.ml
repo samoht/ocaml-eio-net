@@ -476,6 +476,98 @@ let stream () =
    with Eio.Io _ | End_of_file | Eio.Time.Timeout -> ());
   if !unbounded then failwith "64 MiB queued to a client that reads 1 MiB"
 
+let contains s sub =
+  let n = String.length s and m = String.length sub in
+  let rec go i = i + m <= n && (String.sub s i m = sub || go (i + 1)) in
+  go 0
+
+(* The operations of a report between its [trace:] and [replay:] lines. *)
+let trace_lines report =
+  let rec drop = function
+    | l :: rest when l = "  trace:" -> rest
+    | _ :: rest -> drop rest
+    | [] -> []
+  in
+  let rec take = function
+    | l :: _ when String.starts_with ~prefix:"  replay:" l -> []
+    | l :: rest -> l :: take rest
+    | [] -> []
+  in
+  take (drop (String.split_on_char '\n' report))
+
+(* A client that retries a refused connect 1200 times, then fails: each
+   connect is a new socket, and the report's trace shows the first and the
+   last of them. *)
+let test_report_collapses_by_shape () =
+  let run () =
+    Eio_net_chaos.check @@ fun env ->
+    for _ = 1 to 1200 do
+      try Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
+      with Eio.Io _ -> ()
+    done;
+    failwith "no server"
+  in
+  let lines = trace_lines (Expect.report run) in
+  if List.length lines > 10 then
+    Alcotest.failf "the trace of 1200 connects has %d lines:@.%s"
+      (List.length lines) (String.concat "\n" lines)
+
+(* A write cut where a reset lands says so: the write before it moves what
+   comes before the reset. *)
+let test_report_names_the_cut () =
+  let run ?replay () =
+    Eio_net_chaos.check ?replay @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+            Eio.Flow.copy_string "0123456789" flow));
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net addr in
+    let got = Eio.Flow.read_all flow in
+    if got <> "0123456789" then Fmt.failwith "got %S" got
+  in
+  let h = hash (replay_of (Expect.report run)) in
+  let report =
+    Expect.report (run ~replay:(Fmt.str "net/%s/write1s@1.reset" h))
+  in
+  let cut = "<- moves 1 byte(s), up to where it is reset" in
+  if
+    not
+      (List.exists
+         (fun l -> String.ends_with ~suffix:cut l)
+         (trace_lines report))
+  then Alcotest.failf "no line ends with %S in:@.%s" cut report
+
+let test_malformed_replay () =
+  List.iter
+    (fun replay ->
+      refused_with
+        (Fmt.str "Eio_net_chaos.check: ~replay:%S is not a replay of eio-net"
+           replay)
+        (fun () -> mutant ~replay ())
+        ())
+    [ "net/zzzz/none"; "net/0123456/none"; "net/0123456789/none" ]
+
+(* A client that connects and closes for ever, with no failure, makes more
+   connects at one instant than the budget: the report says the workload
+   looks like a loop. *)
+let test_loop_named () =
+  let run () =
+    Eio_net_chaos.check @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
+    while true do
+      Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
+    done
+  in
+  let report = Expect.report run in
+  let says = "a workload that loops for ever" in
+  if not (contains report says) then
+    Alcotest.failf "the report does not say %S: %s" says report
+
 let suite =
   ( "guards",
     [
@@ -515,6 +607,13 @@ let suite =
         (Expect.passes compute);
       Alcotest.test_case "a server that streams until its client leaves" `Quick
         (Expect.passes stream);
+      Alcotest.test_case "a report collapses operations of one shape" `Quick
+        test_report_collapses_by_shape;
+      Alcotest.test_case "a report names the cut before a reset" `Quick
+        test_report_names_the_cut;
+      Alcotest.test_case "a malformed replay is refused" `Quick
+        test_malformed_replay;
+      Alcotest.test_case "a report names a loop" `Quick test_loop_named;
       Alcotest.test_case "a scan of closed ports is not a spin" `Quick
         (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
