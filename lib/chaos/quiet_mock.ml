@@ -13,8 +13,8 @@ open! Hermetic
      going reports as a run past its time limit;
    - every turn of the scheduler, a fiber resumed by a yield, an I/O
      completion or a timer, moves the clock on by 1 us, as real time passes
-     while a program runs, and a run of more than [max_turns] turns stops as
-     a busy loop.
+     while a program runs, and a run of more than [max_turns] turns in a row
+     with no wait of 1 ms or more stops as a busy loop.
 
    A loop run by the library reopens commit 495b8c2, which removed one along
    with the eio.mock dependency: hang detection and deterministic virtual time
@@ -54,7 +54,7 @@ module Mono = struct
   end
 
   module Job = struct
-    type t = { time : Mtime.t; resolver : unit Eio.Promise.u }
+    type t = { time : Mtime.t; since : Mtime.t; resolver : unit Eio.Promise.u }
 
     let compare a b = Mtime.compare a.time b.time
   end
@@ -72,7 +72,7 @@ module Mono = struct
       else
         let p, r = Eio.Promise.create () in
         let k = object end in
-        t.q <- Q.add k { time; resolver = r } t.q;
+        t.q <- Q.add k { time; since = t.now; resolver = r } t.q;
         try Eio.Promise.await p
         with Eio.Cancel.Cancelled _ as ex ->
           t.q <- Q.remove k t.q;
@@ -90,14 +90,19 @@ module Mono = struct
       drain ();
       t.now <- time
 
-    (* Eio_mock's [try_advance], which does not move past [limit]. *)
+    (* Eio_mock's [try_advance], which does not move past [limit]. It says
+       whether the timer it moves to waited 1 ms or more. *)
     let try_advance t ~limit =
       match Q.min t.q with
       | None -> `Idle
       | Some (_, v) when Mtime.compare v.time limit > 0 -> `Past_limit
       | Some (_, v) ->
+          let waited =
+            Mtime.Span.compare (Mtime.span v.since v.time) Mtime.Span.ms >= 0
+            || Mtime.Span.compare (Mtime.span t.now v.time) Mtime.Span.ms >= 0
+          in
           set_time t v.time;
-          `Advanced
+          `Advanced waited
   end
 
   let handler = Eio.Time.Pi.clock (module Impl)
@@ -125,6 +130,7 @@ type t = {
   limit : Mtime.t;
   mutable past_limit : bool;
   mutable turns : int;
+  mutable busy : bool;
 }
 
 (* What a turn costs: a few microseconds of work between two suspensions, as
@@ -137,7 +143,10 @@ let rec schedule t : exit =
   | Some f ->
       t.turns <- t.turns + 1;
       let now = Option.get (Mtime.add_span t.clock.now turn) in
-      if t.turns > max_turns then `Exit_scheduler
+      if t.turns > max_turns then begin
+        t.busy <- true;
+        `Exit_scheduler
+      end
       else if Mtime.compare now t.limit > 0 then begin
         t.past_limit <- true;
         `Exit_scheduler
@@ -148,7 +157,9 @@ let rec schedule t : exit =
       end
   | None -> (
       match Mono.Impl.try_advance t.clock ~limit:t.limit with
-      | `Advanced -> schedule t
+      | `Advanced waited ->
+          if waited then t.turns <- 0;
+          schedule t
       | `Idle -> `Exit_scheduler
       | `Past_limit ->
           t.past_limit <- true;
@@ -169,6 +180,7 @@ let run ~limit main =
       limit = Wall.wall_to_mtime limit;
       past_limit = false;
       turns = 0;
+      busy = false;
     }
   in
   let rec fork ~new_fiber:fiber fn =
@@ -224,6 +236,6 @@ let run ~limit main =
   match !result with
   | Some x -> x
   | None ->
-      if t.turns > max_turns then raise Busy_loop
+      if t.busy then raise Busy_loop
       else if t.past_limit then raise Time_limit
       else raise Deadlock_detected

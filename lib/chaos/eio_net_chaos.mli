@@ -108,15 +108,16 @@
 
     A run hangs, and fails, when every fiber waits and no timer is due, when it
     is still running after an hour of its clock, and when it takes ten million
-    turns: a busy loop that kept the CPU busy for 10 s of its clock. So does a
-    run that makes a million network operations, which a check could not plan
-    from, and one in which the same network operation fails 10000 times on the
-    same target while its clock stands still, as a loop that retries at once
-    with no wait in between makes them: a connect to one address, or a read or a
-    write on one accepted connection or on any of the connections a client made
-    to one address. Failures on distinct targets, as a scan of many ports makes,
-    do not count together, and an end of file is an answer: it counts only
-    against the connection it ended. *)
+    turns in a row without a wait of 1 ms or more: a busy loop. A heartbeat or a
+    poll every millisecond waits, so it runs to its end. So does a run that
+    makes 100000 network operations, more than a check plans from, so that a
+    run's operations stay bounded, and one in which the same network operation
+    fails 10000 times on the same target while its clock stands still, as a loop
+    that retries at once with no wait in between makes them: a connect to one
+    address, or a read or a write on one accepted connection or on any of the
+    connections a client made to one address. Failures on distinct targets, as a
+    scan of many ports makes, do not count together, and an end of file is an
+    answer: it counts only against the connection it ended. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t

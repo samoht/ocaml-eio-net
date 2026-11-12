@@ -20,8 +20,8 @@ let name = "Eio_net_chaos.check"
 let fail fmt = Fmt.failwith ("%s: " ^^ fmt) name
 
 (* The operations a run may make: a run that makes more spins, or is more
-   than a check can plan from, and its trace stays bounded. *)
-let max_ops = 1_000_000
+   than a check plans from, and the trace it keeps stays bounded. *)
+let max_ops = 100_000
 
 let ops_message =
   Fmt.str
@@ -67,8 +67,8 @@ let exec_with ~observe run (s : Plan.scenario) =
         Some "the run hangs: it is still running after an hour of its clock"
     | exception Quiet_mock.Busy_loop ->
         Some
-          "the run hangs in a busy loop: it kept the CPU busy for 10 s of its \
-           clock"
+          "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
+           loop"
     | exception x -> Some (Printexc.to_string x)
   in
   match !wrapped with
