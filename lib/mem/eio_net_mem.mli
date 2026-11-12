@@ -66,8 +66,11 @@ type Eio.Exn.Backend.t +=
   | Address_in_use
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             bound with [bind_to] raises at an address a socket holds, where
-            bind(2) fails with [EADDRINUSE]. [listen] and [datagram_socket]
-            raise that one raw ({!section-errors}). *)
+            bind(2) fails with [EADDRINUSE]. A [connect] that fails holds the
+            address it was bound at until its switch finishes, as eio_posix
+            keeps its socket there and Linux its address; macOS frees a TCP one
+            at once. [listen] and [datagram_socket] raise that one raw
+            ({!section-errors}). *)
   | No_destination
         (** The backend code of the unclassified {!Eio.Io} error a UDP [send]
             without a destination raises, as a socket that is not connected

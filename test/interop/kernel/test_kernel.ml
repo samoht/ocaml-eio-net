@@ -211,8 +211,6 @@ let scenario_exceptions : scenario_exception list =
               List.exists (fun prefix -> starts_with ~prefix name) prefixes);
         })
       [
-        ( "pending: a failed connect frees its bound address at once",
-          [ "failed connect: " ] );
         ( "pending: getnameinfo names IPv4-compatible and abstract addresses \
            otherwise",
           [

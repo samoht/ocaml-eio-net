@@ -1911,8 +1911,7 @@ module Network = struct
     let local =
       match held with `Port (a, _) -> Some a | `Path _ | `Nothing -> None
     in
-    (* Released by the connection's ends, or by a failed connect; a bound path
-       leaves its file. *)
+    (* Released by the connection's ends; a bound path leaves its file. *)
     let release ?until () =
       match held with
       | `Port ((_, port), h) -> release_port t ?until port h
@@ -1922,7 +1921,14 @@ module Network = struct
     match connect_held t ~sw ~bind_to ~release addr local with
     | flow -> flow
     | exception e ->
-        release ();
+        (* eio_posix and eio_linux keep a failed connect's socket on [sw], so
+           the address it was bound at stays bound until [sw] finishes, as on
+           Linux. *)
+        (match bind_to with
+        | None -> release ()
+        | Some _ -> (
+            try Eio.Switch.on_release sw (fun () -> release ())
+            with Invalid_argument _ -> ()));
         raise e
 
   let datagram_handler = Eio.Net.Pi.datagram_socket (module Datagram_socket)
