@@ -813,11 +813,61 @@ let first_fails error =
   refused_with ("Eio_net_chaos.check: the run with no fault failed: " ^ error)
 
 let busy =
-  "the run hangs in a busy loop: it kept the CPU busy for 10 s of its clock"
+  "the run woke 10,000,000 times without waiting 1 ms or more: a busy loop"
 
 let ops =
-  "the run hangs in a busy loop, or is too large for a check: it made 1000000 \
+  "the run hangs in a busy loop, or is too large for a check: it made 100000 \
    network operations"
+
+(* 200 fibers on a 20 ms heartbeat for 1200 s of the clock: twelve million
+   turns, each heartbeat a wait. *)
+let heartbeats () =
+  Eio_net_chaos.check ~budget:2 @@ fun env ->
+  touch env;
+  Eio.Fiber.all
+    (List.init 200 (fun _ () ->
+         while Eio.Time.now env#clock < 1200. do
+           Eio.Time.sleep env#clock 0.02
+         done))
+
+(* A ping-pong that never ends holds a bounded trace while it runs: the
+   live words, sampled as it goes, stay under three million. *)
+let test_busy_memory () =
+  let most = ref 0 and first = ref None in
+  let sample () =
+    Gc.full_major ();
+    let live = (Gc.stat ()).live_words in
+    match !first with
+    | None -> first := Some live
+    | Some f -> most := max !most (live - f)
+  in
+  let report =
+    Expect.report @@ fun () ->
+    Eio_net_chaos.check @@ fun env ->
+    first := None;
+    Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+            let buf = Cstruct.create 1 in
+            while true do
+              ignore (Eio.Flow.single_read flow buf);
+              Eio.Flow.copy_string "y" flow
+            done));
+    let flow = Eio.Net.connect ~sw env#net addr in
+    let buf = Cstruct.create 1 in
+    let n = ref 0 in
+    while true do
+      if !n mod 25_000 = 0 then sample ();
+      incr n;
+      Eio.Flow.copy_string "x" flow;
+      ignore (Eio.Flow.single_read flow buf)
+    done
+  in
+  if not (contains report "a busy loop") then
+    Alcotest.failf "the report does not call it a busy loop: %s" report;
+  if !most > 3_000_000 then
+    Alcotest.failf "the live words grew by %d while it ran" !most
 
 let suite =
   ( "guards",
@@ -861,6 +911,10 @@ let suite =
       Alcotest.test_case "a poll that never succeeds is a busy loop" `Quick
         (first_fails busy yield_poll);
       Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
+      Alcotest.test_case "many fibers on a heartbeat are no busy loop" `Quick
+        (refused_with "Eio_net_chaos.check: the linear tier needs" heartbeats);
+      Alcotest.test_case "a busy loop's trace is bounded" `Quick
+        test_busy_memory;
       Alcotest.test_case "a check keeps no run's operations" `Quick
         test_linear_memory;
       Alcotest.test_case "a report collapses no single line" `Quick
