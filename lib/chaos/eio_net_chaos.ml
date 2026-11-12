@@ -28,6 +28,43 @@ let ops_message =
   "the run made 100,000 network operations, more than a check plans from: "
   ^ too_large
 
+let in_kind = function
+  | `Connect -> "a connect"
+  | `Accept -> "an accept"
+  | `Read -> "a read"
+  | `Write -> "a write"
+  | `Recv -> "a receive"
+
+(* What a hang adds when the workload's own fiber, [root], waits in no
+   network operation on other fibers that still run, as a switch whose body
+   returned waits on the fibers it forked: those fibers, by what they do. *)
+let waits_on net ~root tids =
+  let others = List.filter (( <> ) root) tids in
+  let named = 5 in
+  match others with
+  | [] -> ""
+  | _ when not (List.mem root tids) -> ""
+  | _ when Option.is_some (fst (Wrapper.activity net root)) -> ""
+  | _ ->
+      let fiber tid =
+        match Wrapper.activity net tid with
+        | Some k, Some op ->
+            Fmt.str "a fiber in %s, last %a" (in_kind k) Op.pp op
+        | Some k, None -> Fmt.str "a fiber in %s" (in_kind k)
+        | None, Some op ->
+            Fmt.str "a fiber in no network operation, last %a" Op.pp op
+        | None, None -> "a fiber that made no network operation"
+      in
+      let n = List.length others in
+      Fmt.str
+        ". The workload's own fiber waits on %d fiber%s still running, as a \
+         switch does once its body returned: %s%s"
+        n
+        (if n = 1 then "" else "s")
+        (String.concat "; "
+           (List.map fiber (List.filteri (fun i _ -> i < named) others)))
+        (if n > named then Fmt.str "; and %d more" (n - named) else "")
+
 (* A run of [s]: why it failed if it did. [observe] sees each operation and
    the fault it met. *)
 let exec_with ~observe run (s : Plan.scenario) =
@@ -38,9 +75,14 @@ let exec_with ~observe run (s : Plan.scenario) =
     fault
   in
   let wrapped = ref None and stopped = ref false in
+  let root = ref None and waiting = ref None in
   let failed =
     match
       Quiet_mock.run ~limit:3600. @@ fun clock mono_clock charge ->
+      root :=
+        Some
+          (Eio.Private.Fiber_context.tid
+             (Effect.perform Eio.Private.Effects.Get_context));
       Eio.Switch.run @@ fun sw ->
       let capacity =
         match s.lasting with
@@ -61,7 +103,8 @@ let exec_with ~observe run (s : Plan.scenario) =
         end
     with
     | () -> None
-    | exception Quiet_mock.Deadlock_detected ->
+    | exception Quiet_mock.Deadlock_detected tids ->
+        waiting := Some tids;
         Some "the run hangs: every fiber waits and no timer is due"
     | exception Quiet_mock.Time_limit ->
         Some "the run hangs: it is still running after an hour of its clock"
@@ -89,6 +132,11 @@ let exec_with ~observe run (s : Plan.scenario) =
   in
   match !wrapped with
   | Some net when Wrapper.overrun net -> Some (multiplied net ops_message)
+  | Some net when Option.is_some !waiting ->
+      Option.map
+        (fun msg ->
+          msg ^ waits_on net ~root:(Option.get !root) (Option.get !waiting))
+        failed
   | Some net when Wrapper.livelocked net ->
       Some ("the run hangs: " ^ Wrapper.livelock_message)
   | Some net when !stopped -> Option.map (multiplied net) failed

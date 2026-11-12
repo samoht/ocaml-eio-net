@@ -116,7 +116,10 @@
     to one address, or a read or a write on one accepted connection or on any of
     the connections a client made to one address. Failures on distinct targets,
     as a scan of many ports makes, do not count together, and an end of file is
-    an answer: it counts only against the connection it ended.
+    an answer: it counts only against the connection it ended. When every fiber
+    waits and the workload's own fiber is in no network operation, as a switch
+    whose body returned waits on the fibers it forked, the report names up to
+    five of the others by the operation each waits in and the last one it made.
 
     A run also stops, and fails, after ten million turns. A check repeats a run
     hundreds of times, so it cannot check a larger one, and the limit bounds the

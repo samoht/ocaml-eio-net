@@ -43,6 +43,14 @@ val overrun : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
 val splits : [ `Generic ] Eio.Net.ty Eio.Resource.t -> int
 (** [splits net] is the operations of [net] its [split] held of. *)
 
+val activity :
+  [ `Generic ] Eio.Net.ty Eio.Resource.t ->
+  Eio.Private.Trace.id ->
+  Op.kind option * Op.t option
+(** [activity net tid] is, for the fiber of trace id [tid], the kind of the
+    operation of [net] it is in, if any, and the last one it made, if any. Only
+    a network made with a [charge] keeps them. *)
+
 val threshold : int
 (** [threshold] is the failures of one operation on one target, while the clock
     stands still, after which it raises [Failure]: [10_000]. *)

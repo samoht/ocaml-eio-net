@@ -44,7 +44,7 @@ module Trace = Eio.Private.Trace
 module Lf_queue = Eio_utils.Lf_queue
 module Suspended = Eio_utils.Suspended
 
-exception Deadlock_detected
+exception Deadlock_detected of Trace.id list
 exception Time_limit
 exception Busy_loop
 exception Too_many_turns
@@ -136,6 +136,7 @@ type t = {
   mutable past_limit : bool;
   mutable turns : int;
   mutable waited : bool;
+  waiting : (Trace.id, unit) Hashtbl.t;
 }
 
 (* What a turn costs: a few microseconds of work between two suspensions, as
@@ -196,6 +197,7 @@ let run ~limit main =
       past_limit = false;
       turns = 0;
       waited = false;
+      waiting = Hashtbl.create 16;
     }
   in
   let rec fork ~new_fiber:fiber fn =
@@ -222,8 +224,11 @@ let run ~limit main =
                 Some
                   (fun k ->
                     let k = { Suspended.k; fiber } in
+                    let tid = Fiber_context.tid fiber in
+                    Hashtbl.replace t.waiting tid ();
                     f fiber (fun result ->
                         Lf_queue.push t.run_q (fun () ->
+                            Hashtbl.remove t.waiting tid;
                             Fiber_context.clear_cancel_fn fiber;
                             match result with
                             | Ok v -> Suspended.continue k v
@@ -261,4 +266,8 @@ let run ~limit main =
       if t.turns > max_turns then
         raise (if t.waited then Too_many_turns else Busy_loop)
       else if t.past_limit then raise Time_limit
-      else raise Deadlock_detected
+      else
+        raise
+          (Deadlock_detected
+             (List.sort compare
+                (Hashtbl.fold (fun tid () l -> tid :: l) t.waiting [])))

@@ -154,12 +154,17 @@ type target =
   | Recv of int
   | Ended of int * Op.side
 
+(* What a fiber did on the network: the operation it waits in, if any, and
+   the last one [f] was asked about. *)
+type activity = { mutable inside : Op.kind option; mutable last : Op.t option }
+
 (* What the wrappers of one network share. [lock] guards the counters and
    [pending], and runs [f], so [f] sees one operation at a time, in the order
    of [index]. [ops] counts the operations [f] is asked about but those
    [split] holds of, which [splits] counts, and past [max_ops] of them
    [overrun] holds. [charge] takes a turn of the run's clock for every network
-   operation, and [charges] counts those turns. *)
+   operation, and [charges] counts those turns. With [charge], [fibers] keeps
+   what each fiber did, by its trace id, for the report of a hang. *)
 type ctx = {
   f : Op.t -> Fault.t option;
   split : Op.t -> bool;
@@ -181,6 +186,7 @@ type ctx = {
   mutable streak_charges : int;
   livelocked : bool Atomic.t;
   pending : (int, pending) Hashtbl.t;
+  fibers : (Eio.Private.Trace.id, activity) Hashtbl.t;
   max_ops : int;
   overrun : bool Atomic.t;
 }
@@ -208,9 +214,23 @@ let ctx ?(max_ops = max_int) ?(split = fun _ -> false) ?charge ~clock ~outage f
     streak_charges = 0;
     livelocked = Atomic.make false;
     pending = Hashtbl.create 7;
+    fibers = Hashtbl.create 7;
     max_ops;
     overrun = Atomic.make false;
   }
+
+(* Under [ctx.lock]. What the calling fiber did. *)
+let activity ctx =
+  let tid =
+    Eio.Private.Fiber_context.tid
+      (Effect.perform Eio.Private.Effects.Get_context)
+  in
+  match Hashtbl.find_opt ctx.fibers tid with
+  | Some a -> a
+  | None ->
+      let a = { inside = None; last = None } in
+      Hashtbl.replace ctx.fibers tid a;
+      a
 
 (* Under [ctx.lock]. *)
 let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
@@ -218,6 +238,7 @@ let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
   let op =
     { Op.index = ctx.index; kind; socket; side; family; offset; length }
   in
+  if Option.is_some ctx.charge then (activity ctx).last <- Some op;
   if ctx.split op then ctx.splits <- ctx.splits + 1 else ctx.ops <- ctx.ops + 1;
   ctx.f op
 
@@ -292,14 +313,30 @@ let tick ctx =
    spins, one that reconnects after each does not. *)
 let guard ?eof ctx target f =
   tick ctx;
+  let inside k =
+    if Option.is_some ctx.charge then
+      locked ctx (fun () -> (activity ctx).inside <- k)
+  in
+  inside
+    (Some
+       (match target with
+       | Connect _ -> `Connect
+       | Accept _ -> `Accept
+       | Read _ | Ended _ -> `Read
+       | Write _ -> `Write
+       | Recv _ -> `Recv));
   match f () with
   | v ->
+      inside None;
       locked ctx (fun () ->
           if Hashtbl.length ctx.streaks > 0 then
             Hashtbl.remove ctx.streaks target);
       v
-  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception (Eio.Cancel.Cancelled _ as e) ->
+      inside None;
+      raise e
   | exception e ->
+      inside None;
       let bt = Printexc.get_raw_backtrace () in
       (match (e, eof) with
       | End_of_file, Some eof -> failed ctx eof
@@ -1024,6 +1061,11 @@ type (_, _, _) Eio.Resource.pi +=
   | Livelocked : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
   | Overrun : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
   | Splits : ('t, 't -> int, [> `Generic ]) Eio.Resource.pi
+  | Activity :
+      ( 't,
+        't -> Eio.Private.Trace.id -> Op.kind option * Op.t option,
+        [> `Generic ] )
+      Eio.Resource.pi
 
 module Network = struct
   type t = { ctx : ctx; net : [ `Generic ] Eio.Net.ty Eio.Resource.t }
@@ -1111,6 +1153,13 @@ module Network = struct
       :: H (Livelocked, fun t -> Atomic.get t.ctx.livelocked)
       :: H (Overrun, fun t -> Atomic.get t.ctx.overrun)
       :: H (Splits, fun t -> locked t.ctx (fun () -> t.ctx.splits))
+      :: H
+           ( Activity,
+             fun t tid ->
+               locked t.ctx (fun () ->
+                   match Hashtbl.find_opt t.ctx.fibers tid with
+                   | Some a -> (a.inside, a.last)
+                   | None -> (None, None)) )
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
@@ -1146,3 +1195,9 @@ let overrun (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
 let splits (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
   match Eio.Resource.get_opt ops Splits with Some f -> f t | None -> 0
+
+let activity (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) tid =
+  let (Eio.Resource.T (t, ops)) = net in
+  match Eio.Resource.get_opt ops Activity with
+  | Some f -> f t tid
+  | None -> (None, None)

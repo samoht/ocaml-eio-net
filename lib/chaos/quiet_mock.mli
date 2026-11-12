@@ -3,8 +3,9 @@
     A trimmed copy of Eio_mock's scheduler and clock (eio 1.6, ISC), whose clock
     prints nothing and stops at a time limit. *)
 
-exception Deadlock_detected
-(** Raised by {!run} when every fiber waits and no timer is due. *)
+exception Deadlock_detected of Eio.Private.Trace.id list
+(** Raised by {!run} when every fiber waits and no timer is due, with the trace
+    ids of the fibers that wait. *)
 
 exception Time_limit
 (** Raised by {!run} when its clock would move past the limit. *)
