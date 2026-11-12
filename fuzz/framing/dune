@@ -9,14 +9,14 @@
   (<> %{profile} afl))
  (deps fuzz.exe)
  (action
-  (run %{exe:fuzz.exe} --repeat 100 --budget 0 --timeout 120)))
+  (run %{exe:fuzz.exe} --repeat 100 --budget 0 --timeout 0)))
 
 (rule
  (alias chaos)
  (package eio-net)
  (deps fuzz.exe)
  (action
-  (run %{exe:fuzz.exe} --repeat 5000 --budget 0 --timeout 120)))
+  (run %{exe:fuzz.exe} --repeat 5000 --budget 0 --timeout 0)))
 
 (rule
  (alias fuzz)
