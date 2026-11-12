@@ -1013,6 +1013,31 @@ let systhread () =
   | () -> failwith "no exception"
   | exception Exit -> ()
 
+(* A server forked with [Fiber.fork] rather than [Fiber.fork_daemon]: once
+   the client is done, the switch waits on it for ever. The report names the
+   fiber the workload waits on by what it does. *)
+let test_forgotten_server () =
+  let report =
+    Expect.report @@ fun () ->
+    Eio_net_chaos.check @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+    Eio.Fiber.fork ~sw (fun () ->
+        Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+            Eio.Flow.copy_string "hi" flow));
+    let flow = Eio.Net.connect ~sw env#net addr in
+    ignore (Eio.Flow.read_all flow : string)
+  in
+  List.iter
+    (fun says ->
+      if not (contains report says) then
+        Alcotest.failf "the report does not say %S: %s" says report)
+    [
+      "the run hangs: every fiber waits and no timer is due. The workload's \
+       own fiber waits on 1 fiber still running";
+      "a fiber in an accept, last #";
+    ]
+
 (* A ping-pong that never ends holds a bounded trace while it runs: the
    live words, sampled as it goes, stay under three million. *)
 let test_busy_memory () =
@@ -1119,6 +1144,8 @@ let suite =
         test_linear_memory;
       Alcotest.test_case "a report collapses no single line" `Quick
         test_report_shows_three;
+      Alcotest.test_case "a hang names the fibers a switch waits on" `Quick
+        test_forgotten_server;
       Alcotest.test_case "a workload may run work in a systhread" `Quick
         (Expect.passes systhread);
       Alcotest.test_case "a replay's hash may be uppercase" `Quick
