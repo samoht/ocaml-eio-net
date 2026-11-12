@@ -108,8 +108,10 @@
 
     A run hangs, and fails, when every fiber waits and no timer is due, when it
     is still running after an hour of its clock, and when it takes ten million
-    turns in a row without a wait of 1 ms or more: a busy loop. A heartbeat or a
-    poll every millisecond waits, so it runs to its end. So does a run that
+    turns in a row without a wait of 1 ms or more: a busy loop. So is a run
+    whose turns, 1 us each, add up to more than 10 s and to half its clock or
+    more, as a loop that sleeps 1 ms after each burst of work does. A heartbeat
+    or a poll every millisecond waits, so it runs to its end. So does a run that
     makes 100000 network operations, more than a check plans from, so that a
     run's operations stay bounded, and one in which the same network operation
     fails 10000 times on the same target while its clock stands still, as a loop

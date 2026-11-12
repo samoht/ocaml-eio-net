@@ -14,7 +14,8 @@ open! Hermetic
    - every turn of the scheduler, a fiber resumed by a yield, an I/O
      completion or a timer, moves the clock on by 1 us, as real time passes
      while a program runs, and a run of more than [max_turns] turns in a row
-     with no wait of 1 ms or more stops as a busy loop.
+     with no wait of 1 ms or more stops as a busy loop, as does a run of more
+     than [max_turns] turns in all that add up to half its clock or more.
 
    A loop run by the library reopens commit 495b8c2, which removed one along
    with the eio.mock dependency: hang detection and deterministic virtual time
@@ -43,6 +44,7 @@ module Suspended = Eio_utils.Suspended
 exception Deadlock_detected
 exception Time_limit
 exception Busy_loop
+exception Busy_time
 
 (* {1 Clock} *)
 
@@ -130,21 +132,31 @@ type t = {
   limit : Mtime.t;
   mutable past_limit : bool;
   mutable turns : int;
-  mutable busy : bool;
+  mutable all_turns : int;
+  mutable busy : [ `No | `Loop | `Time ];
 }
 
 (* What a turn costs: a few microseconds of work between two suspensions, as
    a program does on eio_posix. *)
 let turn = Mtime.Span.(1 * us)
+let turn_ns = Int64.to_int (Mtime.Span.to_uint64_ns turn)
 let max_turns = 10_000_000
 
 let rec schedule t : exit =
   match Lf_queue.pop t.run_q with
   | Some f ->
       t.turns <- t.turns + 1;
+      t.all_turns <- t.all_turns + 1;
       let now = Option.get (Mtime.add_span t.clock.now turn) in
       if t.turns > max_turns then begin
-        t.busy <- true;
+        t.busy <- `Loop;
+        `Exit_scheduler
+      end
+      else if
+        t.all_turns > max_turns
+        && 2 * t.all_turns * turn_ns >= Int64.to_int (Mtime.to_uint64_ns now)
+      then begin
+        t.busy <- `Time;
         `Exit_scheduler
       end
       else if Mtime.compare now t.limit > 0 then begin
@@ -180,7 +192,8 @@ let run ~limit main =
       limit = Wall.wall_to_mtime limit;
       past_limit = false;
       turns = 0;
-      busy = false;
+      all_turns = 0;
+      busy = `No;
     }
   in
   let rec fork ~new_fiber:fiber fn =
@@ -235,7 +248,9 @@ let run ~limit main =
   in
   match !result with
   | Some x -> x
-  | None ->
-      if t.busy then raise Busy_loop
-      else if t.past_limit then raise Time_limit
-      else raise Deadlock_detected
+  | None -> (
+      match t.busy with
+      | `Loop -> raise Busy_loop
+      | `Time -> raise Busy_time
+      | `No ->
+          if t.past_limit then raise Time_limit else raise Deadlock_detected)

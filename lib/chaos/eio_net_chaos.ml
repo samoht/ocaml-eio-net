@@ -69,6 +69,10 @@ let exec_with ~observe run (s : Plan.scenario) =
         Some
           "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
            loop"
+    | exception Quiet_mock.Busy_time ->
+        Some
+          "the run kept the CPU busy for 10 s, more than half its time: a busy \
+           loop"
     | exception x -> Some (Printexc.to_string x)
   in
   match !wrapped with

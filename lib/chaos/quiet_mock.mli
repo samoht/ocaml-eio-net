@@ -12,6 +12,10 @@ exception Time_limit
 exception Busy_loop
 (** Raised by {!run} after {!max_turns} turns with no wait of 1 ms or more. *)
 
+exception Busy_time
+(** Raised by {!run} after more than {!max_turns} turns in all, once their 1 us
+    each add up to half its clock or more. *)
+
 val max_turns : int
 (** [max_turns] is the turns a run may take in a row with no wait of 1 ms or
     more: [10_000_000]. *)
@@ -31,4 +35,6 @@ val run :
 
     @raise Deadlock_detected if every fiber waits and no timer is due.
     @raise Time_limit if the clock would move past [limit].
-    @raise Busy_loop after {!max_turns} turns in a row. *)
+    @raise Busy_loop after {!max_turns} turns in a row.
+    @raise Busy_time
+      after more than {!max_turns} turns that add up to half its clock. *)
