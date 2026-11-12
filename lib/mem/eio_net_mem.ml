@@ -223,6 +223,7 @@ let cross_family (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
 module Ports = struct
   type hold = {
     ip : Eio.Net.Ipaddr.v4v6;
+    wildcard : bool;
     reuse : bool;
     listening : bool;
     mutable until : Mtime.t option;
@@ -273,8 +274,9 @@ module Ports = struct
               Hashtbl.replace t.held port live;
             live)
 
-  let add t ?(reuse = false) ?(listening = false) (ip, port) =
-    let h = { ip; reuse; listening; until = None } in
+  let add t ?(wildcard = false) ?(reuse = false) ?(listening = false) (ip, port)
+      =
+    let h = { ip; wildcard; reuse; listening; until = None } in
     Hashtbl.replace t.held port (h :: at t port);
     h
 
@@ -293,11 +295,14 @@ module Ports = struct
 
   (* A bind at [ip] conflicts with a hold at an overlapping address, unless
      both sockets have [SO_REUSEADDR] and the held one does not listen, as
-     Linux has it. *)
+     Linux has it. A client bound at a wildcard address and connected holds
+     its source address, and conflicts with a bind at a wildcard address
+     too. *)
   let in_use t ?(reuse = false) (ip, port) =
+    let wild = same (unmap ip) (any (unmap ip)) in
     List.exists
       (fun h ->
-        ip_overlaps (ip, port) (h.ip, port)
+        (ip_overlaps (ip, port) (h.ip, port) || (h.wildcard && wild))
         && not (reuse && h.reuse && not h.listening))
       (at t port)
 
@@ -1713,19 +1718,20 @@ module Network = struct
   let hold t ?bind (ip : Eio.Net.Ipaddr.v4v6) =
     let mapped = String.length (ip :> string) = 16 && is_v4 ip in
     let reached = if mapped then map (source_to ip) else source_to ip in
-    let ip, port =
+    let bound, wildcard, port =
       match bind with
-      | None -> (reached, 0)
-      | Some (b, port) ->
-          ((if same (unmap b) (any (unmap b)) then reached else b), port)
+      | None -> (reached, false, 0)
+      | Some (b, port) -> (b, same (unmap b) (any (unmap b)), port)
     in
+    let ip = if wildcard then reached else bound in
     Eio.Mutex.use_rw ~protect:true t.hub.mutex @@ fun () ->
     let ports = t.hub.Listening_socket.ports in
-    if port <> 0 && Ports.in_use ports (ip, port) then Error `In_use
+    (* The bind comes first, at the address it names. *)
+    if port <> 0 && Ports.in_use ports (bound, port) then Error `In_use
     else
       match if port = 0 then Ports.free_down ports else Some port with
       | None -> Error `No_port
-      | Some port -> Ok ((ip, port), Ports.add ports (ip, port))
+      | Some port -> Ok ((ip, port), Ports.add ports ~wildcard (ip, port))
 
   (* Lets go of [h] now, or at [until]. Not cancelled, even while it waits
      for the mutex: a release that gave up would hold the port for good. *)

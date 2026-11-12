@@ -278,13 +278,16 @@ val connection : _ Eio.Net.stream_socket -> int option
     A [connect] bound with [bind_to] holds that address, which the listener sees
     as its peer's, at a port of the dynamic range for port 0. One at an address
     a listener or another client holds raises the error that {!Address_in_use}
-    marks; one bound to an IPv6 address connecting to an IPv4-mapped one, or the
-    reverse, raises the error that {!Network_unreachable} or {!Address_family}
-    marks; one bound to an address of another family raises, as Linux's bind(2)
-    fails, the error that {!Address_family} marks from an IPv4 socket, IPv6 or a
-    path for IPv4, and the one that {!Invalid_address} marks from an IPv6 or a
-    Unix-domain socket, IPv4 for IPv6 or TCP for a path; macOS says EAFNOSUPPORT
-    for both.
+    marks, a wildcard one by the rule [listen] follows: the IPv6 wildcard
+    address finds every hold on its port. Once connected from a wildcard
+    address, a client holds the address it sends from, and a later bind at a
+    wildcard address of its port finds it in use, as on Linux; one bound to an
+    IPv6 address connecting to an IPv4-mapped one, or the reverse, raises the
+    error that {!Network_unreachable} or {!Address_family} marks; one bound to
+    an address of another family raises, as Linux's bind(2) fails, the error
+    that {!Address_family} marks from an IPv4 socket, IPv6 or a path for IPv4,
+    and the one that {!Invalid_address} marks from an IPv6 or a Unix-domain
+    socket, IPv4 for IPv6 or TCP for a path; macOS says EAFNOSUPPORT for both.
 
     A connection follows Linux, and macOS differs from it in more than the two
     cases {!Closed} names, the empty write after a shutdown and the bytes read
