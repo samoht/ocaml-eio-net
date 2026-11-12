@@ -84,12 +84,14 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
           (Eio.Private.Fiber_context.tid
              (Effect.perform Eio.Private.Effects.Get_context));
       Eio.Switch.run @@ fun sw ->
+      (* Tiny buffers lower each connection's queue to 32 KiB, or keep the
+         kernel's default for its family if that is smaller. *)
       let capacity =
         match s.lasting with
-        | Some Tiny_buffers -> Some Plan.tiny_buffer
-        | _ -> None
+        | Some Tiny_buffers -> Int.min Plan.tiny_buffer
+        | _ -> Fun.id
       in
-      let base = Eio_net_mem.v ~os ?capacity ~clock:mono_clock ~sw () in
+      let base = Eio_net_mem.Private.v ~os ~capacity ~clock:mono_clock ~sw () in
       let net =
         Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
           ~outage:(s.lasting = Some Outage) f base

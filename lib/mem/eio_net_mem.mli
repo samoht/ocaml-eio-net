@@ -191,8 +191,9 @@ val v :
     about 2.6 MiB over TCP before it waits, and at most about 250 KiB over
     AF_UNIX, less in small writes. Under [`Macos] it defaults to 1 MiB over TCP,
     what macOS's buffers grow to on loopback from about 330 KiB, and 8 KiB over
-    AF_UNIX, as macOS holds. A [capacity] above the default has no effect.
-    Raises [Invalid_argument] if [capacity] is not positive.
+    AF_UNIX, as macOS holds. A [capacity] is what every connection queues, over
+    TCP and over a Unix path, above the default too. Raises [Invalid_argument]
+    if [capacity] is not positive.
 
     On [clock], the end of a TCP connection whose FIN went first holds its
     address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
@@ -538,3 +539,18 @@ val connection : _ Eio.Net.stream_socket -> int option
 
     Where macOS's loopback delivers a segment asynchronously, the network
     delivers it at once, as if the next call came after it. *)
+
+(**/**)
+
+module Private : sig
+  val v :
+    ?os:[< `Linux | `Macos ] ->
+    capacity:(int -> int) ->
+    ?clock:_ Eio.Time.Mono.t ->
+    sw:Eio.Switch.t ->
+    unit ->
+    [ `Generic ] Eio.Net.ty Eio.Resource.t
+  (** [v ~capacity] is {!val-v} whose connections queue [capacity d] each way,
+      where [d] is the chosen kernel's default for their family. [capacity d]
+      must be positive. For eio-net.chaos; it may change at any release. *)
+end

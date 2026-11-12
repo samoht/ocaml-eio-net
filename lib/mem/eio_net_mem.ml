@@ -1252,11 +1252,6 @@ module Flow = struct
     | Linux -> if local then 256 * 1024 else 4 * 1024 * 1024
     | Macos -> if local then 8 * 1024 else 1024 * 1024
 
-  (* A network's capacity lowers the default and never raises it. *)
-  let capacity ~os ~local = function
-    | None -> default_capacity ~os ~local
-    | Some c -> min c (default_capacity ~os ~local)
-
   (* A connection to itself: what it writes, it reads. *)
   let self ~os ~capacity =
     let connection = Atomic.fetch_and_add connections 1 in
@@ -2310,7 +2305,8 @@ module Network = struct
     os : os;
     hub : Listening_socket.hub;
     datagrams : Datagram_socket.hub;
-    capacity : int option;
+    capacity : int -> int;
+        (* What a connection queues each way, from the kernel's default. *)
     sleep : (float -> unit) option;
   }
 
@@ -2488,7 +2484,9 @@ module Network = struct
             raise (Posix.timed_out ())
         | None -> Eio.Fiber.await_cancel ())
     | None, `Tcp _ when to_itself ->
-        let capacity = Flow.capacity ~os:t.os ~local:false t.capacity in
+        let capacity =
+          t.capacity (Flow.default_capacity ~os:t.os ~local:false)
+        in
         let flow = Flow.self ~os:t.os ~capacity in
         let ends = Ends.v t.hub.Listening_socket.ports in
         (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
@@ -2510,7 +2508,9 @@ module Network = struct
     | Some listener, _ when Listening_socket.is_closed listener -> refused ()
     | Some listener, _ -> (
         let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
-        let capacity = Flow.capacity ~os:t.os ~local:unix t.capacity in
+        let capacity =
+          t.capacity (Flow.default_capacity ~os:t.os ~local:unix)
+        in
         let client, server = Flow.pair ~os:t.os ~local:unix ~capacity in
         (* The accepted socket holds the listener's port at the address the
            client reached, with the listener's [SO_REUSEADDR], and as one
@@ -2738,22 +2738,23 @@ end
 
 let handler = Eio.Net.Pi.network (module Network)
 
-let check_capacity = function
-  | None -> None
-  | Some c when c >= 1 -> Some c
+let capacity_rule = function
+  | None -> Fun.id
+  | Some c when c >= 1 -> Fun.const c
   | Some c -> Fmt.invalid_arg "eio-net.mem: the capacity is %d" c
 
 let connection = Flow.connection
 
 let pipe ?os ?capacity () =
   let os = kernel os in
-  let capacity = Flow.capacity ~os ~local:false (check_capacity capacity) in
+  let capacity =
+    capacity_rule capacity (Flow.default_capacity ~os ~local:false)
+  in
   let (_, client), (_, server) = Flow.pair ~os ~local:false ~capacity in
   (client, server)
 
-let v ?os ?capacity ?clock ~sw () =
+let network ?os ~capacity ?clock ~sw () =
   let os = kernel os in
-  let capacity = check_capacity capacity in
   let files = Files.v () in
   let now = Option.map (fun clock () -> Eio.Time.Mono.now clock) clock in
   let sleep = Option.map (fun clock d -> Eio.Time.Mono.sleep clock d) clock in
@@ -2776,3 +2777,10 @@ let v ?os ?capacity ?clock ~sw () =
     }
   in
   Eio.Resource.T (Network.{ sw; os; hub; datagrams; capacity; sleep }, handler)
+
+let v ?os ?capacity ?clock ~sw () =
+  network ?os ~capacity:(capacity_rule capacity) ?clock ~sw ()
+
+module Private = struct
+  let v = network
+end
