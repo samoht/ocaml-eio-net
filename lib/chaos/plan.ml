@@ -61,17 +61,26 @@ let ends (trace : trace) =
          if Op.is_bytes op.kind then Some (op.socket, op.side) else None)
        trace)
 
-let ops kind (s, side) (trace : trace) =
-  List.filter_map
+(* The operations of a trace by kind and end, each in order, so that what
+   one end did costs a lookup, not a pass over the whole trace. *)
+type index = (Op.kind * int * Op.side, Op.t list) Hashtbl.t
+
+let index (trace : trace) : index =
+  let h = Hashtbl.create 64 in
+  List.iter
     (fun ((op : Op.t), _) ->
-      if op.kind = kind && op.socket = s && op.side = side then Some op
-      else None)
-    trace
+      let k = (op.kind, op.socket, op.side) in
+      Hashtbl.replace h k (op :: Option.value ~default:[] (Hashtbl.find_opt h k)))
+    (List.rev trace);
+  h
+
+let ops ix kind (s, side) =
+  Option.value ~default:[] (Hashtbl.find_opt ix (kind, s, side))
 
 (* Whether a cut of end [e] at byte [b] fires in a run like [trace]: a read of
    [e] starts at or past [b], or one spans [b] and the peer wrote past it. *)
-let reached trace ((s, side) as e) =
-  let reads = ops `Read e trace in
+let reached ix ((s, side) as e) =
+  let reads = ops ix `Read e in
   let extent =
     List.fold_left (fun m (op : Op.t) -> max m op.offset) (-1) reads
   in
@@ -79,7 +88,7 @@ let reached trace ((s, side) as e) =
     List.fold_left
       (fun m (op : Op.t) -> max m (op.offset + op.length))
       0
-      (ops `Write (s, other side) trace)
+      (ops ix `Write (s, other side))
   in
   let spans b (op : Op.t) = op.offset < b && b < op.offset + op.length in
   fun b -> b >= 0 && (b <= extent || (b < sent && List.exists (spans b) reads))
@@ -106,41 +115,40 @@ let structural writes =
 let around l = List.concat_map (fun b -> [ b - 1; b; b + 1 ]) l
 
 (* The address family of an end. *)
-let family trace (s, side) =
-  List.find_map
-    (fun ((op : Op.t), _) ->
-      if op.socket = s && op.side = side then Some op.family else None)
-    trace
-  |> Option.value ~default:`Inet
+let family ix e =
+  match ops ix `Read e @ ops ix `Write e with
+  | (op : Op.t) :: _ -> op.family
+  | [] -> `Inet
 
 (* Over IP a cut may land a byte either side of a write's end, as TCP splits
    and joins segments. A Unix-domain stream queues each small write whole
    (unix(7)), so a cut lands between two writes. *)
-let near trace e l = match family trace e with `Inet -> around l | `Unix -> l
+let near ix e l = match family ix e with `Inet -> around l | `Unix -> l
 
 (* Where a reader's bytes may be cut: around the ends of the peer's writes.
    [all] takes every write, not only the structural ones. *)
-let read_positions ~all trace ((s, side) as e) =
-  let w = ops `Write (s, other side) trace in
+let read_positions ~all ix ((s, side) as e) =
+  let w = ops ix `Write (s, other side) in
   let w = if all then w else structural w in
-  0 :: near trace e (List.map (fun (op : Op.t) -> op.offset + op.length) w)
-  |> List.filter (reached trace e)
+  0 :: near ix e (List.map (fun (op : Op.t) -> op.offset + op.length) w)
+  |> List.filter (reached ix e)
   |> List.sort_uniq compare
 
-let write_positions ~all trace e =
-  let w = ops `Write e trace in
+let write_positions ~all ix e =
+  let w = ops ix `Write e in
   let top =
     List.fold_left (fun m (op : Op.t) -> max m (op.offset + op.length)) 0 w
   in
   let w = if all then w else structural w in
   (* Around the start of each write and, over IP, the last byte of the
      stream, where a writer that closes cuts its last message. *)
-  let starts = near trace e (List.map (fun (op : Op.t) -> op.offset) w) in
-  (match family trace e with `Inet -> (top - 1) :: starts | `Unix -> starts)
+  let starts = near ix e (List.map (fun (op : Op.t) -> op.offset) w) in
+  (match family ix e with `Inet -> (top - 1) :: starts | `Unix -> starts)
   |> List.filter (fun b -> b >= 0 && b < top)
   |> List.sort_uniq compare
 
 let byte_rules ~all trace =
+  let ix = index trace in
   List.concat_map
     (fun ((s, side) as e) ->
       List.concat_map
@@ -148,13 +156,13 @@ let byte_rules ~all trace =
           List.map
             (fun fault -> { kind = `Read; socket = s; side; at; fault })
             Fault.[ Reset; Eof; Hang ])
-        (read_positions ~all trace e)
+        (read_positions ~all ix e)
       @ List.concat_map
           (fun at ->
             List.map
               (fun fault -> { kind = `Write; socket = s; side; at; fault })
               Fault.[ Reset; Eof ])
-          (write_positions ~all trace e))
+          (write_positions ~all ix e))
     (ends trace)
 
 let structural_rules (trace : trace) =
@@ -203,27 +211,28 @@ let linear trace =
       lastings
 
 let others trace =
-  let lin = singles trace in
+  let lin = Hashtbl.create 64 in
+  List.iter (fun r -> Hashtbl.replace lin r ()) (singles trace);
   byte_rules ~all:true trace
-  |> List.filter (fun r -> not (List.mem r lin))
+  |> List.filter (fun r -> not (Hashtbl.mem lin r))
   |> List.map (fun r -> { rules = [ r ]; lasting = None })
 
-let fires_at (trace : trace) r =
+let fires_at ix r =
   List.find_map
-    (fun ((op : Op.t), _) ->
+    (fun (op : Op.t) ->
       if
-        op.kind = r.kind && op.socket = r.socket && op.side = r.side
-        && (op.offset = r.at
-           || Op.is_bytes op.kind && op.offset < r.at
-              && r.at < op.offset + op.length)
+        op.offset = r.at
+        || Op.is_bytes op.kind && op.offset < r.at
+           && r.at < op.offset + op.length
       then Some op.index
       else None)
-    trace
+    (ops ix r.kind (r.socket, r.side))
 
 (* Second faults after [r1], from the run [r1] changed. A benign one (a single
    byte, a 50 ms stall) counts as one of the two. *)
 let seconds r1 ~first ~(after : trace) =
-  match fires_at first r1 with
+  let ix = index after in
+  match fires_at (index first) r1 with
   | None -> []
   | Some i1 ->
       let benign =
@@ -247,7 +256,7 @@ let seconds r1 ~first ~(after : trace) =
       in
       List.filter_map
         (fun r2 ->
-          match fires_at after r2 with
+          match fires_at ix r2 with
           | Some i2 when i2 > i1 -> Some { rules = [ r1; r2 ]; lasting = None }
           | _ -> None)
         (singles after @ benign)
