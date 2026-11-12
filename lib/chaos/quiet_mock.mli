@@ -27,9 +27,10 @@ val run :
     clocks start at [0.] and move up to [limit] seconds: to the next timer when
     every fiber waits, and, as real time passes while a program polls, after
     {!polls} turns at one instant in which every runnable fiber had just
-    yielded, by a tenth of how long the run has polled so far, 10 ms at least,
-    or to the next timer if that comes first. It returns what [main] returns,
-    and raises what [main] raises.
+    yielded, by 10 ms, or to the next timer if that comes first. Once a fiber
+    has yielded for 5 seconds with no wait in between, the step is a tenth of
+    how long it has. It returns what [main] returns, and raises what [main]
+    raises.
 
     @raise Deadlock_detected if every fiber waits and no timer is due.
     @raise Time_limit if the clock would move past [limit]. *)

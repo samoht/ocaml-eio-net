@@ -94,25 +94,28 @@
     the other fibers of that loop wait for it. Its clocks start at [0.] and move
     only when every fiber waits, so a timeout of an hour takes no time, or when
     the run polls, as real time passes while a program does: after 1000 turns at
-    one instant in which every runnable fiber had just yielded, they move by a
-    tenth of how long the run has polled so far, 10 ms at least, or to the next
-    timer if that comes first. A run in which every fiber waits and no timer is
-    due fails as a hang, and so does one still running after an hour of its
-    clock, and one in which the same network operation fails 10000 times on the
-    same target while its clock stands still, with no success there in between:
-    a connect to one address, or a read or a write on one accepted connection or
-    on any of the connections a client made to one address. A client that
-    retries a refused connect at once does that in the outage, and so does one
-    that reconnects at once after each failed read. Failures on distinct
-    targets, as a scan of many ports makes, do not count together, and an end of
-    file is an answer: it counts only against the connection it ended, so a
-    batch of jobs that each end with the server's close is no spin. A run that
-    makes 10000 more connects, accepts and receives while its clock stands still
-    than the run with no fault made in all hangs too, as a client that
-    reconnects at once to a server a fault broke does. The run with no fault
-    stops once it has made more of them than the budget while its clock stands
-    still: each is a scenario of the linear tier, so the check fails on the
-    budget. *)
+    one instant in which every runnable fiber had just yielded, they move by 10
+    ms, or to the next timer if that comes first: the time a program that works
+    between its yields takes for them, so a server that yields while it computes
+    answers in time. Once a fiber has yielded for 5 seconds of the clock with no
+    wait in between, each move is a tenth of how long it has, so a poll with a
+    timeout ends, and one with none reaches the hour below in bounded time. A
+    run in which every fiber waits and no timer is due fails as a hang, and so
+    does one still running after an hour of its clock, and one in which the same
+    network operation fails 10000 times on the same target while its clock
+    stands still, with no success there in between: a connect to one address, or
+    a read or a write on one accepted connection or on any of the connections a
+    client made to one address. A client that retries a refused connect at once
+    does that in the outage, and so does one that reconnects at once after each
+    failed read. Failures on distinct targets, as a scan of many ports makes, do
+    not count together, and an end of file is an answer: it counts only against
+    the connection it ended, so a batch of jobs that each end with the server's
+    close is no spin. A run that makes 10000 more connects, accepts and receives
+    while its clock stands still than the run with no fault made in all hangs
+    too, as a client that reconnects at once to a server a fault broke does. The
+    run with no fault stops once it has made more of them than the budget while
+    its clock stands still: each is a scenario of the linear tier, so the check
+    fails on the budget. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t

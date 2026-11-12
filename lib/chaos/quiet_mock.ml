@@ -13,10 +13,11 @@ open! Hermetic
      going reports as a run past its time limit;
    - real time passes while a program polls: after [polls] turns at one
      instant in which every runnable fiber had just yielded, the clock moves
-     on by a tenth of how long the run has polled so far, 10 ms at least, or
-     to the next timer if that comes first, as eio_posix fires a timer that
-     is due between two rounds of its run queue. The step grows so that a
-     program that polls for ever reaches the time limit.
+     on by 10 ms, or to the next timer if that comes first, as eio_posix
+     fires a timer that is due between two rounds of its run queue. Once a
+     fiber has yielded for 5 seconds, with no wait in between, the step is a
+     tenth of how long it has, so that a program that polls for ever reaches
+     the time limit.
 
    A loop run by the library reopens commit 495b8c2, which removed one along
    with the eio.mock dependency: hang detection and deterministic virtual time
@@ -140,7 +141,8 @@ type exit = [ `Exit_scheduler ]
 
 (* [queued] counts what [run_q] holds, and [polling] the fibers among them
    that yielded. [polls] counts the turns at [polled_at] that found nothing
-   else runnable, and [poll_start] is when the run began to poll. *)
+   else runnable. [pollers] holds, for each fiber whose last suspension was a
+   yield, when it began to yield with no wait in between. *)
 type t = {
   run_q : (unit -> exit) Lf_queue.t;
   clock : Mono.Impl.t;
@@ -150,7 +152,7 @@ type t = {
   polling : int Atomic.t;
   mutable polls : int;
   mutable polled_at : Mtime.t;
-  mutable poll_start : Mtime.t option;
+  pollers : (Trace.id, Mtime.t) Hashtbl.t;
 }
 
 let polls = 1_000
@@ -164,7 +166,30 @@ let wait_io () =
   Eio.Fiber.yield ();
   Domain.DLS.set io false
 
-let min_step = Mtime.Span.(10 * ms)
+(* A yield costs tens of nanoseconds on eio_posix, and a program that yields
+   works between two: 10 us a turn. Faster, a client that polls for a
+   datagram while its peer stalls for 50 ms would send more of them than a
+   spin. *)
+let step = Mtime.Span.(10 * ms)
+
+(* How long a fiber yields at [step] before the step grows. *)
+let patience = Mtime.Span.(5 * s)
+
+(* How long the fiber that has yielded the longest has. *)
+let longest_poll t now =
+  Hashtbl.fold
+    (fun _ start acc ->
+      let d = Mtime.span start now in
+      if Mtime.Span.compare d acc > 0 then d else acc)
+    t.pollers Mtime.Span.zero
+
+(* A fiber that waits or ends no longer polls. *)
+let stopped t fiber = Hashtbl.remove t.pollers (Fiber_context.tid fiber)
+
+let yielded t fiber =
+  let id = Fiber_context.tid fiber in
+  if not (Hashtbl.mem t.pollers id) then
+    Hashtbl.add t.pollers id (Mono.Impl.now t.clock)
 
 let push t ~yielded f =
   Atomic.incr t.queued;
@@ -197,22 +222,14 @@ let polled t =
 
 let rec schedule t : exit =
   if polled t then begin
-    let now = Mono.Impl.now t.clock in
-    let start = Option.value t.poll_start ~default:now in
-    let tenth =
-      Mtime.Span.of_uint64_ns
-        (Int64.div (Mtime.Span.to_uint64_ns (Mtime.span start now)) 10L)
-    in
+    let polled = longest_poll t (Mono.Impl.now t.clock) in
     let step =
-      if Mtime.Span.compare tenth min_step < 0 then min_step else tenth
+      if Mtime.Span.compare polled patience < 0 then step
+      else
+        Mtime.Span.of_uint64_ns (Int64.div (Mtime.Span.to_uint64_ns polled) 10L)
     in
     match Mono.Impl.poll t.clock ~step ~limit:t.limit with
-    | `Timer ->
-        t.poll_start <- None;
-        next t
-    | `Moved ->
-        t.poll_start <- Some start;
-        next t
+    | `Timer | `Moved -> next t
     | `Past_limit ->
         t.past_limit <- true;
         `Exit_scheduler
@@ -224,9 +241,7 @@ and next t =
   | Some f -> f ()
   | None -> (
       match Mono.Impl.try_advance t.clock ~limit:t.limit with
-      | `Advanced ->
-          t.poll_start <- None;
-          schedule t
+      | `Advanced -> schedule t
       | `Idle -> `Exit_scheduler
       | `Past_limit ->
           t.past_limit <- true;
@@ -250,7 +265,7 @@ let run ~limit main =
       polling = Atomic.make 0;
       polls = 0;
       polled_at = Mtime.of_uint64_ns 0L;
-      poll_start = None;
+      pollers = Hashtbl.create 7;
     }
   in
   let rec fork ~new_fiber:fiber fn =
@@ -259,11 +274,13 @@ let run ~limit main =
       {
         retc =
           (fun () ->
+            stopped t fiber;
             Fiber_context.destroy fiber;
             schedule t);
         exnc =
           (fun ex ->
             let bt = Printexc.get_raw_backtrace () in
+            stopped t fiber;
             Fiber_context.destroy fiber;
             Printexc.raise_with_backtrace ex bt);
         effc =
@@ -279,15 +296,20 @@ let run ~limit main =
                     let k = { Suspended.k; fiber } in
                     (* A fiber resumed before [f] returns yielded, unless
                        it waits on I/O. *)
-                    let entering = ref (not (Domain.DLS.get io)) in
+                    let waits_io = Domain.DLS.get io in
+                    let entering = ref (not waits_io) in
+                    let resumed = ref false in
                     Domain.DLS.set io false;
                     f fiber (fun result ->
+                        if !entering then resumed := true;
                         push t ~yielded:!entering (fun () ->
                             Fiber_context.clear_cancel_fn fiber;
                             match result with
                             | Ok v -> Suspended.continue k v
                             | Error ex -> Suspended.discontinue k ex));
                     entering := false;
+                    if !resumed then yielded t fiber
+                    else if not waits_io then stopped t fiber;
                     schedule t)
             | Eio.Private.Effects.Fork (new_fiber, f) ->
                 Some
