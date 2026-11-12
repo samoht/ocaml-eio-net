@@ -1,32 +1,115 @@
 (* eio-net.mem replays every sequence and every scenario of the kernel's
-   traces and must give Linux's outcomes, except where an exception below
-   says why not.
+   traces: with [~os:`Linux] it must give Linux's outcomes, and with
+   [~os:`Macos] macOS's, except where an exception below says why not.
 
    Traces recorded through eio_posix on Linux (Docker image ocaml/opam, pinned
    by digest in scripts/generate.sh) and on macOS. Linux's outcomes are the
    same from one recording to the next; a few of macOS's TCP ones depend on
-   timing, as its loopback delivers asynchronously, so they are shown only to
-   compare with.
+   timing, as its loopback delivers asynchronously, and are listed below by
+   name.
    Regenerate, on macOS: REGEN=1 dune build @test/interop/kernel/regen-traces *)
 
 open Kernel_seq
 
-(* A step where mem may differ from Linux: the transports, the operation (its
-   first words), and the two outcomes. *)
+type os = [ `Linux | `Macos ]
+
+let os_name : os -> string = function `Linux -> "Linux" | `Macos -> "macOS"
+
+(* A step where mem may differ from a kernel: the transports, the operation
+   (its first words), and the two outcomes. *)
 type exception_ = {
   why : string;
   transports : transport list;
   op : string;
   mem : string;
-  linux : string;
+  kernel : string;
 }
 
-(* Choices the mli documents as following macOS, each listed here: none,
-   as eio-net.mem follows Linux on every sequence these traces hold. *)
-let exceptions : exception_ list = []
+(* None: eio-net.mem follows each kernel on every sequence these traces
+   hold that does not depend on timing. *)
+let exceptions : os -> exception_ list = function `Linux | `Macos -> []
+
+(* macOS's loopback delivers a segment asynchronously, so an operation that
+   follows one that sends a FIN, data or a reset to the peer can run before
+   the segment arrives; mem delivers it at once. These sequences are not
+   compared: on one Mac their recorded outcome differs from that of a
+   recording that lets 20 ms pass after each operation, which mem gives. *)
+let timing_dependent : (transport * string) list =
+  [
+    (Tcp4, "connect;accept;close C;shutdown S all;write S 0");
+    (Tcp4, "connect;accept;close C;shutdown S all;write S 2");
+    (Tcp4, "connect;accept;close S;shutdown C all;write C 0");
+    (Tcp4, "connect;accept;close S;shutdown C all;write C 2");
+    (Tcp4, "connect;accept;shutdown C all;shutdown S all;write S 0");
+    (Tcp4, "connect;accept;shutdown C all;shutdown S all;write S 2");
+    (Tcp4, "connect;accept;shutdown C send;shutdown S all;read C 1");
+    (Tcp4, "connect;accept;shutdown C send;shutdown S all;read C 4");
+    (Tcp4, "connect;accept;shutdown C send;shutdown S all;write S 2");
+    (Tcp4, "connect;accept;shutdown S all;shutdown C all;write C 0");
+    (Tcp4, "connect;accept;shutdown S send;shutdown C all;read S 1");
+    (Tcp4, "connect;accept;shutdown S send;shutdown C all;read S 4");
+    (Tcp4, "connect;accept;shutdown S send;shutdown C all;write C 0");
+    (Tcp4, "connect;accept;shutdown S send;shutdown C all;write C 2");
+    (Tcp4, "connect;accept;write C 2;shutdown S all;read C 1");
+    (Tcp4, "connect;accept;write C 2;shutdown S all;read C 4");
+    (Tcp4, "connect;accept;write C 2;shutdown S all;write C 0");
+    (Tcp4, "connect;accept;write C 2;shutdown S all;write C 2");
+    (Tcp4, "connect;accept;write C 2;shutdown S recv;read C 1");
+    (Tcp4, "connect;accept;write C 2;shutdown S recv;read C 4");
+    (Tcp4, "connect;accept;write C 2;shutdown S recv;write C 0");
+    (Tcp4, "connect;accept;write C 2;shutdown S recv;write C 2");
+    (Tcp4, "connect;accept;write C 2;shutdown S recv;write S 0");
+    (Tcp4, "connect;accept;write C 2;shutdown S recv;write S 2");
+    (Tcp4, "connect;accept;write S 2;shutdown C all;read S 1");
+    (Tcp4, "connect;accept;write S 2;shutdown C all;read S 4");
+    (Tcp4, "connect;accept;write S 2;shutdown C all;write S 0");
+    (Tcp4, "connect;accept;write S 2;shutdown C all;write S 2");
+    (Tcp4, "connect;accept;write S 2;shutdown C recv;read S 1");
+    (Tcp4, "connect;accept;write S 2;shutdown C recv;read S 4");
+    (Tcp4, "connect;accept;write S 2;shutdown C recv;write C 0");
+    (Tcp4, "connect;accept;write S 2;shutdown C recv;write C 2");
+    (Tcp6, "connect;accept;close C;shutdown S all;write S 0");
+    (Tcp6, "connect;accept;close C;shutdown S all;write S 2");
+    (Tcp6, "connect;accept;close C;write S 2;write S 0");
+    (Tcp6, "connect;accept;close S;shutdown C all;write C 0");
+    (Tcp6, "connect;accept;close S;shutdown C all;write C 2");
+    (Tcp6, "connect;accept;shutdown C all;shutdown S all;write S 0");
+    (Tcp6, "connect;accept;shutdown C all;shutdown S all;write S 2");
+    (Tcp6, "connect;accept;shutdown C send;shutdown S all;read C 1");
+    (Tcp6, "connect;accept;shutdown C send;shutdown S all;read C 4");
+    (Tcp6, "connect;accept;shutdown C send;shutdown S all;write S 0");
+    (Tcp6, "connect;accept;shutdown C send;shutdown S all;write S 2");
+    (Tcp6, "connect;accept;shutdown S all;shutdown C all;write C 0");
+    (Tcp6, "connect;accept;shutdown S all;shutdown C all;write C 2");
+    (Tcp6, "connect;accept;shutdown S send;shutdown C all;read S 1");
+    (Tcp6, "connect;accept;shutdown S send;shutdown C all;read S 4");
+    (Tcp6, "connect;accept;shutdown S send;shutdown C all;write C 0");
+    (Tcp6, "connect;accept;shutdown S send;shutdown C all;write C 2");
+    (Tcp6, "connect;accept;write C 2;shutdown S all;read C 1");
+    (Tcp6, "connect;accept;write C 2;shutdown S all;read C 4");
+    (Tcp6, "connect;accept;write C 2;shutdown S all;write C 0");
+    (Tcp6, "connect;accept;write C 2;shutdown S all;write C 2");
+    (Tcp6, "connect;accept;write C 2;shutdown S recv;read C 1");
+    (Tcp6, "connect;accept;write C 2;shutdown S recv;read C 4");
+    (Tcp6, "connect;accept;write C 2;shutdown S recv;write C 0");
+    (Tcp6, "connect;accept;write C 2;shutdown S recv;write C 2");
+    (Tcp6, "connect;accept;write C 2;shutdown S recv;write S 0");
+    (Tcp6, "connect;accept;write C 2;shutdown S recv;write S 2");
+    (Tcp6, "connect;accept;write S 2;shutdown C all;read S 1");
+    (Tcp6, "connect;accept;write S 2;shutdown C all;read S 4");
+    (Tcp6, "connect;accept;write S 2;shutdown C all;write S 0");
+    (Tcp6, "connect;accept;write S 2;shutdown C all;write S 2");
+    (Tcp6, "connect;accept;write S 2;shutdown C recv;read S 1");
+    (Tcp6, "connect;accept;write S 2;shutdown C recv;read S 4");
+    (Tcp6, "connect;accept;write S 2;shutdown C recv;write C 0");
+    (Tcp6, "connect;accept;write S 2;shutdown C recv;write C 2");
+    (Tcp6, "connect;accept;write S 2;shutdown C recv;write S 0");
+    (Tcp6, "connect;accept;write S 2;shutdown C recv;write S 2");
+  ]
 
 type row = { ops : string list; linux : string list; macos : string list }
 
+let column os r = match os with `Linux -> r.linux | `Macos -> r.macos
 let split sep = function "" -> [] | s -> String.split_on_char sep s
 
 let rows t =
@@ -43,9 +126,9 @@ let rows t =
           }
       | _ -> Fmt.failwith "%s: bad row %S" file line)
 
-let replay t ops =
+let replay ~os t ops =
   Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw -> Kernel_seq.run (Eio_net_mem.v ~sw ()) t ops
+  Eio.Switch.run @@ fun sw -> Kernel_seq.run (Eio_net_mem.v ~os ~sw ()) t ops
 
 let rec first_diff i a b =
   match (a, b) with
@@ -60,31 +143,38 @@ let starts_with ~prefix s =
   String.length s >= String.length prefix
   && String.equal (String.sub s 0 (String.length prefix)) prefix
 
-let matches t ~op ~mem ~linux (e : exception_) =
+let matches t ~op ~mem ~kernel (e : exception_) =
   List.mem t e.transports
   && starts_with ~prefix:e.op op
-  && e.mem = mem && e.linux = linux
+  && e.mem = mem && e.kernel = kernel
 
-(* The exceptions some sequence needed, across transports. *)
+(* The exceptions some sequence or scenario needed, by OS. *)
 let used = Hashtbl.create 16
 
-let test_transport t () =
+let test_transport os t () =
   let rows = rows t in
   if List.map (fun r -> r.ops) rows <> sequences t then
     Alcotest.failf
       "the %s traces hold other sequences than Kernel_seq's: regenerate them"
       (transport_name t);
+  let timed r =
+    os = `Macos && List.mem (t, String.concat ";" r.ops) timing_dependent
+  in
   let unexpected =
     List.filter_map
       (fun r ->
-        let mem = replay t r.ops in
-        match first_diff 0 mem r.linux with
+        let mem = replay ~os t r.ops in
+        let kernel = column os r in
+        match first_diff 0 mem kernel with
         | None -> None
+        | Some _ when timed r -> None
         | Some i -> (
-            let op = nth r.ops i and m = nth mem i and l = nth r.linux i in
-            match List.find_opt (matches t ~op ~mem:m ~linux:l) exceptions with
+            let op = nth r.ops i and m = nth mem i and k = nth kernel i in
+            match
+              List.find_opt (matches t ~op ~mem:m ~kernel:k) (exceptions os)
+            with
             | Some e ->
-                Hashtbl.replace used e.why ();
+                Hashtbl.replace used (os, e.why) ();
                 None
             | None ->
                 Fmt.kstr Option.some
@@ -97,15 +187,16 @@ let test_transport t () =
   match unexpected with
   | [] -> ()
   | l ->
-      Alcotest.failf "%d of %d %s sequences differ from Linux:@.%s"
-        (List.length l) (List.length rows) (transport_name t)
+      Alcotest.failf "%d of %d %s sequences differ from %s:@.%s" (List.length l)
+        (List.length rows) (transport_name t) (os_name os)
         (String.concat "\n" l)
 
-(* A scenario where mem may differ from Linux, and when: given the
-   scenario's name, mem's outcome and Linux's. *)
+(* A scenario where mem may differ from a kernel, and when: given the
+   scenario's name, mem's outcome and the kernel's. *)
 type scenario_exception = {
   why : string;
-  holds : string -> mem:string -> linux:string -> bool;
+  oses : os list;
+  holds : string -> mem:string -> kernel:string -> bool;
 }
 
 let split_last c s =
@@ -153,24 +244,29 @@ let scenario_exceptions : scenario_exception list =
       why =
         "the recording host has no IPv6 address but loopback, so glibc leaves \
          out IPv6 addresses; mem resolves as a dual-stack host";
+      oses = [ `Linux ];
       holds =
-        (fun name ~mem ~linux ->
+        (fun name ~mem ~kernel:linux ->
           starts_with ~prefix:"getaddrinfo" name
           && without_ipv6 name mem = linux);
     };
     {
       why = "mem has no services database: a service name is unknown to it";
+      oses = [ `Linux; `Macos ];
       holds =
-        (fun name ~mem ~linux ->
+        (fun name ~mem ~kernel ->
           starts_with ~prefix:"getaddrinfo" name
           && Filename.check_suffix name {|"http"|}
-          && mem = "SERVICE"
-          && (starts_with ~prefix:"tcp:" linux || linux = "ADDRFAMILY"));
+          && (mem = "SERVICE" || mem = "NONAME")
+          && (starts_with ~prefix:"tcp:" kernel
+             || starts_with ~prefix:"udp:" kernel
+             || kernel = "ADDRFAMILY"));
     };
     {
       why = "mem has no services database: getnameinfo gives the port";
+      oses = [ `Linux; `Macos ];
       holds =
-        (fun name ~mem ~linux ->
+        (fun name ~mem ~kernel:linux ->
           let mh, ms = split_last '/' mem and lh, ls = split_last '/' linux in
           starts_with ~prefix:"getnameinfo" name
           && mh = lh && is_number ms
@@ -180,8 +276,9 @@ let scenario_exceptions : scenario_exception list =
       why =
         "mem has no host name: getnameinfo gives a Unix address's host as \
          localhost";
+      oses = [ `Linux ];
       holds =
-        (fun name ~mem ~linux ->
+        (fun name ~mem ~kernel:linux ->
           let mh, ms = split_last '/' mem and lh, ls = split_last '/' linux in
           starts_with ~prefix:"getnameinfo unix" name
           && mh = "localhost" && lh = "HOSTNAME" && ms = ls);
@@ -191,8 +288,9 @@ let scenario_exceptions : scenario_exception list =
         "mem has no name server: a name /etc/hosts does not hold, such as \
          localhost. with its final dot, maps to no address, where the \
          recording host's name server resolves it";
+      oses = [ `Linux; `Macos ];
       holds =
-        (fun name ~mem ~linux ->
+        (fun name ~mem ~kernel:linux ->
           match String.split_on_char '"' name with
           | [ "getaddrinfo "; host; " "; _; "" ] ->
               String.ends_with ~suffix:"." host
@@ -200,6 +298,23 @@ let scenario_exceptions : scenario_exception list =
               && (starts_with ~prefix:"tcp:" linux
                  || starts_with ~prefix:"udp:" linux)
           | _ -> false);
+    };
+    {
+      why =
+        "a scenario off the loopback interface is recorded only on a host with \
+         loopback only, a container, so not on macOS";
+      oses = [ `Macos ];
+      holds = (fun _ ~mem:_ ~kernel -> kernel = "not recorded");
+    };
+    {
+      why =
+        "the Mac that records routes multicast through its own network \
+         interface, which 127.0.0.1 is not on; mem's host has loopback only";
+      oses = [ `Macos ];
+      holds =
+        (fun name ~mem ~kernel ->
+          name = "dgram error v4->224.0.0.1 len=10"
+          && mem = "sent" && kernel = "EADDRNOTAVAIL");
     };
   ]
 
@@ -212,20 +327,44 @@ let scenario_rows () =
       | [ name; linux; macos ] -> (name, linux, macos)
       | _ -> Fmt.failwith "%s: bad row %S" file line)
 
-(* mem runs on a mock clock, which moves only when a timed scenario waits,
-   as Linux's timers run on a scenario's real time. *)
-let replay_scenario name =
-  Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw ->
-  let clock = Eio_mock.Clock.Mono.make () in
-  let wait secs =
-    let span = Mtime.Span.of_float_ns (secs *. 1e9) |> Option.get in
-    Eio_mock.Clock.Mono.set_time clock
-      (Mtime.add_span (Eio.Time.Mono.now clock) span |> Option.get)
+(* The scenarios whose macOS outcome depends on timing, as its loopback
+   delivers asynchronously, and why: they are not compared. *)
+let timing_dependent_scenarios : (string * string) list =
+  let last_ack =
+    "the end that closes second holds its port until the peer's last ACK \
+     reaches it, which a bind right after the close races: on one Mac a bind \
+     succeeded within 6 ms of both closes"
   in
-  Kernel_seq.scenario ~wait (Eio_net_mem.v ~clock ~sw ()) name
+  [
+    ("reuse client closes first", last_ack);
+    ("reuse bound server closes first", last_ack);
+    ("timed: client closes first", last_ack);
+    ("timed: client shuts send then server closes", last_ack);
+    ("timed: client shuts down then server closes", last_ack);
+    ( "timed: reset by unread bytes",
+      "the reset races the bind: two recordings on one Mac differ" );
+    ("connect 127.0.0.1 from 0.0.0.0 to ::1", "two recordings on one Mac differ");
+  ]
 
-let test_scenarios () =
+(* mem runs on a mock clock, which moves only when every fiber waits, as the
+   kernel's timers run on a scenario's real time. An untimed scenario has 2
+   seconds, as the recorder gives it. *)
+let replay_scenario ~os name =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = env#mono_clock in
+  let net = Eio_net_mem.v ~os ~clock ~sw () in
+  if Kernel_seq.timed name then
+    Kernel_seq.scenario ~wait:(Eio.Time.Mono.sleep clock) net name
+  else
+    match
+      Eio.Time.with_timeout_exn env#clock 2. (fun () ->
+          Kernel_seq.scenario net name)
+    with
+    | r -> r
+    | exception Eio.Time.Timeout -> "timeout"
+
+let test_scenarios os () =
   let rows = scenario_rows () in
   if List.map (fun (n, _, _) -> n) rows <> scenarios then
     Alcotest.fail
@@ -234,16 +373,20 @@ let test_scenarios () =
   let unexpected =
     List.filter_map
       (fun (name, linux, macos) ->
-        let mem = replay_scenario name in
-        if String.equal mem linux then None
+        let kernel = match os with `Linux -> linux | `Macos -> macos in
+        let mem = replay_scenario ~os name in
+        if String.equal mem kernel then None
+        else if os = `Macos && List.mem_assoc name timing_dependent_scenarios
+        then None
         else
           match
             List.find_opt
-              (fun (e : scenario_exception) -> e.holds name ~mem ~linux)
+              (fun (e : scenario_exception) ->
+                List.mem os e.oses && e.holds name ~mem ~kernel)
               scenario_exceptions
           with
           | Some e ->
-              Hashtbl.replace used e.why ();
+              Hashtbl.replace used (os, e.why) ();
               None
           | None ->
               Fmt.kstr Option.some
@@ -254,28 +397,58 @@ let test_scenarios () =
   match unexpected with
   | [] -> ()
   | l ->
-      Alcotest.failf "%d of %d scenarios differ from Linux:@.%s" (List.length l)
-        (List.length rows) (String.concat "\n" l)
+      Alcotest.failf "%d of %d scenarios differ from %s:@.%s" (List.length l)
+        (List.length rows) (os_name os) (String.concat "\n" l)
+
+let oses : os list = [ `Linux; `Macos ]
 
 let test_exceptions_needed () =
   List.iter
-    (fun (e : exception_) ->
-      if not (Hashtbl.mem used e.why) then
-        Alcotest.failf "no sequence needs the exception %S any more" e.why)
-    exceptions;
+    (fun os ->
+      List.iter
+        (fun (e : exception_) ->
+          if not (Hashtbl.mem used (os, e.why)) then
+            Alcotest.failf "no %s sequence needs the exception %S any more"
+              (os_name os) e.why)
+        (exceptions os))
+    oses;
   List.iter
     (fun (e : scenario_exception) ->
-      if not (Hashtbl.mem used e.why) then
-        Alcotest.failf "no scenario needs the exception %S any more" e.why)
-    scenario_exceptions
+      List.iter
+        (fun os ->
+          if not (Hashtbl.mem used (os, e.why)) then
+            Alcotest.failf "no %s scenario needs the exception %S any more"
+              (os_name os) e.why)
+        e.oses)
+    scenario_exceptions;
+  List.iter
+    (fun (t, ops) ->
+      if not (List.mem (String.split_on_char ';' ops) (sequences t)) then
+        Alcotest.failf "%s holds no sequence %S" (transport_name t) ops)
+    timing_dependent;
+  List.iter
+    (fun (name, _) ->
+      if not (List.mem name scenarios) then
+        Alcotest.failf "there is no scenario %S" name)
+    timing_dependent_scenarios
 
 let suite =
   ( "kernel",
-    List.map
-      (fun t -> Alcotest.test_case (transport_name t) `Quick (test_transport t))
-      transports
+    List.concat_map
+      (fun os ->
+        List.map
+          (fun t ->
+            Alcotest.test_case
+              (Fmt.str "%s %s" (transport_name t) (os_name os))
+              `Quick (test_transport os t))
+          transports
+        @ [
+            Alcotest.test_case
+              ("scenarios " ^ os_name os)
+              `Quick (test_scenarios os);
+          ])
+      oses
     @ [
-        Alcotest.test_case "scenarios" `Quick test_scenarios;
         Alcotest.test_case "every exception is needed" `Quick
           test_exceptions_needed;
       ] )

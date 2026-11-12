@@ -680,6 +680,93 @@ let test_default_capacity () =
   queued (`Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)) (4 * 1024 * 1024);
   queued (`Unix "/tmp/queued.sock") (256 * 1024)
 
+(* Under [`Macos] a connection queues what macOS's buffers hold: at least
+   the 1 MiB its TCP autotuning grows to, and AF_UNIX's 8 KiB. *)
+let test_macos_capacity () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~os:`Macos ~sw () in
+  let queued addr bound =
+    let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+    let client = Eio.Net.connect ~sw net (Eio.Net.listening_addr l) in
+    let _ = Eio.Net.accept ~sw l in
+    let chunk = Cstruct.create 4096 and total = ref 0 in
+    let blocked =
+      Eio.Fiber.first
+        (fun () ->
+          while !total <= 4 * bound do
+            total := !total + Eio.Flow.single_write client [ chunk ]
+          done;
+          false)
+        (fun () ->
+          Eio.Fiber.yield ();
+          true)
+    in
+    Alcotest.(check bool) "the writer waits" true blocked;
+    Alcotest.(check int) "the bytes queued" bound !total
+  in
+  queued (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) (1024 * 1024);
+  queued (`Unix "/tmp/queued-macos.sock") 8192;
+  let client, _server = Eio_net_mem.pipe ~os:`Macos () in
+  let n = Eio.Flow.single_write client [ Cstruct.create (2 * 1024 * 1024) ] in
+  Alcotest.(check int) "a pipe queues as TCP" (1024 * 1024) n
+
+(* Under [`Macos] a connect to an address of 127.0.0.0/8 other than
+   127.0.0.1 is never answered, and times out after 75 seconds on the
+   clock with eio_posix's error; macOS's TCP ports count up, shared by
+   listeners and clients. *)
+let test_macos_connect () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = env#mono_clock in
+  let net = Eio_net_mem.v ~os:`Macos ~clock ~sw () in
+  let port l =
+    match Eio.Net.listening_addr l with `Tcp (_, p) -> p | `Unix _ -> 0
+  in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let l1 = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (lo, 0)) in
+  let l2 = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (lo, 0)) in
+  Alcotest.(check (list int))
+    "listeners count up" [ 49152; 49153 ]
+    [ port l1; port l2 ];
+  let t0 = Eio.Time.Mono.now clock in
+  let ip = Eio.Net.Ipaddr.of_raw "\127\000\000\002" in
+  (match Eio.Net.connect ~sw net (`Tcp (ip, port l1)) with
+  | _ -> Alcotest.fail "the connect returned"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ETIMEDOUT, _, _)), _)
+    ->
+      ());
+  let waited = Mtime.span t0 (Eio.Time.Mono.now clock) in
+  Alcotest.(check bool)
+    "after 75 s" true
+    (Mtime.Span.equal waited Mtime.Span.(75 * s))
+
+(* Under [`Macos] a Unix-domain address that starts with a NUL names no
+   file, the empty path binds nothing, and getnameinfo names no Unix
+   address. *)
+let test_macos_unix () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~os:`Macos ~sw () in
+  let raised f =
+    match f () with
+    | _ -> "ok"
+    | exception Unix.Unix_error (e, _, _) -> Unix.error_message e
+    | exception Not_found -> "Not_found"
+    | exception Eio.Io _ -> "io"
+  in
+  Alcotest.(check string)
+    "abstract"
+    (Unix.error_message Unix.ENOENT)
+    (raised (fun () -> Eio.Net.listen ~sw ~backlog:1 net (`Unix "\000x")));
+  Alcotest.(check string)
+    "empty"
+    (Unix.error_message Unix.EINVAL)
+    (raised (fun () -> Eio.Net.listen ~sw ~backlog:1 net (`Unix "")));
+  Alcotest.(check string)
+    "getnameinfo" "Not_found"
+    (raised (fun () -> Eio.Net.getnameinfo net (`Unix "x.sock")))
+
 (* A read or a write wakes one waiter, not every one: 8000 writers blocked on
    a queue of one byte, and 8000 readers on an empty one, finish with work, here
    counted as the words allocated, that grows with the number of waiters, not
@@ -2358,6 +2445,10 @@ let suite =
       Alcotest.test_case "a Unix path with no socket" `Quick
         test_unix_path_not_found;
       Alcotest.test_case "a capacity bounds the queue" `Quick test_capacity;
+      Alcotest.test_case "macOS: buffers" `Quick test_macos_capacity;
+      Alcotest.test_case "macOS: a connect to 127.0.0.2 times out" `Quick
+        test_macos_connect;
+      Alcotest.test_case "macOS: Unix addresses" `Quick test_macos_unix;
       Alcotest.test_case "a connection's queue is bounded by default" `Quick
         test_default_capacity;
       Alcotest.test_case "write after own shutdown" `Quick
