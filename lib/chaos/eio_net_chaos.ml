@@ -40,7 +40,7 @@ let exec_with ~observe run (s : Plan.scenario) =
   let wrapped = ref None in
   let failed =
     match
-      Quiet_mock.run ~limit:3600. @@ fun clock mono_clock ->
+      Quiet_mock.run ~limit:3600. @@ fun clock mono_clock charge ->
       Eio.Switch.run @@ fun sw ->
       let capacity =
         match s.lasting with
@@ -49,7 +49,8 @@ let exec_with ~observe run (s : Plan.scenario) =
       in
       let base = Eio_net_mem.v ?capacity ~clock:mono_clock ~sw () in
       let net =
-        Wrapper.v ~max_ops ~clock ~outage:(s.lasting = Some Outage) f base
+        Wrapper.v ~max_ops ~charge ~clock ~outage:(s.lasting = Some Outage) f
+          base
       in
       wrapped := Some net;
       run

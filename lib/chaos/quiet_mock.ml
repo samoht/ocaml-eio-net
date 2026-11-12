@@ -3,7 +3,7 @@ open! Hermetic
 (* A silent copy of Eio_mock's scheduler and clock.
 
    Copied from eio 1.6, lib_eio/mock/backend.ml and lib_eio/mock/clock.ml,
-   trimmed to what Eio_net_chaos.check needs, with two changes:
+   trimmed to what Eio_net_chaos.check needs, with these changes:
    - moving the clock prints nothing. Eio_mock's clock calls [traceln] from
      the scheduler, where no fiber binding reaches, so a check built on it
      cannot keep stderr clean. A quiet mock clock belongs upstream; this copy
@@ -13,7 +13,9 @@ open! Hermetic
      going reports as a run past its time limit;
    - every turn of the scheduler, a fiber resumed by a yield, an I/O
      completion or a timer, moves the clock on by 1 us, as real time passes
-     while a program runs, and a run stops after [max_turns] turns.
+     while a program runs, and a run stops after [max_turns] turns;
+   - [charge] takes a turn for a call that does not suspend, as a network
+     operation does, so a loop of them moves the clock and meets the limits.
 
    A loop run by the library reopens commit 495b8c2, which removed one along
    with the eio.mock dependency: hang detection and deterministic virtual time
@@ -138,6 +140,19 @@ type t = {
 let turn = Mtime.Span.(1 * us)
 let max_turns = 10_000_000
 
+(* A turn taken in a fiber: past the limits, the fiber waits for ever, and
+   the scheduler stops at its next turn. *)
+let charge t () =
+  t.turns <- t.turns + 1;
+  let now = Option.get (Mtime.add_span t.clock.now turn) in
+  let past = Mtime.compare now t.limit > 0 in
+  if t.turns > max_turns || past then begin
+    if past then t.past_limit <- true;
+    Eio.Cancel.protect (fun () ->
+        Eio.Promise.await (fst (Eio.Promise.create ())))
+  end
+  else Mono.Impl.set_time t.clock now
+
 let rec schedule t : exit =
   match Lf_queue.pop t.run_q with
   | Some f ->
@@ -228,7 +243,7 @@ let run ~limit main =
   let (`Exit_scheduler : exit) =
     Domain_local_await.using ~prepare_for_await:Eio_utils.Dla.prepare_for_await
       ~while_running:(fun () ->
-        fork ~new_fiber (fun () -> result := Some (main wall mono)))
+        fork ~new_fiber (fun () -> result := Some (main wall mono (charge t))))
   in
   match !result with
   | Some x -> x

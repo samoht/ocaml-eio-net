@@ -4,15 +4,18 @@ type Eio.Exn.Backend.t += Injected_fault
 
 val v :
   ?max_ops:int ->
+  ?charge:(unit -> unit) ->
   clock:_ Eio.Time.clock ->
   outage:bool ->
   (Op.t -> Fault.t option) ->
   _ Eio.Net.t ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~max_ops ~clock ~outage f net] is [net] with [f] asked about each
+(** [v ~max_ops ~charge ~clock ~outage f net] is [net] with [f] asked about each
     operation, as {!Eio_net_chaos.wrap} documents. [outage] is what {!outage}
-    says of it. Once [max_ops] (defaults to none) operations were asked about,
-    every operation waits for ever, and {!overrun} holds. *)
+    says of it. Each network operation, a listen, a send, a lookup or a close
+    included, first calls [charge] (defaults to none). Once [max_ops] (defaults
+    to none) operations of the kinds [f] is asked about were made, every
+    operation waits for ever, and {!overrun} holds. *)
 
 val pair :
   clock:_ Eio.Time.clock ->

@@ -156,13 +156,19 @@ type target =
 
 (* What the wrappers of one network share. [lock] guards the counters and
    [pending], and runs [f], so [f] sees one operation at a time, in the order
-   of [index]. Past [max_ops] operations, [overrun] holds. *)
+   of [index]. [ops] counts the operations of the kinds [f] is asked about,
+   and past [max_ops] of them [overrun] holds. [charge] takes a turn of the
+   run's clock for every network operation, and [charges] counts those
+   turns. *)
 type ctx = {
   f : Op.t -> Fault.t option;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
+  charge : (unit -> unit) option;
   outage : bool;
   lock : Mutex.t;
   mutable index : int;
+  mutable ops : int;
+  mutable charges : int;
   mutable sockets : int;
   mutable connects : int;
   mutable accepts : int;
@@ -170,19 +176,23 @@ type ctx = {
   mutable listeners : int;
   streaks : (target, int) Hashtbl.t;
   mutable streak_at : float;
+  mutable streak_charges : int;
   livelocked : bool Atomic.t;
   pending : (int, pending) Hashtbl.t;
   max_ops : int;
   overrun : bool Atomic.t;
 }
 
-let ctx ?(max_ops = max_int) ~clock ~outage f =
+let ctx ?(max_ops = max_int) ?charge ~clock ~outage f =
   {
     f;
     clock :> float Eio.Time.clock_ty Eio.Resource.t;
+    charge;
     outage;
     lock = Mutex.create ();
     index = 0;
+    ops = 0;
+    charges = 0;
     sockets = 0;
     connects = 0;
     accepts = 0;
@@ -190,6 +200,7 @@ let ctx ?(max_ops = max_int) ~clock ~outage f =
     listeners = 0;
     streaks = Hashtbl.create 7;
     streak_at = 0.;
+    streak_charges = 0;
     livelocked = Atomic.make false;
     pending = Hashtbl.create 7;
     max_ops;
@@ -204,8 +215,10 @@ let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
 let locked (ctx : ctx) f = Mutex.protect ctx.lock f
 
 (* A program that retries a failed operation at once, with no time passing,
-   spins for ever: an outage refuses each connect at once. After [threshold]
-   failures of one operation on one target while the clock stands still, with
+   spins for ever: an outage refuses each connect at once. The clock stands
+   still when it moved only by the turns the operations took. After
+   [threshold] failures of one operation on one target while the clock stands
+   still, with
    no success there in between, the operation raises [Failure] instead, and
    after twice as many it waits for ever, as nothing the program does can get
    it out. Failures on distinct targets, as a scan of many ports makes, do not
@@ -222,8 +235,10 @@ let failed ctx target =
   let n =
     locked ctx (fun () ->
         let now = Eio.Time.now ctx.clock in
-        if now <> ctx.streak_at then begin
+        let charged = float (ctx.charges - ctx.streak_charges) *. 1e-6 in
+        if Float.abs (now -. ctx.streak_at -. charged) > 5e-7 then begin
           ctx.streak_at <- now;
+          ctx.streak_charges <- ctx.charges;
           Hashtbl.reset ctx.streaks
         end;
         let n =
@@ -244,15 +259,35 @@ let failed ctx target =
 let stop () =
   Eio.Cancel.protect (fun () -> Eio.Promise.await (fst (Eio.Promise.create ())))
 
+(* The start of each network operation: it takes a turn, as one that waits
+   does when it resumes, so a loop of calls that never wait moves the clock
+   and meets the run's limit on turns. *)
+let charge ctx =
+  Option.iter
+    (fun charge ->
+      charge ();
+      locked ctx (fun () -> ctx.charges <- ctx.charges + 1))
+    ctx.charge
+
+(* The start of an operation [f] is asked about, which also counts toward
+   [max_ops], as a check plans from each. *)
+let tick ctx =
+  charge ctx;
+  let over =
+    locked ctx (fun () ->
+        ctx.ops <- ctx.ops + 1;
+        ctx.ops > ctx.max_ops)
+  in
+  if over || Atomic.get ctx.overrun then begin
+    Atomic.set ctx.overrun true;
+    stop ()
+  end
+
 (* An end of file is an answer, not a failure, so it counts only against
    [eof], the connection it ended: a program that reads it again and again
    spins, one that reconnects after each does not. *)
 let guard ?eof ctx target f =
-  if Atomic.get ctx.overrun || locked ctx (fun () -> ctx.index >= ctx.max_ops)
-  then begin
-    Atomic.set ctx.overrun true;
-    stop ()
-  end;
+  tick ctx;
   match f () with
   | v ->
       locked ctx (fun () ->
@@ -630,6 +665,7 @@ module Flow = struct
     let read_methods = []
 
     let shutdown t cmd =
+      charge t.ctx;
       (match cmd with
       | `Send -> thaw t.conn t.side
       | `Receive -> thaw t.conn (other t.side)
@@ -637,6 +673,7 @@ module Flow = struct
       try Eio.Flow.shutdown t.sock cmd with Eio.Io _ when broken t -> ()
 
     let close t =
+      charge t.ctx;
       let was_open =
         Mutex.protect t.lock (fun () ->
             let was_open = not t.closed in
@@ -648,8 +685,13 @@ module Flow = struct
       Eio.Resource.close t.sock;
       if was_open then free t.ctx
 
-    let setsockopt t opt v = Eio.Net.setsockopt t.sock opt v
-    let getsockopt t opt = Eio.Net.getsockopt t.sock opt
+    let setsockopt t opt v =
+      charge t.ctx;
+      Eio.Net.setsockopt t.sock opt v
+
+    let getsockopt t opt =
+      charge t.ctx;
+      Eio.Net.getsockopt t.sock opt
   end
 
   let handler = Eio.Net.Pi.stream_socket (module Impl)
@@ -816,11 +858,18 @@ module Datagram = struct
           | `Wait None -> Eio.Fiber.await_cancel ())
 
     let recv t buf = guard t.ctx (Recv t.socket) (fun () -> recv_ t buf)
-    let send t ?dst bufs = Eio.Net.send t.sock ?dst bufs
-    let shutdown t cmd = shutdown_of t.sock cmd
+
+    let send t ?dst bufs =
+      charge t.ctx;
+      Eio.Net.send t.sock ?dst bufs
+
+    let shutdown t cmd =
+      charge t.ctx;
+      shutdown_of t.sock cmd
 
     (* A datagram kept back goes with the socket. *)
     let close t =
+      charge t.ctx;
       Mutex.protect t.lock (fun () ->
           t.ready <- [];
           t.held <- [];
@@ -828,8 +877,13 @@ module Datagram = struct
       Eio.Resource.close t.sock;
       free t.ctx
 
-    let setsockopt t opt v = Eio.Net.setsockopt t.sock opt v
-    let getsockopt t opt = Eio.Net.getsockopt t.sock opt
+    let setsockopt t opt v =
+      charge t.ctx;
+      Eio.Net.setsockopt t.sock opt v
+
+    let getsockopt t opt =
+      charge t.ctx;
+      Eio.Net.getsockopt t.sock opt
   end
 
   let handler = Eio.Net.Pi.datagram_socket (module Impl)
@@ -941,12 +995,21 @@ module Listener = struct
     let accept t ~sw = guard t.ctx (Accept t.number) (fun () -> accept_ t ~sw)
 
     let close t =
+      charge t.ctx;
       Eio.Resource.close t.l;
       free t.ctx
 
-    let listening_addr t = Eio.Net.listening_addr t.l
-    let setsockopt t opt v = Eio.Net.setsockopt t.l opt v
-    let getsockopt t opt = Eio.Net.getsockopt t.l opt
+    let listening_addr t =
+      charge t.ctx;
+      Eio.Net.listening_addr t.l
+
+    let setsockopt t opt v =
+      charge t.ctx;
+      Eio.Net.setsockopt t.l opt v
+
+    let getsockopt t opt =
+      charge t.ctx;
+      Eio.Net.getsockopt t.l opt
   end
 
   let handler = Eio.Net.Pi.listening_socket (module Impl)
@@ -1006,6 +1069,7 @@ module Network = struct
           connect_ t ~bind_to ~options ~sw addr)
 
     let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
+      charge t.ctx;
       let l = Eio.Net.listen ~reuse_addr ~reuse_port ~backlog ~sw t.net addr in
       Eio.Resource.T
         ( {
@@ -1021,13 +1085,19 @@ module Network = struct
           Listener.handler )
 
     let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
+      charge t.ctx;
       Datagram.v t.ctx
         ~family:(Op.family_of_datagram addr)
         (Eio.Net.datagram_socket ~reuse_addr ~reuse_port ~sw t.net addr
           :> Datagram.socket)
 
-    let getaddrinfo t ~service node = Eio.Net.getaddrinfo ~service t.net node
-    let getnameinfo t addr = Eio.Net.getnameinfo t.net addr
+    let getaddrinfo t ~service node =
+      charge t.ctx;
+      Eio.Net.getaddrinfo ~service t.net node
+
+    let getnameinfo t addr =
+      charge t.ctx;
+      Eio.Net.getnameinfo t.net addr
   end
 
   let handler =
@@ -1038,11 +1108,11 @@ module Network = struct
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
-let v ?max_ops ~clock ~outage f (net : _ Eio.Net.t) :
+let v ?max_ops ?charge ~clock ~outage f (net : _ Eio.Net.t) :
     [ `Generic ] Eio.Net.ty Eio.Resource.t =
   Eio.Resource.T
     ( {
-        Network.ctx = ctx ?max_ops ~clock ~outage f;
+        Network.ctx = ctx ?max_ops ?charge ~clock ~outage f;
         net :> [ `Generic ] Eio.Net.ty Eio.Resource.t;
       },
       Network.handler )

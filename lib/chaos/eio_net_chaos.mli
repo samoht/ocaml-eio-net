@@ -103,8 +103,9 @@
 
     Its clocks start at [0.]. Each turn of a fiber, resumed by a yield, an I/O
     completion or a timer, moves them by 1 us, as a program's work takes time,
-    and when every fiber waits they move to the next timer, so a timeout of an
-    hour takes no time.
+    and so does each network operation, one that never waits included: a listen,
+    a send, a lookup or a close. When every fiber waits they move to the next
+    timer, so a timeout of an hour takes no time.
 
     A run hangs, and fails, when every fiber waits and no timer is due, when it
     is still running after an hour of its clock, and when the same network
