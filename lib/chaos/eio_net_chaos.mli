@@ -251,10 +251,13 @@ module Fault : sig
             reader's queue what a returned write sent, so each end reads that
             first. At each end the first read or write that follows raises
             [Connection_reset]; later reads return end of file and writes keep
-            raising it, as on Linux and macOS. On an accept, the accept succeeds
-            and the connection it returns is reset, as Linux hands over one
-            whose client left first. On a connect, it is a refusal, as a reset
-            answering the handshake is. *)
+            raising it, as on Linux and macOS. On a Unix-domain connection a
+            write raises it as AF_UNIX's EPIPE, which leaves it to the reads:
+            each end reads what is queued, then [Connection_reset] once, then
+            end of file, as on Linux. On an accept, the accept succeeds and the
+            connection it returns is reset, as Linux hands over one whose client
+            left first. On a connect, it is a refusal, as a reset answering the
+            handshake is. *)
     | Eof
         (** One end closes, as a FIN does: no byte already written is lost. On a
             read, the peer closed: the read returns what the peer wrote before,

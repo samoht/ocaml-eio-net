@@ -713,14 +713,14 @@ let test_unix_cut_keeps_written () =
    macOS), so no write returns with its bytes lost; over TCP the first write
    goes through. *)
 let test_write_after_peer_close () =
-  let run addr =
+  let run ?(fault = Fault.Eof) addr =
     Eio_mock.Backend.run_full @@ fun env ->
     Eio.Switch.run @@ fun sw ->
     let fired = ref false in
     let f (op : Op.t) =
       if op.kind = `Read && op.side = `Server && not !fired then (
         fired := true;
-        Some Fault.Eof)
+        Some fault)
       else None
     in
     let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
@@ -737,7 +737,16 @@ let test_write_after_peer_close () =
     (run (`Unix "/tmp/s.sock"));
   Alcotest.(check string)
     "TCP" "ab 1 reset end end"
-    (run (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)))
+    (run (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)));
+  (* After a reset, an AF_UNIX write's EPIPE leaves the reset to the next
+     read, which reads it after what is queued; over TCP the write that
+     reports it clears it. *)
+  Alcotest.(check string)
+    "AF_UNIX reset" "ab reset reset reset end"
+    (run ~fault:Reset (`Unix "/tmp/s.sock"));
+  Alcotest.(check string)
+    "TCP reset" "reset reset reset end end"
+    (run ~fault:Reset (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)))
 
 (* An AF_UNIX read that hangs is a peer that stopped: the client reads what
    the server's returned write queued, then waits, and the server's next write
