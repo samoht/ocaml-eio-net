@@ -341,6 +341,11 @@ let timing_dependent_scenarios : (string * string) list =
     ("timed: client closes first", last_ack);
     ("timed: client shuts send then server closes", last_ack);
     ("timed: client shuts down then server closes", last_ack);
+    ("dual-stack hold: listen :: client ::1 client closes first", last_ack);
+    ("dual-stack hold: listen :: client 127.0.0.1 client closes first", last_ack);
+    ("dual-stack hold: listen ::1 client ::1 client closes first", last_ack);
+    ( "dual-stack hold: listen 0.0.0.0 client 127.0.0.1 client closes first",
+      last_ack );
     ( "timed: reset by unread bytes",
       "the reset races the bind: two recordings on one Mac differ" );
     ("connect 127.0.0.1 from 0.0.0.0 to ::1", "two recordings on one Mac differ");
