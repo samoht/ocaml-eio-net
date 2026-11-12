@@ -295,15 +295,21 @@ let test_config () =
         (match f () with
         | (_ : Framing.Config.t) -> false
         | exception Invalid_argument _ -> true))
-    [
-      ("negative minimum", fun () -> Framing.Config.v ~min_length:(-1) ());
-      ( "maximum below minimum",
-        fun () -> Framing.Config.v ~min_length:4 ~max_length:3 () );
-      ( "minimum above the default maximum",
-        fun () -> Framing.Config.v ~min_length:2_000_000 () );
-      ( "maximum above uint32",
-        fun () -> Framing.Config.v ~max_length:0x1_0000_0000 () );
-    ]
+    ([
+       ("negative minimum", fun () -> Framing.Config.v ~min_length:(-1) ());
+       ( "maximum below minimum",
+         fun () -> Framing.Config.v ~min_length:4 ~max_length:3 () );
+       ( "minimum above the default maximum",
+         fun () -> Framing.Config.v ~min_length:2_000_000 () );
+     ]
+    @
+    (* An int holds 2^32 only where it has more than 32 bits. *)
+    if Sys.int_size > 32 then
+      [
+        ( "maximum above uint32",
+          fun () -> Framing.Config.v ~max_length:(1 lsl 32) () );
+      ]
+    else [])
 
 let suite =
   ( "framing",

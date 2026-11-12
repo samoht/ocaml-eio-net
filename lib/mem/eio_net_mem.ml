@@ -2033,7 +2033,7 @@ module Resolve = struct
       if j < n && is_digit service.[j] then digits (j + 1) else j
     in
     let j = digits i in
-    if n = 0 then Some (false, false, 0)
+    if n = 0 then Some (false, false, 0L)
     else if j = i || j <> n then None
     else
       let ds = String.sub service i (j - i) in
@@ -2048,8 +2048,10 @@ module Resolve = struct
       (* The low 32 bits are all a port needs. *)
       let low =
         String.fold_left
-          (fun acc c -> ((acc * 10) + Char.code c - 48) land 0xffff_ffff)
-          0 ds
+          (fun acc c ->
+            Int64.(logand (add (mul acc 10L) (of_int (Char.code c - 48))))
+              0xffff_ffffL)
+          0L ds
       in
       Some (neg, overflow, low)
 
@@ -2060,8 +2062,12 @@ module Resolve = struct
     | None -> None
     | Some (_, true, _) -> None
     | Some (neg, false, low) ->
-        let v = if neg then (0x1_0000_0000 - low) land 0xffff_ffff else low in
-        if v >= 0x8000_0000 then None else Some (v land 0xffff)
+        let v =
+          if neg then Int64.(logand (sub 0x1_0000_0000L low) 0xffff_ffffL)
+          else low
+        in
+        if Int64.compare v 0x8000_0000L >= 0 then None
+        else Some (Int64.to_int v land 0xffff)
 
   (* A part of an inet_aton(3) address: hexadecimal after 0x, octal after 0,
      decimal otherwise. A bare 0x is no number. *)
@@ -2084,9 +2090,9 @@ module Resolve = struct
                 in
                 if d >= base then None
                 else
-                  let v = (v * base) + d in
-                  if v > 0xffff_ffff then None else Some v)
-          (Some 0) digits
+                  let v = Int64.(add (mul v (of_int base)) (of_int d)) in
+                  if Int64.compare v 0xffff_ffffL > 0 then None else Some v)
+          (Some 0L) digits
     in
     if n >= 2 && s.[0] = '0' && (s.[1] = 'x' || s.[1] = 'X') then
       value 16 (String.sub s 2 (n - 2))
@@ -2134,7 +2140,7 @@ module Resolve = struct
       List.mapi
         (fun i p ->
           if os = Macos && i < last && String.lowercase_ascii p = "0x" then
-            Some 0
+            Some 0L
           else part p)
         parts
     in
@@ -2146,17 +2152,23 @@ module Resolve = struct
         | [] -> Some acc
         | [ last ] ->
             let bits = 8 * (5 - k) in
-            if k > 4 || last >= 1 lsl bits then None
-            else Some ((acc lsl bits) lor last)
-        | x :: rest -> if x > 255 then None else fold ((acc lsl 8) lor x) rest
+            if k > 4 || Int64.compare last (Int64.shift_left 1L bits) >= 0 then
+              None
+            else Some Int64.(logor (shift_left acc bits) last)
+        | x :: rest ->
+            if Int64.compare x 255L > 0 then None
+            else fold Int64.(logor (shift_left acc 8) x) rest
       in
-      match fold 0 parts with
+      match fold 0L parts with
       | None -> None
       | Some v ->
           Some
             (Eio.Net.Ipaddr.of_raw
                (String.init 4 (fun i ->
-                    Char.chr ((v lsr (8 * (3 - i))) land 255))))
+                    Char.chr
+                      (Int64.to_int
+                         Int64.(
+                           logand (shift_right_logical v (8 * (3 - i))) 255L)))))
 
   (* /etc/hosts names the loopback addresses "localhost", in any case. With
      no name server, "localhost." is another name. *)
@@ -2178,10 +2190,13 @@ module Resolve = struct
     ||
     let value =
       String.fold_left
-        (fun v c -> if v > 0xffff_ffff then v else (v * 10) + Char.code c - 48)
-        0 s
+        (fun v c ->
+          if Int64.compare v 0xffff_ffffL > 0 then v
+          else Int64.(add (mul v 10L) (of_int (Char.code c - 48))))
+        0L s
     in
-    (s <> "" && String.for_all is_digit s && value <= 0xffff_ffff)
+    s <> "" && String.for_all is_digit s
+    && Int64.compare value 0xffff_ffffL <= 0
     || (s = "lo" && needs_scope ip)
 
   let number ~os name =
