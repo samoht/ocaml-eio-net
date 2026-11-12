@@ -884,7 +884,7 @@ dgram ::1 from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL
 dgram :: from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL
 dgram ::ffff:127.0.0.1 from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL
 dgram 127.0.0.2 from UdpV6 to 127.0.0.2,sent udp:127.0.0.1 n=2,recv EADDRNOTAVAIL
-getaddrinfo "localhost" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,timeout
+getaddrinfo "localhost" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80
 getaddrinfo "localhost" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0
 getaddrinfo "localhost" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535
 getaddrinfo "localhost" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME
@@ -1111,7 +1111,7 @@ getnameinfo tcp 127.0.0.1:49999,localhost/49999,localhost/49999
 getnameinfo tcp 10.1.2.3:80,10.1.2.3/http,10.1.2.3/http
 getnameinfo tcp 127.0.0.2:8080,127.0.0.2/http-alt,127.0.0.2/http-alt
 reuse server closes first,EADDRINUSE EADDRINUSE,EADDRINUSE ok
-reuse client closes first,ok ok,ok ok
+reuse client closes first,ok ok,EADDRINUSE ok
 reuse connection open,EADDRINUSE EADDRINUSE,EADDRINUSE ok
 reuse no connection,ok ok,ok ok
 reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok
@@ -1261,7 +1261,9 @@ off loopback: connect ::127.0.0.1,ENETUNREACH,not recorded
 off loopback: dgram 10.1.2.3 from 0.0.0.0 to ::,ENETUNREACH blk,not recorded
 off loopback: dgram 10.1.2.3 from :: to ::,ENETUNREACH blk,not recorded
 off loopback: dgram 2001:db8::1 from :: to ::,ENETUNREACH blk,not recorded
+off loopback: dgram 2001:db8::1 from ::ffff:127.0.0.1 to ::,ENETUNREACH blk,not recorded
 off loopback: dgram ::2 from :: to ::,ENETUNREACH blk,not recorded
+off loopback: dgram ::2 from ::ffff:127.0.0.1 to ::,ENETUNREACH blk,not recorded
 off loopback: dgram ::ffff:10.1.2.3 from :: to ::,ENETUNREACH blk,not recorded
 off loopback: dgram ::127.0.0.1 from :: to ::,ENETUNREACH blk,not recorded
 timed: server closes first,EADDRINUSE ok,EADDRINUSE ok
@@ -1269,7 +1271,7 @@ timed: server closes first and relisten with reuse_addr,EADDRINUSE ok,ok ok
 timed: server closes first with reuse_addr on both,ok ok,ok ok
 timed: client closes first,ok ok,EADDRINUSE ok
 timed: server closes and client stays,EADDRINUSE ok,EADDRINUSE ok
-timed: reset by unread bytes,ok ok,ok ok
+timed: reset by unread bytes,ok ok,EADDRINUSE ok
 timed: bound client closes first,EADDRINUSE/EADDRINUSE ok/ok,EADDRINUSE/EADDRINUSE ok/ok
 timed: both shut send and server first,EADDRINUSE ok,EADDRINUSE ok
 timed: server shuts send then client closes,EADDRINUSE ok,EADDRINUSE ok

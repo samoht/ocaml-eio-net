@@ -1400,9 +1400,9 @@ let untimed_scenarios : (string * (net -> string)) list =
           (fun src ->
             ( Fmt.str "off loopback: dgram %s from %s to ::" d src,
               dgram_case "::" src d ))
-          (if String.contains d '.' && not (String.contains d ':') then
-             [ "0.0.0.0"; "::" ]
-           else [ "::" ]))
+          (if not (String.contains d ':') then [ "0.0.0.0"; "::" ]
+           else if String.contains d '.' then [ "::" ]
+           else [ "::"; "::ffff:127.0.0.1" ]))
       off_loopback_ips
 
 let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
