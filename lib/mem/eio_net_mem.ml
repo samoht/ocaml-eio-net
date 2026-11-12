@@ -1177,18 +1177,26 @@ end
 module Datagram_socket = struct
   type tag = [ `Generic ]
 
+  (* [room] is broadcast whenever a queued datagram goes, so a Unix-domain
+     send waiting for room looks again. *)
   type hub = {
     sockets : (Eio.Net.Sockaddr.datagram, t) Hashtbl.t;
     ports : Ports.t;
     files : Files.t;
     mutex : Mutex.t;
+    room : Eio.Condition.t;
   }
 
+  (* [rmem] is the memory the datagrams of [queued] take, and [wmem] that of
+     the Unix-domain datagrams this socket sent that are still queued, as
+     Linux counts them; both are guarded by [lock], [wmem] by the sender's. *)
   and t = {
     hub : hub;
     addr : Eio.Net.Sockaddr.datagram;
     lock : Mutex.t;
-    queued : (Eio.Net.Sockaddr.datagram * string) Queue.t;
+    queued : datagram Queue.t;
+    mutable rmem : int;
+    mutable wmem : int;
     readable : Eio.Condition.t;
     mutable closed : bool;
     mutable send_shut : bool;
@@ -1196,6 +1204,35 @@ module Datagram_socket = struct
     mutable release : Eio.Switch.hook;
     hold : Ports.hold option;
   }
+
+  and datagram = {
+    src : Eio.Net.Sockaddr.datagram;
+    data : string;
+    size : int;
+    sender : t option;
+  }
+
+  (* Linux's default receive and send buffers, [rmem_default] and
+     [wmem_default], on the kernel the tests record. *)
+  let buffer = 229376
+
+  (* The memory a UDP datagram of [n] bytes takes in a receive queue over
+     loopback, as Linux allocates it: a head of 896 bytes or a power of two
+     that holds the payload and its headers, up to 16 KiB, then a small head
+     and the payload in pages, and 256 bytes of [sk_buff]. *)
+  let udp_size ~v4 n =
+    let head = n + if v4 then 444 else 456 in
+    let rec pow2 p = if p >= head then p else pow2 (2 * p) in
+    256
+    + if head <= 896 then 896 else if head <= 16384 then pow2 1024 else 896 + n
+
+  (* The memory a Unix-domain datagram of [n] bytes takes from its sender's
+     buffer until it is received: a head and the payload in pages. *)
+  let unix_size n = 1152 + ((n + 4095) / 4096 * 4096)
+
+  (* A Unix-domain socket whose queue holds more than [max_dgram_qlen]
+     datagrams makes a send to it wait. *)
+  let max_dgram_qlen = 10
 
   let free_port hub =
     match Ports.free hub.ports with
@@ -1236,6 +1273,8 @@ module Datagram_socket = struct
         addr;
         lock = Mutex.create ();
         queued = Queue.create ();
+        rmem = 0;
+        wmem = 0;
         readable = Eio.Condition.create ();
         closed = false;
         send_shut = false;
@@ -1328,23 +1367,57 @@ module Datagram_socket = struct
      receive side; Linux checks a Unix-domain socket's shutdown before its
      destination, and a UDP socket's after. *)
   (* Queues the datagram at [peer], unless [peer] refuses it (a Unix-domain
-     socket that shut its receive side) or has closed. *)
+     socket that shut its receive side) or has closed. A UDP datagram that
+     finds the receive buffer full is lost, as Linux drops it. A Unix-domain
+     one waits while the sender's buffer is full, or [peer] holds more than
+     [max_dgram_qlen], as on Linux: [`Wait] says to look again. *)
   let deliver t ~local ~dst peer bufs =
+    let data = Cstruct.to_string (Cstruct.concat bufs) in
+    let n = String.length data in
     let delivered =
-      Mutex.protect peer.lock @@ fun () ->
-      if local && peer.recv_shut then `Refused
-      else if peer.closed then `Lost
-      else begin
-        Queue.push
-          (source t ~dst peer, Cstruct.to_string (Cstruct.concat bufs))
-          peer.queued;
-        `Delivered
-      end
+      if local && Mutex.protect t.lock (fun () -> t.wmem >= buffer) then `Wait
+      else
+        Mutex.protect peer.lock @@ fun () ->
+        if local && peer.recv_shut then `Refused
+        else if peer.closed then `Lost
+        else if local then
+          if Queue.length peer.queued > max_dgram_qlen then `Wait
+          else begin
+            let size = unix_size n in
+            Mutex.protect t.lock (fun () -> t.wmem <- t.wmem + size);
+            Queue.push
+              { src = source t ~dst peer; data; size; sender = Some t }
+              peer.queued;
+            `Delivered
+          end
+        else
+          let v4 = match dst with `Udp (d, _) -> is_v4 d | `Unix _ -> false in
+          let size = udp_size ~v4 n in
+          if peer.rmem + size > buffer then `Lost
+          else begin
+            peer.rmem <- peer.rmem + size;
+            Queue.push
+              { src = source t ~dst peer; data; size; sender = None }
+              peer.queued;
+            `Delivered
+          end
     in
     match delivered with
-    | `Delivered -> Eio.Condition.broadcast peer.readable
-    | `Lost -> ()
+    | `Delivered ->
+        Eio.Condition.broadcast peer.readable;
+        `Done
+    | `Lost -> `Done
+    | `Wait -> `Wait
     | `Refused -> raise (reset_exn ())
+
+  (* A datagram leaves its socket's queue: its memory is free. *)
+  let freed t d =
+    t.rmem <- t.rmem - d.size;
+    Option.iter
+      (fun s ->
+        if s == t then s.wmem <- s.wmem - d.size
+        else Mutex.protect s.lock (fun () -> s.wmem <- s.wmem - d.size))
+      d.sender
 
   (* The destination of a send, or the error a send without one raises; a
      send shutdown first for a Unix-domain socket, after for a UDP one. *)
@@ -1375,6 +1448,8 @@ module Datagram_socket = struct
     Option.iter
       (fun code -> raise (Eio.Exn.create (Eio.Exn.X code)))
       (refusal t dst bufs);
+    (* A send that waits looks for its destination again, as Linux does. *)
+    Eio.Condition.loop_no_mutex t.hub.room @@ fun () ->
     let file =
       match dst with
       | `Unix path -> Files.find t.hub.files ~stream:false path
@@ -1391,31 +1466,43 @@ module Datagram_socket = struct
         match dst with
         | `Unix path when Files.abstract path -> refused ()
         | `Unix _ -> raise (no_file ())
-        | `Udp _ -> ())
-    | Some Datagram, None -> ()
-    | (None | Some Datagram), Some peer -> deliver t ~local ~dst peer bufs
+        | `Udp _ -> Some ())
+    | Some Datagram, None -> Some ()
+    | (None | Some Datagram), Some peer -> (
+        match deliver t ~local ~dst peer bufs with
+        | `Done -> Some ()
+        | `Wait -> None)
 
   (* A datagram longer than [buf] is cut to it, as a socket cuts it. *)
   let recv t buf =
-    Eio.Condition.loop_no_mutex t.readable @@ fun () ->
-    Mutex.protect t.lock @@ fun () ->
-    if t.closed then invalid_arg "eio-net.mem: recv on a closed datagram socket"
-    else
-      match Queue.take_opt t.queued with
-      | None -> None
-      | Some (src, data) ->
-          let n = min (String.length data) (Cstruct.length buf) in
-          Cstruct.blit_from_string data 0 buf 0 n;
-          Some (src, n)
+    let got =
+      Eio.Condition.loop_no_mutex t.readable @@ fun () ->
+      Mutex.protect t.lock @@ fun () ->
+      if t.closed then
+        invalid_arg "eio-net.mem: recv on a closed datagram socket"
+      else
+        match Queue.take_opt t.queued with
+        | None -> None
+        | Some d ->
+            freed t d;
+            let n = min (String.length d.data) (Cstruct.length buf) in
+            Cstruct.blit_from_string d.data 0 buf 0 n;
+            Some (d.src, n)
+    in
+    Eio.Condition.broadcast t.hub.room;
+    got
 
   let close t =
     let was_open =
       Mutex.protect t.lock @@ fun () ->
       let was_open = not t.closed in
       t.closed <- true;
+      Queue.iter (freed t) t.queued;
+      Queue.clear t.queued;
       was_open
     in
     if was_open then begin
+      Eio.Condition.broadcast t.hub.room;
       Eio.Switch.remove_hook t.release;
       t.release <- Eio.Switch.null_hook;
       Mutex.protect t.hub.mutex (fun () ->
@@ -2091,6 +2178,7 @@ let v ?capacity ?clock ~sw () =
       ports = Ports.v ();
       files;
       mutex = Mutex.create ();
+      room = Eio.Condition.create ();
     }
   in
   Eio.Resource.T (Network.{ sw; hub; datagrams; capacity }, handler)

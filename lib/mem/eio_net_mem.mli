@@ -336,12 +336,19 @@ val connection : _ Eio.Net.stream_socket -> int option
 
     A datagram reaches a socket by the rule a [connect] reaches a listener, and
     arrives whole, after every datagram sent to it before: the network never
-    drops, cuts or reorders one, and a send never waits. It comes with the
-    sender's address as the receiver sees it: the loopback address of the
-    destination's family for a wildcard sender, 127.0.0.1 for any address of
-    127.0.0.0/8, and IPv4-mapped for an IPv4 sender to an IPv6 socket. One sent
-    to an address no socket binds is lost, as UDP loses it. A [recv] into a
-    buffer shorter than the datagram gets its first bytes, as a socket does.
+    cuts or reorders one. A socket queues what Linux's default receive buffer
+    holds, 229376 bytes on the kernel the tests record, each datagram counted
+    with the memory Linux gives it: 199 datagrams of up to about 450 bytes, 99
+    of 1000, 3 of 60000. Over UDP a datagram past that is lost, and the send
+    returns as on Linux; on a Unix path the send waits until the receiver takes
+    one, as it does while the receiver holds more than 10 datagrams, Linux's
+    [max_dgram_qlen], or while the sender's own datagrams not yet received fill
+    its send buffer of the same size. It comes with the sender's address as the
+    receiver sees it: the loopback address of the destination's family for a
+    wildcard sender, 127.0.0.1 for any address of 127.0.0.0/8, and IPv4-mapped
+    for an IPv4 sender to an IPv6 socket. One sent to an address no socket binds
+    is lost, as UDP loses it. A [recv] into a buffer shorter than the datagram
+    gets its first bytes, as a socket does.
 
     After a socket shut its send side, a send raises the connection reset that
     {!Closed} marks, as EPIPE, and so does one to a Unix-domain socket that shut

@@ -349,17 +349,31 @@ let check ?(budget = 2_000) ?replay run =
            check never passes on a partial one. Shrink the workload, or raise \
            ~budget."
           n budget;
-      let afters = List.map (fun s -> (s, attempt `Linear s)) linear in
+      let others = Plan.others first in
+      let share classes = Plan.sampled_share ~budget ~linear:n ~classes in
+      (* The second faults each run allows, spread as it ends, so no run's
+         operations outlive it: a share of the tier's, evenly. *)
+      let singles =
+        List.length
+          (List.filter
+             (fun (s : Plan.scenario) -> List.length s.rules = 1)
+             linear)
+      in
+      let quota =
+        let sh = share (if others = [] then 1 else 2) in
+        (sh + singles - 1) / max 1 singles
+      in
       let pairs =
         List.concat_map
-          (fun ((s : Plan.scenario), after) ->
-            match s.rules with [ r ] -> Plan.seconds r ~first ~after | _ -> [])
-          afters
+          (fun (s : Plan.scenario) ->
+            let after = attempt `Linear s in
+            match s.rules with
+            | [ r ] -> Plan.spread quota (Plan.seconds r ~first ~after)
+            | _ -> [])
+          linear
       in
-      let classes = List.filter (( <> ) []) [ Plan.others first; pairs ] in
-      let share =
-        Plan.sampled_share ~budget ~linear:n ~classes:(List.length classes)
-      in
+      let classes = List.filter (( <> ) []) [ others; pairs ] in
+      let share = share (List.length classes) in
       List.iter
         (fun c ->
           List.iter
