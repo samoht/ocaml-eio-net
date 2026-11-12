@@ -1622,8 +1622,8 @@ let test_no_ephemeral_port_for_a_listen () =
   done;
   Alcotest.(check bool)
     "a listen at port 0" true
-    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE)
-       (fun () -> ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)))))
+    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE) (fun () ->
+         ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)))))
 
 (* A datagram socket at port 0 fails the same way, with EADDRINUSE raw and not
    with [Failure]. Datagram sockets hold their own ports, apart from the
@@ -1639,14 +1639,15 @@ let test_no_ephemeral_port_for_a_datagram_socket () =
   done;
   Alcotest.(check bool)
     "a datagram socket at port 0" true
-    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE)
-       (fun () -> ignore (Eio.Net.datagram_socket ~sw net (`Udp (lo, 0)))))
+    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE) (fun () ->
+         ignore (Eio.Net.datagram_socket ~sw net (`Udp (lo, 0)))))
 
 (* A [connect] whose socket binds no address takes a port of the range counted
    down from its top, so a range the listeners hold leaves it none: it fails as
    connect(2) fails it on Linux, with EADDRNOTAVAIL as an [Eio.Io] error, and
-   not with [Failure]. The listener it reaches for is below the range, so it
-   holds no port of it. *)
+   not with [Failure]. One bound with [bind_to] at port 0 fails its bind(2)
+   first, with EADDRINUSE, as eio_posix binds before it connects. The listener
+   it reaches for is below the range, so it holds no port of it. *)
 let test_no_ephemeral_port_for_a_connect () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -1659,9 +1660,14 @@ let test_no_ephemeral_port_for_a_connect () =
   done;
   Alcotest.(check bool)
     "a connect that binds no port" true
-    (fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL)
-       (fun () ->
-          ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket)))
+    (fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL) (fun () ->
+         ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket)));
+  let bind_to = `Tcp (lo, 0) in
+  Alcotest.(check bool)
+    "a connect bound at port 0" true
+    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE) (fun () ->
+         ignore
+           (Eio.Net.connect ~sw ~bind_to net addr : _ Eio.Net.stream_socket)))
 
 (* A listener's close defers to the accept waiting on it, as Eio defers a
    descriptor's close to its users: the listener takes connections until
