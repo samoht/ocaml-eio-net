@@ -15,3 +15,6 @@ let bind_error = function
 let timed_out () =
   Eio.Exn.create
     (Eio.Exn.X (Eio_unix.Unix_error (Unix.ETIMEDOUT, "connect-in-progress", "")))
+
+let no_buffer_space () =
+  Eio.Exn.create (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENOBUFS, "sendmsg", "")))

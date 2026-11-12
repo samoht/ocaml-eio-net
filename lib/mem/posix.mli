@@ -18,3 +18,7 @@ val bind_error :
 val timed_out : unit -> exn
 (** [timed_out ()] is the error eio_posix raises for a connect whose handshake
     times out. *)
+
+val no_buffer_space : unit -> exn
+(** [no_buffer_space ()] is the error eio_posix raises for a datagram that finds
+    no buffer space on macOS. *)

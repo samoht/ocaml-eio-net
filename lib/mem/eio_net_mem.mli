@@ -504,7 +504,12 @@ val connection : _ Eio.Net.stream_socket -> int option
       route ({!Host_unreachable}). From [::1] an IPv4-mapped destination is not
       available, and from an IPv4-mapped address other than the wildcard an IPv6
       one has no route. A socket bound at an IPv4-mapped address sees IPv4
-      senders as IPv4.
+      senders as IPv4. A receiver holds 786896 bytes over UDP, each datagram
+      counted by its length, and 4096 on a Unix path, each counted as at least
+      128 bytes, which fits what one Mac holds of datagrams of 1 to 2000 bytes.
+      A datagram past that is lost over UDP, and on a Unix path the send raises
+      the [ENOBUFS] error eio_posix raises, where Linux waits; a receive frees
+      what it takes at once.
     - Unix paths. [sun_path] holds 103 bytes. There is no abstract namespace: a
       path with a NUL anywhere names no file, and the empty path binds nothing,
       with [EINVAL].

@@ -1500,6 +1500,13 @@ module Datagram_socket = struct
      datagrams makes a send to it wait. *)
   let max_dgram_qlen = 10
 
+  (* macOS's receive buffers, net.inet.udp.recvspace and
+     net.local.dgram.recvspace, and what a datagram of [n] bytes takes of
+     them: its length, and at least 128 bytes on a Unix path, which fits
+     what one Mac holds of 1, 500, 1000 and 2000 bytes. *)
+  let macos_buffer ~local = if local then 4096 else 786896
+  let macos_size ~local n = if local then max n 128 else n
+
   (* A port of zero with none of the range free is bind(2)'s EADDRINUSE. *)
   let free_port hub =
     match Ports.free hub.ports with
@@ -1692,44 +1699,72 @@ module Datagram_socket = struct
      finds the receive buffer full is lost, as Linux drops it. A Unix-domain
      one waits while the sender's buffer is full, or [peer] holds more than
      [max_dgram_qlen], as on Linux: [`Wait] says to look again. *)
-  let deliver t ~local ~dst peer bufs =
-    let data = Cstruct.to_string (Cstruct.concat bufs) in
-    let n = String.length data in
+  let deliver_macos t ~local ~dst peer data =
+    let size = macos_size ~local (String.length data) in
     let delivered =
-      if local && Mutex.protect t.lock (fun () -> t.wmem >= buffer) then `Wait
-      else
-        Mutex.protect peer.lock @@ fun () ->
-        if local && peer.recv_shut then `Refused
-        else if peer.closed then `Lost
-        else if local then
-          if Queue.length peer.queued > max_dgram_qlen then `Wait
-          else begin
-            let size = unix_size n in
-            Mutex.protect t.lock (fun () -> t.wmem <- t.wmem + size);
-            Queue.push
-              { src = source t ~dst peer; data; size; sender = Some t }
-              peer.queued;
-            `Delivered
-          end
-        else
-          let v4 = match dst with `Udp (d, _) -> is_v4 d | `Unix _ -> false in
-          let size = udp_size ~v4 n in
-          if peer.rmem + size > buffer then `Lost
-          else begin
-            peer.rmem <- peer.rmem + size;
-            Queue.push
-              { src = source t ~dst peer; data; size; sender = None }
-              peer.queued;
-            `Delivered
-          end
+      Mutex.protect peer.lock @@ fun () ->
+      if peer.closed then `Lost
+      else if peer.rmem + size > macos_buffer ~local then
+        if local then `Full else `Lost
+      else begin
+        peer.rmem <- peer.rmem + size;
+        Queue.push
+          { src = source t ~dst peer; data; size; sender = None }
+          peer.queued;
+        `Delivered
+      end
     in
     match delivered with
     | `Delivered ->
         Eio.Condition.broadcast peer.readable;
         `Done
     | `Lost -> `Done
-    | `Wait -> `Wait
-    | `Refused -> raise (reset_exn ())
+    | `Full -> raise (Posix.no_buffer_space ())
+
+  (* On macOS a datagram that finds its receiver's buffer full is lost over
+     UDP, and refused with ENOBUFS on a Unix path, where Linux waits. *)
+  let deliver t ~local ~dst peer bufs =
+    let data = Cstruct.to_string (Cstruct.concat bufs) in
+    if t.hub.os = Macos then deliver_macos t ~local ~dst peer data
+    else
+      let n = String.length data in
+      let delivered =
+        if local && Mutex.protect t.lock (fun () -> t.wmem >= buffer) then `Wait
+        else
+          Mutex.protect peer.lock @@ fun () ->
+          if local && peer.recv_shut then `Refused
+          else if peer.closed then `Lost
+          else if local then
+            if Queue.length peer.queued > max_dgram_qlen then `Wait
+            else begin
+              let size = unix_size n in
+              Mutex.protect t.lock (fun () -> t.wmem <- t.wmem + size);
+              Queue.push
+                { src = source t ~dst peer; data; size; sender = Some t }
+                peer.queued;
+              `Delivered
+            end
+          else
+            let v4 =
+              match dst with `Udp (d, _) -> is_v4 d | `Unix _ -> false
+            in
+            let size = udp_size ~v4 n in
+            if peer.rmem + size > buffer then `Lost
+            else begin
+              peer.rmem <- peer.rmem + size;
+              Queue.push
+                { src = source t ~dst peer; data; size; sender = None }
+                peer.queued;
+              `Delivered
+            end
+      in
+      match delivered with
+      | `Delivered ->
+          Eio.Condition.broadcast peer.readable;
+          `Done
+      | `Lost -> `Done
+      | `Wait -> `Wait
+      | `Refused -> raise (reset_exn ())
 
   (* A datagram leaves its socket's queue: its memory is free. *)
   let freed t d =
@@ -1746,6 +1781,7 @@ module Datagram_socket = struct
   let taken t d =
     match d.sender with
     | Some _ -> freed t d
+    | None when t.hub.os = Macos -> freed t d
     | None ->
         t.unfreed <- t.unfreed + d.size;
         if t.unfreed >= buffer / 4 || t.batch = 0 then begin
