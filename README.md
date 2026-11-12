@@ -104,7 +104,10 @@ The tests follow a few rules:
   the test asserts its latency to catch it.
 - Ports are held as on Linux: the end of a connection that closes first
   holds its port for 60 seconds, so a server that listens again on its port
-  within a run passes `~reuse_addr:true`.
+  within a run passes `~reuse_addr:true`. A client that binds no address
+  holds its port only toward its destination, and takes a port in TIME_WAIT
+  toward it again after a second, so short connections to a few servers do
+  not run out of ports.
 - In the outage run every connect is refused and every datagram lost.
   `Eio_net_chaos.outage env` is then `true`, and the test checks what its
   program does when it gives up.

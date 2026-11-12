@@ -294,10 +294,14 @@ let cross_family ~os (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
    lingers in TIME_WAIT, until when on [now]. Holds alike in all but when
    they end share a group, which counts those that last and keeps when the
    others end, so a port that many connections held costs a bind the groups
-   on it, not the connections. [lowest] is a port of the dynamic range (RFC
-   6335, section 6) at or below the lowest one nothing holds: every port
-   below it is held; [highest] is one at or above the highest free one.
-   [next] is where macOS looks for its next TCP port, counting up. *)
+   on it, not the connections. On Linux, a connect that binds no address
+   holds its port [toward] its destination, and of those in TIME_WAIT,
+   [time_waits] counts by when they end. [lowest] is a port of the dynamic
+   range (RFC 6335, section 6) at or below the lowest one nothing holds:
+   every port below it is held; [highest] is one at or above the highest
+   free one. [next] is where macOS looks for its next TCP port, counting up,
+   and [down] where Linux looks for the next port of a connect that binds no
+   address, counting down. *)
 module Ports = struct
   module Untils = Map.Make (Mtime)
 
@@ -307,13 +311,16 @@ module Ports = struct
     reuse : bool;
     listening : bool;
     connected : bool;
+    toward : (Eio.Net.Ipaddr.v4v6 * int) option;
     mutable lasting : int;
     mutable untils : int Untils.t;
+    mutable time_waits : int Untils.t;
   }
 
   type hold = {
     group : group;
     mutable until : Mtime.t option;
+    mutable time_wait : bool;
     mutable released : bool;
   }
 
@@ -323,6 +330,7 @@ module Ports = struct
     mutable lowest : int;
     mutable highest : int;
     mutable next : int;
+    mutable down : int;
     now : (unit -> Mtime.t) option;
   }
 
@@ -333,6 +341,7 @@ module Ports = struct
       lowest = 49152;
       highest = 65535;
       next = 49152;
+      down = 65535;
       now;
     }
 
@@ -345,6 +354,10 @@ module Ports = struct
 
   let fin_timeout = Mtime.Span.(60 * s)
 
+  (* Linux's tcp_tw_reuse_delay: a connect may take a 4-tuple held in
+     TIME_WAIT once this has passed since the peer's FIN. *)
+  let tw_reuse_delay = Mtime.Span.(1 * s)
+
   let freed t port =
     if port >= 49152 && port < t.lowest then t.lowest <- port;
     if port <= 65535 && port > t.highest then t.highest <- port
@@ -354,11 +367,10 @@ module Ports = struct
   let untils_add u g =
     g.untils <- Untils.update u (fun c -> Some (count 1 c)) g.untils
 
-  let untils_remove u g =
-    g.untils <-
-      Untils.update u
-        (function Some c when c > 1 -> Some (c - 1) | _ -> None)
-        g.untils
+  let decr u m =
+    Untils.update u (function Some c when c > 1 -> Some (c - 1) | _ -> None) m
+
+  let untils_remove u g = g.untils <- decr u g.untils
 
   (* Whether a hold of [g] is live, once those whose TIME_WAIT has ended are
      dropped. *)
@@ -371,6 +383,7 @@ module Ports = struct
           match Untils.min_binding_opt g.untils with
           | Some (u, _) when not (Mtime.is_earlier now ~than:u) ->
               g.untils <- Untils.remove u g.untils;
+              g.time_waits <- Untils.remove u g.time_waits;
               prune ()
           | _ -> ()
         in
@@ -392,12 +405,19 @@ module Ports = struct
               Hashtbl.replace t.held port live;
             live)
 
+  let same_toward a b =
+    match (a, b) with
+    | None, None -> true
+    | Some (ip, port), Some (ip', port') -> same ip ip' && port = port'
+    | _ -> false
+
   let add t ?(wildcard = false) ?(reuse = false) ?(listening = false)
-      ?(connected = false) (ip, port) =
+      ?(connected = false) ?toward (ip, port) =
     let groups = at t port in
     let alike g =
       same g.ip ip && g.wildcard = wildcard && g.reuse = reuse
       && g.listening = listening && g.connected = connected
+      && same_toward g.toward toward
     in
     let group =
       match List.find_opt alike groups with
@@ -410,38 +430,51 @@ module Ports = struct
               reuse;
               listening;
               connected;
+              toward;
               lasting = 0;
               untils = Untils.empty;
+              time_waits = Untils.empty;
             }
           in
           Hashtbl.replace t.held port (g :: groups);
           g
     in
     group.lasting <- group.lasting + 1;
-    { group; until = None; released = false }
+    { group; until = None; time_wait = false; released = false }
+
+  let forget h u =
+    untils_remove u h.group;
+    if h.time_wait then h.group.time_waits <- decr u h.group.time_waits
 
   let remove t port h =
     if not h.released then begin
       h.released <- true;
       match h.until with
       | None -> h.group.lasting <- h.group.lasting - 1
-      | Some u -> untils_remove u h.group
+      | Some u -> forget h u
     end;
     ignore (at t port : group list)
 
-  (* [h] lets go at [until], or later if it already would. *)
-  let set_until h until =
+  (* [h] lets go at [until], or later if it already would; [time_wait] when
+     it lingers in TIME_WAIT. *)
+  let set_until h ~time_wait until =
+    let set () =
+      untils_add until h.group;
+      if time_wait then
+        h.group.time_waits <-
+          Untils.update until (fun c -> Some (count 1 c)) h.group.time_waits;
+      h.until <- Some until;
+      h.time_wait <- time_wait
+    in
     match h.until with
     | _ when h.released -> ()
     | Some u when Mtime.is_later u ~than:until -> ()
     | Some u ->
-        untils_remove u h.group;
-        untils_add until h.group;
-        h.until <- Some until
+        forget h u;
+        set ()
     | None ->
         h.group.lasting <- h.group.lasting - 1;
-        untils_add until h.group;
-        h.until <- Some until
+        set ()
 
   (* A bind at [ip] conflicts with a hold at an overlapping address, unless
      both sockets have [SO_REUSEADDR] and the held one does not listen, as
@@ -523,6 +556,48 @@ module Ports = struct
         end
     in
     find t.next 0
+
+  (* Whether a connect toward [toward] that binds no address may take a port
+     [g] holds, on Linux: one that another such connect holds toward another
+     destination, as Linux keeps those unique per 4-tuple, or toward the same
+     one once each of its holds is in TIME_WAIT from more than
+     [tw_reuse_delay] after the peer's FIN, as Linux's [tcp_tw_reuse] lets
+     it on loopback. *)
+  let shares t ~toward g =
+    match g.toward with
+    | None -> false
+    | Some _ when not (same_toward g.toward (Some toward)) -> true
+    | Some _ -> (
+        g.lasting = 0
+        && Untils.equal Int.equal g.untils g.time_waits
+        &&
+        match (t.now, Untils.max_binding_opt g.untils) with
+        | Some now, Some (u, _) -> (
+            match Mtime.sub_span u (time_wait t) with
+            | Some fin ->
+                let from = Mtime.add_span fin tw_reuse_delay in
+                Option.fold ~none:false
+                  ~some:(fun from -> Mtime.is_later (now ()) ~than:from)
+                  from
+            | None -> false)
+        | _ -> false)
+
+  (* The port a connect toward [toward] that binds no address takes on
+     Linux: the next one down from the last such connect's, round the
+     dynamic range, that only connects toward other destinations hold, as
+     Linux shares an ephemeral port between them. *)
+  let free_toward t toward =
+    let rec find port n =
+      if n = 0 then None
+      else
+        let port = if port < 49152 then 65535 else port in
+        if List.for_all (shares t ~toward) (at t port) then begin
+          t.down <- port - 1;
+          Some port
+        end
+        else find (port - 1) (n - 1)
+    in
+    find t.down (65535 - 49152 + 1)
 
   (* The highest port of the dynamic range nothing holds. *)
   let free_down t =
@@ -2148,7 +2223,9 @@ end
    it. *)
 module Ends = struct
   type side = [ `Client | `Server ]
-  type decision = [ `Held | `Release | `Until of Mtime.t ]
+
+  type decision =
+    [ `Held | `Release | `Until of Mtime.t | `Time_wait of Mtime.t ]
 
   type t = {
     lock : Mutex.t;
@@ -2192,7 +2269,7 @@ module Ends = struct
           | _, Some (_, peer) when Mtime.is_later peer ~than:orphan -> `Release
           | _, Some (_, peer) ->
               let u = after t.time_wait peer in
-              if Mtime.is_later u ~than:closed then `Until u else `Release
+              if Mtime.is_later u ~than:closed then `Time_wait u else `Release
           | _, None -> `Until orphan)
 
   (* Changes the state, and gives what the client and the server now do. *)
@@ -2272,12 +2349,15 @@ module Network = struct
         Sockopt.stream opt;
         check_options rest
 
-  (* Holds the address of a client that connects to [ip] in the listeners'
-     ports, until [release]: the loopback address of its destination's
-     family, in the destination's form, or the one it is bound at, at a free port counted
-     down from the top of the dynamic range as listeners count up from its
-     bottom. *)
-  let hold t ?bind (ip : Eio.Net.Ipaddr.v4v6) =
+  (* Holds the address of a client that connects to [ip] at [dport] in the
+     listeners' ports, until [release]: the loopback address of its
+     destination's family, in the destination's form, or the one it is bound
+     at. Its port is, on Linux, one free toward the destination if it binds
+     no address, and the highest port nothing holds if bound at port 0, as
+     listeners count up from the bottom; on macOS, the next port nothing
+     holds. *)
+  let hold t ?bind ((ip : Eio.Net.Ipaddr.v4v6), dport) =
+    let toward = (List.hd (reaching ip), dport) in
     let mapped = String.length (ip :> string) = 16 && is_v4 ip in
     let reached = if mapped then map (source_to ip) else source_to ip in
     let bound, wildcard, port =
@@ -2291,24 +2371,31 @@ module Network = struct
     (* The bind comes first, at the address it names. *)
     if port <> 0 && Ports.in_use ports (bound, port) then Error `In_use
     else
-      let free =
-        match t.os with
-        | Linux -> Ports.free_down ports
-        | Macos -> Ports.free_next ports
+      let toward =
+        match (bind, t.os) with None, Linux -> Some toward | _ -> None
       in
-      match if port = 0 then free else Some port with
+      let port =
+        match (toward, t.os) with
+        | _ when port <> 0 -> Some port
+        | Some toward, _ -> Ports.free_toward ports toward
+        | None, Linux -> Ports.free_down ports
+        | None, Macos -> Ports.free_next ports
+      in
+      match port with
       | None -> Error `No_port
       | Some port ->
-          Ok ((ip, port), Ports.add ports ~wildcard ~connected:true (ip, port))
+          Ok
+            ( (ip, port),
+              Ports.add ports ~wildcard ~connected:true ?toward (ip, port) )
 
   (* Lets go of [h] now, or at [until]. Not cancelled, even while it waits
      for the mutex: a release that gave up would hold the port for good. *)
-  let release_port t ?until port h =
+  let release_port t ?until ?(time_wait = false) port h =
     Eio.Cancel.protect @@ fun () ->
     Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
         let ports = t.hub.Listening_socket.ports in
         match until with
-        | Some until -> Ports.set_until h until
+        | Some until -> Ports.set_until h ~time_wait until
         | None -> Ports.remove ports port h)
 
   (* A connect's socket has its destination's family, and fails to bind an
@@ -2348,8 +2435,9 @@ module Network = struct
     | `Tcp (lip, _) -> `Tcp (seen_by lip ip, port)
 
   (* A connect for a client that holds [local], if it is a TCP one. *)
-  let connect_held t ~sw ~bind_to ~(release : ?until:Mtime.t -> unit -> unit)
-      addr local =
+  let connect_held t ~sw ~bind_to
+      ~(release : ?until:Mtime.t -> ?time_wait:bool -> unit -> unit) addr local
+      =
     let listener =
       Eio.Mutex.use_ro t.hub.mutex (fun () ->
           match addr with
@@ -2405,6 +2493,7 @@ module Network = struct
         Flow.on_close flow (fun ~reset ~abort:_ ->
             ignore (Ends.close ends `Client ~reset ~abort:false);
             match Ends.close ends `Server ~reset ~abort:false with
+            | `Time_wait u, _ -> release ~until:u ~time_wait:true ()
             | `Until u, _ -> release ~until:u ()
             | (`Release | `Held), _ -> release ());
         Flow.close_with sw flow
@@ -2454,13 +2543,16 @@ module Network = struct
         let settle (client, server) =
           let apply f = function
             | `Held -> ()
-            | `Release -> f None
-            | `Until u -> f (Some u)
+            | `Release -> f None false
+            | `Until u -> f (Some u) false
+            | `Time_wait u -> f (Some u) true
           in
-          apply (fun until -> release ?until ()) client;
+          apply (fun until time_wait -> release ?until ~time_wait ()) client;
           Option.iter
             (fun (port, h) ->
-              apply (fun until -> release_port t ?until port h) server)
+              apply
+                (fun until time_wait -> release_port t ?until ~time_wait port h)
+                server)
             child
         in
         Flow.on_close client (fun ~reset ~abort ->
@@ -2530,9 +2622,9 @@ module Network = struct
           if Files.bind t.hub.files path Client then `Path path
           else raise (address_in_use ())
       | `Unix _, _ -> `Nothing
-      | `Tcp (ip, _), bind -> (
+      | `Tcp (ip, dport), bind -> (
           let bind = match bind with Some (`Tcp b) -> Some b | _ -> None in
-          match hold t ?bind ip with
+          match hold t ?bind (ip, dport) with
           | Ok (local, h) -> `Port (local, h)
           (* With no port left, connect(2) fails with EADDRNOTAVAIL, and a
              bind(2) at port 0 before it with EADDRINUSE. *)
@@ -2544,9 +2636,9 @@ module Network = struct
       match held with `Port (a, _) -> Some a | `Path _ | `Nothing -> None
     in
     (* Released by the connection's ends; a bound path leaves its file. *)
-    let release ?until () =
+    let release ?until ?time_wait () =
       match held with
-      | `Port ((_, port), h) -> release_port t ?until port h
+      | `Port ((_, port), h) -> release_port t ?until ?time_wait port h
       | `Path path -> Files.leave t.hub.files path Client
       | `Nothing -> ()
     in

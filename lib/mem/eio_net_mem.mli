@@ -132,13 +132,13 @@ type Eio.Exn.Backend.t +=
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             with [bind_to] raises at an IP address no interface has, where
             bind(2) fails with [EADDRNOTAVAIL]; [listen] and [datagram_socket]
-            raise that one raw. A [connect] without [bind_to] raises it when
-            every port of the dynamic range is held, as connect(2) fails on
-            Linux. The network has the loopback interface only: an IPv4 socket
-            binds an address of 127.0.0.0/8, the broadcast address or a
-            multicast one, an IPv6 one [::1], either the wildcard address of its
-            family, and an IPv6 one the IPv4-mapped form of those IPv4
-            addresses, as on Linux. *)
+            raise that one raw. A [connect] without [bind_to] raises it when no
+            port of the dynamic range is free toward its destination
+            ({!section-streams}), as connect(2) fails on Linux. The network has
+            the loopback interface only: an IPv4 socket binds an address of
+            127.0.0.0/8, the broadcast address or a multicast one, an IPv6 one
+            [::1], either the wildcard address of its family, and an IPv6 one
+            the IPv4-mapped form of those IPv4 addresses, as on Linux. *)
   | Name_too_long
         (** The backend code of the unclassified {!Eio.Io} error raised for a
             Unix path of 108 bytes or more, which Linux's [sun_path] cannot hold
@@ -297,8 +297,8 @@ val connection : _ Eio.Net.stream_socket -> int option
     the other. An accepted connection's peer address is the client's: the
     loopback address of its destination's family, 127.0.0.1 for any address of
     127.0.0.0/8 as Linux picks it, IPv4-mapped for an IPv4 client of an IPv6
-    listener, at a port of the dynamic range no socket holds, counted down from
-    its top, or [`Unix ""] for a Unix-domain client, which binds no path.
+    listener, at a port of the dynamic range, or [`Unix ""] for a Unix-domain
+    client, which binds no path.
 
     Each end of a TCP connection holds an address while it is open: the client
     its own, and the accepted end, queued or accepted, the listener's port at
@@ -317,25 +317,39 @@ val connection : _ Eio.Net.stream_socket -> int option
     have [reuse_addr]: as on Linux, an accepted end has its listener's, a client
     has none, and a listener's own hold refuses every other socket.
 
+    A [connect] without [bind_to] takes the next port down from the last one
+    such a connect took, from the top of the dynamic range, and from its top
+    again once past its bottom. As Linux's connect(2) does, it skips a port that
+    a listener or a [connect] bound with [bind_to] holds, open or in TIME_WAIT,
+    and one that another connection holds toward the same destination address
+    and port. Connections to different destinations thus share a port: the range
+    bounds the connections to each destination, not their sum. Given a clock, a
+    port in TIME_WAIT toward the same destination is free again for it once more
+    than a second has passed since the peer's FIN, as Linux reuses it on
+    loopback with [net.ipv4.tcp_tw_reuse] at its default; one in FIN_WAIT2 is
+    not. With no port left, the [connect] raises the error that
+    {!Address_not_available} marks.
+
     A [connect] bound with [bind_to] at its own destination, where no listener
     is, connects to itself, as Linux's simultaneous open does: it reads what it
     writes, and once closed holds its address in TIME_WAIT.
 
     A [connect] bound with [bind_to] holds that address, which the listener sees
-    as its peer's, at a port of the dynamic range for port 0. One at an address
-    a listener or another client holds raises the error that {!Address_in_use}
-    marks, a wildcard one by the rule [listen] follows: the IPv6 wildcard
-    address finds every hold on its port. Once connected from a wildcard
-    address, a client holds the address it sends from, and a later bind at a
-    wildcard address of its port finds it in use, as on Linux; one bound to an
-    IPv6 address connecting to an IPv4-mapped one, or the reverse, raises the
-    error that {!Network_unreachable} or {!Address_family} marks; one bound to
-    an address of another family raises, as Linux's bind(2) fails, the error
-    that {!Address_family} marks from an IPv4 socket, IPv6 or a path for IPv4,
-    and the one that {!Invalid_address} marks from an IPv6 or a Unix-domain
-    socket, IPv4 for IPv6 or TCP for a path. Under [`Macos] each of these raises
-    the error that {!Address_family} marks, as macOS's bind(2) fails with
-    EAFNOSUPPORT for both.
+    as its peer's, for port 0 at the highest port of the dynamic range that
+    nothing holds, as a bind(2) before its connect(2) takes a port of its own
+    there. One at an address a listener or another client holds raises the error
+    that {!Address_in_use} marks, a wildcard one by the rule [listen] follows:
+    the IPv6 wildcard address finds every hold on its port. Once connected from
+    a wildcard address, a client holds the address it sends from, and a later
+    bind at a wildcard address of its port finds it in use, as on Linux; one
+    bound to an IPv6 address connecting to an IPv4-mapped one, or the reverse,
+    raises the error that {!Network_unreachable} or {!Address_family} marks; one
+    bound to an address of another family raises, as Linux's bind(2) fails, the
+    error that {!Address_family} marks from an IPv4 socket, IPv6 or a path for
+    IPv4, and the one that {!Invalid_address} marks from an IPv6 or a
+    Unix-domain socket, IPv4 for IPv6 or TCP for a path. Under [`Macos] each of
+    these raises the error that {!Address_family} marks, as macOS's bind(2)
+    fails with EAFNOSUPPORT for both.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and
@@ -477,13 +491,16 @@ val connection : _ Eio.Net.stream_socket -> int option
       {!Host_unreachable} marks from a [connect]. A [connect] bound at its own
       destination raises the error that {!Invalid_address} marks.
     - Ports. A TCP port of [0] takes the next free port of the range, counting
-      up from the last one taken, for listeners and clients alike. A bind looks
-      up its port as the BSDs do: with [reuse_addr] only a socket at the same
-      address that is not connected conflicts, a listener or a datagram socket;
-      without, any socket at an overlapping address does, connected ones and
-      TIME_WAIT included. An IPv6 socket at [::] or an IPv4-mapped address also
-      looks at the IPv4 side, where a socket at 0.0.0.0 does not conflict with
-      it. A [connect] that fails frees its address at once.
+      up from the last one taken, for listeners and clients alike. A [connect]
+      without [bind_to] takes one too: macOS shares no port between
+      destinations, and holds one in TIME_WAIT toward any of them for its 30
+      seconds. A bind looks up its port as the BSDs do: with [reuse_addr] only a
+      socket at the same address that is not connected conflicts, a listener or
+      a datagram socket; without, any socket at an overlapping address does,
+      connected ones and TIME_WAIT included. An IPv6 socket at [::] or an
+      IPv4-mapped address also looks at the IPv4 side, where a socket at 0.0.0.0
+      does not conflict with it. A [connect] that fails frees its address at
+      once.
     - Listeners. The accept queue takes [backlog] connections, 128 for a
       [backlog] of 0 or less or past [kern.ipc.somaxconn]; a [connect] past it
       raises [Connection_reset] at once.
