@@ -7,5 +7,6 @@ let () =
       Test_probe.suite;
       Test_review3.suite;
       Test_review4.suite;
+      Test_dead_peer.suite;
       Test_guards.suite;
     ]

@@ -900,6 +900,63 @@ let test_unix_hang_keeps_written () =
     "TCP" "timeout"
     (run (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)))
 
+(* A read that hangs silences its connection for good, as a peer that lost
+   power or a partition does: the client's close reaches no one. The server
+   reads what was queued to it on AF_UNIX, nothing over TCP, then waits; its
+   writes fill the queue, then wait until its own shutdown ends them. *)
+let test_hang_silences () =
+  let run addr =
+    Eio_mock.Backend.run_full @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let f (op : Op.t) =
+      if op.kind = `Read && op.side = `Client then Some Fault.Hang else None
+    in
+    let net =
+      Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~capacity:4096 ~sw ())
+    in
+    let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    let server, _ = Eio.Net.accept ~sw l in
+    let timed f =
+      match Eio.Time.with_timeout env#clock 1.0 (fun () -> Ok (f ())) with
+      | Ok s -> s
+      | Error `Timeout -> "timeout"
+      | exception End_of_file -> "eof"
+      | exception e when is_reset e -> "reset"
+    in
+    Eio.Flow.copy_string "ab" client;
+    let hung = timed (fun () -> read1 client) in
+    Eio.Flow.close client;
+    let r1 = timed (fun () -> read1 server) in
+    let r2 = timed (fun () -> read1 server) in
+    let written = ref 0 in
+    let filled =
+      timed (fun () ->
+          while true do
+            Eio.Flow.copy_string (String.make 1024 'x') server;
+            written := !written + 1024
+          done;
+          "")
+    in
+    let blocked = ref "" in
+    Eio.Fiber.both
+      (fun () ->
+        blocked :=
+          timed (fun () ->
+              Eio.Flow.copy_string "y" server;
+              "y"))
+      (fun () ->
+        Eio.Time.sleep env#clock 0.5;
+        Eio.Flow.shutdown server `Send);
+    Fmt.str "%s %s %s %s %d %s" hung r1 r2 filled !written !blocked
+  in
+  Alcotest.(check string)
+    "TCP" "timeout timeout timeout timeout 4096 reset"
+    (run (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)));
+  Alcotest.(check string)
+    "AF_UNIX" "timeout ab timeout timeout 4096 reset"
+    (run (`Unix "/tmp/s.sock"))
+
 (* --- Domains ------------------------------------------------------------- *)
 
 (* Writers in two domains share one count of bytes written: with a reset on
@@ -1183,6 +1240,8 @@ let suite =
         test_unix_cut_keeps_written;
       Alcotest.test_case "an AF_UNIX hang keeps the bytes written" `Quick
         test_unix_hang_keeps_written;
+      Alcotest.test_case "a hang silences the connection" `Quick
+        test_hang_silences;
       Alcotest.test_case "an AF_UNIX hang stops a write under way" `Quick
         test_unix_hang_stops_write;
       Alcotest.test_case "a write after the peer's close" `Quick
