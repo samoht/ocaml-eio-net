@@ -920,6 +920,65 @@ let lookups =
   ignore (Eio.Net.getaddrinfo env#net "localhost");
   true
 
+(* [n] clients that each send 4 KiB to an echo server and read it back.
+   Under one-byte reads or writes each 4 KiB takes about 4096 operations
+   each way. *)
+let echo n () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:128 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let r = Eio.Buf_read.of_flow flow ~max_size:4096 in
+          match
+            Eio.Time.with_timeout_exn env#clock 10. (fun () ->
+                Eio.Buf_read.take 4096 r)
+          with
+          | s -> Eio.Flow.copy_string s flow
+          | exception (Eio.Time.Timeout | End_of_file | Eio.Io _) -> ()));
+  let msg = String.init 4096 (fun i -> Char.chr (65 + (i mod 26))) in
+  Eio.Fiber.List.iter
+    (fun _ ->
+      match
+        Eio.Time.with_timeout_exn env#clock 20. (fun () ->
+            Eio.Switch.run @@ fun sw ->
+            let flow = Eio.Net.connect ~sw env#net addr in
+            Eio.Flow.copy_string msg flow;
+            Eio.Buf_read.take 4096 (Eio.Buf_read.of_flow flow ~max_size:4096))
+      with
+      | s -> if s <> msg then failwith "a corrupt echo"
+      | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) -> ())
+    (List.init n Fun.id)
+
+(* A client that reads a reply of 4 KiB, and polls with yields for ever if
+   that took more than 100 reads. *)
+let slow_reply () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      (try
+         let flow, _ = Eio.Net.accept ~sw l in
+         Eio.Flow.copy_string (String.make 4096 'x') flow;
+         Eio.Flow.shutdown flow `Send
+       with Eio.Io _ -> ());
+      `Stop_daemon);
+  match Eio.Net.connect ~sw env#net addr with
+  | exception Eio.Io _ -> ()
+  | flow ->
+      let reads = ref 0 and buf = Cstruct.create 4096 in
+      (try
+         Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+         while true do
+           ignore (Eio.Flow.single_read flow buf);
+           incr reads
+         done
+       with End_of_file | Eio.Io _ | Eio.Time.Timeout -> ());
+      if !reads > 100 then
+        while true do
+          Eio.Fiber.yield ()
+        done
+
 (* A ping-pong that never ends holds a bounded trace while it runs: the
    live words, sampled as it goes, stay under three million. *)
 let test_busy_memory () =
@@ -1043,6 +1102,13 @@ let suite =
         (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
         (Expect.passes (transfer 25 4096));
+      Alcotest.test_case "20 clients of a 4 KiB echo meet one-byte reads" `Quick
+        (Expect.passes (echo 20));
+      Alcotest.test_case "a run the one-byte reads multiplied says so" `Quick
+        (error_is
+           "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
+            loop; one-byte reads multiplied its operations, 4096 of them"
+           slow_reply);
       Alcotest.test_case "a linear tier past the budget fails" `Quick
         (refused_with
            "Eio_net_chaos.check: the linear tier needs 69 runs, more than the \
