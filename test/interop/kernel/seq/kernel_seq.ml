@@ -1226,6 +1226,142 @@ let dgram_error_cases =
     ("v4->224.0.0.1", "127.0.0.1", "224.0.0.1");
   ]
 
+(* A writer blocked on a full queue, and what a shutdown [how] by [who]
+   does: the reader's reads until one waits or ends, whether the write still
+   waits, and how it ends once the reader closes. The bytes read are only
+   said to be some, as the kernels queue different amounts. *)
+let blocked_writer ~unix ~who how net =
+  Eio.Switch.run @@ fun sw ->
+  let addr =
+    if unix then begin
+      if Sys.file_exists "bw.sock" then Unix.unlink "bw.sock";
+      `Unix "bw.sock"
+    end
+    else `Tcp (ip "127.0.0.1", 0)
+  in
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let c =
+    Eio.Net.connect ~sw net
+      (match addr with `Unix _ -> addr | `Tcp _ -> Eio.Net.listening_addr l)
+  in
+  let r, _ = Eio.Net.accept ~sw l in
+  let chunk = Cstruct.create 65536 in
+  let w =
+    Eio.Fiber.fork_promise ~sw (fun () ->
+        outcome (fun () ->
+            while true do
+              Eio.Flow.write c [ chunk ]
+            done;
+            "ok"))
+  in
+  let waits () =
+    for _ = 1 to 64 do
+      Eio.Fiber.yield ()
+    done;
+    match Eio.Promise.peek w with
+    | None -> "blk"
+    | Some (Ok s) -> s
+    | Some (Error e) -> classify e
+  in
+  let before = waits () in
+  (match who with
+  | `Reader -> Eio.Flow.shutdown r how
+  | `Writer -> Eio.Flow.shutdown c how);
+  let buf = Cstruct.create 65536 in
+  (* Its own bound, past what any queue holds: reads that free room for
+     the writer would otherwise go on for ever. *)
+  let rec reads total =
+    match now (fun () -> Eio.Flow.single_read r buf) with
+    | _ when total > 64 * 1024 * 1024 -> "data more"
+    | n -> reads (total + n)
+    | exception e ->
+        let e = match e with Blocked -> "blk" | e -> classify e in
+        (if total > 0 then "data " else "") ^ e
+  in
+  let read = reads 0 in
+  let after = waits () in
+  Eio.Resource.close r;
+  (* A reader that also shut its sending lingers in FIN-WAIT once closed,
+     and Linux resets the writer only when its next probe comes. *)
+  let closed = if how = `All then [] else [ waits () ] in
+  String.concat " " ([ before; read; after ] @ closed)
+
+(* A datagram sent from [src] to [dst], which only loopback could carry. *)
+let send_only src dst net =
+  Eio.Switch.run @@ fun sw ->
+  let s = Eio.Net.datagram_socket ~sw net (`Udp (ip src, 0)) in
+  outcome (fun () ->
+      Eio.Net.send s ~dst:(`Udp (ip dst, 9)) [ Cstruct.create 10 ];
+      "sent")
+
+let off_loopback_routes =
+  List.map
+    (fun d ->
+      ( Fmt.str "off loopback: connect %s from ::ffff:127.0.0.1" d,
+        fun net -> edge_connect ~bind:"::ffff:127.0.0.1" d net ))
+    [
+      "::127.0.0.1";
+      "2001:db8::1";
+      "fc00::1";
+      "::2";
+      "64:ff9b::a00:1";
+      "fe80::1";
+      "::ffff:10.0.0.1";
+      "ff02::1";
+    ]
+  @ List.concat_map
+      (fun d ->
+        List.map
+          (fun bind ->
+            ( Fmt.str "off loopback: connect %s from %s" d
+                (Option.value bind ~default:"-"),
+              fun net -> edge_connect ?bind d net ))
+          [ None; Some "127.0.0.1" ])
+      [
+        "127.255.255.255";
+        "255.255.255.255";
+        "10.0.0.1";
+        "169.254.1.1";
+        "240.0.0.1";
+        "0.1.2.3";
+      ]
+  @ List.concat_map
+      (fun d ->
+        List.map
+          (fun src ->
+            (Fmt.str "off loopback: send %s from %s" d src, send_only src d))
+          [ "0.0.0.0"; "::"; "127.0.0.1"; "::1"; "::ffff:127.0.0.1" ])
+      [
+        "127.255.255.255";
+        "255.255.255.255";
+        "224.0.0.1";
+        "239.1.1.1";
+        "::ffff:224.0.0.1";
+        "::ffff:255.255.255.255";
+        "ff02::1";
+        "ff0e::1";
+        "ff01::1";
+        "10.0.0.1";
+        "169.254.1.1";
+        "240.0.0.1";
+        "0.1.2.3";
+        "::ffff:10.0.0.1";
+      ]
+
+let blocked_writers =
+  List.concat_map
+    (fun (unix, family) ->
+      List.map
+        (fun (who, how, name) ->
+          ( Fmt.str "blocked %s writer: %s" family name,
+            blocked_writer ~unix ~who how ))
+        [
+          (`Reader, `Receive, "reader shuts receive");
+          (`Reader, `All, "reader shuts down");
+          (`Writer, `Send, "writer shuts send");
+        ])
+    [ (false, "tcp"); (true, "unix") ]
+
 let untimed_scenarios : (string * (net -> string)) list =
   [ ("three", three) ]
   @ List.map (fun n -> (Fmt.str "backlog %d" n, backlog n)) [ 0; 1; 2; 5 ]
@@ -1391,6 +1527,7 @@ let untimed_scenarios : (string * (net -> string)) list =
         ("listen ::1", `Listen "::1");
         ("client 127.0.0.1", `Client "127.0.0.1");
       ]
+  @ blocked_writers
   @ List.map
       (fun d -> ("off loopback: connect " ^ d, off_loopback_connect d))
       off_loopback_ips
@@ -1404,10 +1541,27 @@ let untimed_scenarios : (string * (net -> string)) list =
            else if String.contains d '.' then [ "::" ]
            else [ "::"; "::ffff:127.0.0.1" ]))
       off_loopback_ips
+  @ off_loopback_routes
+
+(* A scenario sent off loopback is recorded on a host with loopback only,
+   which mem models: a host with other routes refuses a loopback source
+   with EINVAL instead. *)
+let routed_off (name, f) =
+  let prefixes = [ "dgram error"; "edge connect" ] in
+  let off =
+    List.exists (fun prefix -> String.starts_with ~prefix name) prefixes
+    &&
+    let n = String.length name and m = String.length "10.1.2.3" in
+    let rec has i =
+      i + m <= n && (String.sub name i m = "10.1.2.3" || has (i + 1))
+    in
+    has 0
+  in
+  ((if off then "off loopback: " ^ name else name), f)
 
 let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
   let untimed (name, f) = (name, fun ~wait:_ net -> f net) in
-  List.map untimed untimed_scenarios
+  List.map untimed (List.map routed_off untimed_scenarios)
   @ List.map
       (fun (name, order) -> ("timed: " ^ name, timed_close order))
       timed_cases

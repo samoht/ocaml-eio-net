@@ -97,9 +97,9 @@ let test_transport t () =
   match unexpected with
   | [] -> ()
   | l ->
-      List.iteri (fun i s -> if i < 20 then Fmt.epr "%s@." s) l;
-      Alcotest.failf "%d of %d %s sequences differ from Linux" (List.length l)
-        (List.length rows) (transport_name t)
+      Alcotest.failf "%d of %d %s sequences differ from Linux:@.%s"
+        (List.length l) (List.length rows) (transport_name t)
+        (String.concat "\n" l)
 
 (* A scenario where mem may differ from Linux, and when: given the
    scenario's name, mem's outcome and Linux's. *)
@@ -254,9 +254,8 @@ let test_scenarios () =
   match unexpected with
   | [] -> ()
   | l ->
-      List.iteri (fun i s -> if i < 400 then Fmt.epr "%s@." s) l;
-      Alcotest.failf "%d of %d scenarios differ from Linux" (List.length l)
-        (List.length rows)
+      Alcotest.failf "%d of %d scenarios differ from Linux:@.%s" (List.length l)
+        (List.length rows) (String.concat "\n" l)
 
 let test_exceptions_needed () =
   List.iter

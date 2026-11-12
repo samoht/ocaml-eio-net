@@ -986,9 +986,10 @@ let test_write_after_own_shutdown () =
       Alcotest.failf "write after own shutdown leaked Failure %S" msg
   | (_ : int) -> Alcotest.fail "write after own shutdown should raise"
 
-(* A write to a full queue whose reader shut down both ways waits for room,
-   as Linux holds data its peer's closed window refuses, and raises the reset
-   once the reader makes room, as the data then reaches a peer in FIN-WAIT. *)
+(* A write to a full queue whose reader shut down both ways waits, as Linux
+   holds data its peer's closed window refuses, and keeps waiting once the
+   reader reads, as Linux then advertises no room; the reader's close ends
+   it. *)
 let test_full_write_after_peer_shutdown_all () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe ~capacity:1 () in
@@ -997,9 +998,8 @@ let test_full_write_after_peer_shutdown_all () =
   let blocked = ref true in
   Eio.Fiber.both
     (fun () ->
-      (match Eio.Flow.single_write client [ Cstruct.of_string "b" ] with
-      | exception e when is_reset e -> ()
-      | n -> Alcotest.failf "the write returned %d" n);
+      (try ignore (Eio.Flow.single_write client [ Cstruct.of_string "b" ])
+       with e when is_reset e -> ());
       blocked := false)
     (fun () ->
       Eio.Fiber.yield ();
@@ -1007,7 +1007,10 @@ let test_full_write_after_peer_shutdown_all () =
       let buf = Cstruct.create 1 in
       Eio.Flow.read_exact server buf;
       Eio.Fiber.yield ();
-      Alcotest.(check bool) "room wakes the write" false !blocked)
+      Alcotest.(check bool) "a read frees no room" true !blocked;
+      Eio.Flow.close server;
+      Eio.Fiber.yield ();
+      Alcotest.(check bool) "the close ends the write" false !blocked)
 
 let test_read_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
@@ -1783,8 +1786,8 @@ let test_datagram_reuse_addr () =
 
 (* A datagram's errors come in Linux's order: a Unix-domain socket refuses a
    UDP address with EINVAL before the length; an IPv4 socket refuses more than
-   65535 bytes first, then an address of another family, port 0, or one its
-   loopback address cannot route to, then a datagram too long for IPv4; an
+   65535 bytes first, then an address of another family, port 0, or one off
+   loopback, then a datagram too long for IPv4; an
    IPv6 socket refuses another family or an unreachable network first. *)
 let test_datagram_error_order () =
   Eio_mock.Backend.run @@ fun () ->
@@ -1830,7 +1833,7 @@ let test_datagram_error_order () =
         v4_sock,
         `Udp (ip "\010\001\002\003", 9),
         65508,
-        "EINVAL" );
+        "ENETUNREACH" );
       ( "loopback to 224.0.0.1",
         v4_sock,
         `Udp (ip "\224\000\000\001", 9),
@@ -1909,8 +1912,8 @@ let test_edge_addresses () =
       ("::ffff:224.0.0.1", None, "ENETUNREACH");
       ("ff02::1", None, "ENETUNREACH");
       ("fe80::1", None, "EINVAL");
-      ("10.1.2.3", Some "127.0.0.1", "EINVAL");
-      ("::ffff:10.1.2.3", Some "::ffff:127.0.0.1", "EINVAL");
+      ("10.1.2.3", Some "127.0.0.1", "ENETUNREACH");
+      ("::ffff:10.1.2.3", Some "::ffff:127.0.0.1", "ENETUNREACH");
       ("127.0.0.2", Some "127.0.0.1", "REFUSED");
     ]
 

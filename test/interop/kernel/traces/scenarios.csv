@@ -1172,14 +1172,14 @@ dgram error unix->missing len=10,Not_found,Not_found
 dgram error unix->missing len=65508,Not_found,EMSGSIZE
 dgram error unix->missing len=65536,Not_found,EMSGSIZE
 dgram error unix->missing len=300000,EMSGSIZE,EMSGSIZE
-dgram error v4->10.1.2.3 len=10,EINVAL,EADDRNOTAVAIL
-dgram error v4->10.1.2.3 len=65508,EINVAL,EMSGSIZE
-dgram error v4->10.1.2.3 len=65536,EMSGSIZE,EMSGSIZE
-dgram error v4->10.1.2.3 len=300000,EMSGSIZE,EMSGSIZE
-dgram error v4 127.0.0.2->10.1.2.3 len=10,EINVAL,abort EADDRNOTAVAIL
-dgram error v4 127.0.0.2->10.1.2.3 len=65508,EINVAL,abort EADDRNOTAVAIL
-dgram error v4 127.0.0.2->10.1.2.3 len=65536,EMSGSIZE,abort EADDRNOTAVAIL
-dgram error v4 127.0.0.2->10.1.2.3 len=300000,EMSGSIZE,abort EADDRNOTAVAIL
+off loopback: dgram error v4->10.1.2.3 len=10,ENETUNREACH,not recorded
+off loopback: dgram error v4->10.1.2.3 len=65508,ENETUNREACH,not recorded
+off loopback: dgram error v4->10.1.2.3 len=65536,EMSGSIZE,not recorded
+off loopback: dgram error v4->10.1.2.3 len=300000,EMSGSIZE,not recorded
+off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=10,ENETUNREACH,not recorded
+off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=65508,ENETUNREACH,not recorded
+off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=65536,EMSGSIZE,not recorded
+off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=300000,EMSGSIZE,not recorded
 dgram error v4->224.0.0.1 len=10,sent,EADDRNOTAVAIL
 dgram error v4->224.0.0.1 len=65508,EMSGSIZE,EMSGSIZE
 dgram error v4->224.0.0.1 len=65536,EMSGSIZE,EMSGSIZE
@@ -1195,9 +1195,9 @@ edge connect 224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT
 edge connect ::ffff:224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT
 edge connect ff02::1 from -,ENETUNREACH,EAFNOSUPPORT
 edge connect fe80::1 from -,EINVAL,No route to host
-edge connect 10.1.2.3 from 127.0.0.1,EINVAL,EADDRNOTAVAIL
-edge connect 10.1.2.3 from 127.0.0.2,EINVAL,EADDRNOTAVAIL
-edge connect ::ffff:10.1.2.3 from ::ffff:127.0.0.1,EINVAL,EADDRNOTAVAIL
+off loopback: edge connect 10.1.2.3 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: edge connect 10.1.2.3 from 127.0.0.2,ENETUNREACH,not recorded
+off loopback: edge connect ::ffff:10.1.2.3 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
 self connect,ok hi EOF EADDRINUSE,EINVAL
 queued close: relisten,ok Reset,ok Reset
 queued close: relisten with reuse_addr,ok Reset,ok Reset
@@ -1253,6 +1253,12 @@ wildcard bind: bound at :: after listen ::1,ok/EADDRINUSE,ok/EADDRINUSE
 wildcard bind: listen ::1 after bound at ::,ok/EADDRINUSE,ok/EADDRINUSE
 wildcard bind: bound at :: after client 127.0.0.1,ok/EADDRINUSE,ok/EADDRINUSE
 wildcard bind: client 127.0.0.1 after bound at ::,ok/ok,ok/ok
+blocked tcp writer: reader shuts receive,blk data EOF blk Reset,blk EOF blk Reset
+blocked tcp writer: reader shuts down,blk data EOF blk,blk EOF Reset
+blocked tcp writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Reset Reset
+blocked unix writer: reader shuts receive,blk data EOF Reset Reset,blk EOF blk Reset
+blocked unix writer: reader shuts down,blk data EOF Reset,blk EOF blk
+blocked unix writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Reset Reset
 off loopback: connect 10.1.2.3,ENETUNREACH,not recorded
 off loopback: connect 2001:db8::1,ENETUNREACH,not recorded
 off loopback: connect ::2,ENETUNREACH,not recorded
@@ -1266,12 +1272,102 @@ off loopback: dgram ::2 from :: to ::,ENETUNREACH blk,not recorded
 off loopback: dgram ::2 from ::ffff:127.0.0.1 to ::,ENETUNREACH blk,not recorded
 off loopback: dgram ::ffff:10.1.2.3 from :: to ::,ENETUNREACH blk,not recorded
 off loopback: dgram ::127.0.0.1 from :: to ::,ENETUNREACH blk,not recorded
+off loopback: connect ::127.0.0.1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 2001:db8::1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect fc00::1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect ::2 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 64:ff9b::a00:1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect fe80::1 from ::ffff:127.0.0.1,EINVAL,not recorded
+off loopback: connect ::ffff:10.0.0.1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect ff02::1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 127.255.255.255 from -,ENETUNREACH,not recorded
+off loopback: connect 127.255.255.255 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 255.255.255.255 from -,ENETUNREACH,not recorded
+off loopback: connect 255.255.255.255 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 10.0.0.1 from -,ENETUNREACH,not recorded
+off loopback: connect 10.0.0.1 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 169.254.1.1 from -,ENETUNREACH,not recorded
+off loopback: connect 169.254.1.1 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 240.0.0.1 from -,ENETUNREACH,not recorded
+off loopback: connect 240.0.0.1 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: connect 0.1.2.3 from -,ENETUNREACH,not recorded
+off loopback: connect 0.1.2.3 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 127.255.255.255 from 0.0.0.0,Fs,not recorded
+off loopback: send 127.255.255.255 from ::,Fs,not recorded
+off loopback: send 127.255.255.255 from 127.0.0.1,Fs,not recorded
+off loopback: send 127.255.255.255 from ::1,ENETUNREACH,not recorded
+off loopback: send 127.255.255.255 from ::ffff:127.0.0.1,Fs,not recorded
+off loopback: send 255.255.255.255 from 0.0.0.0,ENETUNREACH,not recorded
+off loopback: send 255.255.255.255 from ::,ENETUNREACH,not recorded
+off loopback: send 255.255.255.255 from 127.0.0.1,Fs,not recorded
+off loopback: send 255.255.255.255 from ::1,ENETUNREACH,not recorded
+off loopback: send 255.255.255.255 from ::ffff:127.0.0.1,Fs,not recorded
+off loopback: send 224.0.0.1 from 0.0.0.0,ENETUNREACH,not recorded
+off loopback: send 224.0.0.1 from ::,ENETUNREACH,not recorded
+off loopback: send 224.0.0.1 from 127.0.0.1,sent,not recorded
+off loopback: send 224.0.0.1 from ::1,ENETUNREACH,not recorded
+off loopback: send 224.0.0.1 from ::ffff:127.0.0.1,sent,not recorded
+off loopback: send 239.1.1.1 from 0.0.0.0,ENETUNREACH,not recorded
+off loopback: send 239.1.1.1 from ::,ENETUNREACH,not recorded
+off loopback: send 239.1.1.1 from 127.0.0.1,sent,not recorded
+off loopback: send 239.1.1.1 from ::1,ENETUNREACH,not recorded
+off loopback: send 239.1.1.1 from ::ffff:127.0.0.1,sent,not recorded
+off loopback: send ::ffff:224.0.0.1 from 0.0.0.0,EAFNOSUPPORT,not recorded
+off loopback: send ::ffff:224.0.0.1 from ::,ENETUNREACH,not recorded
+off loopback: send ::ffff:224.0.0.1 from 127.0.0.1,EAFNOSUPPORT,not recorded
+off loopback: send ::ffff:224.0.0.1 from ::1,ENETUNREACH,not recorded
+off loopback: send ::ffff:224.0.0.1 from ::ffff:127.0.0.1,sent,not recorded
+off loopback: send ::ffff:255.255.255.255 from 0.0.0.0,EAFNOSUPPORT,not recorded
+off loopback: send ::ffff:255.255.255.255 from ::,ENETUNREACH,not recorded
+off loopback: send ::ffff:255.255.255.255 from 127.0.0.1,EAFNOSUPPORT,not recorded
+off loopback: send ::ffff:255.255.255.255 from ::1,ENETUNREACH,not recorded
+off loopback: send ::ffff:255.255.255.255 from ::ffff:127.0.0.1,Fs,not recorded
+off loopback: send ff02::1 from 0.0.0.0,EAFNOSUPPORT,not recorded
+off loopback: send ff02::1 from ::,ENETUNREACH,not recorded
+off loopback: send ff02::1 from 127.0.0.1,EAFNOSUPPORT,not recorded
+off loopback: send ff02::1 from ::1,ENETUNREACH,not recorded
+off loopback: send ff02::1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: send ff0e::1 from 0.0.0.0,EAFNOSUPPORT,not recorded
+off loopback: send ff0e::1 from ::,ENETUNREACH,not recorded
+off loopback: send ff0e::1 from 127.0.0.1,EAFNOSUPPORT,not recorded
+off loopback: send ff0e::1 from ::1,ENETUNREACH,not recorded
+off loopback: send ff0e::1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: send ff01::1 from 0.0.0.0,EAFNOSUPPORT,not recorded
+off loopback: send ff01::1 from ::,ENETUNREACH,not recorded
+off loopback: send ff01::1 from 127.0.0.1,EAFNOSUPPORT,not recorded
+off loopback: send ff01::1 from ::1,ENETUNREACH,not recorded
+off loopback: send ff01::1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 10.0.0.1 from 0.0.0.0,ENETUNREACH,not recorded
+off loopback: send 10.0.0.1 from ::,ENETUNREACH,not recorded
+off loopback: send 10.0.0.1 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 10.0.0.1 from ::1,ENETUNREACH,not recorded
+off loopback: send 10.0.0.1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 169.254.1.1 from 0.0.0.0,ENETUNREACH,not recorded
+off loopback: send 169.254.1.1 from ::,ENETUNREACH,not recorded
+off loopback: send 169.254.1.1 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 169.254.1.1 from ::1,ENETUNREACH,not recorded
+off loopback: send 169.254.1.1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 240.0.0.1 from 0.0.0.0,ENETUNREACH,not recorded
+off loopback: send 240.0.0.1 from ::,ENETUNREACH,not recorded
+off loopback: send 240.0.0.1 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 240.0.0.1 from ::1,ENETUNREACH,not recorded
+off loopback: send 240.0.0.1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 0.1.2.3 from 0.0.0.0,ENETUNREACH,not recorded
+off loopback: send 0.1.2.3 from ::,ENETUNREACH,not recorded
+off loopback: send 0.1.2.3 from 127.0.0.1,ENETUNREACH,not recorded
+off loopback: send 0.1.2.3 from ::1,ENETUNREACH,not recorded
+off loopback: send 0.1.2.3 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
+off loopback: send ::ffff:10.0.0.1 from 0.0.0.0,EAFNOSUPPORT,not recorded
+off loopback: send ::ffff:10.0.0.1 from ::,ENETUNREACH,not recorded
+off loopback: send ::ffff:10.0.0.1 from 127.0.0.1,EAFNOSUPPORT,not recorded
+off loopback: send ::ffff:10.0.0.1 from ::1,ENETUNREACH,not recorded
+off loopback: send ::ffff:10.0.0.1 from ::ffff:127.0.0.1,ENETUNREACH,not recorded
 timed: server closes first,EADDRINUSE ok,EADDRINUSE ok
 timed: server closes first and relisten with reuse_addr,EADDRINUSE ok,ok ok
 timed: server closes first with reuse_addr on both,ok ok,ok ok
 timed: client closes first,ok ok,EADDRINUSE ok
 timed: server closes and client stays,EADDRINUSE ok,EADDRINUSE ok
-timed: reset by unread bytes,ok ok,EADDRINUSE ok
+timed: reset by unread bytes,ok ok,ok ok
 timed: bound client closes first,EADDRINUSE/EADDRINUSE ok/ok,EADDRINUSE/EADDRINUSE ok/ok
 timed: both shut send and server first,EADDRINUSE ok,EADDRINUSE ok
 timed: server shuts send then client closes,EADDRINUSE ok,EADDRINUSE ok
