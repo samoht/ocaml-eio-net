@@ -67,6 +67,12 @@ val looked_at : unit -> int
 (** [looked_at ()] is the operations of runs the plans made so far have looked
     at, in all: a test of their cost reads it. *)
 
+val split : scenario -> Op.t -> bool
+(** [split s op] is [true] iff a one-byte condition of [s] splits [op]: a read
+    of the first 4 KiB of an end over IP under {!constructor-Short_reads}, and a
+    read or a write of them under {!constructor-Short_writes}, as the peer of a
+    one-byte write reads one byte at a time. *)
+
 val faults : scenario -> Op.t -> Fault.t option
 (** [faults s op] is the fault [op] meets in a run of [s]. A rule cuts the read
     or write that spans its position short, so the next one starts there.

@@ -336,13 +336,23 @@ let sampled_share ~budget ~linear ~classes =
   let spend = min (budget - linear) (max 200 (linear / 2)) in
   max 0 spend / max 1 classes
 
+let one_byte = 4096
+
+let split s (op : Op.t) =
+  op.offset < one_byte && op.family = `Inet
+  &&
+  match (s.lasting, op.kind) with
+  | Some Short_reads, `Read | Some Short_writes, (`Read | `Write) -> true
+  | _ -> false
+
 let faults s =
   let pending = ref s.rules in
   fun (op : Op.t) ->
     match (s.lasting, op.kind) with
-    | Some Short_reads, `Read when op.offset < 4096 && op.family = `Inet ->
+    | Some Short_reads, `Read when op.offset < one_byte && op.family = `Inet ->
         Some (Fault.Short 1)
-    | Some Short_writes, `Write when op.offset < 4096 && op.family = `Inet ->
+    | Some Short_writes, `Write when op.offset < one_byte && op.family = `Inet
+      ->
         Some (Short 1)
     | Some Coalesce, `Read -> Some (Stall 0.005)
     | Some Tiny_buffers, `Write when op.length > tiny_buffer ->

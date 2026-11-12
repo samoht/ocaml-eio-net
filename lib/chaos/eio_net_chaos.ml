@@ -37,7 +37,7 @@ let exec_with ~observe run (s : Plan.scenario) =
     observe op fault;
     fault
   in
-  let wrapped = ref None in
+  let wrapped = ref None and stopped = ref false in
   let failed =
     match
       Quiet_mock.run ~limit:3600. @@ fun clock mono_clock charge ->
@@ -49,8 +49,8 @@ let exec_with ~observe run (s : Plan.scenario) =
       in
       let base = Eio_net_mem.v ?capacity ~clock:mono_clock ~sw () in
       let net =
-        Wrapper.v ~max_ops ~charge ~clock ~outage:(s.lasting = Some Outage) f
-          base
+        Wrapper.v ~max_ops ~split:(Plan.split s) ~charge ~clock
+          ~outage:(s.lasting = Some Outage) f base
       in
       wrapped := Some net;
       run
@@ -66,28 +66,72 @@ let exec_with ~observe run (s : Plan.scenario) =
     | exception Quiet_mock.Time_limit ->
         Some "the run hangs: it is still running after an hour of its clock"
     | exception Quiet_mock.Busy_loop ->
+        stopped := true;
         Some
           "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
            loop"
     | exception Quiet_mock.Too_many_turns ->
+        stopped := true;
         Some
           ("the run took 10,000,000 turns, more than a check can repeat: "
          ^ too_large)
     | exception x -> Some (Printexc.to_string x)
   in
+  (* A run stopped at a limit says how many of its operations a one-byte
+     condition split. *)
+  let multiplied net msg =
+    match (s.lasting, Wrapper.splits net) with
+    | Some ((Short_reads | Short_writes) as l), n when n > 0 ->
+        Fmt.str "%s; one-byte %s multiplied its operations, %d of them" msg
+          (if l = Short_reads then "reads" else "writes")
+          n
+    | _ -> msg
+  in
   match !wrapped with
-  | Some net when Wrapper.overrun net -> Some ops_message
+  | Some net when Wrapper.overrun net -> Some (multiplied net ops_message)
   | Some net when Wrapper.livelocked net ->
       Some ("the run hangs: " ^ Wrapper.livelock_message)
+  | Some net when !stopped -> Option.map (multiplied net) failed
   | _ -> failed
 
-(* A run of [s]: its operations, and why it failed if it did. *)
-let exec run s =
-  let trace = ref [] in
-  let failed =
-    exec_with ~observe:(fun op fault -> trace := (op, fault) :: !trace) run s
+(* The operations of a run a report shows: all of them, or, for a lasting
+   condition, which a one-byte one may multiply up to the limit on turns, the
+   first and the last [kept], and how many were left out between. *)
+type shown = { head : Plan.trace; left_out : int; tail : Plan.trace }
+
+let kept = 10_000
+
+(* A run of [s]: the operations a report shows, and why it failed if it
+   did. *)
+let exec_shown run (s : Plan.scenario) =
+  let head = ref [] and n = ref 0 in
+  let tail = Queue.create () and left_out = ref 0 in
+  let observe op fault =
+    if Option.is_none s.lasting || !n < kept then begin
+      head := (op, fault) :: !head;
+      incr n
+    end
+    else begin
+      Queue.push (op, fault) tail;
+      if Queue.length tail > kept then begin
+        ignore (Queue.pop tail : Op.t * Fault.t option);
+        incr left_out
+      end
+    end
   in
-  (List.rev !trace, failed)
+  let failed = exec_with ~observe run s in
+  ( {
+      head = List.rev !head;
+      left_out = !left_out;
+      tail = List.of_seq (Queue.to_seq tail);
+    },
+    failed )
+
+(* A run of a scenario with no lasting condition: all its operations, and why
+   it failed if it did. *)
+let exec run s =
+  let shown, failed = exec_shown run s in
+  (shown.head, failed)
 
 (* {1 Reports} *)
 
@@ -116,6 +160,7 @@ let socket ((op : Op.t), _) = op.socket
 type line =
   | Op of (Op.t * Fault.t option)
   | Repeated of { period : int; times : int; first : int; last : int }
+  | Left_out of int
 
 let max_period = 8
 let min_times = 3
@@ -184,8 +229,13 @@ let collapse trace =
 let keep = 100
 let context = 10
 
-let pp_trace rules ppf trace =
-  let lines = Array.of_list (collapse trace) in
+let pp_trace rules ppf { head; left_out; tail } =
+  let lines =
+    Array.of_list
+      (collapse head
+      @ (if left_out > 0 then [ Left_out left_out ] else [])
+      @ collapse tail)
+  in
   let n = Array.length lines in
   let first_fault =
     let rec find i =
@@ -193,7 +243,7 @@ let pp_trace rules ppf trace =
       else
         match lines.(i) with
         | Op (_, Some _) -> Some i
-        | Op (_, None) | Repeated _ -> find (i + 1)
+        | Op (_, None) | Repeated _ | Left_out _ -> find (i + 1)
     in
     find 0
   in
@@ -215,7 +265,10 @@ let pp_trace rules ppf trace =
               (if period = 1 then "" else "s")
               times
               (if times = 1 then "" else "s")
-              first last);
+              first last
+        | Left_out n ->
+            Fmt.pf ppf "    ... %d more operation%s, not kept@\n" n
+              (if n = 1 then "" else "s"));
         pp (i + 1)
       end
       else
@@ -306,7 +359,9 @@ let first_failed ~hash trace error =
     "%s: the run with no fault failed: %s@\n\
     \  trace:@\n\
      %a  replay:   ~replay:\"net/%s/%s\""
-    name error (pp_trace []) trace hash (Plan.key Plan.none)
+    name error (pp_trace [])
+    { head = trace; left_out = 0; tail = [] }
+    hash (Plan.key Plan.none)
 
 let check ?(budget = 2_000) ?replay run =
   if budget < 1 then Fmt.invalid_arg "%s: the budget is %d" name budget;
@@ -323,9 +378,9 @@ let check ?(budget = 2_000) ?replay run =
   let hash = digest first in
   let linear = Plan.linear first in
   let attempt ?matched tier s =
-    let trace, failed = exec run s in
-    Option.iter (report ?matched ~hash ~tier s trace) failed;
-    trace
+    let shown, failed = exec_shown run s in
+    Option.iter (report ?matched ~hash ~tier s shown) failed;
+    shown.head
   in
   match replay with
   | Some (h, k) -> (

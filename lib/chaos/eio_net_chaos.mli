@@ -120,9 +120,11 @@
     hundreds of times, so it cannot check a larger one, and the limit bounds the
     CPU time of each run. If none of its turns was a wait of 1 ms or more, the
     report calls the run a busy loop; otherwise, a busy loop or a workload too
-    large for a check. A run fails the same way after 100,000 network
-    operations, as a check plans from each of them, so that the operations it
-    keeps stay bounded. *)
+    large for a check. A run fails the same way after 100,000 connects, accepts,
+    reads, writes and receives, as a check plans from each of them, so that the
+    operations it keeps stay bounded. The reads and writes a one-byte condition
+    splits do not count: a report of a run stopped while they ran says how many
+    there were, and shows its first and last 10,000 operations. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t

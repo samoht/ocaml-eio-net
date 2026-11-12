@@ -4,6 +4,7 @@ type Eio.Exn.Backend.t += Injected_fault
 
 val v :
   ?max_ops:int ->
+  ?split:(Op.t -> bool) ->
   ?charge:(unit -> unit) ->
   clock:_ Eio.Time.clock ->
   outage:bool ->
@@ -14,8 +15,9 @@ val v :
     operation, as {!Eio_net_chaos.wrap} documents. [outage] is what {!outage}
     says of it. Each network operation, a listen, a send, a lookup or a close
     included, first calls [charge] (defaults to none). Once [max_ops] (defaults
-    to none) operations of the kinds [f] is asked about were made, every
-    operation waits for ever, and {!overrun} holds. *)
+    to none) operations [f] was asked about were made, every operation waits for
+    ever, and {!overrun} holds. Those of which [split] (defaults to none) holds
+    do not count: {!splits} does. *)
 
 val pair :
   clock:_ Eio.Time.clock ->
@@ -37,6 +39,9 @@ val livelock_message : string
 
 val overrun : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
 (** [overrun net] is [true] iff [net] reached its [max_ops]. *)
+
+val splits : [ `Generic ] Eio.Net.ty Eio.Resource.t -> int
+(** [splits net] is the operations of [net] its [split] held of. *)
 
 val threshold : int
 (** [threshold] is the failures of one operation on one target, while the clock

@@ -156,12 +156,14 @@ type target =
 
 (* What the wrappers of one network share. [lock] guards the counters and
    [pending], and runs [f], so [f] sees one operation at a time, in the order
-   of [index]. [ops] counts the operations of the kinds [f] is asked about,
-   and past [max_ops] of them [overrun] holds. [charge] takes a turn of the
-   run's clock for every network operation, and [charges] counts those
-   turns. *)
+   of [index]. [ops] counts the operations [f] is asked about but those
+   [split] holds of, which [splits] counts, and past [max_ops] of them
+   [overrun] holds. [charge] takes a turn of the run's clock for every network
+   operation, and [charges] counts those turns. *)
 type ctx = {
   f : Op.t -> Fault.t option;
+  split : Op.t -> bool;
+  mutable splits : int;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   charge : (unit -> unit) option;
   outage : bool;
@@ -183,9 +185,12 @@ type ctx = {
   overrun : bool Atomic.t;
 }
 
-let ctx ?(max_ops = max_int) ?charge ~clock ~outage f =
+let ctx ?(max_ops = max_int) ?(split = fun _ -> false) ?charge ~clock ~outage f
+    =
   {
     f;
+    split;
+    splits = 0;
     clock :> float Eio.Time.clock_ty Eio.Resource.t;
     charge;
     outage;
@@ -210,7 +215,11 @@ let ctx ?(max_ops = max_int) ?charge ~clock ~outage f =
 (* Under [ctx.lock]. *)
 let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
   ctx.index <- ctx.index + 1;
-  ctx.f { Op.index = ctx.index; kind; socket; side; family; offset; length }
+  let op =
+    { Op.index = ctx.index; kind; socket; side; family; offset; length }
+  in
+  if ctx.split op then ctx.splits <- ctx.splits + 1 else ctx.ops <- ctx.ops + 1;
+  ctx.f op
 
 let locked (ctx : ctx) f = Mutex.protect ctx.lock f
 
@@ -269,16 +278,11 @@ let charge ctx =
       locked ctx (fun () -> ctx.charges <- ctx.charges + 1))
     ctx.charge
 
-(* The start of an operation [f] is asked about, which also counts toward
-   [max_ops], as a check plans from each. *)
+(* The start of an operation [f] is asked about: past [max_ops], it stops. *)
 let tick ctx =
   charge ctx;
-  let over =
-    locked ctx (fun () ->
-        ctx.ops <- ctx.ops + 1;
-        ctx.ops > ctx.max_ops)
-  in
-  if over || Atomic.get ctx.overrun then begin
+  if Atomic.get ctx.overrun || locked ctx (fun () -> ctx.ops >= ctx.max_ops)
+  then begin
     Atomic.set ctx.overrun true;
     stop ()
   end
@@ -1019,6 +1023,7 @@ type (_, _, _) Eio.Resource.pi +=
   | Outage : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
   | Livelocked : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
   | Overrun : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
+  | Splits : ('t, 't -> int, [> `Generic ]) Eio.Resource.pi
 
 module Network = struct
   type t = { ctx : ctx; net : [ `Generic ] Eio.Net.ty Eio.Resource.t }
@@ -1105,14 +1110,15 @@ module Network = struct
       (H (Outage, fun t -> t.ctx.outage)
       :: H (Livelocked, fun t -> Atomic.get t.ctx.livelocked)
       :: H (Overrun, fun t -> Atomic.get t.ctx.overrun)
+      :: H (Splits, fun t -> locked t.ctx (fun () -> t.ctx.splits))
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
-let v ?max_ops ?charge ~clock ~outage f (net : _ Eio.Net.t) :
+let v ?max_ops ?split ?charge ~clock ~outage f (net : _ Eio.Net.t) :
     [ `Generic ] Eio.Net.ty Eio.Resource.t =
   Eio.Resource.T
     ( {
-        Network.ctx = ctx ?max_ops ?charge ~clock ~outage f;
+        Network.ctx = ctx ?max_ops ?split ?charge ~clock ~outage f;
         net :> [ `Generic ] Eio.Net.ty Eio.Resource.t;
       },
       Network.handler )
@@ -1136,3 +1142,7 @@ let livelocked (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
 let overrun (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
   match Eio.Resource.get_opt ops Overrun with Some f -> f t | None -> false
+
+let splits (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
+  let (Eio.Resource.T (t, ops)) = net in
+  match Eio.Resource.get_opt ops Splits with Some f -> f t | None -> 0
