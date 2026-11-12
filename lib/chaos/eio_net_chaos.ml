@@ -19,25 +19,23 @@ let outage (env : env) = Wrapper.outage env#net
 let name = "Eio_net_chaos.check"
 let fail fmt = Fmt.failwith ("%s: " ^^ fmt) name
 
-(* The connects, accepts and receives of a run. *)
-let arrivals (trace : Plan.trace) =
-  List.length
-    (List.filter
-       (fun ((op : Op.t), _) ->
-         match op.kind with
-         | `Connect | `Accept | `Recv -> true
-         | `Read | `Write -> false)
-       trace)
+(* The operations a run may make: a run that makes more spins, or is more
+   than a check can plan from, and its trace stays bounded. *)
+let max_ops = 1_000_000
 
-(* A run of [s]: its operations, why it failed if it did, and the connects,
-   accepts and receives it made while its clock stood still if they went past
-   [bound], which stopped it. *)
-let exec ~bound run (s : Plan.scenario) =
-  let trace = ref [] in
+let ops_message =
+  Fmt.str
+    "the run hangs in a busy loop, or is too large for a check: it made %d \
+     network operations"
+    max_ops
+
+(* A run of [s]: why it failed if it did. [observe] sees each operation and
+   the fault it met. *)
+let exec_with ~observe run (s : Plan.scenario) =
   let faults = Plan.faults s in
   let f op =
     let fault = faults op in
-    trace := (op, fault) :: !trace;
+    observe op fault;
     fault
   in
   let wrapped = ref None in
@@ -52,7 +50,7 @@ let exec ~bound run (s : Plan.scenario) =
       in
       let base = Eio_net_mem.v ?capacity ~clock:mono_clock ~sw () in
       let net =
-        Wrapper.v ~bound ~clock ~outage:(s.lasting = Some Outage) f base
+        Wrapper.v ~max_ops ~clock ~outage:(s.lasting = Some Outage) f base
       in
       wrapped := Some net;
       run
@@ -67,16 +65,25 @@ let exec ~bound run (s : Plan.scenario) =
         Some "the run hangs: every fiber waits and no timer is due"
     | exception Quiet_mock.Time_limit ->
         Some "the run hangs: it is still running after an hour of its clock"
+    | exception Quiet_mock.Busy_loop ->
+        Some
+          "the run hangs in a busy loop: it kept the CPU busy for 10 s of its \
+           clock"
     | exception x -> Some (Printexc.to_string x)
   in
-  let failed, overrun =
-    match !wrapped with
-    | Some net when Wrapper.livelocked net ->
-        (Some ("the run hangs: " ^ Wrapper.livelock_message), None)
-    | Some net -> (failed, Wrapper.overrun net)
-    | None -> (failed, None)
+  match !wrapped with
+  | Some net when Wrapper.overrun net -> Some ops_message
+  | Some net when Wrapper.livelocked net ->
+      Some ("the run hangs: " ^ Wrapper.livelock_message)
+  | _ -> failed
+
+(* A run of [s]: its operations, and why it failed if it did. *)
+let exec run s =
+  let trace = ref [] in
+  let failed =
+    exec_with ~observe:(fun op fault -> trace := (op, fault) :: !trace) run s
   in
-  (List.rev !trace, failed, overrun)
+  (List.rev !trace, failed)
 
 (* {1 Reports} *)
 
@@ -233,13 +240,23 @@ let digest (trace : Plan.trace) =
   let s = Fmt.str "%a" Fmt.(list ~sep:(any ";") Op.pp) ops in
   String.sub (Digest.to_hex (Digest.string s)) 0 8
 
-(* The first operation two runs differ at. *)
-let rec diverge (a : Plan.trace) (b : Plan.trace) =
-  match (a, b) with
-  | (x, _) :: a, (y, _) :: b ->
-      if x = y then diverge a b else Fmt.str "%a, then %a" Op.pp x Op.pp y
-  | (x, _) :: _, [] | [], (x, _) :: _ -> Fmt.str "%a, then nothing" Op.pp x
-  | [], [] -> "nothing"
+(* Where a run with no fault first differs from [first], if it does, seen
+   as it runs, so that its operations are not kept. *)
+let diverges run (first : Plan.trace) =
+  let rest = ref first and diverged = ref None in
+  let observe op _ =
+    if Option.is_none !diverged then
+      match !rest with
+      | (x, _) :: tl when x = op -> rest := tl
+      | (x, _) :: _ ->
+          diverged := Fmt.kstr Option.some "%a, then %a" Op.pp x Op.pp op
+      | [] -> diverged := Fmt.kstr Option.some "%a, then nothing" Op.pp op
+  in
+  ignore (exec_with ~observe run Plan.none : string option);
+  match (!diverged, !rest) with
+  | Some d, _ -> Some d
+  | None, (x, _) :: _ -> Fmt.kstr Option.some "%a, then nothing" Op.pp x
+  | None, [] -> None
 
 (* A replay is [net/HASH/KEY], with the 8 hexadecimal digits of a first
    run's digest. *)
@@ -256,7 +273,7 @@ let parse_replay r =
 let find k = List.find_opt (fun s -> Plan.key s = k)
 
 (* The scenario a replay names, if the check still has it. *)
-let scenario ~bound run ~first ~linear k =
+let scenario run ~first ~linear k =
   match find k linear with
   | Some s -> Some (s, `Linear)
   | None when k = Plan.key Plan.none -> Some (Plan.none, `Linear)
@@ -269,7 +286,7 @@ let scenario ~bound run ~first ~linear k =
           | Some i -> (
               match find (String.sub k 0 i) linear with
               | Some ({ rules = [ r ]; _ } as s1) ->
-                  let after, _, _ = exec ~bound run s1 in
+                  let after, _ = exec run s1 in
                   Plan.seconds r ~first ~after
                   |> find k
                   |> Option.map (fun s -> (s, `Sampled))
@@ -287,50 +304,19 @@ let first_failed ~hash trace error =
 let check ?(budget = 2_000) ?replay run =
   if budget < 1 then Fmt.invalid_arg "%s: the budget is %d" name budget;
   let replay = Option.map parse_replay replay in
-  (* Each connect, accept and receive is at least one scenario of the linear
-     tier, so a first run that makes more than [budget] stops there. *)
-  let first, failed, overrun = exec ~bound:budget run Plan.none in
-  Option.iter
-    (fun n ->
-      fail
-        "the linear tier needs at least %d runs, more than the budget of %d, \
-         and a check never passes on a partial one: the run with no fault made \
-         that many connects, accepts and receives while its clock stood still, \
-         and was stopped there. It looks like a workload that loops for ever, \
-         as a client that reconnects at once does: end the loop. If the \
-         workload ends, shrink it or raise ~budget."
-        n budget)
-    overrun;
+  let first, failed = exec run Plan.none in
   Option.iter (first_failed ~hash:(digest first) first) failed;
   if first = [] then
     fail "the workload makes no network operation, so it tests nothing";
-  let again, _, _ = exec ~bound:budget run Plan.none in
-  if again <> first then
-    fail
-      "two runs with no fault made different operations (%s); the workload \
-       must be deterministic"
-      (diverge first again);
+  Option.iter
+    (fail
+       "two runs with no fault made different operations (%s); the workload \
+        must be deterministic")
+    (diverges run first);
   let hash = digest first in
   let linear = Plan.linear first in
-  (* A run that makes [Wrapper.threshold] more connects, accepts and receives
-     while its clock stands still than the run with no fault made in all
-     spins, as a client that reconnects at once to a server a fault broke
-     does, with no failure to count. *)
-  let before = arrivals first in
-  let bound = before + Wrapper.threshold in
   let attempt ?matched tier s =
-    let trace, failed, overrun = exec ~bound run s in
-    let failed =
-      match overrun with
-      | Some n ->
-          Some
-            (Fmt.str
-               "the run hangs: it made %d connects, accepts and receives while \
-                its clock stood still, %d more than the run with no fault made \
-                in all"
-               n (n - before))
-      | None -> failed
-    in
+    let trace, failed = exec run s in
     Option.iter (report ?matched ~hash ~tier s trace) failed;
     trace
   in
@@ -346,7 +332,7 @@ let check ?(budget = 2_000) ?replay run =
                "the replay named first run %s, and the workload's is now %s" h
                hash)
       in
-      match scenario ~bound run ~first ~linear k with
+      match scenario run ~first ~linear k with
       | Some (s, tier) -> ignore (attempt ?matched tier s : Plan.trace)
       | None when h = hash ->
           fail "the replay names %s, a scenario this check no longer has" k

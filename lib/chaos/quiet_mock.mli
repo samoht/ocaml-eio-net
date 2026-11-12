@@ -9,13 +9,11 @@ exception Deadlock_detected
 exception Time_limit
 (** Raised by {!run} when its clock would move past the limit. *)
 
-val polls : int
-(** [polls] is the turns at one instant in which every runnable fiber had just
-    yielded after which time passes: [1_000]. *)
+exception Busy_loop
+(** Raised by {!run} after {!max_turns} turns. *)
 
-val wait_io : unit -> unit
-(** [wait_io ()] yields, as a fiber that waits on I/O that is already ready
-    does: {!run} does not count it as a poll. *)
+val max_turns : int
+(** [max_turns] is the turns a run may take: [10_000_000]. *)
 
 val run :
   limit:float ->
@@ -24,13 +22,11 @@ val run :
   'a) ->
   'a
 (** [run ~limit main] calls [main clock mono_clock] in a fresh event loop whose
-    clocks start at [0.] and move up to [limit] seconds: to the next timer when
-    every fiber waits, and, as real time passes while a program polls, after
-    {!polls} turns at one instant in which every runnable fiber had just
-    yielded, by 10 ms, or to the next timer if that comes first. Once a fiber
-    has yielded for 5 seconds with no wait in between, the step is a tenth of
-    how long it has. It returns what [main] returns, and raises what [main]
-    raises.
+    clocks start at [0.] and move up to [limit] seconds: by 1 us on each turn, a
+    fiber resumed by a yield, an I/O completion or a timer, and to the next
+    timer when every fiber waits. It returns what [main] returns, and raises
+    what [main] raises.
 
     @raise Deadlock_detected if every fiber waits and no timer is due.
-    @raise Time_limit if the clock would move past [limit]. *)
+    @raise Time_limit if the clock would move past [limit].
+    @raise Busy_loop after {!max_turns} turns. *)

@@ -159,8 +159,7 @@ type target =
 
 (* What the wrappers of one network share. [lock] guards the counters and
    [pending], and runs [f], so [f] sees one operation at a time, in the order
-   of [index]. [arrivals] counts the connects, accepts and receives made at
-   [arrived_at]; past [bound], [overrun] holds that count. *)
+   of [index]. Past [max_ops] operations, [overrun] holds. *)
 type ctx = {
   f : Op.t -> Fault.t option;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
@@ -176,13 +175,11 @@ type ctx = {
   mutable streak_at : float;
   livelocked : bool Atomic.t;
   pending : (int, pending) Hashtbl.t;
-  bound : int option;
-  mutable arrivals : int;
-  mutable arrived_at : float;
-  overrun : int option Atomic.t;
+  max_ops : int;
+  overrun : bool Atomic.t;
 }
 
-let ctx ?bound ~clock ~outage f =
+let ctx ?(max_ops = max_int) ~clock ~outage f =
   {
     f;
     clock :> float Eio.Time.clock_ty Eio.Resource.t;
@@ -198,30 +195,12 @@ let ctx ?bound ~clock ~outage f =
     streak_at = 0.;
     livelocked = Atomic.make false;
     pending = Hashtbl.create 7;
-    bound;
-    arrivals = 0;
-    arrived_at = 0.;
-    overrun = Atomic.make None;
+    max_ops;
+    overrun = Atomic.make false;
   }
-
-(* Under [ctx.lock]. A connect, an accept or a receive arrives. *)
-let arrive ctx =
-  match ctx.bound with
-  | None -> ()
-  | Some bound ->
-      let now = Eio.Time.now ctx.clock in
-      if now <> ctx.arrived_at then begin
-        ctx.arrived_at <- now;
-        ctx.arrivals <- 0
-      end;
-      ctx.arrivals <- ctx.arrivals + 1;
-      if ctx.arrivals > bound then Atomic.set ctx.overrun (Some ctx.arrivals)
 
 (* Under [ctx.lock]. *)
 let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
-  (match kind with
-  | `Connect | `Accept | `Recv -> arrive ctx
-  | `Read | `Write -> ());
   ctx.index <- ctx.index + 1;
   ctx.f { Op.index = ctx.index; kind; socket; side; family; offset; length }
 
@@ -264,7 +243,7 @@ let failed ctx target =
     failwith ("Eio_net_chaos: " ^ livelock_message)
   end
 
-(* A run past its bound stops: every operation then waits for ever. *)
+(* A network past its operations stops: each operation then waits for ever. *)
 let stop () =
   Eio.Cancel.protect (fun () -> Eio.Promise.await (fst (Eio.Promise.create ())))
 
@@ -272,7 +251,11 @@ let stop () =
    [eof], the connection it ended: a program that reads it again and again
    spins, one that reconnects after each does not. *)
 let guard ?eof ctx target f =
-  if Option.is_some (Atomic.get ctx.overrun) then stop ();
+  if Atomic.get ctx.overrun || locked ctx (fun () -> ctx.index >= ctx.max_ops)
+  then begin
+    Atomic.set ctx.overrun true;
+    stop ()
+  end;
   match f () with
   | v ->
       locked ctx (fun () ->
@@ -578,7 +561,7 @@ module Flow = struct
             t.cut_short <- false;
             waits)
       in
-      if waits then Quiet_mock.wait_io ();
+      if waits then Eio.Fiber.yield ();
       let total = Cstruct.lenv bufs in
       let fault, n =
         Mutex.protect t.lock @@ fun () ->
@@ -978,7 +961,7 @@ end
 type (_, _, _) Eio.Resource.pi +=
   | Outage : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
   | Livelocked : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
-  | Overrun : ('t, 't -> int option, [> `Generic ]) Eio.Resource.pi
+  | Overrun : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
 
 module Network = struct
   type t = { ctx : ctx; net : [ `Generic ] Eio.Net.ty Eio.Resource.t }
@@ -1061,11 +1044,11 @@ module Network = struct
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
-let v ?bound ~clock ~outage f (net : _ Eio.Net.t) :
+let v ?max_ops ~clock ~outage f (net : _ Eio.Net.t) :
     [ `Generic ] Eio.Net.ty Eio.Resource.t =
   Eio.Resource.T
     ( {
-        Network.ctx = ctx ?bound ~clock ~outage f;
+        Network.ctx = ctx ?max_ops ~clock ~outage f;
         net :> [ `Generic ] Eio.Net.ty Eio.Resource.t;
       },
       Network.handler )
@@ -1088,4 +1071,4 @@ let livelocked (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
 
 let overrun (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
-  match Eio.Resource.get_opt ops Overrun with Some f -> f t | None -> None
+  match Eio.Resource.get_opt ops Overrun with Some f -> f t | None -> false
