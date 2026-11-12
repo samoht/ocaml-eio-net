@@ -126,8 +126,8 @@ variable and prints nothing. For a scenario a check does not try,
 - `eio-net.accept`: an accept loop that holds at most a given number of
   connections.
 - `eio-net.connect`: a classifier of failed connects, refused or unreachable.
-- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, and host
-  name resolution.
+- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, their
+  equality, and host name resolution.
 - `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets.
   A connection queues what Linux's default buffers hold, and a datagram
   socket what its receive buffer holds; a small `?capacity` shows a peer that

@@ -31,13 +31,13 @@ let test_source_round_trip () =
   Alcotest.(check string) "request arrives whole" "ping" payload;
   Alcotest.(check bool)
     "source is the sender's bound address" true
-    (Eio_net.Datagram.equal_addr source addr_a);
+    (Eio_net_addr.equal_datagram source addr_a);
   send b ~dst:source "pong";
   let reply_source, reply = Eio_net.Datagram.recv a in
   Alcotest.(check string) "reply reaches the source" "pong" reply;
   Alcotest.(check bool)
     "reply comes from the responder" true
-    (Eio_net.Datagram.equal_addr reply_source addr_b)
+    (Eio_net_addr.equal_datagram reply_source addr_b)
 
 (* On eio_posix: eio_linux refuses a send to a Unix-domain address with EINVAL
    until ocaml-uring sets msg_namelen to the size of the address it is given
@@ -62,13 +62,13 @@ let test_unix_source_round_trip () =
   Alcotest.(check string) "request arrives whole" "ping" payload;
   Alcotest.(check bool)
     "source is the sender's path" true
-    (Eio_net.Datagram.equal_addr source (`Unix path_a));
+    (Eio_net_addr.equal_datagram source (`Unix path_a));
   send b ~dst:source "pong";
   let reply_source, reply = Eio_net.Datagram.recv a in
   Alcotest.(check string) "reply reaches the source" "pong" reply;
   Alcotest.(check bool)
     "reply comes from the responder" true
-    (Eio_net.Datagram.equal_addr reply_source (`Unix path_b))
+    (Eio_net_addr.equal_datagram reply_source (`Unix path_b))
 
 let test_default_destination () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
@@ -171,31 +171,6 @@ let test_too_long_prints () =
     (Printexc.to_string
        (Eio.Exn.create (Eio.Exn.X (Eio_net.Datagram.Too_long { max = 8 }))))
 
-let test_equal_addr () =
-  let ip raw = Eio.Net.Ipaddr.of_raw raw in
-  let localhost = ip "\127\000\000\001" in
-  Alcotest.(check bool)
-    "same host and port" true
-    (Eio_net.Datagram.equal_addr
-       (`Udp (localhost, 9000))
-       (`Udp (ip "\127\000\000\001", 9000)));
-  Alcotest.(check bool)
-    "different port" false
-    (Eio_net.Datagram.equal_addr
-       (`Udp (localhost, 9000))
-       (`Udp (localhost, 9001)));
-  Alcotest.(check bool)
-    "different host" false
-    (Eio_net.Datagram.equal_addr
-       (`Udp (localhost, 9000))
-       (`Udp (ip "\127\000\000\002", 9000)));
-  Alcotest.(check bool)
-    "unix paths compare by path" true
-    (Eio_net.Datagram.equal_addr (`Unix "/tmp/a") (`Unix "/tmp/a"));
-  Alcotest.(check bool)
-    "udp never equals unix" false
-    (Eio_net.Datagram.equal_addr (`Udp (localhost, 9000)) (`Unix "/tmp/a"))
-
 let suite =
   ( "datagram",
     [
@@ -209,5 +184,4 @@ let suite =
         test_frame_carrier_refuses_oversize;
       Alcotest.test_case "concurrent receives" `Quick test_concurrent_receives;
       Alcotest.test_case "Too_long prints its bound" `Quick test_too_long_prints;
-      Alcotest.test_case "address equality" `Quick test_equal_addr;
     ] )

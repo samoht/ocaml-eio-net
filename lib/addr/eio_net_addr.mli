@@ -16,6 +16,17 @@ val tcp : Ipaddr.t -> int -> Eio.Net.Sockaddr.stream
 val udp : Ipaddr.t -> int -> Eio.Net.Sockaddr.datagram
 (** [udp a port] is the datagram address of [port] on [a]. *)
 
+val equal_stream : Eio.Net.Sockaddr.stream -> Eio.Net.Sockaddr.stream -> bool
+(** [equal_stream a b] is [true] iff [a] and [b] are the same stream address:
+    equal IP address and port, or equal Unix socket path. *)
+
+val equal_datagram :
+  Eio.Net.Sockaddr.datagram -> Eio.Net.Sockaddr.datagram -> bool
+(** [equal_datagram a b] is [true] iff [a] and [b] are the same datagram
+    address: equal IP address and port, or equal Unix socket path. A receiver
+    that locks onto the source of a datagram compares later sources with this.
+*)
+
 val stream :
   _ Eio.Net.t ->
   host:string ->
