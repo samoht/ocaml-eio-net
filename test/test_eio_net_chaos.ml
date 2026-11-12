@@ -707,6 +707,38 @@ let test_unix_cut_keeps_written () =
     "TCP reset" "reset reset eof eof" (run tcp Fault.Reset);
   Alcotest.(check string) "TCP end" "eof eof eof eof" (run tcp Fault.Eof)
 
+(* After the client closes, as an end of stream on the server's first read
+   says, the server reads what the client wrote, then writes twice and reads
+   twice. AF_UNIX raises EPIPE, a reset to Eio, on each write (Linux and
+   macOS), so no write returns with its bytes lost; over TCP the first write
+   goes through. *)
+let test_write_after_peer_close () =
+  let run addr =
+    Eio_mock.Backend.run_full @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let fired = ref false in
+    let f (op : Op.t) =
+      if op.kind = `Read && op.side = `Server && not !fired then (
+        fired := true;
+        Some Fault.Eof)
+      else None
+    in
+    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    let server, _ = Eio.Net.accept ~sw l in
+    Eio.Flow.copy_string "ab" client;
+    String.concat " "
+      (in_order
+         [ read server; write server; write server; read server; read server ])
+  in
+  Alcotest.(check string)
+    "AF_UNIX" "ab reset reset end end"
+    (run (`Unix "/tmp/s.sock"));
+  Alcotest.(check string)
+    "TCP" "ab 1 reset end end"
+    (run (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)))
+
 (* An AF_UNIX read that hangs is a peer that stopped: the client reads what
    the server's returned write queued, then waits, and the server's next write
    waits with it until the read is cancelled. Over TCP the read holds the
@@ -981,6 +1013,8 @@ let suite =
         test_unix_cut_keeps_written;
       Alcotest.test_case "an AF_UNIX hang keeps the bytes written" `Quick
         test_unix_hang_keeps_written;
+      Alcotest.test_case "a write after the peer's close" `Quick
+        test_write_after_peer_close;
       Alcotest.test_case "no IP fault on a Unix-domain socket" `Quick
         test_unix_has_no_ip_faults;
       Alcotest.test_case "writes counted across domains" `Quick

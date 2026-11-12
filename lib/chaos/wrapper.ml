@@ -325,9 +325,10 @@ module Flow = struct
     if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
     if t.family = `Inet && cut t then ended t
 
-  (* Under [t.lock]. A closed flow refuses a write before any fault. After its
-     peer closed, an end's first write goes through, its bytes lost, and the
-     next ones raise the reset the peer answers with, as on Linux. *)
+  (* Under [t.lock]. A closed flow refuses a write before any fault. Over IP,
+     after its peer closed, an end's first write goes through, its bytes
+     lost, and the next ones raise the reset the peer answers with, as on
+     Linux. AF_UNIX raises EPIPE on each, a reset to Eio. *)
   let check_write t =
     if t.closed then invalid_arg "Eio_net_chaos: write on a closed flow";
     let reset () =
@@ -337,7 +338,7 @@ module Flow = struct
     match Atomic.get t.conn.broken with
     | `Open -> `Write
     | `Reset -> reset ()
-    | `Closed closer when closer = t.side -> reset ()
+    | `Closed closer when closer = t.side || t.family = `Unix -> reset ()
     | `Closed _ ->
         if t.wrote_after_end then reset ();
         t.wrote_after_end <- true;

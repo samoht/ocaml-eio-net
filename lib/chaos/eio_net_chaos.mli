@@ -264,8 +264,9 @@ module Fault : sig
             that closed reads end of file and its writes raise
             [Connection_reset]; the other end's first write goes through, its
             bytes lost, and the next ones raise [Connection_reset], as on Linux
-            after the peer closes. On a Unix-domain connection the end that
-            closed reads what is queued to it first. *)
+            after the peer closes. On a Unix-domain connection each of its
+            writes raises it, as AF_UNIX raises EPIPE, and the end that closed
+            reads what is queued to it first. *)
     | Refuse  (** A connect fails with [Connection_failure (Refused _)]. *)
     | Timeout
         (** A connect fails after 133 seconds of the clock, as a lost handshake
