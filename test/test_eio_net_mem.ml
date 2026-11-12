@@ -651,6 +651,35 @@ let test_capacity () =
   | exception Invalid_argument _ -> ()
   | _ -> Alcotest.fail "a capacity of 0 was accepted"
 
+(* By default a connection queues at most 4 MiB each way over TCP and
+   256 KiB over a Unix path, as Linux's default buffers hold no more: a
+   writer whose reader does not read then waits. *)
+let test_default_capacity () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let queued addr bound =
+    let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    let _ = Eio.Net.accept ~sw l in
+    let chunk = Cstruct.create 65536 and total = ref 0 in
+    let blocked =
+      Eio.Fiber.first
+        (fun () ->
+          while !total <= 4 * bound do
+            total := !total + Eio.Flow.single_write client [ chunk ]
+          done;
+          false)
+        (fun () ->
+          Eio.Fiber.yield ();
+          true)
+    in
+    Alcotest.(check bool) "the writer waits" true blocked;
+    Alcotest.(check int) "the bytes queued" bound !total
+  in
+  queued (`Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)) (4 * 1024 * 1024);
+  queued (`Unix "/tmp/queued.sock") (256 * 1024)
+
 (* A read or a write wakes one waiter, not every one: 8000 writers blocked on
    a queue of one byte, and 8000 readers on an empty one, finish with work, here
    counted as the words allocated, that grows with the number of waiters, not
@@ -2137,6 +2166,8 @@ let suite =
       Alcotest.test_case "a Unix path with no socket" `Quick
         test_unix_path_not_found;
       Alcotest.test_case "a capacity bounds the queue" `Quick test_capacity;
+      Alcotest.test_case "a connection's queue is bounded by default" `Quick
+        test_default_capacity;
       Alcotest.test_case "write after own shutdown" `Quick
         test_write_after_own_shutdown;
       Alcotest.test_case "an empty read" `Quick test_empty_read;

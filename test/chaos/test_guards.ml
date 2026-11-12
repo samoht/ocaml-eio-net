@@ -451,6 +451,31 @@ let compute () =
   | Some answer -> Fmt.failwith "got %S" answer
   | None -> if not (Eio_net_chaos.outage env) then failwith "no answer"
 
+(* A server that streams to each client until a write fails, and a client
+   that reads 1 MiB and leaves. The server's writes wait while its socket's
+   buffer is full, as on Linux, so the client runs and its close ends them. *)
+let stream () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
+  let unbounded = ref false in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let chunk = Cstruct.create 65536 in
+          (* Its own bound: without one, the run queues for ever. *)
+          for _ = 1 to 1024 do
+            Eio.Flow.write flow [ chunk ]
+          done;
+          unbounded := true));
+  (try
+     Eio.Time.with_timeout_exn env#clock 30.0 @@ fun () ->
+     Eio.Switch.run @@ fun sw ->
+     let flow = Eio.Net.connect ~sw env#net addr in
+     let r = Eio.Buf_read.of_flow flow ~max_size:(1 lsl 20) in
+     ignore (Eio.Buf_read.take (1 lsl 20) r : string)
+   with Eio.Io _ | End_of_file | Eio.Time.Timeout -> ());
+  if !unbounded then failwith "64 MiB queued to a client that reads 1 MiB"
+
 let suite =
   ( "guards",
     [
@@ -488,6 +513,8 @@ let suite =
            (poll ?patience:None));
       Alcotest.test_case "a server that yields while it computes" `Quick
         (Expect.passes compute);
+      Alcotest.test_case "a server that streams until its client leaves" `Quick
+        (Expect.passes stream);
       Alcotest.test_case "a scan of closed ports is not a spin" `Quick
         (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
