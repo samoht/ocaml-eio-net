@@ -2,28 +2,71 @@
 
 Initial release.
 
-- `eio-net`: frame channels over datagram sockets, length-prefixed streams and
-  in-memory pairs (`Eio_net.Frame`, `Eio_net.Datagram`); `Eio_net.Relay`
-  forwards connections, and `Eio_net.Progress` ends a transfer that moves too
-  slowly.
-- `eio-net.framing`: the length-prefix codec, with a bound on frame length,
-  read with `Eio.Buf_read`.
-- `eio-net.accept`: an accept loop that holds at most a given number of
-  connections and drops the one that has made the least progress.
-- `eio-net.connect`: tells a refused connect from an unreachable one.
-- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, their
-  equality, and host name resolution.
-- `eio-net.mem`: an in-memory `Eio.Net.t` with TCP, UDP and Unix-domain
-  sockets that follow what Linux does, checked against real sockets on Linux
-  and macOS by an oracle adapted from gVisor's socket tests.
-- `eio-net.chaos`: `Eio_net_chaos.check` runs a workload many times on
-  `eio-net.mem`, each run with faults chosen from what the workload does:
-  reads cut short or coalesced, a connection reset or closed by one end, a
-  stalled peer, connections that queue 32 KiB, refused, timed-out or unreachable
-  connects, and lost, duplicated, reordered or garbled datagrams. Injected
-  errors have the shape eio_posix gives them. A failure names its scenario,
-  and `~replay` runs it alone. `wrap` and `pair` inject the faults a function
+### eio-net
+
+- `Eio_net.Frame`: a channel where one receive is one frame, over a datagram
+  socket, a length-prefixed byte stream or an in-memory pair.
+- `Eio_net.Datagram`: a datagram channel whose receives also give the source
+  address.
+- `Eio_net.Relay` forwards stream connections between two addresses, and
+  `Eio_net.Progress` ends a transfer that moves too few bytes a second.
+
+### eio-net.framing
+
+- The length-prefix codec of a frame channel, read with `Eio.Buf_read` and
+  written without copying the payloads.
+- A two- or four-byte length; a prefix that declares a payload past the bound
+  raises before any payload byte is read.
+
+### eio-net.accept
+
+- `Eio_net_accept.run`: an accept loop that holds at most a given number of
+  connections and, when full, drops the one whose head is incomplete and has
+  made the least progress.
+- Loops that share a pool shed each other's connections when the process runs
+  out of descriptors.
+
+### eio-net.connect and eio-net.addr
+
+- `Eio_net_connect.classify` tells a refused connect from an unreachable one.
+- `Eio_net_addr` converts between `Ipaddr` and Eio addresses, compares them,
+  and resolves host names.
+
+### eio-net.mem
+
+- An in-memory `Eio.Net.t` with TCP, UDP and Unix-domain sockets, for tests
+  that need no real socket.
+- It follows Linux by default and macOS with `` ~os:`Macos ``: errors, port
+  allocation, TIME_WAIT on a given clock, queue sizes and datagram limits.
+  Kernel traces recorded on both systems, and tests adapted from gVisor's, check
+  it against real sockets.
+- `?capacity` sets what each direction of a connection queues, to show a peer
+  that writes without reading.
+
+### eio-net.chaos
+
+- `Eio_net_chaos.check` runs a workload many times on `eio-net.mem`, each run
+  with faults chosen from what the workload did on its first run: reads cut
+  short or coalesced, a reset, a closed or a stalled peer, small socket
+  buffers, refused, timed-out or unreachable connects, and lost, duplicated,
+  reordered or garbled datagrams.
+- Each run has its own event loop and a virtual clock, so a check is
+  deterministic and an hour-long timeout takes no time. A run that hangs,
+  spins or grows too large fails.
+- A failure names its scenario and its operations, and `~replay` runs that
+  scenario alone. `?os` picks the kernel the network follows, as in
+  `eio-net.mem`.
+- `Eio_net_chaos.wrap` and `Eio_net_chaos.pair` inject the faults a function
   chooses, from one domain or several.
-- `eio-net.unix`: batched datagram transfers, Unix-domain sockets with long
-  paths and the descriptors a message carries, the host's interface addresses, and the Unix classifiers of failed
-  connects and accepts.
+
+### eio-net.unix
+
+- `Eio_net_unix.Frame`: frame channels over Unix datagram descriptors, with
+  batched system calls.
+- `Eio_net_unix.Local`: Unix-domain stream sockets reached through a directory
+  capability, with paths of any length, and the descriptors a message
+  carries.
+- `Eio_net_unix.Interface`: the host's interface addresses and their changes.
+- `Eio_net_unix.Stream` offloads a write to a systhread, and
+  `Eio_net_unix.connect_failure` and `Eio_net_unix.accept_failure` classify
+  the Unix errors of failed connects and accepts.
