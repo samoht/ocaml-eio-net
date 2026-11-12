@@ -1250,15 +1250,19 @@ module Datagram_socket = struct
     room : Eio.Condition.t;
   }
 
-  (* [rmem] is the memory the datagrams of [queued] take, and [wmem] that of
-     the Unix-domain datagrams this socket sent that are still queued, as
-     Linux counts them; both are guarded by [lock], [wmem] by the sender's. *)
+  (* [rmem] is the memory the datagrams of [queued] take, and those read but
+     not yet freed, [unfreed], and [wmem] that of the Unix-domain datagrams
+     this socket sent that are still queued, as Linux counts them; [batch] is
+     the datagrams left of those queued when a receive last found none taken.
+     All are guarded by [lock], [wmem] by the sender's. *)
   and t = {
     hub : hub;
     addr : Eio.Net.Sockaddr.datagram;
     lock : Mutex.t;
     queued : datagram Queue.t;
     mutable rmem : int;
+    mutable unfreed : int;
+    mutable batch : int;
     mutable wmem : int;
     readable : Eio.Condition.t;
     mutable closed : bool;
@@ -1347,6 +1351,8 @@ module Datagram_socket = struct
         lock = Mutex.create ();
         queued = Queue.create ();
         rmem = 0;
+        unfreed = 0;
+        batch = 0;
         wmem = 0;
         readable = Eio.Condition.create ();
         closed = false;
@@ -1499,6 +1505,19 @@ module Datagram_socket = struct
         else Mutex.protect s.lock (fun () -> s.wmem <- s.wmem - d.size))
       d.sender
 
+  (* A datagram a receive takes. A UDP one's memory is freed with that of
+     the others read before, once they reach a quarter of the buffer or the
+     receive takes the last of its batch, as Linux frees it. *)
+  let taken t d =
+    match d.sender with
+    | Some _ -> freed t d
+    | None ->
+        t.unfreed <- t.unfreed + d.size;
+        if t.unfreed >= buffer / 4 || t.batch = 0 then begin
+          t.rmem <- t.rmem - t.unfreed;
+          t.unfreed <- 0
+        end
+
   (* The destination of a send, or the error a send without one raises; a
      send shutdown first for a Unix-domain socket, after for a UDP one. *)
   let destination t ~local dst =
@@ -1565,14 +1584,15 @@ module Datagram_socket = struct
       Mutex.protect t.lock @@ fun () ->
       if t.closed then
         invalid_arg "eio-net.mem: recv on a closed datagram socket"
-      else
-        match Queue.take_opt t.queued with
-        | None -> None
-        | Some d ->
-            freed t d;
-            let n = min (String.length d.data) (Cstruct.length buf) in
-            Cstruct.blit_from_string d.data 0 buf 0 n;
-            Some (d.src, n)
+      else if t.batch = 0 then t.batch <- Queue.length t.queued;
+      match Queue.take_opt t.queued with
+      | None -> None
+      | Some d ->
+          t.batch <- t.batch - 1;
+          taken t d;
+          let n = min (String.length d.data) (Cstruct.length buf) in
+          Cstruct.blit_from_string d.data 0 buf 0 n;
+          Some (d.src, n)
     in
     Eio.Condition.broadcast t.hub.room;
     got
