@@ -770,6 +770,45 @@ let test_linear_memory () =
   if grown > 100_000 then
     Alcotest.failf "the live words grew by %d over the check" grown
 
+(* Three refused connects, then a failure: the report shows each, as
+   collapsing them would hide one line behind another. *)
+let test_report_shows_three () =
+  let report =
+    Expect.report @@ fun () ->
+    Eio_net_chaos.check @@ fun env ->
+    for _ = 1 to 3 do
+      touch env
+    done;
+    failwith "no server"
+  in
+  let lines = trace_lines report in
+  if
+    List.length lines <> 3
+    || List.exists (fun l -> contains l "more time") lines
+  then
+    Alcotest.failf "the trace of three connects is:@.%s"
+      (String.concat "\n" lines)
+
+(* A replay whose scenario is not one a check names is malformed. *)
+let test_malformed_scenario () =
+  let h = hash (replay_of (Expect.report (fun () -> mutant ()))) in
+  List.iter
+    (fun k ->
+      let replay = Fmt.str "net/%s/%s" h k in
+      refused_with
+        (Fmt.str "Eio_net_chaos.check: ~replay:%S is not a replay of eio-net"
+           replay)
+        (fun () -> mutant ~replay ())
+        ())
+    [
+      "read1c@0.reset+read1c@1.reset+read1c@2.reset";
+      "read1c@x.reset";
+      "read1c@0.explode";
+      "read1c@0.reset+";
+      "read1x@0.reset";
+      "";
+    ]
+
 let first_fails error =
   refused_with ("Eio_net_chaos.check: the run with no fault failed: " ^ error)
 
@@ -824,6 +863,10 @@ let suite =
       Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
       Alcotest.test_case "a check keeps no run's operations" `Quick
         test_linear_memory;
+      Alcotest.test_case "a report collapses no single line" `Quick
+        test_report_shows_three;
+      Alcotest.test_case "a malformed scenario is refused" `Quick
+        test_malformed_scenario;
       Alcotest.test_case "a server that yields while it computes" `Quick
         (Expect.passes compute);
       Alcotest.test_case "a server that streams until its client leaves" `Quick
