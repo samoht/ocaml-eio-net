@@ -268,9 +268,10 @@ let spin () =
   in
   go 0
 
-(* A client that reconnects at once after each failed read, to a server
-   that closes every connection unanswered, spins with its clock stopped:
-   each read fails on a new connection to the same address. *)
+(* A client that reconnects at once after each read that fails or ends, to
+   a server that closes every connection unanswered, spins with its clock
+   stopped, even with no fault: an end of file is no failure, but the run
+   makes more connects than the budget lets the linear tier cover. *)
 let reconnect () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -281,6 +282,61 @@ let reconnect () =
      here instead of spinning for ever. *)
   let rec go n =
     if n > 30_000 then failwith "the spin was not stopped";
+    match
+      Eio.Switch.run (fun sw ->
+          let flow = Eio.Net.connect ~sw env#net addr in
+          Eio.Flow.copy_string "hi\n" flow;
+          Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:16))
+    with
+    | _ -> ()
+    | exception (Eio.Io _ | End_of_file) -> go (n + 1)
+  in
+  go 0
+
+(* A batch of jobs, each acknowledged by the server's close: each read ends
+   a new connection, an answer and no failure, so the run with no fault
+   passes, and only the budget stops the check. *)
+let batch () =
+  Eio_net_chaos.check ~budget:30_000 @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          ignore (Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:16))));
+  for _ = 1 to 10_005 do
+    try
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect ~sw env#net addr in
+      Eio.Flow.copy_string "job\n" flow;
+      match Eio.Flow.single_read flow (Cstruct.create 1) with
+      | _ -> failwith "the job was answered"
+      | exception End_of_file -> ()
+    with Eio.Io _ -> ()
+  done
+
+(* A server that a fault breaks closes each later connection at once, and
+   its client reconnects at once after each read that fails or ends: a spin
+   no failure counts, which the run makes far more connects than the run
+   with no fault. *)
+let broken_server () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let broken = ref false in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          if not !broken then
+            match
+              Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:16)
+            with
+            | _ -> Eio.Flow.copy_string "ok\n" flow
+            | exception e ->
+                broken := true;
+                raise e));
+  (* Its own bound, well past the check's: without it, the run fails here
+     instead of spinning for ever. *)
+  let rec go n =
+    if n > 100_000 then failwith "the spin was not stopped";
     match
       Eio.Switch.run (fun sw ->
           let flow = Eio.Net.connect ~sw env#net addr in
@@ -364,10 +420,19 @@ let suite =
             the same target while its clock stood still"
            spin);
       Alcotest.test_case "a client that reconnects at once spins" `Quick
-        (refused_with
-           "Eio_net_chaos.check: the run with no fault failed: the run hangs: \
-            the same network operation failed 10000 times on the same target"
+        (refused_with "Eio_net_chaos.check: the linear tier needs at least"
            reconnect);
+      Alcotest.test_case "a batch of jobs ended by the server is no spin" `Quick
+        (refused_with
+           "Eio_net_chaos.check: the linear tier needs 190100 runs, more than \
+            the budget of 30000"
+           batch);
+      Alcotest.test_case "a client of a server a fault broke spins" `Quick
+        (fun () ->
+          let error = Expect.field "error" (Expect.report broken_server) in
+          if
+            not (String.starts_with ~prefix:"the run hangs: it made 1000" error)
+          then Alcotest.failf "the check failed with %S" error);
       Alcotest.test_case "a client that polls with a deadline" `Quick
         (Expect.passes (poll ~patience:1.0));
       Alcotest.test_case "a client that polls for ever hangs" `Quick

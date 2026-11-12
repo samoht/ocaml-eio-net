@@ -129,17 +129,20 @@ type pending = { number : int Eio.Promise.t; set : int Eio.Promise.u; c : conn }
    once after each failure retries one target. *)
 type peer = Remote of Eio.Net.Sockaddr.stream | End of int * Op.side
 
-(* What an operation is tried on, for the livelock guard. *)
+(* What an operation is tried on, for the livelock guard. [Ended] is the end
+   of a connection whose read met an end of file. *)
 type target =
   | Connect of Eio.Net.Sockaddr.stream
   | Accept of int
   | Read of peer
   | Write of peer
   | Recv of int
+  | Ended of int * Op.side
 
 (* What the wrappers of one network share. [lock] guards the counters and
    [pending], and runs [f], so [f] sees one operation at a time, in the order
-   of [index]. *)
+   of [index]. [arrivals] counts the connects, accepts and receives made at
+   [arrived_at]; past [bound], [overrun] holds that count. *)
 type ctx = {
   f : Op.t -> Fault.t option;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
@@ -155,9 +158,13 @@ type ctx = {
   mutable streak_at : float;
   livelocked : bool Atomic.t;
   pending : (int, pending) Hashtbl.t;
+  bound : int option;
+  mutable arrivals : int;
+  mutable arrived_at : float;
+  overrun : int option Atomic.t;
 }
 
-let ctx ~clock ~outage f =
+let ctx ?bound ~clock ~outage f =
   {
     f;
     clock :> float Eio.Time.clock_ty Eio.Resource.t;
@@ -173,10 +180,30 @@ let ctx ~clock ~outage f =
     streak_at = 0.;
     livelocked = Atomic.make false;
     pending = Hashtbl.create 7;
+    bound;
+    arrivals = 0;
+    arrived_at = 0.;
+    overrun = Atomic.make None;
   }
+
+(* Under [ctx.lock]. A connect, an accept or a receive arrives. *)
+let arrive ctx =
+  match ctx.bound with
+  | None -> ()
+  | Some bound ->
+      let now = Eio.Time.now ctx.clock in
+      if now <> ctx.arrived_at then begin
+        ctx.arrived_at <- now;
+        ctx.arrivals <- 0
+      end;
+      ctx.arrivals <- ctx.arrivals + 1;
+      if ctx.arrivals > bound then Atomic.set ctx.overrun (Some ctx.arrivals)
 
 (* Under [ctx.lock]. *)
 let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
+  (match kind with
+  | `Connect | `Accept | `Recv -> arrive ctx
+  | `Read | `Write -> ());
   ctx.index <- ctx.index + 1;
   ctx.f { Op.index = ctx.index; kind; socket; side; family; offset; length }
 
@@ -219,7 +246,15 @@ let failed ctx target =
     failwith ("Eio_net_chaos: " ^ livelock_message)
   end
 
-let guard ctx target f =
+(* A run past its bound stops: every operation then waits for ever. *)
+let stop () =
+  Eio.Cancel.protect (fun () -> Eio.Promise.await (fst (Eio.Promise.create ())))
+
+(* An end of file is an answer, not a failure, so it counts only against
+   [eof], the connection it ended: a program that reads it again and again
+   spins, one that reconnects after each does not. *)
+let guard ?eof ctx target f =
+  if Option.is_some (Atomic.get ctx.overrun) then stop ();
   match f () with
   | v ->
       locked ctx (fun () ->
@@ -229,7 +264,9 @@ let guard ctx target f =
   | exception (Eio.Cancel.Cancelled _ as e) -> raise e
   | exception e ->
       let bt = Printexc.get_raw_backtrace () in
-      failed ctx target;
+      (match (e, eof) with
+      | End_of_file, Some eof -> failed ctx eof
+      | _ -> failed ctx target);
       Printexc.raise_with_backtrace e bt
 
 (* A close frees a descriptor, so the accepts that [Fault.Emfile] fails go
@@ -574,7 +611,10 @@ module Flow = struct
         (fun () -> write_ t bufs ~sent)
 
     let single_read t dst =
-      guard t.ctx (Read t.peer) (fun () -> single_read_ t dst)
+      guard
+        ~eof:(Ended (t.socket, t.side))
+        t.ctx (Read t.peer)
+        (fun () -> single_read_ t dst)
 
     let single_write t bufs =
       guard t.ctx (Write t.peer) (fun () -> single_write_ t bufs)
@@ -907,6 +947,7 @@ end
 type (_, _, _) Eio.Resource.pi +=
   | Outage : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
   | Livelocked : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
+  | Overrun : ('t, 't -> int option, [> `Generic ]) Eio.Resource.pi
 
 module Network = struct
   type t = { ctx : ctx; net : [ `Generic ] Eio.Net.ty Eio.Resource.t }
@@ -985,14 +1026,15 @@ module Network = struct
     Eio.Resource.handler
       (H (Outage, fun t -> t.ctx.outage)
       :: H (Livelocked, fun t -> Atomic.get t.ctx.livelocked)
+      :: H (Overrun, fun t -> Atomic.get t.ctx.overrun)
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
-let v ~clock ~outage f (net : _ Eio.Net.t) :
+let v ?bound ~clock ~outage f (net : _ Eio.Net.t) :
     [ `Generic ] Eio.Net.ty Eio.Resource.t =
   Eio.Resource.T
     ( {
-        Network.ctx = ctx ~clock ~outage f;
+        Network.ctx = ctx ?bound ~clock ~outage f;
         net :> [ `Generic ] Eio.Net.ty Eio.Resource.t;
       },
       Network.handler )
@@ -1012,3 +1054,7 @@ let outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
 let livelocked (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
   match Eio.Resource.get_opt ops Livelocked with Some f -> f t | None -> false
+
+let overrun (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
+  let (Eio.Resource.T (t, ops)) = net in
+  match Eio.Resource.get_opt ops Overrun with Some f -> f t | None -> None

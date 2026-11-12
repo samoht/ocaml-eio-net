@@ -103,7 +103,15 @@
     on any of the connections a client made to one address. A client that
     retries a refused connect at once does that in the outage, and so does one
     that reconnects at once after each failed read. Failures on distinct
-    targets, as a scan of many ports makes, do not count together. *)
+    targets, as a scan of many ports makes, do not count together, and an end of
+    file is an answer: it counts only against the connection it ended, so a
+    batch of jobs that each end with the server's close is no spin. A run that
+    makes 10000 more connects, accepts and receives while its clock stands still
+    than the run with no fault made in all hangs too, as a client that
+    reconnects at once to a server a fault broke does. The run with no fault
+    stops once it has made more of them than the budget while its clock stands
+    still: each is a scenario of the linear tier, so the check fails on the
+    budget. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
@@ -340,7 +348,8 @@ val wrap :
     After the same operation fails 10000 times on the same target while [clock]
     stands still, with no success there in between, the next attempt raises
     [Failure], as the program that makes them spins for ever, and after 20000 it
-    waits for ever.
+    waits for ever. An end of file counts only against the connection it ended:
+    a read of it again and again spins, a reconnect after each does not.
 
     A read or a write after the flow's own close raises [Invalid_argument]
     before [f] is asked, as Eio's own sockets do. A close drops the bytes a read
