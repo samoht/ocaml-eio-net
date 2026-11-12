@@ -401,6 +401,34 @@ let test_a_failed_connection_leaves_the_loop () =
     "the next peer is answered" "ok fresh\n" (exchange net "fresh\n");
   Alcotest.(check int) "the failure is reported" 1 (List.length !seen)
 
+(* [n] peers whose connection raises [Invalid_argument] and [Failure] in turn
+   each end their own connection, which reports it to [on_error]; a fresh peer
+   is then answered. A loop that let one out would end at the first, and every
+   peer after it would go unanswered. *)
+let exceptions_end_their_connection n () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let seen, on_error = errors () in
+  let served = function
+    | "invalid" -> invalid_arg "invalid"
+    | "failure" -> failwith "failure"
+    | _ -> ()
+  in
+  Eio.Switch.run @@ fun scope ->
+  let listening = scripted ~sw:scope net [] in
+  Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+      Eio_net_accept.run ~max_connections:4 ~on_error listening
+        (line_server ~served));
+  for i = 1 to n do
+    Alcotest.(check string)
+      "the raising peer is not answered" ""
+      (exchange net (if i mod 2 = 0 then "invalid\n" else "failure\n"))
+  done;
+  Alcotest.(check string)
+    "the fresh peer is answered" "ok fresh\n" (exchange net "fresh\n");
+  Alcotest.(check int) "each exception is reported" n (List.length !seen)
+
 (* Without [on_error], a failed connection is logged as a warning on the
    [eio-net.accept] source, and the loop serves on. *)
 let test_a_failed_connection_is_logged_by_default () =
@@ -587,6 +615,10 @@ let suite =
         (complete_heads_are_not_shed 100);
       Alcotest.test_case "a failed connection leaves the loop" `Quick
         test_a_failed_connection_leaves_the_loop;
+      Alcotest.test_case "10 exceptions end their own connections" `Quick
+        (exceptions_end_their_connection 10);
+      Alcotest.test_case "100 exceptions end their own connections" `Quick
+        (exceptions_end_their_connection 100);
       Alcotest.test_case "a failed connection is logged by default" `Quick
         test_a_failed_connection_is_logged_by_default;
       Alcotest.test_case "a malformed peer leaves the loop" `Quick
