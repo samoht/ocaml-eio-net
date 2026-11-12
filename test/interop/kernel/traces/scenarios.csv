@@ -1111,7 +1111,7 @@ getnameinfo tcp 127.0.0.1:49999,localhost/49999,localhost/49999
 getnameinfo tcp 10.1.2.3:80,10.1.2.3/http,10.1.2.3/http
 getnameinfo tcp 127.0.0.2:8080,127.0.0.2/http-alt,127.0.0.2/http-alt
 reuse server closes first,EADDRINUSE EADDRINUSE,EADDRINUSE ok
-reuse client closes first,ok ok,ok ok
+reuse client closes first,ok ok,EADDRINUSE ok
 reuse connection open,EADDRINUSE EADDRINUSE,EADDRINUSE ok
 reuse no connection,ok ok,ok ok
 reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok
@@ -1264,7 +1264,7 @@ dual-stack hold: listen :: client ::1 server closes first,::=EADDRINUSE ::1=EADD
 dual-stack hold: listen :: client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen :: client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
 dual-stack hold: listen :: client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
-dual-stack hold: listen :: client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+dual-stack hold: listen :: client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen ::1 client ::1 open,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen ::1 client ::1 server closes first,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen ::1 client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
@@ -1410,3 +1410,8 @@ timed: client shuts send then server closes,ok ok,EADDRINUSE ok
 timed: client shuts down then server closes,ok ok,EADDRINUSE ok
 timed: client shuts receive then server closes,EADDRINUSE ok,EADDRINUSE ok
 timed: server closes and client closes at 30 s,EADDRINUSE EADDRINUSE ok,EADDRINUSE ok ok
+ports: destinations share a port,A as many EADDRNOTAVAIL B as many EADDRNOTAVAIL ::1 as many EADDRNOTAVAIL listen 0 EADDRINUSE,not recorded
+ports: server closes first,as many EADDRNOTAVAIL again as many EADDRNOTAVAIL,not recorded
+ports: bound connects,bound EADDRINUSE then EADDRNOTAVAIL,not recorded
+ports: a bound connect in TIME_WAIT,other one fewer EADDRNOTAVAIL,not recorded
+ports: clients close first,EADDRNOTAVAIL other ok 0.5 s EADDRNOTAVAIL 1.5 s ok,not recorded

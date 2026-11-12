@@ -7,7 +7,10 @@
    record scenarios         records the scenarios in the same way, one row each:
                             those off the loopback interface only, when
                             $KERNEL_LOOPBACK_ONLY is set on a host with no
-                            other interface, and the others otherwise
+                            other interface, those that run out of ephemeral
+                            ports only, when $KERNEL_NARROW_PORTS is set on a
+                            host whose range is narrowed to a few ports, and
+                            the others otherwise
    record overlay A B       is A, with B's outcome where A has none
    record merge LINUX MACOS joins two recordings of the same sequences *)
 
@@ -33,9 +36,13 @@ let scenarios () =
      timed scenarios run together, each sleeping on the clock. *)
   let clock = Eio.Stdenv.clock env in
   let loopback_only = Sys.getenv_opt "KERNEL_LOOPBACK_ONLY" <> None in
+  let narrow = Sys.getenv_opt "KERNEL_NARROW_PORTS" <> None in
   let run name =
-    if Kernel_seq.off_loopback name <> loopback_only then not_recorded
-    else if Kernel_seq.timed name then
+    if
+      Kernel_seq.narrow_ports name <> narrow
+      || ((not narrow) && Kernel_seq.off_loopback name <> loopback_only)
+    then not_recorded
+    else if Kernel_seq.timed name || narrow then
       Kernel_seq.scenario ~wait:(Eio.Time.sleep clock) net name
     else
       match
@@ -45,7 +52,13 @@ let scenarios () =
       | r -> r
       | exception Eio.Time.Timeout -> "timeout"
   in
-  let timed, untimed = List.partition Kernel_seq.timed Kernel_seq.scenarios in
+  (* Those that run out of ports run one at a time, as they share the
+     range. *)
+  let timed, untimed =
+    List.partition
+      (fun name -> Kernel_seq.timed name && not narrow)
+      Kernel_seq.scenarios
+  in
   let results = Hashtbl.create 16 in
   List.iter (fun name -> Hashtbl.replace results name (run name)) untimed;
   Eio.Fiber.List.iter

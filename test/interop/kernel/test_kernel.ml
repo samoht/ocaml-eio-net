@@ -301,8 +301,8 @@ let scenario_exceptions : scenario_exception list =
     };
     {
       why =
-        "a scenario off the loopback interface is recorded only on a host with \
-         loopback only, a container, so not on macOS";
+        "a scenario off the loopback interface, or one that runs out of \
+         ephemeral ports, is recorded only in a container, so not on macOS";
       oses = [ `Macos ];
       holds = (fun _ ~mem:_ ~kernel -> kernel = "not recorded");
     };
@@ -359,7 +359,7 @@ let replay_scenario ~os name =
   Eio.Switch.run @@ fun sw ->
   let clock = env#mono_clock in
   let net = Eio_net_mem.v ~os ~clock ~sw () in
-  if Kernel_seq.timed name then
+  if Kernel_seq.timed name || Kernel_seq.narrow_ports name then
     Kernel_seq.scenario ~wait:(Eio.Time.Mono.sleep clock) net name
   else
     match

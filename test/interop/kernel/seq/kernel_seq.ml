@@ -1492,6 +1492,130 @@ let dual_hold lst cli which net =
        (fun a -> a ^ "=" ^ listen_at net (`Tcp (ip a, p)))
        [ "::"; "::1"; "0.0.0.0"; "127.0.0.1" ])
 
+(* The ephemeral ports of the range, which a kernel's range narrowed to a
+   few ports runs out of in a few connects; a whole range would take the
+   host's. Outcomes count no ports: a count is compared with the first
+   destination's. Each case listens at its own ports, below both ranges, so
+   that one case's TIME_WAITs are not another's. *)
+
+(* Connects to [addr], each accepted and kept open, until one fails: the
+   connections and its error. *)
+let fill ?bind_to ~sw net l addr =
+  let rec go n acc =
+    if n = 70000 then (acc, "max")
+    else
+      match Eio.Net.connect ~sw ?bind_to net addr with
+      | c ->
+          let s, _ = Eio.Net.accept ~sw l in
+          go (n + 1) ((c, s) :: acc)
+      | exception e -> (acc, classify e)
+  in
+  go 0 []
+
+(* Closes the server's ends first, so that the clients hold no port. *)
+let close_all ?(client_first = false) conns =
+  List.iter
+    (fun (c, s) ->
+      let a, b = if client_first then (c, s) else (s, c) in
+      Eio.Flow.close a;
+      Eio.Flow.close b)
+    conns
+
+let as_many first l =
+  if first = [] then "none"
+  else if List.compare_lengths l first = 0 then "as many"
+  else if List.compare_length_with l (List.length first - 1) = 0 then
+    "one fewer"
+  else Fmt.str "%d of %d" (List.length l) (List.length first)
+
+let ports_listen ~sw net a p =
+  let addr = `Tcp (ip a, p) in
+  (Eio.Net.listen ~sw ~backlog:16 net addr, addr)
+
+(* Connects toward three destinations, each until one fails, then a listen
+   at port 0. *)
+let ports_shared ~wait:_ net =
+  Eio.Switch.run @@ fun sw ->
+  let la, a = ports_listen ~sw net "127.0.0.1" 7101 in
+  let lb, b = ports_listen ~sw net "127.0.0.1" 7102 in
+  let l6, c = ports_listen ~sw net "::1" 7103 in
+  let ca, ea = fill ~sw net la a in
+  let cb, eb = fill ~sw net lb b in
+  let c6, e6 = fill ~sw net l6 c in
+  let l0 = listen_at net (`Tcp (ip "127.0.0.1", 0)) in
+  List.iter close_all [ ca; cb; c6 ];
+  Fmt.str "A %s %s B %s %s ::1 %s %s listen 0 %s" (as_many ca ca) ea
+    (as_many ca cb) eb (as_many ca c6) e6 l0
+
+(* Connects until one fails, closed server first, then as many again. *)
+let ports_server_first ~wait:_ net =
+  Eio.Switch.run @@ fun sw ->
+  let l, a = ports_listen ~sw net "127.0.0.1" 7104 in
+  let first, e = fill ~sw net l a in
+  close_all first;
+  let again, e' = fill ~sw net l a in
+  close_all again;
+  Fmt.str "%s %s again %s %s" (as_many first first) e (as_many first again) e'
+
+(* Connects bound at port 0 until one fails, then one that binds no
+   address, toward another destination. *)
+let ports_bound ~wait:_ net =
+  Eio.Switch.run @@ fun sw ->
+  let la, a = ports_listen ~sw net "127.0.0.1" 7105 in
+  let lb, b = ports_listen ~sw net "127.0.0.1" 7106 in
+  let bound, e = fill ~bind_to:(`Tcp (ip "127.0.0.1", 0)) ~sw net la a in
+  let unbound, e' = fill ~sw net lb b in
+  List.iter close_all [ bound; unbound ];
+  Fmt.str "bound %s then %s" e
+    (if unbound = [] then e' else Fmt.str "%d then %s" (List.length unbound) e')
+
+(* How many ports a destination has, then a connect bound at port 0 that
+   closes first, and the ports another destination has. *)
+let ports_bound_time_wait ~wait:_ net =
+  Eio.Switch.run @@ fun sw ->
+  let la, a = ports_listen ~sw net "127.0.0.1" 7107 in
+  let lb, b = ports_listen ~sw net "127.0.0.1" 7108 in
+  let first, _ = fill ~sw net la a in
+  close_all first;
+  let c = Eio.Net.connect ~sw ~bind_to:(`Tcp (ip "127.0.0.1", 0)) net a in
+  let s, _ = Eio.Net.accept ~sw la in
+  close_all ~client_first:true [ (c, s) ];
+  let other, e = fill ~sw net lb b in
+  close_all other;
+  Fmt.str "other %s %s" (as_many first other) e
+
+(* Connects until one fails, closed client first, so that every port is in
+   TIME_WAIT toward the destination: a connect to it and to another at once,
+   and to it after 0.5 s and 1.5 s. *)
+let ports_client_first ~wait net =
+  Eio.Switch.run @@ fun sw ->
+  let la, a = ports_listen ~sw net "127.0.0.1" 7109 in
+  let lb, b = ports_listen ~sw net "127.0.0.1" 7110 in
+  let first, _ = fill ~sw net la a in
+  close_all ~client_first:true first;
+  let connect l addr =
+    outcome (fun () ->
+        let c = Eio.Net.connect ~sw net addr in
+        let s, _ = Eio.Net.accept ~sw l in
+        close_all [ (c, s) ];
+        "ok")
+  in
+  let at_once = connect la a in
+  let other = connect lb b in
+  wait 0.5;
+  let half = connect la a in
+  wait 1.0;
+  Fmt.str "%s other %s 0.5 s %s 1.5 s %s" at_once other half (connect la a)
+
+let ports_cases =
+  [
+    ("ports: destinations share a port", ports_shared);
+    ("ports: server closes first", ports_server_first);
+    ("ports: bound connects", ports_bound);
+    ("ports: a bound connect in TIME_WAIT", ports_bound_time_wait);
+    ("ports: clients close first", ports_client_first);
+  ]
+
 let untimed_scenarios : (string * (net -> string)) list =
   [ ("three", three) ]
   @ List.map (fun n -> (Fmt.str "backlog %d" n, backlog n)) [ 0; 1; 2; 5 ]
@@ -1750,10 +1874,12 @@ let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
   @ List.map
       (fun (name, order) -> ("timed: " ^ name, timed_close order))
       timed_cases
+  @ ports_cases
 
 let scenarios = List.map fst scenario_list
 let timed name = String.starts_with ~prefix:"timed: " name
 let off_loopback name = String.starts_with ~prefix:"off loopback: " name
+let narrow_ports name = String.starts_with ~prefix:"ports: " name
 
 let scenario ?(wait = fun _ -> ()) net name =
   let f = List.assoc name scenario_list in

@@ -50,8 +50,17 @@ docker run --rm --network none \
   -v "$work:/out" "$image" bash -euc "
     mkdir -p /tmp/sock
     KERNEL_LOOPBACK_ONLY=1 KERNEL_DIR=/tmp/sock /out/record.linux scenarios >/out/lo.linux"
+# The scenarios that run out of ephemeral ports, with a range of 20 ports,
+# so that they fill it in a few connects and leave the host's alone.
+docker run --rm --network none \
+  --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+  --sysctl net.ipv6.conf.lo.disable_ipv6=0 \
+  --sysctl net.ipv4.ip_local_port_range="40000 40019" \
+  -v "$work:/out" "$image" bash -euc "
+    mkdir -p /tmp/sock
+    KERNEL_NARROW_PORTS=1 KERNEL_DIR=/tmp/sock /out/record.linux scenarios >/out/ports.linux"
 "$record" overlay "$work/scenarios.linux" "$work/lo.linux" >"$work/both.linux"
-mv "$work/both.linux" "$work/scenarios.linux"
+"$record" overlay "$work/both.linux" "$work/ports.linux" >"$work/scenarios.linux"
 
 for t in $traces; do
   "$record" merge "$work/$t.linux" "$work/$t.macos" >"$out/$t.csv"

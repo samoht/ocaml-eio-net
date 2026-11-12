@@ -36,12 +36,18 @@ val scenarios : string list
     [listening_addr] after a close, the names of IPv4-compatible and abstract
     addresses, the address a failed connect keeps bound, a Unix path with a NUL,
     connects bound at the IPv6 wildcard address next to IPv4 holds on their
-    port, connects and datagrams off the loopback interface, and timed closes.
-*)
+    port, connects and datagrams off the loopback interface, timed closes, and
+    connects that run out of ephemeral ports. *)
 
 val timed : string -> bool
 (** [timed name] is [true] for a scenario that lets time pass: TIME_WAIT and
     FIN_WAIT2, probed now and after Linux's 60-second timers. *)
+
+val narrow_ports : string -> bool
+(** [narrow_ports name] is [true] for a scenario that runs out of ephemeral
+    ports. Only a host whose range is narrowed to a few ports records it, as a
+    container with [net.ipv4.ip_local_port_range] set: on another host it would
+    take the host's ports. *)
 
 val off_loopback : string -> bool
 (** [off_loopback name] is [true] for a scenario that sends toward an address
