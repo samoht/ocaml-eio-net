@@ -35,7 +35,9 @@ type freeze = { thawed : unit Eio.Promise.t; thaw : unit Eio.Promise.u }
    added after the break is shut at once. [paired] holds when both ends are
    wrapped here. [sent], [writing] and [frozen] are indexed by the writing
    side: the bytes whose write returned, the writes under way, and the freeze
-   of a stopped writer. *)
+   of a stopped writer; [taken] by the reading side, the bytes its reads
+   returned. [reset_to] is the end of an AF_UNIX connection whose peer
+   crashed with bytes unread: it reads ECONNRESET once its queue is empty. *)
 type conn = {
   lock : Mutex.t;
   family : Op.family;
@@ -44,7 +46,9 @@ type conn = {
   mutable ends : (Op.side * stream) list;
   sent : int array;
   writing : int array;
+  taken : int array;
   frozen : freeze option array;
+  mutable reset_to : Op.side option;
 }
 
 let conn ~paired family =
@@ -56,7 +60,9 @@ let conn ~paired family =
     ends = [];
     sent = [| 0; 0 |];
     writing = [| 0; 0 |];
+    taken = [| 0; 0 |];
     frozen = [| None; None |];
+    reset_to = None;
   }
 
 let ix : Op.side -> int = function `Client -> 0 | `Server -> 1
@@ -111,6 +117,18 @@ let break conn ~at how =
   | `Closed closer when ends <> [] && not (List.mem_assoc closer ends) ->
       List.iter (fun (side, s) -> if side = at then shutdown s `Receive) ends
   | _ -> ()
+
+(* On AF_UNIX a reset is the crash of the end [crashed], which closes its
+   socket: its peer reads ECONNRESET once its queue is empty, only if
+   [crashed] left bytes unread, as unix(7) sockets report it, and end of file
+   otherwise. *)
+let crash conn ~at ~crashed =
+  Mutex.protect conn.lock (fun () ->
+      if
+        Atomic.get conn.broken = `Open
+        && conn.sent.(ix (other crashed)) > conn.taken.(ix crashed)
+      then conn.reset_to <- Some (other crashed));
+  break conn ~at (`Closed crashed)
 
 let join conn side sock =
   let broken =
@@ -345,6 +363,9 @@ module Flow = struct
     | `Reset when not t.reset_reported ->
         t.reset_reported <- true;
         raise (reset_exn ())
+    | `Closed _ when t.conn.reset_to = Some t.side && not t.reset_reported ->
+        t.reset_reported <- true;
+        raise (reset_exn ())
     | `Reset | `Closed _ | `Open -> raise End_of_file
 
   (* Whether this end's own reads are cut: a reset, or its own close. *)
@@ -399,6 +420,7 @@ module Flow = struct
       match Eio.Flow.single_read t.sock scratch with
       | n -> n
       | exception (End_of_file | Eio.Io _) when cut t -> 0
+      | exception End_of_file when t.conn.reset_to = Some t.side -> 0
     in
     Mutex.protect t.lock @@ fun () ->
     check_read t;
@@ -426,6 +448,9 @@ module Flow = struct
         Cstruct.blit t.leftover 0 dst 0 n;
         t.leftover <- Cstruct.sub t.leftover n (avail - n);
         t.delivered <- t.delivered + n;
+        if t.family = `Unix && t.conn.paired then
+          Mutex.protect t.conn.lock (fun () ->
+              t.conn.taken.(ix t.side) <- t.conn.taken.(ix t.side) + n);
         Some n
     in
     match n with Some n -> n | None -> deliver t dst ~cap
@@ -527,6 +552,9 @@ module Flow = struct
             Eio.Time.sleep t.ctx.clock d;
             deliver t dst ~cap:0
         | Some Hang -> Eio.Fiber.await_cancel ()
+        | Some Reset when stops t ->
+            crash t.conn ~at:t.side ~crashed:(other t.side);
+            deliver t dst ~cap:0
         | Some Reset ->
             break t.conn ~at:t.side `Reset;
             if t.family = `Inet then raise_broken t else deliver t dst ~cap:0
@@ -588,6 +616,9 @@ module Flow = struct
       else
         match fault with
         | Some Fault.Hang -> Eio.Fiber.await_cancel ()
+        | Some Reset when stops t ->
+            crash t.conn ~at:t.side ~crashed:t.side;
+            write_reset t
         | Some Reset ->
             break t.conn ~at:t.side `Reset;
             write_reset t

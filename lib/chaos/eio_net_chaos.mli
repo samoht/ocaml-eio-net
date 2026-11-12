@@ -263,18 +263,23 @@ module Fault : sig
             other than {!Eio_net_mem}, where the wrapper does not see the peer,
             the read holds what is queued, as over IP. *)
     | Reset
-        (** The connection is reset at both ends, and the bytes not yet read are
-            lost, except on a Unix-domain connection: AF_UNIX keeps in the
+        (** Over IP, the connection is reset at both ends, and the bytes not yet
+            read are lost. At each end the first read or write that follows
+            raises [Connection_reset]; later reads return end of file and writes
+            keep raising it, as on Linux and macOS. A Unix-domain connection has
+            no reset to send: it is the crash of one end, the peer on a read and
+            this end on a write, which closes its socket. AF_UNIX keeps in the
             reader's queue what a returned write sent, so each end reads that
-            first. At each end the first read or write that follows raises
-            [Connection_reset]; later reads return end of file and writes keep
-            raising it, as on Linux and macOS. On a Unix-domain connection a
-            write raises it as AF_UNIX's EPIPE, which leaves it to the reads:
-            each end reads what is queued, then [Connection_reset] once, then
-            end of file, as on Linux. On an accept, the accept succeeds and the
-            connection it returns is reset, as Linux hands over one whose client
-            left first. On a connect, it is a refusal, as a reset answering the
-            handshake is. *)
+            first. The other end then reads [Connection_reset] once, if the
+            crashed end left bytes unread, as AF_UNIX reports it, then end of
+            file; the crashed end reads end of file. The writes of both raise
+            [Connection_reset], as AF_UNIX's EPIPE, which leaves the reset to
+            the reads. On a network other than {!Eio_net_mem}, each end of a
+            Unix-domain connection reads what is queued, then [Connection_reset]
+            once. On an accept, the accept succeeds and the connection it
+            returns is reset, as Linux hands over one whose client left first.
+            On a connect, it is a refusal, as a reset answering the handshake
+            is. *)
     | Eof
         (** One end closes, as a FIN does: no byte already written is lost. On a
             read, the peer closed: the read returns what the peer wrote before,

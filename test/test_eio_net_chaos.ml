@@ -676,9 +676,10 @@ let test_unix_has_no_ip_faults () =
     (Eio.Time.with_timeout_exn env#clock 1.0 (fun () -> recv_n rx 6))
 
 (* An AF_UNIX byte whose write returned is in the reader's queue (unix(7)):
-   after a reset or an end of stream that the server's read meets, the client
-   reads what the server wrote, then the cut; over TCP it reads the cut at
-   once. Each end reads the cut once, then end of file. *)
+   after a reset or an end of stream that the server's read meets, a crash or
+   a close of the client, the client reads what the server wrote, then end of
+   file, and the server reads the reset once, as the client left bytes
+   unread; over TCP each end reads the reset at once, then end of file. *)
 let test_unix_cut_keeps_written () =
   let run addr fault =
     Eio_mock.Backend.run_full @@ fun env ->
@@ -706,7 +707,7 @@ let test_unix_cut_keeps_written () =
   let unix = `Unix "/tmp/s.sock"
   and tcp = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
   Alcotest.(check string)
-    "AF_UNIX reset" "reset ab reset eof" (run unix Fault.Reset);
+    "AF_UNIX reset" "reset ab eof eof" (run unix Fault.Reset);
   Alcotest.(check string) "AF_UNIX end" "eof ab eof eof" (run unix Fault.Eof);
   Alcotest.(check string)
     "TCP reset" "reset reset eof eof" (run tcp Fault.Reset);
@@ -802,11 +803,11 @@ let test_write_after_peer_close () =
   Alcotest.(check string)
     "TCP" "ab 1 reset end end"
     (run (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)));
-  (* After a reset, an AF_UNIX write's EPIPE leaves the reset to the next
-     read, which reads it after what is queued; over TCP the write that
-     reports it clears it. *)
+  (* After a reset, a crash of the client on AF_UNIX that left nothing
+     unread, the server reads what is queued, then end of file; over TCP the
+     write that reports the reset clears it. *)
   Alcotest.(check string)
-    "AF_UNIX reset" "ab reset reset reset end"
+    "AF_UNIX reset" "ab reset reset end end"
     (run ~fault:Reset (`Unix "/tmp/s.sock"));
   Alcotest.(check string)
     "TCP reset" "reset reset reset end end"
