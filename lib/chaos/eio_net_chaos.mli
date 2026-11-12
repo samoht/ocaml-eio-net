@@ -61,7 +61,8 @@
     others, or for longer than 50 ms, may pass: the linear tier delays one
     datagram at a time. A program that never fails the calls still waiting on a
     connection that died passes unless the workload waits for every call and
-    checks how each ended.
+    checks how each ended. A garbled datagram is random bytes, so a parser that
+    rejects most noise but accepts some may pass.
 
     {2 Failures and replay}
 
