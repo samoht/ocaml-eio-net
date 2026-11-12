@@ -414,6 +414,43 @@ let poll ?patience () =
   done;
   if (not !got) && not (Eio_net_chaos.outage env) then failwith "no reply"
 
+(* A server that yields 200000 times while it computes its answer, and a
+   client that waits 30 s for it. A real server takes a few milliseconds
+   for that, so the client's timeout never fires. *)
+let compute () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let r = Eio.Buf_read.of_flow flow ~max_size:16 in
+          let line () = App.strict_line r in
+          match Eio.Time.with_timeout_exn env#clock 5.0 line with
+          | "sum" ->
+              let sum = ref 0 in
+              for i = 1 to 200_000 do
+                sum := !sum + i;
+                Eio.Fiber.yield ()
+              done;
+              Eio.Flow.copy_string (Fmt.str "%d\n" !sum) flow
+          | _ -> ()));
+  let rec ask n =
+    match
+      Eio.Time.with_timeout_exn env#clock 30.0 @@ fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect ~sw env#net addr in
+      Eio.Flow.copy_string "sum\n" flow;
+      App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16)
+    with
+    | answer -> Some answer
+    | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) ->
+        if n < 3 then ask (n + 1) else None
+  in
+  match ask 1 with
+  | Some "20000100000" -> ()
+  | Some answer -> Fmt.failwith "got %S" answer
+  | None -> if not (Eio_net_chaos.outage env) then failwith "no answer"
+
 let suite =
   ( "guards",
     [
@@ -449,6 +486,8 @@ let suite =
         (error_is
            "the run hangs: it is still running after an hour of its clock"
            (poll ?patience:None));
+      Alcotest.test_case "a server that yields while it computes" `Quick
+        (Expect.passes compute);
       Alcotest.test_case "a scan of closed ports is not a spin" `Quick
         (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
