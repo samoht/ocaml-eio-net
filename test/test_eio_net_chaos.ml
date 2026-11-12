@@ -563,6 +563,30 @@ let test_net_connect_timeout () =
   Alcotest.(check (float 0.)) "after 133 s" 133. (connect_timeout ~os:`Linux);
   Alcotest.(check (float 0.)) "after 75 s" 75. (connect_timeout ~os:`Macos)
 
+(* Under [`Macos] a Unix-domain connection queues 8 KiB, so a 16 KiB write
+   to a peer that does not read waits, under every fault: tiny buffers lower
+   the queue to 32 KiB and never raise it. *)
+let test_tiny_buffers_macos_unix () =
+  let path = `Unix "tiny.sock" in
+  Chaos.check ~os:`Macos @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  match Eio.Net.listen ~sw ~reuse_addr:true ~backlog:1 env#net path with
+  | exception Eio.Io _ -> ()
+  | l -> (
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          (try ignore (Eio.Net.accept ~sw l) with Eio.Io _ -> ());
+          `Stop_daemon);
+      match Eio.Net.connect ~sw env#net path with
+      | exception Eio.Io _ -> ()
+      | c -> (
+          match
+            Eio.Time.with_timeout_exn env#clock 1. (fun () ->
+                Eio.Flow.copy_string (String.make 16384 'x') c)
+          with
+          | () ->
+              failwith "a 16 KiB write to a peer that does not read returned"
+          | exception (Eio.Time.Timeout | Eio.Io _ | End_of_file) -> ()))
+
 (* A connect with no route to its host fails at once, as eio_posix reports
    it. *)
 let test_net_connect_unreachable () =
@@ -1104,6 +1128,8 @@ let suite =
   ( "eio_net_chaos",
     [
       Alcotest.test_case "flow short reads" `Quick test_flow_short;
+      Alcotest.test_case "tiny buffers under macOS over AF_UNIX" `Quick
+        test_tiny_buffers_macos_unix;
       Alcotest.test_case "flow stall coalesces writes" `Quick
         test_flow_stall_coalesces;
       Alcotest.test_case "flow buffered bytes before end of stream" `Quick
