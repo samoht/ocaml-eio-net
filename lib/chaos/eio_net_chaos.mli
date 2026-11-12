@@ -12,16 +12,20 @@
     A check runs the workload once with no fault and records its operations. Its
     scenarios are positions in that run, in two tiers:
 
-    - the linear tier always runs whole. On each end of each connection it cuts
-      the bytes around the ends of the first three of the peer's writes, its
-      last, and the first of each length class, a length rounded down to a power
-      of two; it fails each connect, accept and datagram; and it runs each
-      lasting condition. It grows with the structure of the exchange, not with
-      its bytes;
+    - the linear tier always runs whole. It takes the structure of the run: the
+      first three connections, the last, and the first of each class, the length
+      classes each side writes, a length rounded down to a power of two. On each
+      end of these it cuts the bytes around the ends of the first three of the
+      peer's writes, its last, and the first of each length class, and it fails
+      their connects and accepts. On each datagram socket it fails the first
+      three datagrams received, the last, and the first of each length class. It
+      runs each lasting condition. It grows with the structure of the exchange,
+      not with its bytes, its clients or its messages;
     - the sampled tier spends the rest, at most half as much as the linear tier
-      and at least 200 runs: the other write ends, and pairs of faults, the
-      second at a position of the run the first one changed. That is where a
-      retry, or a second connection after a reset, gets tested.
+      and at least 200 runs: the faults the linear tier left, on other write
+      ends, connections and datagrams, and pairs of faults, the second at a
+      position of the run the first one changed. That is where a retry, or a
+      second connection after a reset, gets tested.
 
     A check never passes on a partial linear tier. One that needs more runs than
     its budget fails and says so: shrink the workload or raise [~budget].
@@ -147,17 +151,18 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
 
     The linear tier tries each of these alone:
 
-    - at each structural position of what one end of a connection reads, the
-      connection is reset at both ends, as on TCP, or the peer closes it, or
-      stalls for good;
+    - at each structural position of what one end of a structural connection
+      reads, the connection is reset at both ends, as on TCP, or the peer closes
+      it, or stalls for good;
     - at each structural position of what one end writes, the connection is
       reset, or this end closes it, as a process killed in the middle of a
       message does;
-    - each connect is refused, times out after 133 seconds, or finds no route to
-      its host; each accepted connection is reset before its first byte, as when
-      the client left first;
-    - each datagram received is lost, duplicated, held back behind the next,
-      replaced with noise from the same sender, or delivered 50 ms late, alone;
+    - each connect of a structural connection is refused, times out after 133
+      seconds, or finds no route to its host; each accepted one is reset before
+      its first byte, as when the client left first;
+    - each structural datagram received is lost, duplicated, held back behind
+      the next, replaced with noise from the same sender, or delivered 50 ms
+      late, alone;
     - every read returns one byte until its end has read 4 KiB, or every write
       takes one byte until its end has written 4 KiB; every read waits 5 ms and
       takes what several writes sent; every connection queues 32 KiB each way,
@@ -233,7 +238,7 @@ module Op : sig
             took before, or the connects or accepts before. *)
     length : int;
         (** The bytes a read asks for or a write offers, or the size of the
-            buffer a datagram is received into. *)
+            datagram received. *)
   }
   (** The type for operations. *)
 

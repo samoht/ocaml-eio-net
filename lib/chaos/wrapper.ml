@@ -849,7 +849,8 @@ module Datagram = struct
                 let fault =
                   match
                     ask t.ctx `Recv ~socket:t.socket ~side:`Client
-                      ~family:t.family ~offset ~length:(Cstruct.length buf)
+                      ~family:t.family ~offset
+                      ~length:(String.length (snd d))
                   with
                   | fault -> fault
                   | exception e ->

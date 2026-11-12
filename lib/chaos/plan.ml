@@ -181,20 +181,23 @@ let length_class n =
   let rec go c n = if n <= 1 then c else go (c + 1) (n lsr 1) in
   go 0 n
 
-(* The writes of an end that make its structure: the first three, the last,
-   and the first of each length class, so an exchange of many messages of
-   varying length costs runs by its classes, not its messages. *)
-let structural writes =
-  let n = List.length writes in
+(* The elements of [l] that make its structure: the first three, the last,
+   and the first of each class. *)
+let firsts class_of l =
+  let n = List.length l in
   let seen = Hashtbl.create 8 in
   List.filteri
-    (fun i (op : Op.t) ->
-      let c = length_class op.length in
+    (fun i x ->
+      let c = class_of x in
       let first = not (Hashtbl.mem seen c) in
       Hashtbl.replace seen c ();
       i < 3 || i = n - 1 || first)
-    writes
+    l
 
+(* The writes of an end, or the datagrams of a socket, that make its
+   structure: by length class, so an exchange of many messages of varying
+   length costs runs by its classes, not its messages. *)
+let structural ops = firsts (fun (op : Op.t) -> length_class op.length) ops
 let around l = List.concat_map (fun b -> [ b - 1; b; b + 1 ]) l
 
 (* The address family of an end. *)
@@ -230,7 +233,7 @@ let write_positions ~all ix e =
   |> List.filter (fun b -> b >= 0 && b < top)
   |> List.sort_uniq compare
 
-let byte_rules ~all trace =
+let byte_rules ?(keep = fun _ -> true) ~all trace =
   let ix = index trace in
   List.concat_map
     (fun ((s, side) as e) ->
@@ -246,9 +249,53 @@ let byte_rules ~all trace =
               (fun fault -> { kind = `Write; socket = s; side; at; fault })
               Fault.[ Reset; Eof ])
           (write_positions ~all ix e))
-    (ends trace)
+    (List.filter (fun (s, _) -> keep s) (ends trace))
 
-let structural_rules (trace : trace) =
+(* The connections whose ends and connects the linear tier tries: the first
+   three, the last, and the first of each class, its family and the length
+   classes each side writes, so a server of many alike clients costs runs by
+   its kinds of client, not its clients. And the datagrams it tries: on each
+   socket, those [structural] keeps. *)
+let structural_ops (trace : trace) =
+  let ix = index trace in
+  let order = ref [] and family = Hashtbl.create 64 in
+  let datagrams = Hashtbl.create 8 in
+  List.iter
+    (fun ((op : Op.t), _) ->
+      if not (Hashtbl.mem family op.socket) then begin
+        Hashtbl.replace family op.socket op.family;
+        order := op.socket :: !order
+      end;
+      if op.kind = `Recv then Hashtbl.replace datagrams op.socket ())
+    trace;
+  let streams =
+    List.filter (fun s -> not (Hashtbl.mem datagrams s)) (List.rev !order)
+  in
+  let class_of s =
+    let lengths side =
+      List.sort_uniq compare
+        (List.map
+           (fun (op : Op.t) -> length_class op.length)
+           (ops ix `Write (s, side)))
+    in
+    (Hashtbl.find family s, lengths `Client, lengths `Server)
+  in
+  let kept = Hashtbl.create 64 in
+  List.iter (fun s -> Hashtbl.replace kept s ()) (firsts class_of streams);
+  let recvs = Hashtbl.create 64 in
+  Hashtbl.iter
+    (fun s () ->
+      List.iter
+        (fun (op : Op.t) -> Hashtbl.replace recvs op.index ())
+        (structural (ops ix `Recv (s, `Client))))
+    datagrams;
+  ( (fun s -> Hashtbl.mem kept s),
+    fun (op : Op.t) ->
+      match op.kind with
+      | `Recv -> Hashtbl.mem recvs op.index
+      | `Connect | `Accept | `Read | `Write -> Hashtbl.mem kept op.socket )
+
+let structural_rules ?(keep = fun _ -> true) (trace : trace) =
   List.concat_map
     (fun ((op : Op.t), _) ->
       let r fault =
@@ -264,17 +311,21 @@ let structural_rules (trace : trace) =
          miss, a Unix-domain client that leaves first closes, and a
          Unix-domain datagram is never lost, duplicated, reordered or
          garbled (unix(7)); any datagram may arrive late, alone. *)
-      match (op.kind, op.family) with
-      | `Connect, `Inet -> [ r Refuse; r Timeout; r Unreachable ]
-      | `Connect, `Unix -> [ r Refuse ]
-      | `Accept, `Inet -> [ r Reset ]
-      | `Accept, `Unix -> [ r Eof ]
-      | `Recv, `Inet -> [ r Drop; r Dup; r Reorder; r noise; r late ]
-      | `Recv, `Unix -> [ r late ]
-      | (`Read | `Write), _ -> [])
+      if not (keep op) then []
+      else
+        match (op.kind, op.family) with
+        | `Connect, `Inet -> [ r Refuse; r Timeout; r Unreachable ]
+        | `Connect, `Unix -> [ r Refuse ]
+        | `Accept, `Inet -> [ r Reset ]
+        | `Accept, `Unix -> [ r Eof ]
+        | `Recv, `Inet -> [ r Drop; r Dup; r Reorder; r noise; r late ]
+        | `Recv, `Unix -> [ r late ]
+        | (`Read | `Write), _ -> [])
     trace
 
-let singles trace = structural_rules trace @ byte_rules ~all:false trace
+let singles trace =
+  let conn, op = structural_ops trace in
+  structural_rules ~keep:op trace @ byte_rules ~keep:conn ~all:false trace
 
 (* One-byte reads and writes happen over IP only: a Unix-domain read returns
    what is queued, up to its buffer, and a write queues whole. *)
@@ -295,7 +346,7 @@ let linear trace =
 let others trace =
   let lin = Hashtbl.create 64 in
   List.iter (fun r -> Hashtbl.replace lin r ()) (singles trace);
-  byte_rules ~all:true trace
+  structural_rules trace @ byte_rules ~all:true trace
   |> List.filter (fun r -> not (Hashtbl.mem lin r))
   |> List.map (fun r -> { rules = [ r ]; lasting = None })
 
