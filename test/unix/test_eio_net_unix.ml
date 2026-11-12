@@ -475,6 +475,46 @@ let test_local_listen_perm () =
   check 0o600;
   check 0o660
 
+(* A message read to its peer's end of sending comes with the descriptors
+   sent beside it, a pipe's write end here, which the reader then writes
+   through; past [max] bytes the read stops, too long. *)
+let test_local_receive () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  let p = Filename.concat (Filename.temp_dir "receive" "") "s" in
+  Eio.Switch.run @@ fun sw ->
+  let listening = listen ~sw ~net ~fs p in
+  let send message =
+    let r, w = Unix.pipe ~cloexec:true () in
+    let flow = Eio.Net.connect ~sw net (`Unix p) in
+    let fds = [ Eio_unix.Fd.of_unix ~sw ~close_unix:true w ] in
+    Eio_unix.Net.send_msg flow ~fds [ Cstruct.of_string message ];
+    Eio.Flow.shutdown flow `Send;
+    r
+  in
+  let receive ~max =
+    let flow, _ = Eio.Net.accept ~sw listening in
+    Eio_net_unix.Local.receive ~sw ~max_fds:2 ~max flow
+  in
+  let r = send "a request" in
+  (match receive ~max:64 with
+  | Ok (message, [ w ]) ->
+      Alcotest.(check string) "the message" "a request" message;
+      Eio_unix.Fd.use_exn "w" w (fun w ->
+          ignore (Unix.write_substring w "x" 0 1 : int));
+      let b = Bytes.create 1 in
+      ignore (Unix.read r b 0 1 : int);
+      Alcotest.(check string) "through the descriptor" "x" (Bytes.to_string b);
+      Unix.close r
+  | Ok (_, fds) -> Alcotest.failf "%d descriptors" (List.length fds)
+  | Error `Too_long -> Alcotest.fail "too long");
+  let r = send (String.make 100 'a') in
+  (match receive ~max:64 with
+  | Error `Too_long -> ()
+  | Ok _ -> Alcotest.fail "read past max");
+  Unix.close r
+
 (* A listener reports the path it was given, not the name it was bound by in
    its private directory: a client connects to the address it reports. *)
 let test_local_listening_addr () =
@@ -705,6 +745,8 @@ let suite =
         test_local_listen_perm;
       Alcotest.test_case "a local listener reports its path" `Quick
         test_local_listening_addr;
+      Alcotest.test_case "a message and its descriptors" `Quick
+        test_local_receive;
       Alcotest.test_case "a local listener over an existing file" `Quick
         test_local_listen_existing;
       Alcotest.test_case "a local listener at a long path, and released" `Quick

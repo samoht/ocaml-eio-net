@@ -25,5 +25,5 @@ Initial release.
   and `~replay` runs it alone. `wrap` and `pair` inject the faults a function
   chooses, from one domain or several.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets with long
-  paths, the host's interface addresses, and the Unix classifiers of failed
+  paths and the descriptors a message carries, the host's interface addresses, and the Unix classifiers of failed
   connects and accepts.

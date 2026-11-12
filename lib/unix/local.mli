@@ -68,7 +68,7 @@ val listen :
   backlog:int ->
   perm:int ->
   _ Eio.Path.t ->
-  [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t
+  [ `Unix_fd | Eio_unix.Net.listening_socket_ty ] Eio.Resource.t
 (** [listen ~replace ~sw ~net ~backlog ~perm path] is a stream socket listening
     at [path], whatever its length, whose file has the permission bits [perm]
     from the moment a peer can reach it. The directory that holds [path] is
@@ -95,6 +95,20 @@ val listen :
     ({!Eio.Path.native}), which may be longer than {!max_length}. The kernel
     knows the socket only by the name it was bound at in its private directory,
     so that name, which reaches nothing, is what a client's getpeername(2)
-    reports.
+    reports. Its connections keep the Unix platform's type, so that they pass
+    descriptors ({!receive}).
 
     Raises [Invalid_argument] as {!connect_at} does. *)
+
+val receive :
+  sw:Eio.Switch.t ->
+  max_fds:int ->
+  max:int ->
+  [> `Platform of [> `Unix ] | `Socket | `Stream ] Eio.Resource.t ->
+  (string * Eio_unix.Fd.t list, [ `Too_long ]) result
+(** [receive ~sw ~max_fds ~max flow] is the message its peer wrote on [flow] up
+    to its end of sending, and the descriptors sent with it, at most [max_fds]
+    of them, attached to [sw]; the system closes any more. A peer that writes
+    more than [max] bytes is [Error `Too_long], read no further, and the
+    descriptors it sent are closed. A failure of the socket is the {!Eio.Io}
+    error its read raises. *)
