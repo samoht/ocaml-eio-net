@@ -38,6 +38,10 @@ val key : scenario -> string
 val text : scenario -> string
 (** [text s] says what [s] does, for a report. *)
 
+val is_key : string -> bool
+(** [is_key k] is [true] iff [k] has the form of a scenario's {!key}: ["none"],
+    a lasting condition, or one or two rules. *)
+
 val linear : trace -> scenario list
 (** [linear first] is the linear tier of a check whose first run is [first]:
     each fault alone at each structural position, and each lasting condition. *)

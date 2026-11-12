@@ -135,7 +135,8 @@ let times a i p =
   go 1
 
 (* Runs of a repeated block collapse to its first and last instances, so a
-   run of one-byte operations costs a few lines. *)
+   run of one-byte operations costs a few lines. A collapse hides two lines
+   at least, as one that hides one saves none. *)
 let collapse trace =
   let a = Array.of_list trace in
   let n = Array.length a in
@@ -151,7 +152,7 @@ let collapse trace =
           (List.init max_period (fun k -> k + 1))
       in
       match best with
-      | p, r when r >= min_times ->
+      | p, r when r >= min_times && (r - 2) * p > 1 ->
           let block j = List.init p (fun k -> Op a.(j + k)) in
           let last = i + ((r - 1) * p) in
           let acc =
@@ -259,15 +260,17 @@ let diverges run (first : Plan.trace) =
   | None, [] -> None
 
 (* A replay is [net/HASH/KEY], with the 8 hexadecimal digits of a first
-   run's digest. *)
+   run's digest and a scenario's key. *)
 let parse_replay r =
   let hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
   match String.split_on_char '/' r with
-  | [ "net"; h; k ] when String.length h = 8 && String.for_all hex h -> (h, k)
+  | [ "net"; h; k ]
+    when String.length h = 8 && String.for_all hex h && Plan.is_key k ->
+      (h, k)
   | _ ->
       fail
         "~replay:%S is not a replay of eio-net: one is net/HASH/SCENARIO, HASH \
-         8 hexadecimal digits, as a failure names it"
+         8 hexadecimal digits and SCENARIO as a failure names it"
         r
 
 let find k = List.find_opt (fun s -> Plan.key s = k)

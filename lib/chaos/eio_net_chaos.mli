@@ -73,14 +73,16 @@
     operation shows the fault it met, and one cut short where a fault lands
     names that fault. A block of up to eight operations repeated three times or
     more, on the same sockets each time or each time on the next ones, as a loop
-    that reconnects makes them, shows its first and last instances, and a report
-    longer than that keeps its first and last hundred lines and those around its
-    first fault, so its size is bounded by the workload's structure rather than
-    its bytes. The scenario is found by its position and fault, so a replay
-    still runs after a fix that changes the workload's first run, such as the
-    size of its reads: a failure then says the scenario was re-matched, and a
-    re-matched replay that passes returns as any passing check does, saying
-    nothing. A replay whose scenario the check no longer has fails.
+    that reconnects makes them, shows its first and last instances if that hides
+    two lines or more, and a report longer than that keeps its first and last
+    hundred lines and those around its first fault, so its size is bounded by
+    the workload's structure rather than its bytes. The scenario is found by its
+    position and fault, so a replay still runs after a fix that changes the
+    workload's first run, such as the size of its reads: a failure then says the
+    scenario was re-matched, and a re-matched replay that passes returns as any
+    passing check does, saying nothing. A replay whose scenario the check no
+    longer has fails, and one whose scenario is not of the form a failure names
+    is refused.
 
     A check reads no environment variable and prints nothing. A test that wants
     a larger budget at night reads its own:

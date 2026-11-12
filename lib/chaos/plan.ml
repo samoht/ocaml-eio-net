@@ -42,6 +42,65 @@ let key s =
   | None, [] -> "none"
   | None, rs -> String.concat "+" (List.map rule_key rs)
 
+let is_number s =
+  s <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) s
+
+let is_fault_key k =
+  let number p f =
+    String.starts_with ~prefix:p k
+    &&
+    let n = String.length p in
+    f (String.sub k n (String.length k - n))
+  in
+  List.mem k
+    [
+      "hang";
+      "reset";
+      "eof";
+      "refuse";
+      "timeout";
+      "unreachable";
+      "emfile";
+      "drop";
+      "dup";
+      "reorder";
+    ]
+  || number "short" is_number || number "garble" is_number
+  || number "stall" (fun d -> Option.is_some (float_of_string_opt d))
+
+(* KIND SOCKET SIDE @ AT . FAULT, as [rule_key] writes it. *)
+let is_rule_key r =
+  match String.index_opt r '@' with
+  | None -> false
+  | Some i -> (
+      let head = String.sub r 0 i
+      and tail = String.sub r (i + 1) (String.length r - i - 1) in
+      match String.index_opt tail '.' with
+      | None -> false
+      | Some j ->
+          let at = String.sub tail 0 j
+          and fault = String.sub tail (j + 1) (String.length tail - j - 1) in
+          let n = String.length head in
+          n > 0
+          && (head.[n - 1] = 'c' || head.[n - 1] = 's')
+          && List.exists
+               (fun kind ->
+                 let p = Op.kind_name kind in
+                 String.starts_with ~prefix:p head
+                 && is_number
+                      (String.sub head (String.length p)
+                         (n - 1 - String.length p)))
+               [ `Connect; `Accept; `Read; `Write; `Recv ]
+          && is_number at && is_fault_key fault)
+
+let is_key k =
+  k = "none"
+  || List.exists (fun l -> lasting_name l = k) lastings
+  ||
+  match String.split_on_char '+' k with
+  | ([ _ ] | [ _; _ ]) as rs -> List.for_all is_rule_key rs
+  | _ -> false
+
 let rule_text r =
   Fmt.str "%s of %d%s at %d %a" (Op.kind_name r.kind) r.socket
     (Op.side_name r.side) r.at Fault.pp r.fault
