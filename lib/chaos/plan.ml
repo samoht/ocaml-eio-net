@@ -74,8 +74,13 @@ let index (trace : trace) : index =
     (List.rev trace);
   h
 
+let looked = Atomic.make 0
+let looked_at () = Atomic.get looked
+
 let ops ix kind (s, side) =
-  Option.value ~default:[] (Hashtbl.find_opt ix (kind, s, side))
+  let l = Option.value ~default:[] (Hashtbl.find_opt ix (kind, s, side)) in
+  ignore (Atomic.fetch_and_add looked (List.length l) : int);
+  l
 
 (* Whether a cut of end [e] at byte [b] fires in a run like [trace]: a read of
    [e] starts at or past [b], or one spans [b] and the peer wrote past it. *)

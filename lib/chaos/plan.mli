@@ -59,6 +59,10 @@ val sampled_share : budget:int -> linear:int -> classes:int -> int
     each of its [classes]: in all at most half of [linear], the runs the linear
     tier took, and at least 200, within [budget]. *)
 
+val looked_at : unit -> int
+(** [looked_at ()] is the operations of runs the plans made so far have looked
+    at, in all: a test of their cost reads it. *)
+
 val faults : scenario -> Op.t -> Fault.t option
 (** [faults s op] is the fault [op] meets in a run of [s]. A rule cuts the read
     or write that spans its position short, so the next one starts there.

@@ -55,3 +55,9 @@ exclude = ["E610"]
 [[rules]]
 files = ["lib/chaos/posix.ml"]
 exclude = ["E605"]
+
+# The cost test compiles copies of the check's private modules, which open
+# the Hermetic prelude: the compiler records no import of it.
+[[rules]]
+files = ["test/chaos/plan/dune"]
+exclude = ["E956"]
