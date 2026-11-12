@@ -946,20 +946,20 @@ let lookups =
 (* [n] clients that each send 4 KiB to an echo server and read it back.
    Under one-byte reads or writes each 4 KiB takes about 4096 operations
    each way. *)
-let echo n () =
+let echo ?(size = 4096) n () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:128 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
-          let r = Eio.Buf_read.of_flow flow ~max_size:4096 in
+          let r = Eio.Buf_read.of_flow flow ~max_size:size in
           match
             Eio.Time.with_timeout_exn env#clock 10. (fun () ->
-                Eio.Buf_read.take 4096 r)
+                Eio.Buf_read.take size r)
           with
           | s -> Eio.Flow.copy_string s flow
           | exception (Eio.Time.Timeout | End_of_file | Eio.Io _) -> ()));
-  let msg = String.init 4096 (fun i -> Char.chr (65 + (i mod 26))) in
+  let msg = String.init size (fun i -> Char.chr (65 + (i mod 26))) in
   Eio.Fiber.List.iter
     (fun _ ->
       match
@@ -967,11 +967,45 @@ let echo n () =
             Eio.Switch.run @@ fun sw ->
             let flow = Eio.Net.connect ~sw env#net addr in
             Eio.Flow.copy_string msg flow;
-            Eio.Buf_read.take 4096 (Eio.Buf_read.of_flow flow ~max_size:4096))
+            Eio.Buf_read.take size (Eio.Buf_read.of_flow flow ~max_size:size))
       with
       | s -> if s <> msg then failwith "a corrupt echo"
       | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) -> ())
     (List.init n Fun.id)
+
+(* A client that sends 400 numbered queries over UDP, one at a time, and
+   sends each again after 100 ms without its answer, up to three times. *)
+let queries () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
+  let server = Eio.Net.datagram_socket ~sw env#net (udp 5300) in
+  let client = Eio.Net.datagram_socket ~sw env#net (udp 5301) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let buf = Cstruct.create 64 in
+      while true do
+        let from, n = Eio.Net.recv server buf in
+        Eio.Net.send server ~dst:from [ Cstruct.sub buf 0 n ]
+      done;
+      `Stop_daemon);
+  let buf = Cstruct.create 64 in
+  let answered = ref 0 in
+  for i = 1 to 400 do
+    let q = string_of_int i in
+    let rec ask tries =
+      Eio.Net.send client ~dst:(udp 5300) [ Cstruct.of_string q ];
+      let rec answer () =
+        let _, n = Eio.Net.recv client buf in
+        if Cstruct.to_string ~len:n buf <> q then answer ()
+      in
+      match Eio.Time.with_timeout_exn env#clock 0.1 answer with
+      | () -> incr answered
+      | exception Eio.Time.Timeout -> if tries < 3 then ask (tries + 1)
+    in
+    ask 1
+  done;
+  if !answered < 398 && not (Eio_net_chaos.outage env) then
+    Fmt.failwith "only %d queries answered" !answered
 
 (* A client that reads a reply of 4 KiB, and polls with yields for ever if
    that took more than 100 reads. *)
@@ -1167,6 +1201,10 @@ let suite =
         (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
         (Expect.passes (transfer 25 4096));
+      Alcotest.test_case "80 clients of an echo fit the default budget" `Quick
+        (Expect.passes (echo ~size:100 80));
+      Alcotest.test_case "400 queries over UDP fit the default budget" `Quick
+        (Expect.passes queries);
       Alcotest.test_case "20 clients of a 4 KiB echo meet one-byte reads" `Quick
         (Expect.passes (echo 20));
       Alcotest.test_case "a run the one-byte reads multiplied says so" `Quick
