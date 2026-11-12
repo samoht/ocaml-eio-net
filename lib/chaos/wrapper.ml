@@ -726,10 +726,14 @@ module Datagram = struct
                       raise e
                 in
                 (* A Unix-domain socket loses, duplicates, reorders and
-                   garbles nothing (unix(7)). *)
+                   garbles nothing (unix(7)), and a datagram whose send
+                   returned is queued to it: with no peer to stop, a hang
+                   delivers it, as a stream's peer that stops does. *)
                 let fault =
                   match (t.family, fault) with
-                  | `Unix, Some (Fault.Drop | Dup | Reorder | Garble _) -> None
+                  | `Unix, Some (Fault.Drop | Dup | Reorder | Garble _ | Hang)
+                    ->
+                      None
                   | _ -> fault
                 in
                 match fault with

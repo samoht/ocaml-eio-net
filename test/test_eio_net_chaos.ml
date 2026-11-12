@@ -643,7 +643,8 @@ let test_scan_is_not_a_spin () =
 
 (* Faults only IP has do nothing on a Unix-domain socket, which is reliable
    and ordered (unix(7)): a connect neither times out nor finds no route, and
-   no datagram is lost, duplicated, reordered or garbled. *)
+   no datagram is lost, duplicated, reordered or garbled, or held by a
+   receive that hangs, as its send returned. *)
 let test_unix_has_no_ip_faults () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -651,7 +652,10 @@ let test_unix_has_no_ip_faults () =
     match op.kind with
     | `Connect -> Some (if op.offset = 0 then Fault.Timeout else Unreachable)
     | `Recv ->
-        Some (List.nth Fault.[ Drop; Dup; Reorder; Garble 3 ] (op.offset mod 4))
+        Some
+          (List.nth
+             Fault.[ Drop; Dup; Reorder; Garble 3; Hang ]
+             (op.offset mod 5))
     | _ -> None
   in
   let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
@@ -662,13 +666,14 @@ let test_unix_has_no_ip_faults () =
   Alcotest.(check (float 0.)) "no time passed" 0. (Eio.Time.now env#clock);
   let rx = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/rx.sock") in
   let tx = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/tx.sock") in
-  let payloads = [ "d0"; "d1"; "d2"; "d3"; "d4" ] in
+  let payloads = [ "d0"; "d1"; "d2"; "d3"; "d4"; "d5" ] in
   List.iter
     (fun p ->
       Eio.Net.send tx ~dst:(`Unix "/tmp/rx.sock") [ Cstruct.of_string p ])
     payloads;
   Alcotest.(check (list string))
-    "every datagram, in order" payloads (recv_n rx 5)
+    "every datagram, in order" payloads
+    (Eio.Time.with_timeout_exn env#clock 1.0 (fun () -> recv_n rx 6))
 
 (* An AF_UNIX byte whose write returned is in the reader's queue (unix(7)):
    after a reset or an end of stream that the server's read meets, the client

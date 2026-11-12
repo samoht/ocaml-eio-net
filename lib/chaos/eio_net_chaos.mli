@@ -216,9 +216,9 @@ end
 module Fault : sig
   (** The type for faults. One that does not apply to an operation does nothing,
       as one that AF_UNIX cannot produce on a Unix-domain socket: [Timeout] and
-      [Unreachable] on a connect, and [Drop], [Dup], [Reorder] and [Garble] on a
-      datagram. [Reset] on the accept of a Unix-domain connection is a client
-      that closed, as [Eof]. *)
+      [Unreachable] on a connect, and [Drop], [Dup], [Reorder], [Garble] and
+      [Hang] on a datagram. [Reset] on the accept of a Unix-domain connection is
+      a client that closed, as [Eof]. *)
   type t =
     | Short of int
         (** A read or a write moves at most [max 1 n] bytes. A write cut short
@@ -232,7 +232,9 @@ module Fault : sig
             {!check} hangs reads only. It holds that one operation: a read after
             the cancel gets the bytes the hung one would have, a datagram taken
             by a receive that hangs goes to the next receive, and a connection
-            taken by an accept that hangs to the next accept.
+            taken by an accept that hangs to the next accept. A receive on a
+            Unix-domain datagram socket does not hang: the datagram it took was
+            queued when its send returned, and no peer can stop.
 
             Over IP a read that hangs holds what is queued, as a path that drops
             every segment does. On a Unix-domain connection it is a peer that
