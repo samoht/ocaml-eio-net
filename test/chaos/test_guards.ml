@@ -279,9 +279,9 @@ let spin () =
   go 0
 
 (* A client that reconnects at once after each read that fails or ends, to
-   a server that closes every connection unanswered, spins with its clock
-   stopped, even with no fault: an end of file is no failure, but the run
-   makes more connects than the budget lets the linear tier cover. *)
+   a server that closes every connection unanswered, spins even with no
+   fault: an end of file is no failure, but the run makes more network
+   operations than a check plans from. *)
 let reconnect () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -291,7 +291,7 @@ let reconnect () =
   (* Its own bound, well past the guard's: without the guard, the run fails
      here instead of spinning for ever. *)
   let rec go n =
-    if n > 30_000 then failwith "the spin was not stopped";
+    if n > 2_000_000 then failwith "the spin was not stopped";
     match
       Eio.Switch.run (fun sw ->
           let flow = Eio.Net.connect ~sw env#net addr in
@@ -326,8 +326,8 @@ let batch () =
 
 (* A server that a fault breaks closes each later connection at once, and
    its client reconnects at once after each read that fails or ends: a spin
-   no failure counts, which the run makes far more connects than the run
-   with no fault. *)
+   no failure counts, which makes more network operations than a check plans
+   from. *)
 let broken_server () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -346,7 +346,7 @@ let broken_server () =
   (* Its own bound, well past the check's: without it, the run fails here
      instead of spinning for ever. *)
   let rec go n =
-    if n > 100_000 then failwith "the spin was not stopped";
+    if n > 2_000_000 then failwith "the spin was not stopped";
     match
       Eio.Switch.run (fun sw ->
           let flow = Eio.Net.connect ~sw env#net addr in
@@ -408,7 +408,7 @@ let poll ?patience () =
   let polls = ref 0 in
   while (not !got) && not (waited ()) do
     incr polls;
-    if !polls > 1_000_000 then failwith "polled 1000000 times";
+    if !polls > 5_000_000 then failwith "polled 5000000 times";
     Eio.Net.send client ~dst:(udp 5001) [ Cstruct.of_string "ping" ];
     Eio.Fiber.yield ()
   done;
@@ -549,9 +549,8 @@ let test_malformed_replay () =
         ())
     [ "net/zzzz/none"; "net/0123456/none"; "net/0123456789/none" ]
 
-(* A client that connects and closes for ever, with no failure, makes more
-   connects at one instant than the budget: the report says the workload
-   looks like a loop. *)
+(* A client that connects and reads to the server's close for ever, with no
+   failure: the report says the workload looks like a busy loop. *)
 let test_loop_named () =
   let run () =
     Eio_net_chaos.check @@ fun env ->
@@ -560,13 +559,197 @@ let test_loop_named () =
     Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
     while true do
-      Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
+      try
+        Eio.Switch.run @@ fun sw ->
+        ignore (Eio.Flow.read_all (Eio.Net.connect ~sw env#net addr) : string)
+      with Eio.Io _ -> ()
     done
   in
   let report = Expect.report run in
-  let says = "a workload that loops for ever" in
+  let says = "a busy loop" in
   if not (contains report says) then
     Alcotest.failf "the report does not say %S: %s" says report
+
+(* One network operation, which a fault may fail: the first run of a
+   workload that probes its clock must make one. *)
+let touch (env : Eio_net_chaos.env) =
+  try Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
+  with Eio.Io _ -> ()
+
+(* A fiber that yields 3000 times while it computes, and another that polls
+   for its result with [Fiber.yield], under a 50 ms deadline: a few
+   milliseconds of work on eio_posix. *)
+let deadline_compute () =
+  Eio_net_chaos.check @@ fun env ->
+  touch env;
+  let flag = ref false in
+  Eio.Time.with_timeout_exn env#clock 0.05 @@ fun () ->
+  Eio.Fiber.both
+    (fun () ->
+      for _ = 1 to 3000 do
+        Eio.Fiber.yield ()
+      done;
+      flag := true)
+    (fun () ->
+      while not !flag do
+        Eio.Fiber.yield ()
+      done)
+
+(* A handshake whose ends each yield 5000 times while they derive a key,
+   under a 100 ms deadline per attempt. *)
+let handshake () =
+  let derive () =
+    for _ = 1 to 5000 do
+      Eio.Fiber.yield ()
+    done
+  in
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let r = Eio.Buf_read.of_flow flow ~max_size:16 in
+          match
+            Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+                App.strict_line r)
+          with
+          | "hello" ->
+              derive ();
+              Eio.Flow.copy_string "key\n" flow
+          | _ -> ()));
+  let rec attempt n =
+    match
+      Eio.Time.with_timeout_exn env#clock 0.1 @@ fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let flow = Eio.Net.connect ~sw env#net addr in
+      Eio.Flow.copy_string "hello\n" flow;
+      let key = App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16) in
+      derive ();
+      key
+    with
+    | key -> Some key
+    | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) ->
+        if n < 3 then attempt (n + 1) else None
+  in
+  match attempt 1 with
+  | Some "key" -> ()
+  | Some key -> Fmt.failwith "got %S" key
+  | None -> if not (Eio_net_chaos.outage env) then failwith "no key"
+
+(* Two ends that ping-pong one byte over a connection until a 10 ms timer
+   says stop: a few thousand round trips on eio_posix. *)
+let pingpong () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          let buf = Cstruct.create 1 in
+          while true do
+            ignore
+              (Eio.Time.with_timeout_exn env#clock 1.0 (fun () ->
+                   Eio.Flow.single_read flow buf));
+            Eio.Flow.copy_string "y" flow
+          done));
+  let stop = ref false in
+  Eio.Fiber.fork ~sw (fun () ->
+      Eio.Time.sleep env#clock 0.01;
+      stop := true);
+  (* Its own bound, well past the round trips 10 ms allow: without time
+     passing, the run fails here instead of running for ever. *)
+  let trips = ref 0 in
+  try
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net addr in
+    let buf = Cstruct.create 1 in
+    while not !stop do
+      incr trips;
+      if !trips > 100_000 then failwith "100000 round trips in 10 ms";
+      Eio.Flow.copy_string "x" flow;
+      ignore
+        (Eio.Time.with_timeout_exn env#clock 1.0 (fun () ->
+             Eio.Flow.single_read flow buf))
+    done
+  with Eio.Io _ | End_of_file | Eio.Time.Timeout -> ()
+
+(* The same over UDP, until a 0.5 ms timer: each datagram received is a
+   scenario of the linear tier, so the default budget covers a hundred round
+   trips. *)
+let udp_pingpong () =
+  Eio_net_chaos.check @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
+  let a = Eio.Net.datagram_socket ~sw env#net (udp 5010) in
+  let b = Eio.Net.datagram_socket ~sw env#net (udp 5011) in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      let buf = Cstruct.create 8 in
+      while true do
+        let from, _ = Eio.Net.recv b buf in
+        Eio.Net.send b ~dst:from [ Cstruct.of_string "y" ]
+      done;
+      `Stop_daemon);
+  let stop = ref false in
+  Eio.Fiber.fork ~sw (fun () ->
+      Eio.Time.sleep env#clock 0.0005;
+      stop := true);
+  let trips = ref 0 in
+  let buf = Cstruct.create 8 in
+  while not !stop do
+    incr trips;
+    if !trips > 100_000 then failwith "100000 round trips in 0.5 ms";
+    Eio.Net.send a ~dst:(udp 5011) [ Cstruct.of_string "x" ];
+    try
+      ignore
+        (Eio.Time.with_timeout_exn env#clock 1.0 (fun () -> Eio.Net.recv a buf))
+    with Eio.Time.Timeout -> ()
+  done
+
+(* A loop that sleeps 1 us until a flag no one sets. *)
+let tiny_sleeps () =
+  Eio_net_chaos.check @@ fun env ->
+  touch env;
+  (* Its own bound, past the turns a run may take: without it, a run with no
+     limit on its turns sleeps until its clock reaches the hour. *)
+  let n = ref 0 in
+  while true do
+    incr n;
+    if !n > 20_000_000 then failwith "slept 20000000 times";
+    Eio.Time.sleep env#clock 1e-6
+  done
+
+(* A poll with [Fiber.yield] for a flag no one sets. *)
+let yield_poll () =
+  Eio_net_chaos.check @@ fun env ->
+  touch env;
+  let flag = ref false in
+  while not !flag do
+    Eio.Fiber.yield ()
+  done
+
+(* A workload of two operations under a budget of one run: the budget is
+   too small, and the report says only that. *)
+let test_tiny_budget () =
+  let report =
+    Expect.report @@ fun () ->
+    Eio_net_chaos.check ~budget:1 @@ fun env ->
+    touch env;
+    touch env
+  in
+  let says = "more than the budget of 1" in
+  if not (contains report says) then
+    Alcotest.failf "the report does not say %S: %s" says report;
+  if contains report "loops for ever" then
+    Alcotest.failf "the report calls the workload a loop: %s" report
+
+let first_fails error =
+  refused_with ("Eio_net_chaos.check: the run with no fault failed: " ^ error)
+
+let busy =
+  "the run hangs in a busy loop: it kept the CPU busy for 10 s of its clock"
+
+let ops =
+  "the run hangs in a busy loop, or is too large for a check: it made 1000000 \
+   network operations"
 
 let suite =
   ( "guards",
@@ -584,25 +767,32 @@ let suite =
             the same target while its clock stood still"
            spin);
       Alcotest.test_case "a client that reconnects at once spins" `Quick
-        (refused_with "Eio_net_chaos.check: the linear tier needs at least"
-           reconnect);
+        (first_fails ops reconnect);
       Alcotest.test_case "a batch of jobs ended by the server is no spin" `Quick
         (refused_with
            "Eio_net_chaos.check: the linear tier needs 190100 runs, more than \
             the budget of 30000"
            batch);
       Alcotest.test_case "a client of a server a fault broke spins" `Quick
-        (fun () ->
-          let error = Expect.field "error" (Expect.report broken_server) in
-          if
-            not (String.starts_with ~prefix:"the run hangs: it made 1000" error)
-          then Alcotest.failf "the check failed with %S" error);
+        (error_is ops broken_server);
       Alcotest.test_case "a client that polls with a deadline" `Quick
         (Expect.passes (poll ~patience:1.0));
       Alcotest.test_case "a client that polls for ever hangs" `Quick
-        (error_is
-           "the run hangs: it is still running after an hour of its clock"
-           (poll ?patience:None));
+        (error_is busy (poll ?patience:None));
+      Alcotest.test_case "fibers that yield while they compute meet a deadline"
+        `Quick
+        (Expect.passes deadline_compute);
+      Alcotest.test_case "a handshake that computes meets its deadline" `Quick
+        (Expect.passes handshake);
+      Alcotest.test_case "a ping-pong until a timer ends" `Quick
+        (Expect.passes pingpong);
+      Alcotest.test_case "a UDP ping-pong until a timer ends" `Quick
+        (Expect.passes udp_pingpong);
+      Alcotest.test_case "a loop of 1 us sleeps is a busy loop" `Quick
+        (first_fails busy tiny_sleeps);
+      Alcotest.test_case "a poll that never succeeds is a busy loop" `Quick
+        (first_fails busy yield_poll);
+      Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
       Alcotest.test_case "a server that yields while it computes" `Quick
         (Expect.passes compute);
       Alcotest.test_case "a server that streams until its client leaves" `Quick
