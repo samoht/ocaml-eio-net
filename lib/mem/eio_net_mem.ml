@@ -2070,7 +2070,8 @@ module Network = struct
         in
         let client, server = Flow.pair ~local:unix ~capacity in
         (* The accepted socket holds the listener's port at the address the
-           client reached, with the listener's [SO_REUSEADDR], as Linux's
+           client reached, with the listener's [SO_REUSEADDR], and as one
+           bound at a wildcard address if the listener is, as Linux's
            does. *)
         let child =
           match addr with
@@ -2081,7 +2082,12 @@ module Network = struct
                   Some
                     ( port,
                       Ports.add t.hub.Listening_socket.ports
-                        ~reuse:listener.reuse (reached, port) ))
+                        ~reuse:listener.reuse
+                        ~wildcard:
+                          (match listener.addr with
+                          | `Tcp (l, _) -> same (unmap l) (any (unmap l))
+                          | `Unix _ -> false)
+                        (reached, port) ))
         in
         let ends = Ends.v t.hub.Listening_socket.ports in
         let settle (client, server) =

@@ -285,8 +285,10 @@ val connection : _ Eio.Net.stream_socket -> int option
     Each end of a TCP connection holds an address while it is open: the client
     its own, and the accepted end, queued or accepted, the listener's port at
     the address the client reached, as Linux's accepted socket does, even once
-    the listener closed. A queued end that its listener's close resets lets go
-    at once, as Linux destroys it. Without a clock, or after a reset, each other
+    the listener closed; that of a listener at a wildcard address holds it as a
+    client bound there does, so a later bind at a wildcard address of its port
+    finds it in use. A queued end that its listener's close resets lets go at
+    once, as Linux destroys it. Without a clock, or after a reset, each other
     end lets go once both ends have closed. Given a clock, the end whose FIN
     went first, sent by a shutdown of its send side or by its close, holds its
     address once closed in TIME_WAIT, for 60 seconds from the peer's FIN, as
