@@ -54,11 +54,6 @@ val send : t -> ?dst:Eio.Net.Sockaddr.datagram -> Cstruct.t list -> unit
     datagram held in several buffers is not copied into one. They must not
     change until [send] returns. *)
 
-val equal_addr : Eio.Net.Sockaddr.datagram -> Eio.Net.Sockaddr.datagram -> bool
-(** [equal_addr a b] is [true] iff [a] and [b] are the same datagram address:
-    equal IP address and port, or equal Unix socket path. A receiver that locks
-    onto the source of a datagram compares later sources with this. *)
-
 val pp : t Fmt.t
 (** [pp] prints an opaque placeholder: a datagram channel is an I/O handle with
     no inspectable state. *)

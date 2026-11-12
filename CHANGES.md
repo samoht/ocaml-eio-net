@@ -11,8 +11,8 @@ Initial release.
 - `eio-net.accept`: an accept loop that holds at most a given number of
   connections and drops the one that has made the least progress.
 - `eio-net.connect`: tells a refused connect from an unreachable one.
-- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, and host
-  name resolution.
+- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, their
+  equality, and host name resolution.
 - `eio-net.mem`: an in-memory `Eio.Net.t` with TCP, UDP and Unix-domain
   sockets that follow what Linux does, checked against real sockets on Linux
   and macOS by an oracle adapted from gVisor's socket tests.

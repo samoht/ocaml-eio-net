@@ -38,6 +38,34 @@ let test_sockaddr () =
     "a unix socket names no address" None
     (Eio_net_addr.of_stream (`Unix "/tmp/agent.sock"))
 
+(* A comparison of the ports alone or of the hosts alone answers one of these
+   wrongly. *)
+let test_equal_stream () =
+  let a = Ipaddr.of_string_exn "192.0.2.7"
+  and b = Ipaddr.of_string_exn "192.0.2.8" in
+  let check name want x y =
+    Alcotest.(check bool) name want (Eio_net_addr.equal_stream x y)
+  in
+  check "the same address" true (Eio_net_addr.tcp a 1) (Eio_net_addr.tcp a 1);
+  check "another host" false (Eio_net_addr.tcp a 1) (Eio_net_addr.tcp b 1);
+  check "another port" false (Eio_net_addr.tcp a 1) (Eio_net_addr.tcp a 2);
+  check "a path and a port" false (`Unix "/a") (Eio_net_addr.tcp a 1);
+  check "the same path" true (`Unix "/a") (`Unix "/a");
+  check "another path" false (`Unix "/a") (`Unix "/b")
+
+let test_equal_datagram () =
+  let a = Ipaddr.of_string_exn "127.0.0.1"
+  and b = Ipaddr.of_string_exn "127.0.0.2" in
+  let check name want x y =
+    Alcotest.(check bool) name want (Eio_net_addr.equal_datagram x y)
+  in
+  check "the same address" true (Eio_net_addr.udp a 9000)
+    (`Udp (Eio.Net.Ipaddr.of_raw "\127\000\000\001", 9000));
+  check "another port" false (Eio_net_addr.udp a 9000) (Eio_net_addr.udp a 9001);
+  check "another host" false (Eio_net_addr.udp a 9000) (Eio_net_addr.udp b 9000);
+  check "the same path" true (`Unix "/tmp/a") (`Unix "/tmp/a");
+  check "a path and a port" false (Eio_net_addr.udp a 9000) (`Unix "/tmp/a")
+
 let test_not_an_address () =
   Alcotest.check_raises "a hostname is not an address"
     (Invalid_argument
@@ -96,6 +124,8 @@ let suite =
       Alcotest.test_case "roundtrip" `Quick test_roundtrip;
       Alcotest.test_case "octets" `Quick test_octets;
       Alcotest.test_case "sockaddr" `Quick test_sockaddr;
+      Alcotest.test_case "stream equality" `Quick test_equal_stream;
+      Alcotest.test_case "datagram equality" `Quick test_equal_datagram;
       Alcotest.test_case "not an address" `Quick test_not_an_address;
       Alcotest.test_case "stream: a literal host" `Quick test_stream_literal;
       Alcotest.test_case "stream: every address of a name" `Quick

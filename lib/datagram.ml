@@ -41,10 +41,3 @@ let of_socket ?(max_frame = 65536) ?dst socket =
 
 let recv t = t.recv ()
 let send t ?dst bufs = t.send dst bufs
-
-let equal_addr (a : Eio.Net.Sockaddr.datagram) (b : Eio.Net.Sockaddr.datagram) =
-  match (a, b) with
-  | `Udp (host_a, port_a), `Udp (host_b, port_b) ->
-      port_a = port_b && String.equal (host_a :> string) (host_b :> string)
-  | `Unix path_a, `Unix path_b -> String.equal path_a path_b
-  | `Udp _, `Unix _ | `Unix _, `Udp _ -> false
