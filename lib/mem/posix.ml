@@ -8,3 +8,5 @@ let bind_error = function
   | `Not_available -> Unix.Unix_error (Unix.EADDRNOTAVAIL, "bind", "")
   | `Invalid -> Unix.Unix_error (Unix.EINVAL, "bind", "")
   | `Name_too_long path -> Unix.Unix_error (Unix.ENAMETOOLONG, "", path)
+  | `No_file path -> Unix.Unix_error (Unix.ENOENT, "", path)
+  | `Unlink path -> Unix.Unix_error (Unix.ENOENT, "unlink", path)

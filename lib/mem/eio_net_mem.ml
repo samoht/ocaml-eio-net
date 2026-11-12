@@ -212,12 +212,21 @@ let check_local ?(tcp = false) ?(fail = fail) ip =
   in
   if not local then fail Address_not_available
 
+(* A path with a NUL past its first byte, which is not an abstract address. *)
+let embedded_nul path =
+  match String.index_opt path '\000' with Some i -> i > 0 | None -> false
+
 (* OCaml's [Unix] refuses a path that [sun_path], 108 bytes on Linux, cannot
-   hold with its NUL. *)
+   hold with its NUL, and one with a NUL past its first byte with ENOENT, as
+   no file has that name: raw from a bind, as [Eio.Fs.Not_found] from a
+   [connect] or a [send]. *)
 let check_path ?(raw = false) path =
   if String.length path >= 108 then
     if raw then raise (Posix.bind_error (`Name_too_long path))
     else fail Name_too_long
+  else if embedded_nul path then
+    if raw then raise (Posix.bind_error (`No_file path))
+    else raise (Eio.Fs.err (Not_found No_listener))
 
 (* The error a socket at [src] meets reaching [dst] across address families,
    IPv6 against IPv4-mapped, as on Linux. *)
@@ -1704,6 +1713,13 @@ module Network = struct
     if reuse_port then
       invalid_arg "eio-net.mem does not support SO_REUSEPORT listeners";
     Eio.Switch.check sw;
+    (* eio_posix removes a listener's file when [sw] finishes, and fails to
+       for a path with a NUL, as there is none. *)
+    (match addr with
+    | `Unix path when embedded_nul path ->
+        Eio.Switch.on_release sw (fun () ->
+            raise (Posix.bind_error (`Unlink path)))
+    | _ -> ());
     let listener = Listening_socket.v t.hub ~reuse_addr ~backlog addr in
     (* The file a listener leaves goes when the listen's switch finishes, as
        eio_linux removes it then, closed by hand or not; eio_posix keeps the

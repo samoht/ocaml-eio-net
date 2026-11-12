@@ -385,8 +385,12 @@ val connection : _ Eio.Net.stream_socket -> int option
     The namespace is not a file system: a socket binds a path whose directory
     does not exist, or that it may not write, where a real socket fails with
     [ENOENT] or [EACCES], since modelling them would need the file system the
-    path names. A path of 108 bytes or more raises [ENAMETOOLONG], or the error
-    that {!Name_too_long} marks ({!section-errors}).
+    path names. A path with a NUL past its first byte names no file, as OCaml's
+    [Unix] refuses it: a [listen] or a [datagram_socket] there raises [ENOENT]
+    raw, a [connect], a [bind_to] or a datagram [send] [Eio.Fs.Not_found]. As on
+    eio_posix, the switch passed to such a [listen] then fails to remove its
+    file, with [ENOENT] too. A path of 108 bytes or more raises [ENAMETOOLONG],
+    or the error that {!Name_too_long} marks ({!section-errors}).
 
     With [reuse_addr], a [listen] at a Unix-domain path, not at an abstract
     address, takes the path over, as Eio's backends remove the socket file there
