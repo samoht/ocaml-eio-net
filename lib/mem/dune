@@ -2,4 +2,4 @@
  (name eio_net_mem)
  (public_name eio-net.mem)
  (private_modules posix)
- (libraries hermetic eio cstruct fmt mtime ipaddr unix))
+ (libraries hermetic eio eio.unix cstruct fmt mtime ipaddr unix))

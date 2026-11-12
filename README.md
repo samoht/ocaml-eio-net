@@ -132,6 +132,8 @@ variable and prints nothing. For a scenario a check does not try,
   A connection queues what Linux's default buffers hold, and a datagram
   socket what its receive buffer holds; a small `?capacity` shows a peer that
   writes without reading.
+  It follows Linux by default, and macOS where the two kernels differ with
+  `` ~os:`Macos ``, which `Eio_net_chaos.check` takes too.
 - `eio-net.chaos`: `check`, which runs a workload under the network faults
   it may meet, and the wrapper it uses.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's

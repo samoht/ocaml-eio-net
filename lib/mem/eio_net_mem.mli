@@ -2,7 +2,12 @@
 
     This backend is intended for hermetic tests that need client code and server
     code to talk through the normal {!Eio.Net} APIs without binding OS sockets.
-    It supports stream sockets and datagram sockets. *)
+    It supports stream sockets and datagram sockets.
+
+    Where Linux and macOS differ, the network follows one kernel, chosen by
+    [?os]: [`Linux], the default, or [`Macos]. The choice comes from the
+    argument, never from the host, so a test sees the same network on every
+    machine. {!section-macos} lists what [`Macos] changes. *)
 
 (** {1:errors Errors}
 
@@ -17,8 +22,9 @@ type Eio.Exn.Backend.t +=
         (** The backend code carried by the connection reset a mem flow raises,
             where a TCP socket raises one:
             - A write after this end shut its send. An empty write returns 0
-              instead, as on Linux; macOS fails it with EPIPE. On TCP the write
-              reports a pending reset, so a read after it returns end of file.
+              instead, as on Linux; under [`Macos] it fails as a write does. On
+              TCP the write reports a pending reset, so a read after it returns
+              end of file.
             - A write after the peer closed: the first is lost and answered with
               a reset, which every later write raises; reads keep returning end
               of file, which came first. On a Unix-domain connection the first
@@ -47,18 +53,18 @@ type Eio.Exn.Backend.t +=
             A read after the peer closed or shut its send otherwise raises
             [End_of_file] once the queued bytes are read. A read after this end
             shut its receive side returns the bytes queued, and raises
-            [End_of_file] once none is; macOS drops them. As Linux then
-            advertises no more room to the writer, what it reads frees none: a
-            writer waiting on a full queue keeps waiting, and the bytes it
-            writes into room left at the shutdown arrive and are read too. A
-            read into an empty buffer raises [End_of_file], as Eio's backends
-            do. On TCP, a write after the peer shut its receive side, and only
-            that, is queued and read in the same way. A read, a write or a
-            shutdown on a flow after its own close raises [Invalid_argument], as
-            Eio's own sockets do. One already in flight finishes against the
-            open socket, and the socket closes once none is, as Eio defers a
-            descriptor's close to its users: a read waiting across its flow's
-            close still gets what the peer writes. *)
+            [End_of_file] once none is; under [`Macos] it drops them and raises
+            [End_of_file] at once. As Linux then advertises no more room to the
+            writer, what it reads frees none: a writer waiting on a full queue
+            keeps waiting, and the bytes it writes into room left at the
+            shutdown arrive and are read too. A read into an empty buffer raises
+            [End_of_file], as Eio's backends do. On TCP, a write after the peer
+            shut its receive side, and only that, is queued and read in the same
+            way. A read, a write or a shutdown on a flow after its own close
+            raises [Invalid_argument], as Eio's own sockets do. One already in
+            flight finishes against the open socket, and the socket closes once
+            none is, as Eio defers a descriptor's close to its users: a read
+            waiting across its flow's close still gets what the peer writes. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes
@@ -75,8 +81,9 @@ type Eio.Exn.Backend.t +=
             0 when every port of the dynamic range is held, where bind(2) fails
             with [EADDRINUSE]. A [connect] that fails holds the address it was
             bound at until its switch finishes, as eio_posix keeps its socket
-            there and Linux its address; macOS frees a TCP one at once. [listen]
-            and [datagram_socket] raise that one raw ({!section-errors}). *)
+            there and Linux its address; under [`Macos] a TCP one is free at
+            once, as macOS frees it. [listen] and [datagram_socket] raise that
+            one raw ({!section-errors}). *)
   | No_destination
         (** The backend code of the unclassified {!Eio.Io} error a UDP [send]
             without a destination raises, as a socket that is not connected
@@ -119,7 +126,8 @@ type Eio.Exn.Backend.t +=
   | Not_connected
         (** The backend code of the unclassified {!Eio.Io} error a Unix-domain
             datagram [send] without a destination raises, as Linux fails it with
-            [ENOTCONN]; macOS says [EDESTADDRREQ]. *)
+            [ENOTCONN]. Under [`Macos] the send raises the error that
+            {!No_destination} marks, as macOS says [EDESTADDRREQ]. *)
   | Address_not_available
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             with [bind_to] raises at an IP address no interface has, where
@@ -155,10 +163,16 @@ type Eio.Exn.Backend.t +=
             loopback's network, or at 255.255.255.255 from a socket bound at a
             loopback address, where Linux fails it with [EACCES] as the socket
             has no [SO_BROADCAST]. *)
+  | Host_unreachable
+        (** The backend code of the unclassified {!Eio.Io} error raised under
+            [`Macos] where macOS finds no route to a host, with [EHOSTUNREACH]:
+            a [connect] to a link-local address, and the datagram [send]s
+            {!section-datagrams} lists. *)
 
 (** {1 Networks} *)
 
 val v :
+  ?os:[< `Linux | `Macos ] ->
   ?capacity:int ->
   ?clock:_ Eio.Time.Mono.t ->
   sw:Eio.Switch.t ->
@@ -175,13 +189,15 @@ val v :
     without reading. It defaults to 4 MiB over TCP and 256 KiB over a Unix path,
     at least what Linux's default buffers hold on loopback: a writer queues
     about 2.6 MiB over TCP before it waits, and at most about 250 KiB over
-    AF_UNIX, less in small writes. macOS holds less: about 330 KiB over TCP and
-    8 KiB over AF_UNIX. Raises [Invalid_argument] if [capacity] is not positive.
+    AF_UNIX, less in small writes. Under [`Macos] it defaults to 1 MiB over TCP,
+    what macOS's buffers grow to on loopback from about 330 KiB, and 8 KiB over
+    AF_UNIX, as macOS holds. Raises [Invalid_argument] if [capacity] is not
+    positive.
 
     On [clock], the end of a TCP connection whose FIN went first holds its
-    address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}).
-    Without a clock there is no TIME_WAIT: an address is free once both ends
-    close.
+    address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
+    or 30 seconds under [`Macos]. Without a clock there is no TIME_WAIT: an
+    address is free once both ends close.
 
     Host resolution reads numbers as glibc's getaddrinfo(3) does, on a
     dual-stack host with no services database and no name server. The service is
@@ -204,7 +220,8 @@ val v :
     ["localhost"]'s [::1] into [127.0.0.1]. The order here is glibc's on a
     dual-stack host, [::1] before [127.0.0.1] and each address as a stream one
     before a datagram one, fixed so that a test sees the same addresses
-    everywhere; macOS gives the datagram one first.
+    everywhere. Under [`Macos] each address comes as a datagram one first, as
+    macOS orders them.
 
     [getnameinfo] names [127.0.0.1], IPv4-mapped, IPv4-compatible ([::7f00:1])
     or neither, and [::1] ["localhost"], as [/etc/hosts] does, and gives any
@@ -217,6 +234,7 @@ val v :
 *)
 
 val pipe :
+  ?os:[< `Linux | `Macos ] ->
   ?capacity:int ->
   unit ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
@@ -315,17 +333,9 @@ val connection : _ Eio.Net.stream_socket -> int option
     an address of another family raises, as Linux's bind(2) fails, the error
     that {!Address_family} marks from an IPv4 socket, IPv6 or a path for IPv4,
     and the one that {!Invalid_address} marks from an IPv6 or a Unix-domain
-    socket, IPv4 for IPv6 or TCP for a path; macOS says EAFNOSUPPORT for both.
-
-    A connection follows Linux, and macOS differs from it in more than the two
-    cases {!Closed} names, the empty write after a shutdown and the bytes read
-    after a receive shutdown. Once a peer has closed and a reset has come, macOS
-    keeps raising [ECONNRESET] on every read, where Linux reports the reset once
-    and then end-of-file, and a read after the peer's close can raise the reset
-    where Linux reads end-of-file. Writes after a shutdown of either end differ
-    too: an empty write after a reset raises it on macOS and returns 0 on Linux,
-    and a write after the peer shut down can succeed on one and fail on the
-    other. A test that must hold on macOS needs a real socket there.
+    socket, IPv4 for IPv6 or TCP for a path. Under [`Macos] each of these raises
+    the error that {!Address_family} marks, as macOS's bind(2) fails with
+    EAFNOSUPPORT for both.
 
     [connect], and [setsockopt] on a connection or a listener, accept and ignore
     the socket options whose effect these queues already have: [TCP_NODELAY] and
@@ -385,9 +395,9 @@ val connection : _ Eio.Net.stream_socket -> int option
     socket is connected. A datagram longer than 65507 bytes to an IPv4 address,
     65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default send
     buffer allows, raises the error that {!Message_too_long} marks. These are
-    Linux's limits: by default, macOS refuses a UDP datagram longer than 9216
-    bytes and a Unix-domain one longer than 2048. One sent to UDP port 0 raises
-    the error that {!Invalid_port} marks, as on Linux; macOS sends it over IPv4.
+    Linux's limits: under [`Macos] they are 9216 bytes over UDP and 2048 on a
+    Unix path, macOS's defaults. One sent to UDP port 0 raises the error that
+    {!Invalid_port} marks, as on Linux; under [`Macos] it is sent, and lost.
 
     A datagram sent from an IPv6 address to an IPv4-mapped one, or the reverse,
     raises the error that {!Network_unreachable} or {!Address_family} marks. One
@@ -451,3 +461,58 @@ val connection : _ Eio.Net.stream_socket -> int option
     connection failure that {!No_listener} marks, and a socket bound there
     raises [EADDRINUSE], with [reuse_addr] or not, as eio_posix does; eio_linux,
     given [reuse_addr], removes the file and binds. *)
+
+(** {1:macos macOS}
+
+    Under [`Macos] the network follows macOS where it differs from Linux, as
+    measured through eio_posix on macOS 27:
+
+    - Addresses. The loopback interface has 127.0.0.1 and [::1] only: a bind at
+      another address of 127.0.0.0/8 raises [EADDRNOTAVAIL], a connect there is
+      never answered and fails after 75 seconds on [clock], with the [ETIMEDOUT]
+      error eio_posix raises (it waits for ever without one), and a datagram
+      sent there is lost. A TCP socket binds no multicast or broadcast address,
+      and a [connect] reaches none, with the error that {!Address_family} marks;
+      a link-local address raises [EADDRNOTAVAIL] from a bind and the error that
+      {!Host_unreachable} marks from a [connect]. A [connect] bound at its own
+      destination raises the error that {!Invalid_address} marks.
+    - Ports. A TCP port of [0] takes the next free port of the range, counting
+      up from the last one taken, for listeners and clients alike. A bind looks
+      up its port as the BSDs do: with [reuse_addr] only a socket at the same
+      address that is not connected conflicts, a listener or a datagram socket;
+      without, any socket at an overlapping address does, connected ones and
+      TIME_WAIT included. An IPv6 socket at [::] or an IPv4-mapped address also
+      looks at the IPv4 side, where a socket at 0.0.0.0 does not conflict with
+      it. A [connect] that fails frees its address at once.
+    - Listeners. The accept queue takes [backlog] connections, 128 for a
+      [backlog] of 0 or less or past [kern.ipc.somaxconn]; a [connect] past it
+      raises [Connection_reset] at once.
+    - Connections. A receive shutdown drops what is queued, which still fills
+      the queue, and bytes that reach a TCP end after it reset the connection. A
+      shutdown of the receive side of an end that reads end-of-file does
+      nothing, as macOS refuses it with [ENOTCONN] and Eio ignores that. A TCP
+      reset reaches a read even after end-of-file, and a write that raises it
+      leaves it to the next read. A Unix-domain reset reads as end-of-file. A
+      write to a Unix-domain end that shut its receive side succeeds, its bytes
+      dropped.
+    - Datagrams. A shutdown does nothing, as the socket is not connected. A send
+      checks the length first. Then a Unix-domain socket refuses an IP address
+      with the error that {!Address_family} marks; an IPv4 one a path with
+      {!Address_not_available}'s, and an IPv6 address with {!Invalid_address}'s
+      from a wildcard address and {!Host_unreachable}'s otherwise; an IPv6 one
+      an IPv4 address with {!Invalid_address}'s. A wildcard destination has no
+      route ({!Host_unreachable}). From [::1] an IPv4-mapped destination is not
+      available, and from an IPv4-mapped address other than the wildcard an IPv6
+      one has no route. A socket bound at an IPv4-mapped address sees IPv4
+      senders as IPv4.
+    - Unix paths. [sun_path] holds 103 bytes. There is no abstract namespace: a
+      path with a NUL anywhere names no file, and the empty path binds nothing,
+      with [EINVAL].
+    - Resolution. A service is a decimal number of at most 65535, as strtoul(3)
+      reads it, and any other raises [Address_lookup_failed NONAME].
+      inet_aton(3) reads a bare [0x] before the last part as 0. An IPv6 address
+      takes any scope after a [%]. [getnameinfo] of a Unix address raises
+      [Not_found], as OCaml's [Unix] does when macOS's getnameinfo(3) fails.
+
+    Where macOS's loopback delivers a segment asynchronously, the network
+    delivers it at once, as if the next call came after it. *)
