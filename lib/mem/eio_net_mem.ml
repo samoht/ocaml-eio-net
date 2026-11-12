@@ -1127,9 +1127,9 @@ module Listening_socket = struct
           bind hub ~reuse_addr ~backlog addr)
     with
     | Ok t -> t
-    | Error `In_use -> bind_fail Address_in_use
-    | Error `No_port ->
-        failwith "eio-net.mem: every port of 49152-65535 has a listener"
+    (* A port of zero with none of the range free is bind(2)'s EADDRINUSE, as
+       an address a socket holds is. *)
+    | Error (`In_use | `No_port) -> bind_fail Address_in_use
 
   (* The connections waiting to be accepted are reset with the listener, as
      a kernel resets them. A connect that queues one after this is
@@ -1297,11 +1297,11 @@ module Datagram_socket = struct
      datagrams makes a send to it wait. *)
   let max_dgram_qlen = 10
 
+  (* A port of zero with none of the range free is bind(2)'s EADDRINUSE. *)
   let free_port hub =
     match Ports.free hub.ports with
     | Some port -> port
-    | None ->
-        failwith "eio-net.mem: every port of 49152-65535 has a datagram socket"
+    | None -> bind_fail Address_in_use
 
   let v hub ~reuse addr =
     (match addr with
@@ -2123,9 +2123,11 @@ module Network = struct
           let bind = match bind with Some (`Tcp b) -> Some b | _ -> None in
           match hold t ?bind ip with
           | Ok (local, h) -> `Port (local, h)
-          | Error `In_use -> raise (address_in_use ())
-          | Error `No_port ->
-              failwith "eio-net.mem: every port of 49152-65535 is held")
+          (* With no port left, connect(2) fails with EADDRNOTAVAIL, and a
+             bind(2) at port 0 before it with EADDRINUSE. *)
+          | Error `No_port when Option.is_none bind ->
+              fail Address_not_available
+          | Error (`In_use | `No_port) -> raise (address_in_use ()))
     in
     let local =
       match held with `Port (a, _) -> Some a | `Path _ | `Nothing -> None

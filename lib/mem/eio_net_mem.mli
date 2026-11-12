@@ -71,12 +71,12 @@ type Eio.Exn.Backend.t +=
             at a Unix path no socket binds, which has no file. *)
   | Address_in_use
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
-            bound with [bind_to] raises at an address a socket holds, where
-            bind(2) fails with [EADDRINUSE]. A [connect] that fails holds the
-            address it was bound at until its switch finishes, as eio_posix
-            keeps its socket there and Linux its address; macOS frees a TCP one
-            at once. [listen] and [datagram_socket] raise that one raw
-            ({!section-errors}). *)
+            bound with [bind_to] raises at an address a socket holds, or at port
+            0 when every port of the dynamic range is held, where bind(2) fails
+            with [EADDRINUSE]. A [connect] that fails holds the address it was
+            bound at until its switch finishes, as eio_posix keeps its socket
+            there and Linux its address; macOS frees a TCP one at once. [listen]
+            and [datagram_socket] raise that one raw ({!section-errors}). *)
   | No_destination
         (** The backend code of the unclassified {!Eio.Io} error a UDP [send]
             without a destination raises, as a socket that is not connected
@@ -124,10 +124,12 @@ type Eio.Exn.Backend.t +=
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             with [bind_to] raises at an IP address no interface has, where
             bind(2) fails with [EADDRNOTAVAIL]; [listen] and [datagram_socket]
-            raise that one raw. The network has the loopback interface only: an
-            IPv4 socket binds an address of 127.0.0.0/8, the broadcast address
-            or a multicast one, an IPv6 one [::1], either the wildcard address
-            of its family, and an IPv6 one the IPv4-mapped form of those IPv4
+            raise that one raw. A [connect] without [bind_to] raises it when
+            every port of the dynamic range is held, as connect(2) fails on
+            Linux. The network has the loopback interface only: an IPv4 socket
+            binds an address of 127.0.0.0/8, the broadcast address or a
+            multicast one, an IPv6 one [::1], either the wildcard address of its
+            family, and an IPv6 one the IPv4-mapped form of those IPv4
             addresses, as on Linux. *)
   | Name_too_long
         (** The backend code of the unclassified {!Eio.Io} error raised for a
@@ -241,20 +243,21 @@ val connection : _ Eio.Net.stream_socket -> int option
     A [listen] binds the TCP or Unix stream address it is given. One on TCP port
     [0] binds the lowest port of the dynamic range, 49152-65535 (RFC 6335,
     section 6), that no listener holds, as a socket's bind does, and
-    [listening_addr] reports it; it raises [Failure] if every port of the range
-    is held. A [listen] at an address a listener holds raises [EADDRINUSE]
-    ({!section-errors}); a TCP address overlaps an address of the same port that
-    is equal to it or is the wildcard address of its family, and the IPv6
-    wildcard address overlaps every address of its port, as bind(2) has it on
-    Linux for a dual-stack socket. A [listen] with [reuse_port] raises
-    [Invalid_argument]. A listener is closed, and frees its own hold on its
-    address, when it is closed or when the switch passed to [listen] or to {!v}
-    finishes; the connections waiting to be accepted are reset with it, as a
-    kernel resets them. An [accept] or a [listening_addr] begun after its
-    listener closed, whoever closed it, raises [Invalid_argument], as Eio's own
-    sockets do; one already waiting when it closes keeps waiting, as on
-    eio_posix, and the listener stays open, taking connections, until that
-    accept returns, as Eio defers a descriptor's close to its users.
+    [listening_addr] reports it. A [listen] at an address a listener holds, or
+    at port [0] when every port of the range is held, raises [EADDRINUSE]
+    ({!section-errors}), as bind(2) fails on Linux; a TCP address overlaps an
+    address of the same port that is equal to it or is the wildcard address of
+    its family, and the IPv6 wildcard address overlaps every address of its
+    port, as bind(2) has it on Linux for a dual-stack socket. A [listen] with
+    [reuse_port] raises [Invalid_argument]. A listener is closed, and frees its
+    own hold on its address, when it is closed or when the switch passed to
+    [listen] or to {!v} finishes; the connections waiting to be accepted are
+    reset with it, as a kernel resets them. An [accept] or a [listening_addr]
+    begun after its listener closed, whoever closed it, raises
+    [Invalid_argument], as Eio's own sockets do; one already waiting when it
+    closes keeps waiting, as on eio_posix, and the listener stays open, taking
+    connections, until that accept returns, as Eio defers a descriptor's close
+    to its users.
 
     A [connect] reaches the listener at its address, or at the wildcard address
     of its family and port, or, for an IPv4 address, at the IPv6 wildcard
@@ -338,16 +341,17 @@ val connection : _ Eio.Net.stream_socket -> int option
     bind the wildcard address of their family, as a kernel binds an unbound
     socket on its first send, and an address with port [0] binds its IP address,
     each at the lowest port of the dynamic range that no datagram socket holds.
-    An address that overlaps one a datagram socket holds, by the rule [listen]
-    follows, raises [EADDRINUSE] ({!section-errors}), unless both UDP sockets
-    have [reuse_addr]. Those then share it, as on Linux: a datagram reaches the
-    one bound at the most specific address, the address itself, then the IPv4
-    wildcard, then the IPv6 one, and of those bound at the same address the
-    latest, and once it closes the one before. [reuse_port] raises
-    [Invalid_argument], and [setsockopt] refuses every option. The socket is
-    closed, and its address free again, when the switch passed to
-    [datagram_socket] finishes; a send, a receive or a shutdown on it then
-    raises [Invalid_argument].
+    With every port of the range held, they raise [EADDRINUSE], where Linux
+    fails an unbound socket's first send with [EAGAIN]. An address that overlaps
+    one a datagram socket holds, by the rule [listen] follows, raises
+    [EADDRINUSE] ({!section-errors}), unless both UDP sockets have [reuse_addr].
+    Those then share it, as on Linux: a datagram reaches the one bound at the
+    most specific address, the address itself, then the IPv4 wildcard, then the
+    IPv6 one, and of those bound at the same address the latest, and once it
+    closes the one before. [reuse_port] raises [Invalid_argument], and
+    [setsockopt] refuses every option. The socket is closed, and its address
+    free again, when the switch passed to [datagram_socket] finishes; a send, a
+    receive or a shutdown on it then raises [Invalid_argument].
 
     A datagram reaches a socket by the rule a [connect] reaches a listener, and
     arrives whole, after every datagram sent to it before: the network never
