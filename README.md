@@ -193,7 +193,11 @@ A datagram longer than a channel's `max_frame` (64 KiB by default) raises the
 `Eio_net_accept.run` holds at most `max_connections` connections. A
 connection's head is what its peer sends before it is served. When the loop is
 full and another peer connects, it drops the connection whose head is
-incomplete and has made the least progress.
+incomplete and has made the least progress. A protocol whose head is read
+through a layer of its own, as a TLS handshake reads its records off the
+socket, wraps the socket with `Eio_net_accept.reading_flow` so that the bytes
+the layer reads count as progress. An exception one connection raises ends
+that connection alone and goes to `?on_error`.
 
 `Eio_net_accept.run` reads a failed accept with the classifier it is given as
 `?classify`. Over a Unix network, pass `Eio_net_unix.accept_failure`: when the

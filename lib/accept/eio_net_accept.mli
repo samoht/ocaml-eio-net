@@ -58,6 +58,15 @@ val complete : head -> unit
 (** [complete head] says [head] is complete: its connection is being served, and
     pressure does not shed it until it is {!reading} again. *)
 
+val reading_flow :
+  head ->
+  [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t ->
+  [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t
+(** [reading_flow head flow] is [flow], once it says [head] is {!reading} with
+    the bytes read from [flow] through it as its progress: the head of a layer
+    that reads [flow] itself, as a TLS handshake reads its records off the
+    socket. Closing it closes [flow]. *)
+
 type pool
 (** The type for a set of loops that share their descriptors: when an accept of
     one finds none left, it sheds among the connections of them all. *)
