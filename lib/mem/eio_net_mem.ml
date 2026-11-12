@@ -1290,8 +1290,18 @@ module Datagram_socket = struct
     + if head <= 896 then 896 else if head <= 16384 then pow2 1024 else 896 + n
 
   (* The memory a Unix-domain datagram of [n] bytes takes from its sender's
-     buffer until it is received: a head and the payload in pages. *)
-  let unix_size n = 1152 + ((n + 4095) / 4096 * 4096)
+     buffer until it is received, as Linux allocates it: up to 16000 bytes in
+     a head of a power of two that holds them, rounded up to 64, and 384
+     bytes of shared information; past that, the rest in pages, 17 at most;
+     and 256 bytes of [sk_buff]. *)
+  let unix_size n =
+    let paged =
+      if n <= 16000 then 0
+      else min ((n - 16000 + 4095) / 4096 * 4096) (17 * 4096)
+    in
+    let head = ((n - paged + 63) / 64 * 64) + 384 in
+    let rec pow2 p = if p >= head then p else pow2 (2 * p) in
+    256 + pow2 512 + paged
 
   (* A Unix-domain socket whose queue holds more than [max_dgram_qlen]
      datagrams makes a send to it wait. *)
