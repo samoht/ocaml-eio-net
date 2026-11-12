@@ -550,7 +550,8 @@ module Private : sig
     sw:Eio.Switch.t ->
     unit ->
     [ `Generic ] Eio.Net.ty Eio.Resource.t
-  (** [v ~capacity] is {!val-v} whose connections queue [capacity d] each way,
-      where [d] is the chosen kernel's default for their family. [capacity d]
-      must be positive. For eio-net.chaos; it may change at any release. *)
+  (** [v ~capacity ~sw ()] is the network [Eio_net_mem.v ~sw ()] makes, whose
+      connections queue [capacity d] each way, where [d] is the chosen kernel's
+      default for their family. [capacity d] must be positive. For
+      eio-net.chaos; it may change at any release. *)
 end
