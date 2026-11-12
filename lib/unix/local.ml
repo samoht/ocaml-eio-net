@@ -17,7 +17,6 @@ external rename_at : fd -> string -> fd -> string -> unit
 external unlink_at : fd -> string -> bool -> unit = "caml_eio_net_unlink_at"
 
 type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-type listening = [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t
 
 let eio f =
   try f ()
@@ -28,6 +27,22 @@ let connect ~sw ~net path =
   if String.length s > max_length then
     raise (Eio_unix.Err.v ENAMETOOLONG "connect" s);
   (Eio.Net.connect ~sw net (`Unix s) :> stream)
+
+let receive ~sw ~max_fds ~max flow =
+  let b = Buffer.create 4096 and buf = Cstruct.create 65536 in
+  let rec go fds =
+    let room = max_fds - List.length fds in
+    match Eio_unix.Net.recv_msg_with_fds flow ~sw ~max_fds:room [ buf ] with
+    | exception End_of_file -> Ok (Buffer.contents b, fds)
+    | 0, got -> Ok (Buffer.contents b, fds @ got)
+    | n, got when Buffer.length b + n > max ->
+        List.iter Eio_unix.Fd.close (fds @ got);
+        Error `Too_long
+    | n, got ->
+        Buffer.add_string b (Cstruct.to_string ~len:n buf);
+        go (fds @ got)
+  in
+  go []
 
 (* The directory that holds [path], opened through [path]'s own capability, so
    that a confined directory confines its resolution, and [path]'s base name.
@@ -155,4 +170,4 @@ let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
       ignore_unix_error (fun () ->
           let _, dev, ino = id_at dir name in
           if (dev, ino) = id then unlink_at dir name false));
-  (Eio.Resource.T (Listening.{ socket; addr }, listening_handler) :> listening)
+  Eio.Resource.T (Listening.{ socket; addr }, listening_handler)
