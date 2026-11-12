@@ -592,4 +592,17 @@ module Private : sig
       connections queue [capacity d] each way, where [d] is the chosen kernel's
       default for their family. [capacity d] must be positive. For
       eio-net.chaos; it may change at any release. *)
+
+  val silence : _ Eio.Net.stream_socket -> unit
+  (** [silence s] cuts the connection of [s] for good, as a partition does:
+      nothing crosses it either way from then on. Over TCP what is queued is
+      lost, an end of stream included. On a Unix-domain connection each end
+      reads what is queued to it, and a direction that had ended keeps its end.
+      An end then waits for bytes until its own receive shutdown, after which it
+      reads end of file. Each end's writes fill its queue, then wait until its
+      own send shutdown, after which they raise the reset. Neither end's
+      shutdown or close reaches the other. For eio-net.chaos; it may change at
+      any release.
+
+      @raise Invalid_argument if [s] is not a connection of this library. *)
 end

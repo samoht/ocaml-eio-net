@@ -4,9 +4,9 @@ Network channels and test networks for
 [Eio](https://github.com/ocaml-multicore/eio).
 
 Over a real network, a read may return a few bytes of a message or several
-messages at once. A peer may stall, reset the connection or end the stream
-midway. A connect may be refused or slow, and a datagram lost, duplicated or
-reordered. Loopback sockets in a test rarely do any of this, so the bugs that
+messages at once. A peer may reset the connection, end the stream midway, or
+go silent for good. A connect may be refused or slow, and a datagram lost,
+duplicated or reordered. Loopback sockets in a test rarely do any of this, so the bugs that
 depend on it stay hidden. `eio-net` gives an Eio program an in-memory network,
 and `Eio_net_chaos.check`, which runs a workload on it many times, each time
 with a different fault chosen from what the workload does.
@@ -18,8 +18,9 @@ that bounds the connections it holds.
 ## Chaos tests
 
 Here a client asks a server for a line, with a timeout and three attempts.
-The server bounds how long it waits for the request, as a client may stall
-for good. The workload checks what the client got, and how long it took:
+The server bounds how long it waits for the request, as a client may go
+silent for good. The workload checks what the client got, and how long it
+took:
 
 ```ocaml
 # let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080);;
@@ -94,10 +95,13 @@ The tests follow a few rules:
   condition, such as one-byte reads, counts as one fault but reaches every
   connection.
 - Every program on the network meets the faults, the test's own peers
-  included. Test servers use `Eio.Net.run_server ~on_error:ignore` and a
-  timeout on each read, test clients catch `Eio.Io _ | End_of_file`, and both
-  parse strictly. Two fibers of `Eio.Fiber.both` that both meet a fault fail
-  together with `Eio.Exn.Multiple`, so catch the errors inside each fiber.
+  included. A connection may go silent for good, as when a host loses power,
+  and no close or reset then ends a wait on it: each read needs a timeout,
+  and so does each write that may fill a socket's buffer. Test servers use
+  `Eio.Net.run_server ~on_error:ignore`, test clients catch
+  `Eio.Io _ | End_of_file`, and both parse strictly. Two fibers of
+  `Eio.Fiber.both` that both meet a fault fail together with
+  `Eio.Exn.Multiple`, so catch the errors inside each fiber.
 - A connect that times out takes 133 seconds, as on Linux, and then fails
   with the error eio_posix raises, which Eio does not classify as a
   connection failure. A program with no connect timeout still succeeds, so
@@ -223,9 +227,10 @@ real network, pass the host's kernel.
 
 ### What a check can miss
 
-- A peer that stops is a read that hangs until that peer's own timeout ends
-  it, so a program blocked on it passes once the peer gives up. Assert the
-  program's latency to catch it.
+- A connection that goes silent stays silent: no keepalive ends a read on it,
+  even with `SO_KEEPALIVE` set, and no retransmission timeout ends a write,
+  where Linux gives up after about 15 minutes. A program that relies on either
+  fails as a hang: give it a timeout of its own.
 - A garbled datagram is random bytes, so a parser that accepts some noise may
   pass. Fuzz the parser on its own.
 - A datagram is delayed alone, and for 50 ms. Ask for longer or grouped delays

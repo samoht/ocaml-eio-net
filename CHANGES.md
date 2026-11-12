@@ -51,8 +51,8 @@ Initial release.
 
 - `Eio_net_chaos.check` runs a workload many times on `eio-net.mem`, each run
   with faults chosen from what the workload did on its first run: reads cut
-  short or coalesced, a reset, a closed or a stalled peer, small socket
-  buffers, refused, timed-out or unreachable connects, and lost, duplicated,
+  short or coalesced, a reset, a closed peer, a connection gone silent for
+  good, small socket buffers, refused, timed-out or unreachable connects, and lost, duplicated,
   reordered or garbled datagrams.
 - Each run has its own event loop and a virtual clock, so a check is
   deterministic and an hour-long timeout takes no time. A run that hangs,

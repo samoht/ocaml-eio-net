@@ -1375,7 +1375,13 @@ end
    counts it. Once it
    has also shut its send side, [fin_sent], data reaching a TCP reader resets
    the connection, as Linux resets it in FIN-WAIT; a write to a Unix-domain
-   reader that shut its receive side raises the reset, as EPIPE. *)
+   reader that shut its receive side raises the reset, as EPIPE.
+
+   [silent] says nothing crosses any more, as on a partition: the reader
+   reads the [n] bytes of [Some n], then waits until its own [rcv_shut]; the
+   writer fills the queue, then waits until its own [shut]. What the reader
+   reads frees no room, and neither end's close or shutdown reaches the
+   other. *)
 module Pipe = struct
   type t = {
     mutex : Mutex.t;
@@ -1387,6 +1393,7 @@ module Pipe = struct
     mutable refused : bool;
     mutable rcv_shut : bool;
     mutable fin_sent : bool;
+    mutable silent : int option;
     os : os;
     local : bool;
     mutable capacity : int;
@@ -1409,6 +1416,7 @@ module Pipe = struct
       refused = false;
       rcv_shut = false;
       fin_sent = false;
+      silent = None;
       capacity;
       size = 0;
       unacked = 0;
@@ -1456,7 +1464,8 @@ module Pipe = struct
      macOS. *)
   let reset t =
     update t (fun t ->
-        if t.local && t.os = Macos then t.shut <- true
+        if Option.is_some t.silent then ()
+        else if t.local && t.os = Macos then t.shut <- true
         else if t.local || lasting t || not t.shut then t.reset <- true)
 
   (* The reset was reported: the stream has ended. *)
@@ -1479,6 +1488,18 @@ module Pipe = struct
         push t bufs (n - k)
     | _ -> ()
 
+  (* Under the mutex: queues what room is left of [n] bytes. *)
+  let queue t ~turn bufs n =
+    if turn then t.writers.turn <- false;
+    let k = min n (t.capacity - t.size - t.unacked) in
+    push t bufs k;
+    t.size <- t.size + k;
+    k
+
+  (* Under the mutex: the next writer, if room is left. *)
+  let room t =
+    if t.size + t.unacked < t.capacity then Waiters.pass t.writers else []
+
   let rec write ?(turn = false) t ~back bufs =
     let n = Cstruct.lenv bufs in
     let result =
@@ -1488,6 +1509,12 @@ module Pipe = struct
          closed peer; on macOS it fails where a write would. *)
       if n = 0 && t.os = Linux then leave (`Done 0)
       else if t.shut then leave `Shut
+      else if Option.is_some t.silent then
+        if n = 0 then leave (`Done 0)
+        else if
+          Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
+        then (`Wait (Waiters.queue t.writers ~turn), [])
+        else (`Done (queue t ~turn bufs n), room t)
       else if t.refused then leave `Refused
       else if n = 0 then
         if t.local && t.gone then leave (`Raise (reset_exn ()))
@@ -1519,16 +1546,9 @@ module Pipe = struct
         t.refused <- true;
         if turn then leave (`Raise (reset_exn ())) else leave (`Lost n)
       end
-      else begin
-        if turn then t.writers.turn <- false;
-        let k = min n (t.capacity - t.size - t.unacked) in
-        push t bufs k;
-        t.size <- t.size + k;
-        let next =
-          if t.size + t.unacked < t.capacity then Waiters.pass t.writers else []
-        in
-        (`Done k, Waiters.pass t.readers @ next)
-      end
+      else
+        let k = queue t ~turn bufs n in
+        (`Done k, Waiters.pass t.readers @ room t)
     in
     match result with
     | `Wait w ->
@@ -1576,6 +1596,20 @@ module Pipe = struct
       locked t @@ fun t ->
       if Waiters.must_wait t.readers ~turn then
         (`Wait (Waiters.queue t.readers ~turn), [])
+      else if Option.is_some t.silent then
+        match t.silent with
+        | Some left when left > 0 ->
+            if turn then t.readers.turn <- false;
+            let n =
+              take t (Cstruct.sub dst 0 (min left (Cstruct.length dst))) 0
+            in
+            t.size <- t.size - n;
+            t.unacked <- t.unacked + n;
+            t.silent <- Some (left - n);
+            (`Read n, if left > n then Waiters.pass t.readers else [])
+        | _ when t.rcv_shut ->
+            (`Raise End_of_file, Waiters.release t.readers ~turn)
+        | _ -> (`Wait (Waiters.queue t.readers ~turn), [])
       else if not (Queue.is_empty t.queued) then begin
         if turn then t.readers.turn <- false;
         let n = take t dst 0 in
@@ -1614,11 +1648,13 @@ module Pipe = struct
           Queue.clear t.queued;
           t.head <- 0;
           t.unacked <- t.unacked + t.size;
-          t.size <- 0
+          t.size <- 0;
+          if Option.is_some t.silent then t.silent <- Some 0
         end)
 
   (* A TCP reader's FIN advertises the room its dropped bytes took. *)
-  let open_window t = update t (fun t -> t.unacked <- 0)
+  let open_window t =
+    update t (fun t -> if Option.is_none t.silent then t.unacked <- 0)
 
   (* The reader reads end-of-file once nothing is queued: macOS refuses to
      shut down its receive side again. *)
@@ -1627,17 +1663,31 @@ module Pipe = struct
   (* The reader shut its send side. *)
   let fin_sent t = update t (fun t -> t.fin_sent <- true)
 
+  (* Nothing crosses from now on. Over TCP what is queued is lost, an end of
+     stream or a reset included, as a path that drops every segment loses
+     those in flight. AF_UNIX queues at the reader what a returned write
+     sent, so a Unix-domain reader still reads it, and a direction that has
+     ended keeps its end. *)
+  let silence t =
+    update t (fun t ->
+        if Option.is_none t.silent then
+          if not t.local then t.silent <- Some 0
+          else if not (t.shut || t.reset || t.gone || t.refused || t.rcv_shut)
+          then t.silent <- Some t.size)
+
   (* The reader closes: bytes it left unread answer the writer with a reset,
      which refuses its writes at once. *)
   let leave t =
     locked t @@ fun t ->
-    let unread = not (Queue.is_empty t.queued) in
-    Queue.clear t.queued;
-    t.head <- 0;
-    t.size <- 0;
-    t.gone <- true;
-    if unread then t.refused <- true;
-    (unread, Waiters.take_all t.readers @ Waiters.take_all t.writers)
+    if Option.is_some t.silent then (false, [])
+    else
+      let unread = not (Queue.is_empty t.queued) in
+      Queue.clear t.queued;
+      t.head <- 0;
+      t.size <- 0;
+      t.gone <- true;
+      if unread then t.refused <- true;
+      (unread, Waiters.take_all t.readers @ Waiters.take_all t.writers)
 end
 
 module Flow = struct
@@ -1772,10 +1822,16 @@ module Flow = struct
 
   type (_, _, _) Eio.Resource.pi +=
     | Connection : ('t, 't -> int, [> `Generic ]) Eio.Resource.pi
+    | Silence : ('t, 't -> unit, [> `Generic ]) Eio.Resource.pi
 
   let handler =
     Eio.Resource.handler
       (H (Connection, fun (t : Impl.t) -> t.connection)
+      :: H
+           ( Silence,
+             fun (t : Impl.t) ->
+               Pipe.silence t.to_peer;
+               Pipe.silence t.from_peer )
       :: Eio.Resource.bindings (Eio.Net.Pi.stream_socket (module Impl)))
 
   type t = Impl.t * Impl.tag Eio.Net.stream_socket_ty Eio.Resource.t
@@ -1854,6 +1910,12 @@ module Flow = struct
     match Eio.Resource.get_opt ops Connection with
     | Some f -> Some (f t)
     | None -> None
+
+  let silence (Eio.Resource.T (t, ops) : _ Eio.Net.stream_socket) =
+    match Eio.Resource.get_opt ops Silence with
+    | Some f -> f t
+    | None ->
+        invalid_arg "eio-net.mem: silence: not a connection of eio-net.mem"
 
   (* Closes [flow] when [sw] finishes, unless it is closed first. *)
   let close_with sw ((impl, flow) : t) =
@@ -3416,4 +3478,6 @@ let v ?os ?capacity ?clock ~sw () =
 module Private = struct
   let v ?os ~capacity ?clock ~sw () =
     network ?os ~capacity ~bounded:true ?clock ~sw ()
+
+  let silence = Flow.silence
 end

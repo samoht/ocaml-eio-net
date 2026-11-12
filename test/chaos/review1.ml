@@ -30,16 +30,12 @@ let test ~serve () =
   if served < n - 2 && not (Eio_net_chaos.outage env) then
     Fmt.failwith "%d of %d clients served" served n
 
-(* The idle timeout needs to know which end stalls, so it pins it. *)
+(* The idle timeout needs a client that stalls, so it pins one: it sends
+   nothing, and sees the server's close. A hang would hide that close. *)
 let test_idle ~serve () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let stall (op : Eio_net_chaos.Op.t) =
-    if op.kind = `Read && op.side = `Server && op.socket = 1 then
-      Some Eio_net_chaos.Fault.Hang
-    else None
-  in
-  let net = Eio_net_chaos.wrap ~clock:env#clock stall (Eio_net_mem.v ~sw ()) in
+  let net = Eio_net_mem.v ~sw () in
   let l = Eio.Net.listen ~sw ~backlog:n net addr in
   Eio.Fiber.fork_daemon ~sw (fun () -> serve ~clock:env#clock l);
   let flow = Eio.Net.connect ~sw net addr in

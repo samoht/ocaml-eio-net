@@ -854,10 +854,10 @@ let test_write_after_peer_close () =
     "TCP reset" "reset reset reset end end"
     (run ~fault:Reset (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)))
 
-(* An AF_UNIX read that hangs is a peer that stopped: the client reads what
-   the server's returned write queued, then waits, and the server's next write
-   waits with it until the read is cancelled. Over TCP the read holds the
-   bytes at once. *)
+(* An AF_UNIX read that hangs silences the connection, as a peer process that
+   hangs does: the client still reads what the server's returned write queued,
+   then waits, and what the server writes after reaches it no more. Over TCP
+   the read gets nothing more. *)
 let test_unix_hang_keeps_written () =
   let run addr =
     Eio_mock.Backend.run_full @@ fun env ->
@@ -894,7 +894,7 @@ let test_unix_hang_keeps_written () =
         String.concat " " [ r1; !r2; read () ]
   in
   Alcotest.(check string)
-    "AF_UNIX" "ab timeout(waiting) c"
+    "AF_UNIX" "ab timeout(written) timeout"
     (run (`Unix "/tmp/s.sock"));
   Alcotest.(check string)
     "TCP" "timeout"
@@ -1138,10 +1138,9 @@ let test_connections_paired_across_domains () =
   Eio.Fiber.both client client;
   Alcotest.(check int) "misdirected faults" 0 (Atomic.get wrong)
 
-(* An AF_UNIX read that hangs stops its peer where it stands: a write of
-   1 MB under way, blocked on a queue of 32 KiB, sends no more, so the reads
-   take what is queued and wait. Once the read is cancelled, the peer goes on
-   and the reads get the rest. *)
+(* An AF_UNIX read that hangs while its peer's write of 1 MB waits on a queue
+   of 32 KiB: the reads take what is queued, which frees no room, so the write
+   waits for good, until its own end shuts down. *)
 let test_unix_hang_stops_write () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1159,10 +1158,11 @@ let test_unix_hang_stops_write () =
   let l = Eio.Net.listen ~sw ~backlog:2 net addr in
   let client = Eio.Net.connect ~sw net addr in
   let server, _ = Eio.Net.accept ~sw l in
-  let wrote = ref false in
+  let wrote = ref "waiting" in
   Eio.Fiber.fork ~sw (fun () ->
-      Eio.Flow.write client [ Cstruct.create 1_000_000 ];
-      wrote := true);
+      match Eio.Flow.write client [ Cstruct.create 1_000_000 ] with
+      | () -> wrote := "written"
+      | exception e when is_reset e -> wrote := "reset");
   Eio.Time.sleep env#clock 0.05;
   armed := true;
   let buf = Cstruct.create 65536 in
@@ -1174,12 +1174,15 @@ let test_unix_hang_stops_write () =
     | Ok n -> drain (total + n)
     | Error `Timeout -> total
   in
-  let stopped = drain 0 in
-  if stopped > 65536 then
-    Alcotest.failf "the reads took %d bytes from a peer that stopped" stopped;
-  Alcotest.(check bool) "the write waits" false !wrote;
-  Alcotest.(check int) "then the rest" 1_000_000 (stopped + drain 0);
-  Alcotest.(check bool) "the write returned" true !wrote
+  let queued = drain 0 in
+  if queued > 32768 then
+    Alcotest.failf "the reads took %d bytes, more than was queued" queued;
+  Alcotest.(check string) "the write waits" "waiting" !wrote;
+  Alcotest.(check int) "nothing more" 0 (drain 0);
+  Alcotest.(check string) "the write still waits" "waiting" !wrote;
+  Eio.Flow.shutdown client `Send;
+  Eio.Time.sleep env#clock 0.01;
+  Alcotest.(check string) "its own shutdown ends it" "reset" !wrote
 
 let suite =
   ( "eio_net_chaos",
@@ -1242,7 +1245,7 @@ let suite =
         test_unix_hang_keeps_written;
       Alcotest.test_case "a hang silences the connection" `Quick
         test_hang_silences;
-      Alcotest.test_case "an AF_UNIX hang stops a write under way" `Quick
+      Alcotest.test_case "an AF_UNIX hang holds a write under way" `Quick
         test_unix_hang_stops_write;
       Alcotest.test_case "a write after the peer's close" `Quick
         test_write_after_peer_close;

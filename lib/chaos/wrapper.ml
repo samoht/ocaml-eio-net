@@ -24,29 +24,25 @@ let rec takev len = function
 
 type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 
-(* A writer that stopped, while its reader's read hangs: [thaw] resolves
-   [thawed], which its writes wait for. *)
-type freeze = { thawed : unit Eio.Promise.t; thaw : unit Eio.Promise.u }
-
 (* A connection, shared by its two ends. A reset breaks both, as on TCP. An
    end of stream is the close of one end, [`Closed closer]: its peer reads
-   what it wrote before, then end of file. [broken] changes once, under
-   [lock], which also guards [ends], [sent] and [frozen]: an end
-   added after the break is shut at once. [paired] holds when both ends are
-   wrapped here. [sent] and [frozen] are indexed by the writing side: the
-   bytes its base writes queued, and the freeze of a stopped writer; [taken]
-   by the reading side, the bytes its reads returned. [reset_to] is the end of an AF_UNIX connection whose peer
-   crashed with bytes unread: it reads ECONNRESET once its queue is empty. *)
+   what it wrote before, then end of file. [`Silent] is a hang: nothing
+   crosses any more. [broken] changes once, under [lock], which also guards
+   [ends] and [sent]: an end added after the break is shut at once. [paired]
+   holds when both ends are of eio-net.mem, which silences the connection
+   itself. [sent] is indexed by the writing side, the bytes its base writes
+   queued; [taken] by the reading side, the bytes its reads returned.
+   [reset_to] is the end of an AF_UNIX connection whose peer crashed with
+   bytes unread: it reads ECONNRESET once its queue is empty. *)
 type conn = {
   lock : Mutex.t;
   os : [ `Linux | `Macos ];
   family : Op.family;
   paired : bool;
-  broken : [ `Open | `Reset | `Closed of Op.side ] Atomic.t;
+  broken : [ `Open | `Reset | `Closed of Op.side | `Silent ] Atomic.t;
   mutable ends : (Op.side * stream) list;
   sent : int array;
   taken : int array;
-  frozen : freeze option array;
   mutable reset_to : Op.side option;
 }
 
@@ -60,25 +56,10 @@ let conn ~os ~paired family =
     ends = [];
     sent = [| 0; 0 |];
     taken = [| 0; 0 |];
-    frozen = [| None; None |];
     reset_to = None;
   }
 
 let ix : Op.side -> int = function `Client -> 0 | `Server -> 1
-
-(* The writer [side] goes on. *)
-let thaw conn side =
-  let f =
-    Mutex.protect conn.lock (fun () ->
-        let f = conn.frozen.(ix side) in
-        conn.frozen.(ix side) <- None;
-        f)
-  in
-  Option.iter (fun f -> Eio.Promise.resolve f.thaw ()) f
-
-let thaw_all conn =
-  thaw conn `Client;
-  thaw conn `Server
 
 let other : Op.side -> Op.side = function
   | `Client -> `Server
@@ -98,7 +79,7 @@ let shut conn broken (side, s) =
   | `Closed _, `Unix, `Macos -> shutdown s `Send
   | `Closed closer, family, _ when side = closer ->
       shutdown s (match family with `Inet -> `Send | `Unix -> `All)
-  | (`Closed _ | `Open), _, _ -> ()
+  | (`Closed _ | `Open | `Silent), _, _ -> ()
 
 (* [at] is the end whose operation met the fault. Over a network that pairs no
    ends, a closer that is not there is the real peer: [at]'s receive side is
@@ -112,7 +93,6 @@ let break conn ~at how =
         end
         else [])
   in
-  thaw_all conn;
   List.iter (shut conn how) ends;
   match how with
   | `Closed closer when ends <> [] && not (List.mem_assoc closer ends) ->
@@ -131,6 +111,15 @@ let crash conn ~at ~crashed =
         && conn.sent.(ix (other crashed)) > conn.taken.(ix crashed)
       then conn.reset_to <- Some (other crashed));
   break conn ~at (`Closed crashed)
+
+(* A hang: nothing crosses the connection from now on, either way.
+   eio-net.mem silences a paired connection at [sock], one of its ends. *)
+let silence conn sock =
+  Mutex.protect conn.lock (fun () ->
+      if Atomic.get conn.broken = `Open then begin
+        Atomic.set conn.broken `Silent;
+        if conn.paired then Eio_net_mem.Private.silence sock
+      end)
 
 let join conn side sock =
   let broken =
@@ -416,8 +405,7 @@ module Flow = struct
     mutable reset_reported : bool;
     mutable wrote_after_end : bool;
     mutable cut_short : bool;
-    mutable stop : bool;
-    mutable stop_at : int;
+    mutable hushed : bool;
   }
 
   (* Under [t.lock]. The end of a broken connection's reads: a reset is
@@ -432,22 +420,29 @@ module Flow = struct
     | `Closed _ when t.conn.reset_to = Some t.side && not t.reset_reported ->
         t.reset_reported <- true;
         raise (reset_exn ())
-    | `Reset | `Closed _ | `Open -> raise End_of_file
+    | `Reset | `Closed _ | `Open | `Silent -> raise End_of_file
 
   (* Whether this end's own reads are cut: a reset, or its own close. *)
   let cut t =
     match Atomic.get t.conn.broken with
     | `Reset -> true
     | `Closed closer -> closer = t.side
-    | `Open -> false
+    | `Open | `Silent -> false
 
-  (* Under [t.lock]. Over IP, a cut drops what is buffered at once. An
-     AF_UNIX byte whose write returned is in the reader's queue, so the reader
-     reads it first, then meets the cut (unix(7)). The peer of an end that
-     closed reads on, to the end its socket now reaches. *)
+  let silent t = Atomic.get t.conn.broken = `Silent
+
+  (* Under [t.lock]. Over IP, a cut drops what is buffered at once, and so
+     does a silence. An AF_UNIX byte whose write returned is in the reader's
+     queue, so the reader reads it first, then meets the cut (unix(7)). The
+     peer of an end that closed reads on, to the end its socket now
+     reaches. *)
   let check_read t =
     if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
-    if t.family = `Inet && cut t then ended t
+    if t.family = `Inet && cut t then ended t;
+    if t.family = `Inet && (not t.hushed) && silent t then begin
+      t.hushed <- true;
+      t.leftover <- Cstruct.empty
+    end
 
   (* Under [t.lock]. A write that raises a reset reports it over IP; on
      AF_UNIX it raises EPIPE, which leaves the reset to the next read. *)
@@ -464,7 +459,7 @@ module Flow = struct
       raise (reset_exn ())
     in
     match Atomic.get t.conn.broken with
-    | `Open -> `Write
+    | `Open | `Silent -> `Write
     | `Reset -> reset ()
     | `Closed closer when closer = t.side || t.family = `Unix -> reset ()
     | `Closed _ ->
@@ -479,8 +474,9 @@ module Flow = struct
   let broken t = Atomic.get t.conn.broken <> `Open
 
   (* Appends one base read to the buffer. A base error after a break is the
-     break's. *)
+     break's. A silence over a network that pairs no ends holds the reads. *)
   let fill t =
+    if silent t && not t.conn.paired then Eio.Fiber.await_cancel ();
     let scratch = Cstruct.create 0x4000 in
     let got =
       match Eio.Flow.single_read t.sock scratch with
@@ -525,65 +521,21 @@ module Flow = struct
     Mutex.protect t.lock (fun () -> check_read t);
     raise (reset_exn ())
 
-  (* On AF_UNIX a hang is a peer that stops where it stands. A returned base
-     write is in the reader's queue (unix(7)), so the reads take the bytes
-     queued when it stopped, [t.stop_at], then wait until the read is
-     cancelled or the connection closes, shuts down or breaks; the peer's
-     writes wait from the hang on, a write under way included. Over IP, or
-     with a peer not wrapped here, a hang holds what is queued. *)
-  let stops t = t.family = `Unix && t.conn.paired
+  (* An AF_UNIX connection with both ends here, whose crash depends on what
+     each end left unread. *)
+  let local t = t.family = `Unix && t.conn.paired
 
-  (* Under [t.lock]. The peer stops. *)
-  let stop t =
-    let c = t.conn in
-    Mutex.protect c.lock @@ fun () ->
-    t.stop <- true;
-    t.stop_at <- c.sent.(ix (other t.side));
-    if Option.is_none c.frozen.(ix (other t.side)) then begin
-      let thawed, thaw = Eio.Promise.create () in
-      c.frozen.(ix (other t.side)) <- Some { thawed; thaw }
-    end
+  (* A connection that went silent meets no reset, end of stream or second
+     hang: none would reach it. *)
+  let muted t fault =
+    match fault with
+    | Some (Fault.Reset | Eof | Hang) when silent t -> None
+    | fault -> fault
 
-  let stopped t dst =
-    let next =
-      Mutex.protect t.lock @@ fun () ->
-      check_read t;
-      let c = t.conn in
-      Mutex.protect c.lock @@ fun () ->
-      match c.frozen.(ix (other t.side)) with
-      | Some f when Atomic.get c.broken = `Open ->
-          if t.delivered < t.stop_at then `Take (t.stop_at - t.delivered)
-          else `Wait f.thawed
-      | _ ->
-          t.stop <- false;
-          `Read
-    in
-    match next with
-    | `Read -> deliver t dst ~cap:0
-    | `Take n -> deliver t dst ~cap:n
-    | `Wait thawed ->
-        (match Eio.Promise.await thawed with
-        | () -> ()
-        | exception (Eio.Cancel.Cancelled _ as e) ->
-            thaw t.conn (other t.side);
-            raise e);
-        deliver t dst ~cap:0
-
-  (* The writes of a peer that stopped wait. *)
-  let rec thawed t =
-    if stops t then
-      match Mutex.protect t.conn.lock (fun () -> t.conn.frozen.(ix t.side)) with
-      | Some f ->
-          Eio.Promise.await f.thawed;
-          thawed t
-      | None -> ()
-
-  (* One base write, counted once it returns: each waits while the peer is
-     stopped, so a write under way stops where it stands. *)
+  (* One base write, counted once it returns. *)
   let base_write t bufs =
-    thawed t;
     let n = Eio.Flow.single_write t.sock bufs in
-    if stops t then
+    if local t then
       Mutex.protect t.conn.lock (fun () ->
           t.conn.sent.(ix t.side) <- t.conn.sent.(ix t.side) + n);
     n
@@ -593,28 +545,26 @@ module Flow = struct
     type nonrec t = t
 
     let single_read_ t dst =
-      let fault, stop =
+      let fault =
         Mutex.protect t.lock (fun () ->
             check_read t;
-            if Cstruct.length dst = 0 then (None, false)
+            if Cstruct.length dst = 0 then None
             else
-              let fault =
-                ask t.ctx `Read ~socket:t.socket ~side:t.side ~family:t.family
-                  ~offset:t.delivered ~length:(Cstruct.length dst)
-              in
-              if fault = Some Fault.Hang && stops t then stop t;
-              (fault, t.stop))
+              muted t
+                (ask t.ctx `Read ~socket:t.socket ~side:t.side ~family:t.family
+                   ~offset:t.delivered ~length:(Cstruct.length dst)))
       in
       if Cstruct.length dst = 0 then 0
       else
         match fault with
-        | (Some Hang | None) when stop -> stopped t dst
         | Some (Fault.Short n) -> deliver t dst ~cap:(max 1 n)
         | Some (Stall d) ->
             Eio.Time.sleep t.ctx.clock d;
             deliver t dst ~cap:0
-        | Some Hang -> Eio.Fiber.await_cancel ()
-        | Some Reset when stops t ->
+        | Some Hang ->
+            silence t.conn t.sock;
+            deliver t dst ~cap:0
+        | Some Reset when local t ->
             crash t.conn ~at:t.side ~crashed:(other t.side);
             deliver t dst ~cap:0
         | Some Reset ->
@@ -649,16 +599,17 @@ module Flow = struct
         | `Write when total = 0 -> (None, 0)
         | `Write ->
             let fault =
-              ask t.ctx `Write ~socket:t.socket ~side:t.side ~family:t.family
-                ~offset:t.written ~length:total
+              muted t
+                (ask t.ctx `Write ~socket:t.socket ~side:t.side ~family:t.family
+                   ~offset:t.written ~length:total)
             in
             let n =
               match fault with
               | Some (Fault.Short k) -> max 1 (min k total)
-              | Some (Hang | Reset | Eof) -> 0
+              | Some (Reset | Eof) -> 0
               | Some
-                  ( Stall _ | Refuse | Timeout | Unreachable | Emfile | Drop
-                  | Dup | Reorder | Garble _ )
+                  ( Hang | Stall _ | Refuse | Timeout | Unreachable | Emfile
+                  | Drop | Dup | Reorder | Garble _ )
               | None ->
                   total
             in
@@ -679,8 +630,10 @@ module Flow = struct
       else if total = 0 then 0
       else
         match fault with
-        | Some Fault.Hang -> Eio.Fiber.await_cancel ()
-        | Some Reset when stops t ->
+        | Some Fault.Hang ->
+            silence t.conn t.sock;
+            write ()
+        | Some Reset when local t ->
             crash t.conn ~at:t.side ~crashed:t.side;
             write_reset t
         | Some Reset ->
@@ -698,10 +651,6 @@ module Flow = struct
         | None ->
             write ()
 
-    let single_write_ t bufs =
-      thawed t;
-      write_ t bufs
-
     let single_read t dst =
       guard
         ~eof:(Ended (t.socket, t.side))
@@ -709,17 +658,13 @@ module Flow = struct
         (fun () -> single_read_ t dst)
 
     let single_write t bufs =
-      guard t.ctx (Write t.peer) (fun () -> single_write_ t bufs)
+      guard t.ctx (Write t.peer) (fun () -> write_ t bufs)
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
     let read_methods = []
 
     let shutdown t cmd =
       charge t.ctx;
-      (match cmd with
-      | `Send -> thaw t.conn t.side
-      | `Receive -> thaw t.conn (other t.side)
-      | `All -> thaw_all t.conn);
       try Eio.Flow.shutdown t.sock cmd with Eio.Io _ when broken t -> ()
 
     let close t =
@@ -731,7 +676,6 @@ module Flow = struct
             t.closed <- true;
             was_open)
       in
-      thaw_all t.conn;
       Eio.Resource.close t.sock;
       if was_open then free t.ctx
 
@@ -768,8 +712,7 @@ module Flow = struct
           reset_reported = false;
           wrote_after_end = false;
           cut_short = false;
-          stop = false;
-          stop_at = 0;
+          hushed = false;
         },
         handler )
 end

@@ -2,7 +2,7 @@
 
     {!check} runs a workload on an in-memory network that fails in a different
     way on each run: a read returns one byte or several messages at once, a
-    connection is reset or ends midway, a peer stalls, a send buffer fills, a
+    connection is reset, ends midway or goes silent, a send buffer fills, a
     connect is refused or times out, a datagram is lost, duplicated, reordered
     or replaced with noise. It chooses the scenarios from what the workload
     does.
@@ -41,8 +41,10 @@
     and counts as one fault, though it reaches every connection of the run.
 
     {b Every program on the network meets the faults}, the test's own peers
-    included. Write test servers with [Eio.Net.run_server ~on_error:ignore] and
-    a timeout on each read, as a client may stall for good; catch
+    included. A connection may go silent for good, as when a host loses power,
+    and no close or reset then ends a wait on it: give each read a timeout, and
+    each write that may fill a socket's buffer, in test servers and clients
+    alike. Write test servers with [Eio.Net.run_server ~on_error:ignore]; catch
     [Eio.Io _ | End_of_file] in test clients; and parse strictly in both: a peer
     that takes a partial line for a whole one turns an injected end of stream
     into a wrong answer. Under [Eio.Fiber.both] or [Eio.Fiber.all], two fibers
@@ -66,10 +68,7 @@
     datagram at a time. A program that never fails the calls still waiting on a
     connection that died passes unless the workload waits for every call and
     checks how each ended. A garbled datagram is random bytes, so a parser that
-    rejects most noise but accepts some may pass. A peer that stops is a read
-    that hangs until the peer's own timeout cancels it, so a program that blocks
-    on a peer that never reads passes if that peer gives up and closes, as a
-    stopped process would not.
+    rejects most noise but accepts some may pass.
 
     {2 Failures and replay}
 
@@ -158,7 +157,7 @@ val check :
 
     - at each structural position of what one end of a structural connection
       reads, the connection is reset at both ends, as on TCP, or the peer closes
-      it, or stalls for good;
+      it, or the connection goes silent for good;
     - at each structural position of what one end writes, the connection is
       reset, or this end closes it, as a process killed in the middle of a
       message does;
@@ -186,14 +185,13 @@ val check :
     A Unix-domain socket meets only what AF_UNIX can do, as it is reliable and
     ordered (unix(7)). A connect may be refused, but neither times out nor finds
     no route; an accepted connection may have been closed by its client; a peer
-    may close, crash or stop, and its reader still gets every byte whose write
-    returned, while the writes of a peer that stops wait, one under way where it
-    stands, until its reader gives up; reads may take what several writes sent.
-    A write of up to 32 KiB arrives whole, so there are no one-byte reads or
-    writes, and a cut lands between two writes; a larger one is cut short when
-    every connection queues 32 KiB, as Linux cuts a 300,000-byte write to what
-    its socket's buffer takes. No datagram is lost, duplicated, reordered or
-    garbled, and the outage refuses connects only.
+    may close, crash or hang, and its reader still gets every byte whose write
+    returned; reads may take what several writes sent. A write of up to 32 KiB
+    arrives whole, so there are no one-byte reads or writes, and a cut lands
+    between two writes; a larger one is cut short when every connection queues
+    32 KiB, as Linux cuts a 300,000-byte write to what its socket's buffer
+    takes. No datagram is lost, duplicated, reordered or garbled, and the outage
+    refuses connects only.
 
     A run passes if [run] returns. [run] catches the errors its program may
     raise and checks the results itself: any exception that escapes it fails the
@@ -272,27 +270,32 @@ module Fault : sig
     | Stall of float
         (** The operation waits that many seconds of the clock, then runs. *)
     | Hang
-        (** The operation waits until a cancel ends it, as a read from a silent
-            peer does; a connect never does, as the kernel gives up on it, so
-            {!check} hangs reads only. It holds that one operation: a read after
-            the cancel gets the bytes the hung one would have, a datagram taken
-            by a receive that hangs goes to the next receive, and a connection
-            taken by an accept that hangs to the next accept. A receive on a
-            Unix-domain datagram socket does not hang: the datagram it took was
-            queued when its send returned, and no peer can stop.
+        (** On a connection, a read or a write that meets it silences the
+            connection for good, as when the peer's host loses power or a
+            partition cuts the path, and on AF_UNIX as when the peer's process
+            hangs: from then on nothing crosses it either way, and no close or
+            reset comes. Each end reads what is queued to it on a Unix-domain
+            connection, as AF_UNIX queues at the reader what a returned write
+            sent (unix(7)), and nothing more over IP, not even an end of stream
+            already sent, then waits. Its writes fill its buffer, then wait.
+            Neither end's shutdown or close reaches the other. A wait ends only
+            with a cancel or the end's own shutdown: a read then returns end of
+            file, and a write raises [Connection_reset]. Of later faults on the
+            connection, only {!constructor-Short} and {!constructor-Stall} act.
+            A kernel ends such a wait only with a keepalive, or once data it
+            sent goes unacknowledged for about 15 minutes on Linux (tcp(7)); a
+            check models neither, so a program with no timeout of its own hangs.
+            {!check} silences a connection at a read. On a network other than
+            {!Eio_net_mem}, where the wrapper does not see the peer, only this
+            end's reads go silent.
 
-            Over IP a read that hangs holds what is queued, as a path that drops
-            every segment does. On a Unix-domain connection it is a peer that
-            stops, as AF_UNIX keeps in the reader's queue what a returned write
-            sent (unix(7)): the peer's writes on that connection wait from then
-            on, one under way where it stands, the reads return the bytes queued
-            when it stopped, and the first that finds none waits until a cancel
-            ends it. The wait also ends when the peer closes the connection or
-            shuts down its sending, this end shuts down its receiving, or the
-            connection breaks: the read then returns what the socket has, end of
-            file included. On a network other than {!Eio_net_mem}, where the
-            wrapper does not see the peer, the read holds what is queued, as
-            over IP. *)
+            On a connect, an accept or a receive, the operation waits until a
+            cancel ends it; a connect never does in {!check}, as the kernel
+            gives up on it. It holds that one operation: a datagram taken by a
+            receive that hangs goes to the next receive, and a connection taken
+            by an accept that hangs to the next accept. A receive on a
+            Unix-domain datagram socket does not hang: the datagram it took was
+            queued when its send returned. *)
     | Reset
         (** Over IP, the connection is reset at both ends, and the bytes not yet
             read are lost. At each end the first read or write that follows
