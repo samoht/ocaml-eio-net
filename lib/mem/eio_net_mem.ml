@@ -242,21 +242,32 @@ let cross_family (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
 (* The holds sockets of one kind have on each port, kept as they bind and
    close, so a bind checks only the holds on its port. A hold is an address,
    whether its socket has [SO_REUSEADDR], whether it listens, and, once it
-   lingers in TIME_WAIT, until when on [now]. [lowest] is a port of the
-   dynamic range (RFC 6335, section 6) at or below the lowest one nothing
-   holds: every port below it is held; [highest] is one at or above the
-   highest free one. *)
+   lingers in TIME_WAIT, until when on [now]. Holds alike in all but when
+   they end share a group, which counts those that last and keeps when the
+   others end, so a port that many connections held costs a bind the groups
+   on it, not the connections. [lowest] is a port of the dynamic range (RFC
+   6335, section 6) at or below the lowest one nothing holds: every port
+   below it is held; [highest] is one at or above the highest free one. *)
 module Ports = struct
-  type hold = {
+  module Untils = Map.Make (Mtime)
+
+  type group = {
     ip : Eio.Net.Ipaddr.v4v6;
     wildcard : bool;
     reuse : bool;
     listening : bool;
+    mutable lasting : int;
+    mutable untils : int Untils.t;
+  }
+
+  type hold = {
+    group : group;
     mutable until : Mtime.t option;
+    mutable released : bool;
   }
 
   type t = {
-    held : (int, hold list) Hashtbl.t;
+    held : (int, group list) Hashtbl.t;
     mutable lowest : int;
     mutable highest : int;
     now : (unit -> Mtime.t) option;
@@ -273,51 +284,98 @@ module Ports = struct
     if port >= 49152 && port < t.lowest then t.lowest <- port;
     if port <= 65535 && port > t.highest then t.highest <- port
 
-  (* The holds on [port], less those whose TIME_WAIT has ended. *)
+  let count n = function None -> n | Some m -> m + n
+
+  let untils_add u g =
+    g.untils <- Untils.update u (fun c -> Some (count 1 c)) g.untils
+
+  let untils_remove u g =
+    g.untils <-
+      Untils.update u
+        (function Some c when c > 1 -> Some (c - 1) | _ -> None)
+        g.untils
+
+  (* Whether a hold of [g] is live, once those whose TIME_WAIT has ended are
+     dropped. *)
+  let live t g =
+    (match t.now with
+    | None -> ()
+    | Some now ->
+        let now = now () in
+        let rec prune () =
+          match Untils.min_binding_opt g.untils with
+          | Some (u, _) when not (Mtime.is_earlier now ~than:u) ->
+              g.untils <- Untils.remove u g.untils;
+              prune ()
+          | _ -> ()
+        in
+        prune ());
+    g.lasting > 0 || not (Untils.is_empty g.untils)
+
+  (* The groups on [port] that hold it. *)
   let at t port =
     match Hashtbl.find_opt t.held port with
     | None -> []
-    | Some holds -> (
-        let live =
-          match t.now with
-          | None -> holds
-          | Some now ->
-              let now = now () in
-              List.filter
-                (fun h ->
-                  match h.until with
-                  | None -> true
-                  | Some until -> Mtime.is_earlier now ~than:until)
-                holds
-        in
-        match live with
+    | Some groups -> (
+        match List.filter (live t) groups with
         | [] ->
             Hashtbl.remove t.held port;
             freed t port;
             []
-        | _ ->
-            if List.compare_lengths live holds <> 0 then
+        | live ->
+            if List.compare_lengths live groups <> 0 then
               Hashtbl.replace t.held port live;
             live)
 
   let add t ?(wildcard = false) ?(reuse = false) ?(listening = false) (ip, port)
       =
-    let h = { ip; wildcard; reuse; listening; until = None } in
-    Hashtbl.replace t.held port (h :: at t port);
-    h
+    let groups = at t port in
+    let alike g =
+      same g.ip ip && g.wildcard = wildcard && g.reuse = reuse
+      && g.listening = listening
+    in
+    let group =
+      match List.find_opt alike groups with
+      | Some g -> g
+      | None ->
+          let g =
+            {
+              ip;
+              wildcard;
+              reuse;
+              listening;
+              lasting = 0;
+              untils = Untils.empty;
+            }
+          in
+          Hashtbl.replace t.held port (g :: groups);
+          g
+    in
+    group.lasting <- group.lasting + 1;
+    { group; until = None; released = false }
 
   let remove t port h =
-    match List.filter (fun h' -> h' != h) (at t port) with
-    | [] ->
-        Hashtbl.remove t.held port;
-        freed t port
-    | holds -> Hashtbl.replace t.held port holds
+    if not h.released then begin
+      h.released <- true;
+      match h.until with
+      | None -> h.group.lasting <- h.group.lasting - 1
+      | Some u -> untils_remove u h.group
+    end;
+    ignore (at t port : group list)
 
   (* [h] lets go at [until], or later if it already would. *)
   let set_until h until =
     match h.until with
+    | _ when h.released -> ()
     | Some u when Mtime.is_later u ~than:until -> ()
-    | _ -> h.until <- Some until
+    | Some u ->
+        untils_remove u h.group;
+        untils_add until h.group;
+        h.until <- Some until
+    | None ->
+        h.group.lasting <- h.group.lasting - 1;
+        untils_add until h.group;
+        h.until <- Some until
 
   (* A bind at [ip] conflicts with a hold at an overlapping address, unless
      both sockets have [SO_REUSEADDR] and the held one does not listen, as
@@ -327,9 +385,9 @@ module Ports = struct
   let in_use t ?(reuse = false) (ip, port) =
     let wild = same (unmap ip) (any (unmap ip)) in
     List.exists
-      (fun h ->
-        (ip_overlaps (ip, port) (h.ip, port) || (h.wildcard && wild))
-        && not (reuse && h.reuse && not h.listening))
+      (fun g ->
+        (ip_overlaps (ip, port) (g.ip, port) || (g.wildcard && wild))
+        && not (reuse && g.reuse && not g.listening))
       (at t port)
 
   let is_free t port = at t port = []
