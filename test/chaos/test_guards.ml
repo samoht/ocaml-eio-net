@@ -863,6 +863,63 @@ let heartbeats () =
            Eio.Time.sleep env#clock 0.02
          done))
 
+(* Loops of network calls that never wait: [start] makes the step the loop
+   repeats while it says [true]. Each call takes a turn: a loop whose clock
+   stands still over a thousand of them would spin for ever, so it stops
+   there. *)
+let never_waits start () =
+  Eio_net_chaos.check @@ fun env ->
+  touch env;
+  Eio.Switch.run @@ fun sw ->
+  let step = start ~sw env in
+  let t0 = Eio.Time.now env#clock and n = ref 0 in
+  while step () do
+    incr n;
+    if !n = 1000 && Eio.Time.now env#clock = t0 then
+      failwith "the clock stood still over 1000 calls"
+  done
+
+(* A server that listens again on its port while a connection it closed
+   holds it in TIME_WAIT, at once after each refusal. *)
+let relisten =
+  never_waits @@ fun ~sw env ->
+  let port = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8000) in
+  ( Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~sw ~backlog:1 env#net port in
+    Eio.Fiber.both
+      (fun () ->
+        let flow, _ = Eio.Net.accept ~sw l in
+        Eio.Resource.close flow)
+      (fun () ->
+        let flow = Eio.Net.connect ~sw env#net port in
+        try ignore (Eio.Flow.single_read flow (Cstruct.create 1))
+        with End_of_file -> ()) );
+  fun () ->
+    match Eio.Net.listen ~sw ~backlog:1 env#net port with
+    | _ -> false
+    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> true
+
+let udp_flood =
+  never_waits @@ fun ~sw env ->
+  let port p = `Udp (Eio.Net.Ipaddr.V4.loopback, p) in
+  let s = Eio.Net.datagram_socket ~sw env#net (port 9001) in
+  fun () ->
+    Eio.Net.send s ~dst:(port 9002) [ Cstruct.of_string "x" ];
+    true
+
+let sockets =
+  never_waits @@ fun ~sw:_ env () ->
+  Eio.Switch.run (fun sw ->
+      ignore
+        (Eio.Net.datagram_socket ~sw env#net
+           (`Udp (Eio.Net.Ipaddr.V4.loopback, 0))));
+  true
+
+let lookups =
+  never_waits @@ fun ~sw:_ env () ->
+  ignore (Eio.Net.getaddrinfo env#net "localhost");
+  true
+
 (* A ping-pong that never ends holds a bounded trace while it runs: the
    live words, sampled as it goes, stay under three million. *)
 let test_busy_memory () =
@@ -919,6 +976,15 @@ let suite =
            spin);
       Alcotest.test_case "a client that reconnects at once spins" `Quick
         (first_fails ops reconnect);
+      Alcotest.test_case "a listen retried at once is a busy loop" `Quick
+        (first_fails busy relisten);
+      Alcotest.test_case "a send loop that never waits is a busy loop" `Quick
+        (first_fails busy udp_flood);
+      Alcotest.test_case
+        "sockets opened in a loop that never waits are a busy loop" `Quick
+        (first_fails busy sockets);
+      Alcotest.test_case "lookups in a loop that never waits are a busy loop"
+        `Quick (first_fails busy lookups);
       Alcotest.test_case "a batch of jobs ended by the server is no spin" `Quick
         (refused_with
            "Eio_net_chaos.check: the linear tier needs 190100 runs, more than \
