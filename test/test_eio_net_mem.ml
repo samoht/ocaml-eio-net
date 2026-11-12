@@ -760,6 +760,30 @@ let test_port_zero_scales () =
         ignore (Eio.Net.datagram_socket ~sw net (`Udp (v4, 0)))
       done)
 
+(* Connections the server closes first leave their ends in TIME_WAIT on the
+   listener's port: 4000 of them connect with work, counted as the words
+   allocated, that grows with their number, not with its square. *)
+let test_time_wait_scales () =
+  let words n =
+    let before = Gc.minor_words () in
+    ( Eio_mock.Backend.run @@ fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let clock = Eio_mock.Clock.Mono.make () in
+      let net = Eio_net_mem.v ~clock ~sw () in
+      let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+      let l = Eio.Net.listen ~sw ~backlog:5 net addr in
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
+      for _ = 1 to n do
+        Eio.Switch.run @@ fun sw ->
+        ignore (Eio.Flow.read_all (Eio.Net.connect ~sw net addr) : string)
+      done );
+    Gc.minor_words () -. before
+  in
+  let one = words 1000 and four = words 4000 in
+  if four > 8. *. one then
+    Alcotest.failf "%.0f words for 4000 connections, %.0f for 1000" four one
+
 (* A read or a write cancelled while it waits leaves nothing behind: 100000
    cancelled reads and 100000 cancelled writes keep the live heap within a
    bound that a waiter left queued by each would pass. *)
@@ -2327,6 +2351,8 @@ let suite =
         test_datagram_reaches_like_a_kernel;
       Alcotest.test_case "a closed datagram socket's path" `Quick
         test_closed_datagram_path;
+      Alcotest.test_case "TIME_WAIT on one port scales" `Quick
+        test_time_wait_scales;
       Alcotest.test_case "a UDP receive buffer drops past Linux's" `Quick
         test_udp_receive_buffer;
       Alcotest.test_case "a Unix-domain datagram send waits for room" `Quick
