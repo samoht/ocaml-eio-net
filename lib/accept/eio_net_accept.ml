@@ -33,6 +33,43 @@ let reading head received =
 
 let complete head = Atomic.set head.received None
 
+(* A flow whose reads count, for a head read through a layer of its own. The
+   count is read by the loop that chooses whom to shed, on any domain. *)
+module Counted = struct
+  type t = {
+    flow : Eio.Flow.two_way_ty Eio.Resource.t;
+    close : unit -> unit;
+    read : int Atomic.t;
+  }
+
+  let single_read t buf =
+    let n = Eio.Flow.single_read t.flow buf in
+    ignore (Atomic.fetch_and_add t.read n : int);
+    n
+
+  let read_methods = []
+  let single_write t bufs = Eio.Flow.single_write t.flow bufs
+  let copy t ~src = Eio.Flow.copy src t.flow
+  let shutdown t cmd = Eio.Flow.shutdown t.flow cmd
+  let close t = t.close ()
+end
+
+let counted =
+  Eio.Resource.handler
+    (H (Eio.Resource.Close, Counted.close)
+    :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Counted)))
+
+let reading_flow head flow =
+  let read = Atomic.make 0 in
+  reading head (fun () -> Atomic.get read);
+  Eio.Resource.T
+    ( {
+        Counted.flow :> Eio.Flow.two_way_ty Eio.Resource.t;
+        close = (fun () -> Eio.Resource.close flow);
+        read;
+      },
+      counted )
+
 type held = { seq : int; loop : int; head : head }
 
 module Seq_map = Map.Make (Int)

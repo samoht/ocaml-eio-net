@@ -62,6 +62,18 @@ let line_server ?(served = ignore) head flow _addr =
   in
   next ()
 
+(* A protocol that reads its one-line head through a layer of its own, as a TLS
+   handshake reads its records: the head's progress is the bytes the layer
+   read off the socket. *)
+let layered_server head flow _addr =
+  let flow = Eio_net_accept.reading_flow head flow in
+  let reader = Eio.Buf_read.of_flow ~max_size:4096 flow in
+  match Eio.Buf_read.line reader with
+  | exception End_of_file -> ()
+  | line ->
+      Eio_net_accept.complete head;
+      Eio.Flow.copy_string ("ok " ^ line ^ "\n") flow
+
 (* A peer that sends [data], ends its side and reads the answer to its end. *)
 let exchange ?(addr = addr) net data =
   Eio.Switch.run @@ fun sw ->
@@ -123,7 +135,8 @@ let test_aborted_accept_is_followed_by_the_next () =
    connects, or an accept fails for lack of a descriptor (EMFILE). It sheds the
    last peer and no other, reports no error for it, and answers the fresh
    peer. *)
-let pressure_sheds_the_least_progressed pressure n () =
+let pressure_sheds_the_least_progressed ?(server = line_server ?served:None)
+    pressure n () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
@@ -144,7 +157,7 @@ let pressure_sheds_the_least_progressed pressure n () =
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
               Eio_net_accept.run ~classify ~max_connections ~on_error listening
-                (line_server ?served:None));
+                server);
           for i = 0 to n - 1 do
             stall ~sw:clients net
               (String.make (n - i) 'x')
@@ -595,6 +608,12 @@ let suite =
       Alcotest.test_case "no descriptor sheds the least progressed of 100"
         `Quick
         (pressure_sheds_the_least_progressed `Descriptors 100);
+      Alcotest.test_case
+        "10 heads read through a layer shed the least progressed" `Quick
+        (pressure_sheds_the_least_progressed ~server:layered_server `Held 10);
+      Alcotest.test_case
+        "100 heads read through a layer shed the least progressed" `Quick
+        (pressure_sheds_the_least_progressed ~server:layered_server `Held 100);
       Alcotest.test_case "no descriptor on a second loop sheds of 10" `Quick
         (descriptors_are_shared_across_loops 10);
       Alcotest.test_case "no descriptor on a second loop sheds of 100" `Quick
