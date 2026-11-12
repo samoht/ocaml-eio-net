@@ -1111,7 +1111,7 @@ getnameinfo tcp 127.0.0.1:49999,localhost/49999,localhost/49999
 getnameinfo tcp 10.1.2.3:80,10.1.2.3/http,10.1.2.3/http
 getnameinfo tcp 127.0.0.2:8080,127.0.0.2/http-alt,127.0.0.2/http-alt
 reuse server closes first,EADDRINUSE EADDRINUSE,EADDRINUSE ok
-reuse client closes first,ok ok,EADDRINUSE ok
+reuse client closes first,ok ok,ok ok
 reuse connection open,EADDRINUSE EADDRINUSE,EADDRINUSE ok
 reuse no connection,ok ok,ok ok
 reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok
@@ -1259,6 +1259,41 @@ blocked tcp writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Rese
 blocked unix writer: reader shuts receive,blk data EOF Reset Reset,blk EOF blk Reset
 blocked unix writer: reader shuts down,blk data EOF Reset,blk EOF blk
 blocked unix writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Reset Reset
+dual-stack hold: listen :: client ::1 open,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=EADDRINUSE 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen :: client ::1 server closes first,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=EADDRINUSE 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen :: client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen :: client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+dual-stack hold: listen :: client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+dual-stack hold: listen :: client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+dual-stack hold: listen ::1 client ::1 open,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen ::1 client ::1 server closes first,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen ::1 client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen 0.0.0.0 client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+dual-stack hold: listen 0.0.0.0 client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+dual-stack hold: listen 0.0.0.0 client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+unix dgram sndbuf: size=1,sent=299,sent=1920 then ENOBUFS
+unix dgram sndbuf: size=500,sent=180,sent=480 then ENOBUFS
+unix dgram sndbuf: size=1000,sent=100,sent=240 then ENOBUFS
+unix dgram sndbuf: size=2000,sent=53,sent=120 then ENOBUFS
+unix dgram sndbuf: size=4000,sent=28,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=6000,sent=28,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=8000,sent=14,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=16000,sent=14,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=16064,sent=12,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=20000,sent=12,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=50000,sent=5,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=100000,sent=3,sent=0 then EMSGSIZE
+unix dgram sndbuf: size=212960,sent=1,sent=0 then EMSGSIZE
+unix dgram blocked send: receiver shuts receive,queued=11 blk Reset,abort ENOBUFS
+unix dgram blocked send: sender shuts send,queued=11 blk Reset,abort ENOBUFS
+udp rmem: send 99 recv 3 send 10,kept=96,kept=106
+udp rmem: send 99 recv 24 send 10,kept=75,kept=85
+udp rmem: send 99 recv 25 send 10,kept=84,kept=84
+udp rmem: send 99 recv 98 send 10,kept=11,kept=11
+udp rmem: send 99 recv 99 send 10,kept=10,kept=10
+udp rmem: send 10 recv 1 send 89 recv 9 send 10,kept=99,kept=99
+udp rmem: send 10 recv 1 send 89 recv 8 send 10,kept=90,kept=100
+udp rmem: send 99 recv 50 send 10 recv 25 send 30,kept=64,kept=64
 off loopback: connect 10.1.2.3,ENETUNREACH,not recorded
 off loopback: connect 2001:db8::1,ENETUNREACH,not recorded
 off loopback: connect ::2,ENETUNREACH,not recorded

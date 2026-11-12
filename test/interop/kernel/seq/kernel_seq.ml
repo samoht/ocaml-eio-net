@@ -1362,6 +1362,135 @@ let blocked_writers =
         ])
     [ (false, "tcp"); (true, "unix") ]
 
+(* One sender sends datagrams of [size] bytes to 60 receivers in turn until
+   a send waits: how many its send buffer took. *)
+let unix_sndbuf size net =
+  Eio.Switch.run @@ fun sw ->
+  let path i = Fmt.str "sb%d.%d" size i in
+  let receivers = 60 in
+  for i = 0 to receivers - 1 do
+    unlink (path i);
+    ignore (Eio.Net.datagram_socket ~sw net (`Unix (path i)))
+  done;
+  unlink (path receivers);
+  let s = Eio.Net.datagram_socket ~sw net (`Unix (path receivers)) in
+  let data = Cstruct.create size in
+  (* Its own bound, past what a send buffer holds. *)
+  let rec go n =
+    if n >= 2000 then "sent more"
+    else
+      match
+        now (fun () ->
+            Eio.Net.send s ~dst:(`Unix (path (n mod receivers))) [ data ])
+      with
+      | () -> go (n + 1)
+      | exception Blocked -> Fmt.str "sent=%d" n
+      | exception e -> Fmt.str "sent=%d then %s" n (classify e)
+  in
+  let r = go 0 in
+  for i = 0 to receivers do
+    unlink (path i)
+  done;
+  r
+
+(* A send that waits for room on a full receiver, and what ends it: the
+   receiver shuts its receiving, or the sender its sending. A send still
+   waiting is cancelled at the end. *)
+let unix_blocked_send who net =
+  Eio.Switch.run @@ fun sw ->
+  unlink "bs.r";
+  unlink "bs.s";
+  let r = Eio.Net.datagram_socket ~sw net (`Unix "bs.r") in
+  let s = Eio.Net.datagram_socket ~sw net (`Unix "bs.s") in
+  let send () = Eio.Net.send s ~dst:(`Unix "bs.r") [ Cstruct.of_string "x" ] in
+  let rec fill n =
+    if n >= 1000 then n
+    else match now send with () -> fill (n + 1) | exception Blocked -> n
+  in
+  let queued = fill 0 in
+  let result = ref "" in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     let w =
+       Eio.Fiber.fork_promise ~sw (fun () ->
+           outcome (fun () ->
+               send ();
+               "ok"))
+     in
+     let waits () =
+       for _ = 1 to 64 do
+         Eio.Fiber.yield ()
+       done;
+       match Eio.Promise.peek w with
+       | None -> "blk"
+       | Some (Ok s) -> s
+       | Some (Error e) -> classify e
+     in
+     let before = waits () in
+     (match who with
+     | `Receiver -> dgram_shutdown r `Receive
+     | `Sender -> dgram_shutdown s `Send);
+     let after = waits () in
+     result := Fmt.str "queued=%d %s %s" queued before after;
+     Eio.Switch.fail sw Exit
+   with Exit -> ());
+  unlink "bs.r";
+  unlink "bs.s";
+  !result
+
+(* UDP datagrams of 1000 bytes sent and received in [steps] over loopback:
+   how many the receiver then holds, as Linux frees the memory of those
+   read only in batches. *)
+let udp_rmem steps net =
+  Eio.Switch.run @@ fun sw ->
+  let addr = `Udp (ip "127.0.0.1", 41999) in
+  let r = Eio.Net.datagram_socket ~sw net addr in
+  let s = Eio.Net.datagram_socket ~sw net (`Udp (ip "127.0.0.1", 0)) in
+  let buf = Cstruct.create 2000 in
+  List.iter
+    (function
+      | `Send n ->
+          for _ = 1 to n do
+            Eio.Net.send s ~dst:addr [ Cstruct.create 1000 ]
+          done
+      | `Recv n ->
+          for _ = 1 to n do
+            ignore (now (fun () -> Eio.Net.recv r buf))
+          done)
+    steps;
+  let rec drain n =
+    match now (fun () -> Eio.Net.recv r buf) with
+    | _ -> drain (n + 1)
+    | exception Blocked -> n
+  in
+  Fmt.str "kept=%d" (drain 0)
+
+(* A connection to a listener at [lst] from [cli], left open or closed by
+   one end first, once the listener closed: what a listen without
+   [SO_REUSEADDR] at the listener's port finds at each address. *)
+let dual_hold lst cli which net =
+  let p =
+    Eio.Switch.run @@ fun sw ->
+    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip lst, 0)))
+  in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip lst, p)) in
+  let c = Eio.Net.connect ~sw net (`Tcp (ip cli, p)) in
+  let s, _ = Eio.Net.accept ~sw l in
+  Eio.Resource.close l;
+  (match which with
+  | `Server_first ->
+      Eio.Flow.close s;
+      Eio.Flow.close c
+  | `Client_first ->
+      Eio.Flow.close c;
+      Eio.Flow.close s
+  | `Open -> ());
+  String.concat " "
+    (List.map
+       (fun a -> a ^ "=" ^ listen_at net (`Tcp (ip a, p)))
+       [ "::"; "::1"; "0.0.0.0"; "127.0.0.1" ])
+
 let untimed_scenarios : (string * (net -> string)) list =
   [ ("three", three) ]
   @ List.map (fun n -> (Fmt.str "backlog %d" n, backlog n)) [ 0; 1; 2; 5 ]
@@ -1528,6 +1657,61 @@ let untimed_scenarios : (string * (net -> string)) list =
         ("client 127.0.0.1", `Client "127.0.0.1");
       ]
   @ blocked_writers
+  @ List.concat_map
+      (fun (lst, cli) ->
+        List.map
+          (fun (name, which) ->
+            ( Fmt.str "dual-stack hold: listen %s client %s %s" lst cli name,
+              dual_hold lst cli which ))
+          [
+            ("open", `Open);
+            ("server closes first", `Server_first);
+            ("client closes first", `Client_first);
+          ])
+      [
+        ("::", "::1");
+        ("::", "127.0.0.1");
+        ("::1", "::1");
+        ("0.0.0.0", "127.0.0.1");
+      ]
+  @ List.map
+      (fun size ->
+        (Fmt.str "unix dgram sndbuf: size=%d" size, unix_sndbuf size))
+      [
+        1;
+        500;
+        1000;
+        2000;
+        4000;
+        6000;
+        8000;
+        16000;
+        16064;
+        20000;
+        50000;
+        100000;
+        212960;
+      ]
+  @ [
+      ( "unix dgram blocked send: receiver shuts receive",
+        unix_blocked_send `Receiver );
+      ("unix dgram blocked send: sender shuts send", unix_blocked_send `Sender);
+    ]
+  @ List.map
+      (fun (name, steps) -> ("udp rmem: " ^ name, udp_rmem steps))
+      [
+        ("send 99 recv 3 send 10", [ `Send 99; `Recv 3; `Send 10 ]);
+        ("send 99 recv 24 send 10", [ `Send 99; `Recv 24; `Send 10 ]);
+        ("send 99 recv 25 send 10", [ `Send 99; `Recv 25; `Send 10 ]);
+        ("send 99 recv 98 send 10", [ `Send 99; `Recv 98; `Send 10 ]);
+        ("send 99 recv 99 send 10", [ `Send 99; `Recv 99; `Send 10 ]);
+        ( "send 10 recv 1 send 89 recv 9 send 10",
+          [ `Send 10; `Recv 1; `Send 89; `Recv 9; `Send 10 ] );
+        ( "send 10 recv 1 send 89 recv 8 send 10",
+          [ `Send 10; `Recv 1; `Send 89; `Recv 8; `Send 10 ] );
+        ( "send 99 recv 50 send 10 recv 25 send 30",
+          [ `Send 99; `Recv 50; `Send 10; `Recv 25; `Send 30 ] );
+      ]
   @ List.map
       (fun d -> ("off loopback: connect " ^ d, off_loopback_connect d))
       off_loopback_ips
