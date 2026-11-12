@@ -1270,7 +1270,7 @@ dual-stack hold: listen ::1 client ::1 server closes first,::=EADDRINUSE ::1=EAD
 dual-stack hold: listen ::1 client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen 0.0.0.0 client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
 dual-stack hold: listen 0.0.0.0 client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
-dual-stack hold: listen 0.0.0.0 client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
+dual-stack hold: listen 0.0.0.0 client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
 unix dgram sndbuf: size=1,sent=299,sent=1920 then ENOBUFS
 unix dgram sndbuf: size=500,sent=180,sent=480 then ENOBUFS
 unix dgram sndbuf: size=1000,sent=100,sent=240 then ENOBUFS
@@ -1294,6 +1294,1051 @@ udp rmem: send 99 recv 99 send 10,kept=10,kept=10
 udp rmem: send 10 recv 1 send 89 recv 9 send 10,kept=99,kept=99
 udp rmem: send 10 recv 1 send 89 recv 8 send 10,kept=90,kept=100
 udp rmem: send 99 recv 50 send 10 recv 25 send 30,kept=64,kept=64
+sockopt linger close: tcp4 none,EOF,EOF
+sockopt linger close: tcp4 0,Reset,Reset
+sockopt linger close: tcp4 1,EOF,EOF
+sockopt linger close: unix none,EOF,EOF
+sockopt linger close: unix 0,EOF,EOF
+sockopt linger close: unix 1,EOF,EOF
+sockopt: tcp4 listener SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp4 listener SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp4 listener SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener SO_SNDBUF,get=16384 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp4 listener SO_RCVBUF,get=131072 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp4 listener SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp4 listener SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp4 listener SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp4 listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 listener TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30
+sockopt: tcp4 listener TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5
+sockopt: tcp4 listener TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3
+sockopt: tcp4 listener TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_MAXSEG,get=536 set=ok get=1000,get=512 set=EINVAL get=512
+sockopt: tcp4 listener TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_WINDOW_CLAMP,get=0 set=ok get=10000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_QUICKACK,get=true set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener TCP_FASTOPEN,get=0 set=ok get=5,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener IP_TTL,get=64 set=ok get=32,get=64 set=ok get=32
+sockopt: tcp4 listener IP_MTU,get=ENOTCONN set=Invalid_argument get=ENOTCONN,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: tcp4 listener IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp4 listener Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener Unix.SO_ACCEPTCONN,get=true set=Invalid_option get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 listener Unix.TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp4 listener Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 listener Unix.SO_SNDBUF,get=16384 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp4 listener Unix.SO_RCVBUF,get=131072 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp4 listener Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: tcp4 listener Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: tcp4 listener Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp4 listener Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp4 listener Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp4 listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 client SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp4 client SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp4 client SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client SO_SNDBUF,get=2626560 set=ok get=20000,get=146988 set=ok get=10000
+sockopt: tcp4 client SO_RCVBUF,get=131072 set=ok get=20000,get=408300 set=ok get=10000
+sockopt: tcp4 client SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp4 client SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp4 client SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp4 client SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 client SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 client TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30
+sockopt: tcp4 client TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5
+sockopt: tcp4 client TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3
+sockopt: tcp4 client TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_MAXSEG,get=32741 set=ok get=32741,get=16332 set=ok get=1000
+sockopt: tcp4 client TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_WINDOW_CLAMP,get=65536 set=ok get=10000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_QUICKACK,get=true set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client TCP_FASTOPEN,get=0 set=EINVAL get=0,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client IP_TTL,get=64 set=ok get=32,get=64 set=ok get=32
+sockopt: tcp4 client IP_MTU,get=65535 set=Invalid_argument get=65535,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: tcp4 client IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp4 client Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 client Unix.TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp4 client Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 client Unix.SO_SNDBUF,get=2626560 set=ok get=20000,get=146988 set=ok get=10000
+sockopt: tcp4 client Unix.SO_RCVBUF,get=131072 set=ok get=20000,get=408300 set=ok get=10000
+sockopt: tcp4 client Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: tcp4 client Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: tcp4 client Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp4 client Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp4 client Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp4 client Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 client Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 server SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp4 server SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp4 server SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server SO_SNDBUF,get=2626560 set=ok get=20000,get=132792 set=ok get=10000
+sockopt: tcp4 server SO_RCVBUF,get=131072 set=ok get=20000,get=132792 set=ok get=10000
+sockopt: tcp4 server SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp4 server SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp4 server SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp4 server SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 server SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 server TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30
+sockopt: tcp4 server TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5
+sockopt: tcp4 server TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3
+sockopt: tcp4 server TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_MAXSEG,get=32768 set=ok get=32768,get=4024 set=ok get=1000
+sockopt: tcp4 server TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_WINDOW_CLAMP,get=65536 set=ok get=10000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_QUICKACK,get=true set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server TCP_FASTOPEN,get=0 set=EINVAL get=0,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server IP_TTL,get=64 set=ok get=32,get=64 set=ok get=32
+sockopt: tcp4 server IP_MTU,get=65535 set=Invalid_argument get=65535,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: tcp4 server IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp4 server Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp4 server Unix.TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp4 server Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp4 server Unix.SO_SNDBUF,get=2626560 set=ok get=20000,get=132792 set=ok get=10000
+sockopt: tcp4 server Unix.SO_RCVBUF,get=131072 set=ok get=20000,get=132792 set=ok get=10000
+sockopt: tcp4 server Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: tcp4 server Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: tcp4 server Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp4 server Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp4 server Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp4 server Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp4 server Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 listener SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp6 listener SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener IPV6_ONLY,get=true set=EINVAL get=true,get=false set=EINVAL get=false
+sockopt: tcp6 listener SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener SO_SNDBUF,get=16384 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp6 listener SO_RCVBUF,get=131072 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp6 listener SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp6 listener SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp6 listener SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp6 listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 listener TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30
+sockopt: tcp6 listener TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5
+sockopt: tcp6 listener TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3
+sockopt: tcp6 listener TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_MAXSEG,get=536 set=ok get=1000,get=1024 set=ok get=1000
+sockopt: tcp6 listener TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_WINDOW_CLAMP,get=0 set=ok get=10000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_QUICKACK,get=true set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener TCP_FASTOPEN,get=0 set=ok get=5,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp6 listener IP_MTU,get=ENOTCONN set=Invalid_argument get=ENOTCONN,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: tcp6 listener IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp6 listener Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener Unix.SO_ACCEPTCONN,get=true set=Invalid_option get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 listener Unix.TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener Unix.IPV6_ONLY,get=true set=EINVAL get=true,get=false set=EINVAL get=false
+sockopt: tcp6 listener Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 listener Unix.SO_SNDBUF,get=16384 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp6 listener Unix.SO_RCVBUF,get=131072 set=ok get=20000,get=131072 set=ok get=10000
+sockopt: tcp6 listener Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: tcp6 listener Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: tcp6 listener Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp6 listener Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp6 listener Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp6 listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 client SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp6 client SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false
+sockopt: tcp6 client SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client SO_SNDBUF,get=2626560 set=ok get=20000,get=146808 set=ok get=10000
+sockopt: tcp6 client SO_RCVBUF,get=131072 set=ok get=20000,get=407800 set=ok get=10000
+sockopt: tcp6 client SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp6 client SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp6 client SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp6 client SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 client SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 client TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30
+sockopt: tcp6 client TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5
+sockopt: tcp6 client TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3
+sockopt: tcp6 client TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_MAXSEG,get=32732 set=ok get=32732,get=16312 set=ok get=1000
+sockopt: tcp6 client TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_WINDOW_CLAMP,get=65536 set=ok get=10000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_QUICKACK,get=true set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client TCP_FASTOPEN,get=0 set=EINVAL get=0,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp6 client IP_MTU,get=65536 set=Invalid_argument get=65536,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: tcp6 client IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp6 client Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 client Unix.TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client Unix.IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false
+sockopt: tcp6 client Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 client Unix.SO_SNDBUF,get=2626560 set=ok get=20000,get=146808 set=ok get=10000
+sockopt: tcp6 client Unix.SO_RCVBUF,get=131072 set=ok get=20000,get=407800 set=ok get=10000
+sockopt: tcp6 client Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: tcp6 client Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: tcp6 client Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp6 client Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp6 client Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp6 client Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 client Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 server SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp6 server SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server IPV6_ONLY,get=true set=EINVAL get=true,get=false set=EINVAL get=false
+sockopt: tcp6 server SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server SO_SNDBUF,get=2626560 set=ok get=20000,get=132132 set=ok get=10000
+sockopt: tcp6 server SO_RCVBUF,get=131072 set=ok get=20000,get=132132 set=ok get=10000
+sockopt: tcp6 server SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp6 server SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp6 server SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp6 server SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 server SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 server TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30
+sockopt: tcp6 server TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5
+sockopt: tcp6 server TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3
+sockopt: tcp6 server TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_MAXSEG,get=32768 set=ok get=32768,get=4004 set=ok get=1000
+sockopt: tcp6 server TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_WINDOW_CLAMP,get=65536 set=ok get=10000,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_QUICKACK,get=true set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server TCP_FASTOPEN,get=0 set=EINVAL get=0,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp6 server IP_MTU,get=65536 set=Invalid_argument get=65536,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: tcp6 server IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: tcp6 server Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: tcp6 server Unix.TCP_NODELAY,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server Unix.IPV6_ONLY,get=true set=EINVAL get=true,get=false set=EINVAL get=false
+sockopt: tcp6 server Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: tcp6 server Unix.SO_SNDBUF,get=2626560 set=ok get=20000,get=132132 set=ok get=10000
+sockopt: tcp6 server Unix.SO_RCVBUF,get=131072 set=ok get=20000,get=132132 set=ok get=10000
+sockopt: tcp6 server Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: tcp6 server Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: tcp6 server Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: tcp6 server Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: tcp6 server Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: tcp6 server Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: tcp6 server Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix listener SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix listener SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=ENOTCONN set=Not_available EOPNOTSUPP get=ENOTCONN
+sockopt: unix listener IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix listener SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix listener SO_SNDBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix listener SO_RCVBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix listener SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix listener SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: unix listener SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix listener TCP_KEEPIDLE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix listener TCP_KEEPINTVL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix listener TCP_KEEPCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix listener TCP_CONGESTION,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_CORK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_USER_TIMEOUT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_MAXSEG,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=ENOTCONN set=Not_available EOPNOTSUPP get=ENOTCONN
+sockopt: unix listener TCP_LINGER2,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_DEFER_ACCEPT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_SYNCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_WINDOW_CLAMP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_QUICKACK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener TCP_FASTOPEN,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener IP_FREEBIND,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener IP_BIND_ADDRESS_NO_PORT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener IP_LOCAL_PORT_RANGE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener IP_TTL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=ENOTCONN set=Not_available EOPNOTSUPP get=ENOTCONN
+sockopt: unix listener IP_MTU,get=Not_available EOPNOTSUPP set=Invalid_argument get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: unix listener IP_MTU_DISCOVER,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix listener Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix listener Unix.SO_ACCEPTCONN,get=true set=Invalid_option get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix listener Unix.TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=ENOTCONN set=Not_available EOPNOTSUPP get=ENOTCONN
+sockopt: unix listener Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix listener Unix.SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix listener Unix.SO_SNDBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix listener Unix.SO_RCVBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix listener Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: unix listener Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: unix listener Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix listener Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: unix listener Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix client SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix client SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=false set=Not_available EOPNOTSUPP get=false
+sockopt: unix client IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix client SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix client SO_SNDBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix client SO_RCVBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix client SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix client SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: unix client SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix client SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix client SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix client TCP_KEEPIDLE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix client TCP_KEEPINTVL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix client TCP_KEEPCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix client TCP_CONGESTION,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_CORK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_USER_TIMEOUT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_MAXSEG,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=peer set=Not_available EOPNOTSUPP get=peer
+sockopt: unix client TCP_LINGER2,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_DEFER_ACCEPT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_SYNCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_WINDOW_CLAMP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_QUICKACK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client TCP_FASTOPEN,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client IP_FREEBIND,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client IP_BIND_ADDRESS_NO_PORT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client IP_LOCAL_PORT_RANGE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client IP_TTL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=peer set=Not_available EOPNOTSUPP get=peer
+sockopt: unix client IP_MTU,get=Not_available EOPNOTSUPP set=Invalid_argument get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: unix client IP_MTU_DISCOVER,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix client Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix client Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix client Unix.TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=false set=Not_available EOPNOTSUPP get=false
+sockopt: unix client Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix client Unix.SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix client Unix.SO_SNDBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix client Unix.SO_RCVBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix client Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: unix client Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: unix client Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix client Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: unix client Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix client Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix client Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix server SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix server SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=false set=Not_available EOPNOTSUPP get=false
+sockopt: unix server IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix server SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix server SO_SNDBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix server SO_RCVBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix server SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix server SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: unix server SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix server SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix server SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix server TCP_KEEPIDLE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix server TCP_KEEPINTVL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix server TCP_KEEPCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix server TCP_CONGESTION,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_CORK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_USER_TIMEOUT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_MAXSEG,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=peer set=Not_available EOPNOTSUPP get=peer
+sockopt: unix server TCP_LINGER2,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_DEFER_ACCEPT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_SYNCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_WINDOW_CLAMP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_QUICKACK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server TCP_FASTOPEN,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server IP_FREEBIND,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server IP_BIND_ADDRESS_NO_PORT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server IP_LOCAL_PORT_RANGE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server IP_TTL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=peer set=Not_available EOPNOTSUPP get=peer
+sockopt: unix server IP_MTU,get=Not_available EOPNOTSUPP set=Invalid_argument get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: unix server IP_MTU_DISCOVER,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix server Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix server Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix server Unix.TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=false set=Not_available EOPNOTSUPP get=false
+sockopt: unix server Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix server Unix.SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix server Unix.SO_SNDBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix server Unix.SO_RCVBUF,get=229376 set=ok get=20000,get=8192 set=ok get=10000
+sockopt: unix server Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: unix server Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Invalid_option get=1
+sockopt: unix server Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix server Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: unix server Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix server Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix server Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp4 SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: udp4 SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 TCP_NODELAY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 SO_SNDBUF,get=229376 set=ok get=20000,get=9216 set=ok get=10000
+sockopt: udp4 SO_RCVBUF,get=229376 set=ok get=20000,get=786896 set=ok get=10000
+sockopt: udp4 SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: udp4 SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: udp4 SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: udp4 SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp4 SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp4 TCP_KEEPIDLE,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 TCP_KEEPINTVL,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 TCP_KEEPCNT,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 TCP_CONGESTION,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_CORK,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_USER_TIMEOUT,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_MAXSEG,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 TCP_LINGER2,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_DEFER_ACCEPT,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_SYNCNT,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_WINDOW_CLAMP,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_QUICKACK,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 TCP_FASTOPEN,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 IP_TTL,get=64 set=ok get=32,get=64 set=ok get=32
+sockopt: udp4 IP_MTU,get=ENOTCONN set=Invalid_argument get=ENOTCONN,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: udp4 IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: udp4 Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp4 Unix.TCP_NODELAY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp4 Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp4 Unix.SO_SNDBUF,get=229376 set=ok get=20000,get=9216 set=ok get=10000
+sockopt: udp4 Unix.SO_RCVBUF,get=229376 set=ok get=20000,get=786896 set=ok get=10000
+sockopt: udp4 Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: udp4 Unix.SO_TYPE,get=2 set=Invalid_option get=2,get=2 set=Invalid_option get=2
+sockopt: udp4 Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: udp4 Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: udp4 Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: udp4 Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp4 Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp6 SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: udp6 SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 TCP_NODELAY,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6 IPV6_ONLY,get=true set=EINVAL get=true,get=false set=EINVAL get=false
+sockopt: udp6 SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 SO_SNDBUF,get=229376 set=ok get=20000,get=9216 set=ok get=10000
+sockopt: udp6 SO_RCVBUF,get=229376 set=ok get=20000,get=786896 set=ok get=10000
+sockopt: udp6 SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: udp6 SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: udp6 SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: udp6 SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp6 SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp6 TCP_KEEPIDLE,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6 TCP_KEEPINTVL,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6 TCP_KEEPCNT,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6 TCP_CONGESTION,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_CORK,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_USER_TIMEOUT,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_MAXSEG,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6 TCP_LINGER2,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_DEFER_ACCEPT,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_SYNCNT,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_WINDOW_CLAMP,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_QUICKACK,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 TCP_FASTOPEN,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6 IP_MTU,get=ENOTCONN set=Invalid_argument get=ENOTCONN,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: udp6 IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: udp6 Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: udp6 Unix.TCP_NODELAY,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6 Unix.IPV6_ONLY,get=true set=EINVAL get=true,get=false set=EINVAL get=false
+sockopt: udp6 Unix.SO_REUSEPORT,get=false set=ok get=true,get=false set=ok get=true
+sockopt: udp6 Unix.SO_SNDBUF,get=229376 set=ok get=20000,get=9216 set=ok get=10000
+sockopt: udp6 Unix.SO_RCVBUF,get=229376 set=ok get=20000,get=786896 set=ok get=10000
+sockopt: udp6 Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: udp6 Unix.SO_TYPE,get=2 set=Invalid_option get=2,get=2 set=Invalid_option get=2
+sockopt: udp6 Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: udp6 Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10
+sockopt: udp6 Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: udp6 Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: udp6 Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix dgram SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix dgram SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=EINVAL set=Not_available EOPNOTSUPP get=EINVAL
+sockopt: unix dgram IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix dgram SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix dgram SO_SNDBUF,get=229376 set=ok get=20000,get=2048 set=ok get=10000
+sockopt: unix dgram SO_RCVBUF,get=229376 set=ok get=20000,get=4096 set=ok get=10000
+sockopt: unix dgram SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix dgram SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=1 set=ok get=10
+sockopt: unix dgram SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix dgram SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix dgram SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix dgram TCP_KEEPIDLE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix dgram TCP_KEEPINTVL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix dgram TCP_KEEPCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix dgram TCP_CONGESTION,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_CORK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_USER_TIMEOUT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_MAXSEG,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=ENOTCONN set=Not_available EOPNOTSUPP get=ENOTCONN
+sockopt: unix dgram TCP_LINGER2,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_DEFER_ACCEPT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_SYNCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_WINDOW_CLAMP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_QUICKACK,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram TCP_FASTOPEN,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram IP_FREEBIND,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram IP_BIND_ADDRESS_NO_PORT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram IP_LOCAL_PORT_RANGE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram IP_TTL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=ENOTCONN set=Not_available EOPNOTSUPP get=ENOTCONN
+sockopt: unix dgram IP_MTU,get=Not_available EOPNOTSUPP set=Invalid_argument get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_argument get=Invalid_option
+sockopt: unix dgram IP_MTU_DISCOVER,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true
+sockopt: unix dgram Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true
+sockopt: unix dgram Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option
+sockopt: unix dgram Unix.TCP_NODELAY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=EINVAL set=Not_available EOPNOTSUPP get=EINVAL
+sockopt: unix dgram Unix.IPV6_ONLY,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt: unix dgram Unix.SO_REUSEPORT,get=false set=ok get=false,get=false set=ok get=true
+sockopt: unix dgram Unix.SO_SNDBUF,get=229376 set=ok get=20000,get=2048 set=ok get=10000
+sockopt: unix dgram Unix.SO_RCVBUF,get=229376 set=ok get=20000,get=4096 set=ok get=10000
+sockopt: unix dgram Unix.SO_ERROR,get=0 set=Invalid_option get=0,get=0 set=Invalid_option get=0
+sockopt: unix dgram Unix.SO_TYPE,get=2 set=Invalid_option get=2,get=2 set=Invalid_option get=2
+sockopt: unix dgram Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10
+sockopt: unix dgram Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=1 set=ok get=10
+sockopt: unix dgram Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5
+sockopt: unix dgram Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt: unix dgram Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5
+sockopt inherit: tcp4 server SO_DEBUG,set=Permission_denied Permission denied get=false,set=ok get=true
+sockopt inherit: tcp4 server SO_BROADCAST,set=ok get=true,set=ok get=true
+sockopt inherit: tcp4 server SO_REUSEADDR,set=ok get=true,set=ok get=true
+sockopt inherit: tcp4 server SO_KEEPALIVE,set=ok get=true,set=ok get=true
+sockopt inherit: tcp4 server SO_DONTROUTE,set=ok get=true,set=ok get=true
+sockopt inherit: tcp4 server SO_OOBINLINE,set=ok get=true,set=ok get=true
+sockopt inherit: tcp4 server TCP_NODELAY,set=ok get=true,set=ok get=true
+sockopt inherit: tcp4 server IPV6_ONLY,set=Invalid_option get=Not_available EOPNOTSUPP,set=EINVAL get=EINVAL
+sockopt inherit: tcp4 server SO_REUSEPORT,set=ok get=true,set=ok get=true
+sockopt inherit: tcp4 server SO_SNDBUF,set=ok get=20000,set=ok get=52312
+sockopt inherit: tcp4 server SO_RCVBUF,set=ok get=20000,set=ok get=116696
+sockopt inherit: tcp4 server SO_RCVLOWAT,set=ok get=10,set=ok get=1
+sockopt inherit: tcp4 server SO_SNDLOWAT,set=Invalid_option get=1,set=ok get=2048
+sockopt inherit: tcp4 server SO_LINGER,set=ok get=5,set=ok get=5
+sockopt inherit: tcp4 server SO_RCVTIMEO,set=ok get=1.5,set=ok get=0
+sockopt inherit: tcp4 server SO_SNDTIMEO,set=ok get=1.5,set=ok get=0
+sockopt inherit: tcp4 server TCP_KEEPIDLE,set=ok get=30,set=ok get=7200
+sockopt inherit: tcp4 server TCP_KEEPINTVL,set=ok get=5,set=ok get=5
+sockopt inherit: tcp4 server TCP_KEEPCNT,set=ok get=3,set=ok get=3
+sockopt inherit: tcp4 server TCP_CONGESTION,set=ok get=reno,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_CORK,set=ok get=true,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_USER_TIMEOUT,set=ok get=1000,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_MAXSEG,set=ok get=988,set=EINVAL get=4024
+sockopt inherit: tcp4 server TCP_LINGER2,set=ok get=10,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_DEFER_ACCEPT,set=ok get=0,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_SYNCNT,set=ok get=3,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_WINDOW_CLAMP,set=ok get=10000,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_QUICKACK,set=ok get=true,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server TCP_FASTOPEN,set=ok get=0,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server IP_FREEBIND,set=ok get=true,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server IP_BIND_ADDRESS_NO_PORT,set=ok get=true,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server IP_LOCAL_PORT_RANGE,set=ok get=40000-40100,set=Invalid_option get=Invalid_option
+sockopt inherit: tcp4 server IP_TTL,set=ok get=32,set=ok get=32
+sockopt inherit: tcp4 server IP_MTU,set=Invalid_argument get=65535,set=Invalid_argument get=Invalid_option
+sockopt inherit: tcp4 server IP_MTU_DISCOVER,set=ok get=do,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server SO_DEBUG,set=Permission_denied Permission denied get=false,set=ok get=true
+sockopt inherit: unix server SO_BROADCAST,set=ok get=false,set=ok get=true
+sockopt inherit: unix server SO_REUSEADDR,set=ok get=false,set=ok get=true
+sockopt inherit: unix server SO_KEEPALIVE,set=ok get=false,set=ok get=true
+sockopt inherit: unix server SO_DONTROUTE,set=ok get=false,set=ok get=true
+sockopt inherit: unix server SO_OOBINLINE,set=ok get=false,set=ok get=true
+sockopt inherit: unix server TCP_NODELAY,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Not_available EOPNOTSUPP get=false
+sockopt inherit: unix server IPV6_ONLY,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt inherit: unix server SO_REUSEPORT,set=ok get=false,set=ok get=true
+sockopt inherit: unix server SO_SNDBUF,set=ok get=229376,set=ok get=10000
+sockopt inherit: unix server SO_RCVBUF,set=ok get=229376,set=ok get=10000
+sockopt inherit: unix server SO_RCVLOWAT,set=ok get=1,set=ok get=1
+sockopt inherit: unix server SO_SNDLOWAT,set=Invalid_option get=1,set=ok get=2048
+sockopt inherit: unix server SO_LINGER,set=ok get=none,set=ok get=5
+sockopt inherit: unix server SO_RCVTIMEO,set=ok get=0,set=ok get=0
+sockopt inherit: unix server SO_SNDTIMEO,set=ok get=0,set=ok get=0
+sockopt inherit: unix server TCP_KEEPIDLE,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt inherit: unix server TCP_KEEPINTVL,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt inherit: unix server TCP_KEEPCNT,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP
+sockopt inherit: unix server TCP_CONGESTION,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_CORK,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_USER_TIMEOUT,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_MAXSEG,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Not_available EOPNOTSUPP get=peer
+sockopt inherit: unix server TCP_LINGER2,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_DEFER_ACCEPT,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_SYNCNT,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_WINDOW_CLAMP,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_QUICKACK,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server TCP_FASTOPEN,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server IP_FREEBIND,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server IP_BIND_ADDRESS_NO_PORT,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server IP_LOCAL_PORT_RANGE,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt inherit: unix server IP_TTL,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Not_available EOPNOTSUPP get=peer
+sockopt inherit: unix server IP_MTU,set=Invalid_argument get=Not_available EOPNOTSUPP,set=Invalid_argument get=Invalid_option
+sockopt inherit: unix server IP_MTU_DISCOVER,set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,set=Invalid_option get=Invalid_option
+sockopt connect: tcp4 client SO_DEBUG,connect=Permission_denied Permission denied,connect=ok get=true
+sockopt connect: tcp4 client SO_BROADCAST,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp4 client SO_REUSEADDR,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp4 client SO_KEEPALIVE,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp4 client SO_DONTROUTE,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp4 client SO_OOBINLINE,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp4 client TCP_NODELAY,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp4 client IPV6_ONLY,connect=Invalid_option,connect=EINVAL
+sockopt connect: tcp4 client SO_REUSEPORT,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp4 client SO_SNDBUF,connect=ok get=20000,connect=ok get=65328
+sockopt connect: tcp4 client SO_RCVBUF,connect=ok get=20000,connect=ok get=326640
+sockopt connect: tcp4 client SO_RCVLOWAT,connect=ok get=10,connect=ok get=10
+sockopt connect: tcp4 client SO_SNDLOWAT,connect=Invalid_option,connect=ok get=10
+sockopt connect: tcp4 client SO_LINGER,connect=ok get=5,connect=ok get=5
+sockopt connect: tcp4 client SO_RCVTIMEO,connect=ok get=1.5,connect=ok get=1.5
+sockopt connect: tcp4 client SO_SNDTIMEO,connect=ok get=1.5,connect=ok get=1.5
+sockopt connect: tcp4 client TCP_KEEPIDLE,connect=ok get=30,connect=ok get=30
+sockopt connect: tcp4 client TCP_KEEPINTVL,connect=ok get=5,connect=ok get=5
+sockopt connect: tcp4 client TCP_KEEPCNT,connect=ok get=3,connect=ok get=3
+sockopt connect: tcp4 client TCP_CONGESTION,connect=ok get=reno,connect=Invalid_option
+sockopt connect: tcp4 client TCP_CORK,connect=ok get=true,connect=Invalid_option
+sockopt connect: tcp4 client TCP_USER_TIMEOUT,connect=ok get=1000,connect=Invalid_option
+sockopt connect: tcp4 client TCP_MAXSEG,connect=ok get=988,connect=EINVAL
+sockopt connect: tcp4 client TCP_LINGER2,connect=ok get=10,connect=Invalid_option
+sockopt connect: tcp4 client TCP_DEFER_ACCEPT,connect=ok get=7,connect=Invalid_option
+sockopt connect: tcp4 client TCP_SYNCNT,connect=ok get=3,connect=Invalid_option
+sockopt connect: tcp4 client TCP_WINDOW_CLAMP,connect=ok get=10000,connect=Invalid_option
+sockopt connect: tcp4 client TCP_QUICKACK,connect=ok get=true,connect=Invalid_option
+sockopt connect: tcp4 client TCP_FASTOPEN,connect=ok get=5,connect=Invalid_option
+sockopt connect: tcp4 client IP_FREEBIND,connect=ok get=true,connect=Invalid_option
+sockopt connect: tcp4 client IP_BIND_ADDRESS_NO_PORT,connect=ok get=true,connect=Invalid_option
+sockopt connect: tcp4 client IP_LOCAL_PORT_RANGE,connect=ok get=40000-40100,connect=Invalid_option
+sockopt connect: tcp4 client IP_TTL,connect=ok get=32,connect=ok get=32
+sockopt connect: tcp4 client IP_MTU,connect=Invalid_argument,connect=Invalid_argument
+sockopt connect: tcp4 client IP_MTU_DISCOVER,connect=ok get=do,connect=Invalid_option
+sockopt connect: unix client SO_DEBUG,connect=Permission_denied Permission denied,connect=ok get=true
+sockopt connect: unix client SO_BROADCAST,connect=ok get=true,connect=ok get=true
+sockopt connect: unix client SO_REUSEADDR,connect=ok get=true,connect=ok get=true
+sockopt connect: unix client SO_KEEPALIVE,connect=ok get=true,connect=ok get=true
+sockopt connect: unix client SO_DONTROUTE,connect=ok get=true,connect=ok get=true
+sockopt connect: unix client SO_OOBINLINE,connect=ok get=true,connect=ok get=true
+sockopt connect: unix client TCP_NODELAY,connect=Not_available EOPNOTSUPP,connect=Not_available EOPNOTSUPP
+sockopt connect: unix client IPV6_ONLY,connect=Not_available EOPNOTSUPP,connect=Not_available EOPNOTSUPP
+sockopt connect: unix client SO_REUSEPORT,connect=ok get=false,connect=ok get=true
+sockopt connect: unix client SO_SNDBUF,connect=ok get=20000,connect=ok get=10000
+sockopt connect: unix client SO_RCVBUF,connect=ok get=20000,connect=ok get=10000
+sockopt connect: unix client SO_RCVLOWAT,connect=ok get=10,connect=ok get=10
+sockopt connect: unix client SO_SNDLOWAT,connect=Invalid_option,connect=ok get=10
+sockopt connect: unix client SO_LINGER,connect=ok get=5,connect=ok get=5
+sockopt connect: unix client SO_RCVTIMEO,connect=ok get=1.5,connect=ok get=1.5
+sockopt connect: unix client SO_SNDTIMEO,connect=ok get=1.5,connect=ok get=1.5
+sockopt connect: unix client TCP_KEEPIDLE,connect=Not_available EOPNOTSUPP,connect=Not_available EOPNOTSUPP
+sockopt connect: unix client TCP_KEEPINTVL,connect=Not_available EOPNOTSUPP,connect=Not_available EOPNOTSUPP
+sockopt connect: unix client TCP_KEEPCNT,connect=Not_available EOPNOTSUPP,connect=Not_available EOPNOTSUPP
+sockopt connect: unix client TCP_CONGESTION,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_CORK,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_USER_TIMEOUT,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_MAXSEG,connect=Not_available EOPNOTSUPP,connect=Not_available EOPNOTSUPP
+sockopt connect: unix client TCP_LINGER2,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_DEFER_ACCEPT,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_SYNCNT,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_WINDOW_CLAMP,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_QUICKACK,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client TCP_FASTOPEN,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client IP_FREEBIND,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client IP_BIND_ADDRESS_NO_PORT,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client IP_LOCAL_PORT_RANGE,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt connect: unix client IP_TTL,connect=Not_available EOPNOTSUPP,connect=Not_available EOPNOTSUPP
+sockopt connect: unix client IP_MTU,connect=Invalid_argument,connect=Invalid_argument
+sockopt connect: unix client IP_MTU_DISCOVER,connect=Not_available EOPNOTSUPP,connect=Invalid_option
+sockopt: tcp6any listener IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false
+sockopt: tcp6any listener TCP_MAXSEG,get=536 set=ok get=1000,get=1024 set=ok get=1000
+sockopt: tcp6any listener IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp6any client IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false
+sockopt: tcp6any client TCP_MAXSEG,get=32732 set=ok get=32732,get=16312 set=ok get=1000
+sockopt: tcp6any client IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt: tcp6any server IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false
+sockopt: tcp6any server TCP_MAXSEG,get=32768 set=ok get=32768,get=4004 set=ok get=1000
+sockopt: tcp6any server IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6any IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false
+sockopt: udp6any TCP_MAXSEG,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL
+sockopt: udp6any IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL
+sockopt connect: tcp6 client IPV6_ONLY,connect=ok get=true,connect=ok get=true
+sockopt connect: tcp6 client TCP_MAXSEG,connect=ok get=988,connect=ok get=16312
+sockopt connect: tcp6 client IP_TTL,connect=ok get=32,connect=EINVAL
+sockopt value: tcp4 client SO_SNDBUF=0,set=ok get=4608,set=EINVAL get=146988
+sockopt value: tcp4 client SO_SNDBUF=1,set=ok get=4608,set=ok get=1
+sockopt value: tcp4 client SO_SNDBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: tcp4 client SO_SNDBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: tcp4 client SO_SNDBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: tcp4 client SO_SNDBUF=-1,set=ok get=15000000,set=EINVAL get=146988
+sockopt value: tcp4 client SO_RCVBUF=0,set=ok get=2304,set=EINVAL get=408300
+sockopt value: tcp4 client SO_RCVBUF=1,set=ok get=2304,set=ok get=1
+sockopt value: tcp4 client SO_RCVBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: tcp4 client SO_RCVBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: tcp4 client SO_RCVBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: tcp4 client SO_RCVBUF=-1,set=ok get=15000000,set=EINVAL get=408300
+sockopt value: tcp4 client SO_RCVLOWAT=0,set=ok get=1,set=EINVAL get=1
+sockopt value: tcp4 client SO_RCVLOWAT=-1,set=ok get=16777216,set=EINVAL get=1
+sockopt value: tcp4 client SO_RCVLOWAT=1000000000,set=ok get=16777216,set=ok get=408300
+sockopt value: tcp4 client TCP_KEEPIDLE=-1,set=Invalid_argument get=7200,set=Invalid_argument get=7200
+sockopt value: tcp4 client TCP_KEEPIDLE=0,set=EINVAL get=7200,set=ok get=7200
+sockopt value: tcp4 client TCP_KEEPIDLE=1,set=ok get=1,set=ok get=1
+sockopt value: tcp4 client TCP_KEEPIDLE=32767,set=ok get=32767,set=ok get=32767
+sockopt value: tcp4 client TCP_KEEPIDLE=32768,set=EINVAL get=7200,set=ok get=32768
+sockopt value: tcp4 client TCP_KEEPINTVL=0,set=EINVAL get=75,set=ok get=75
+sockopt value: tcp4 client TCP_KEEPINTVL=32767,set=ok get=32767,set=ok get=32767
+sockopt value: tcp4 client TCP_KEEPINTVL=32768,set=EINVAL get=75,set=ok get=32768
+sockopt value: tcp4 client TCP_KEEPCNT=0,set=EINVAL get=9,set=ok get=8
+sockopt value: tcp4 client TCP_KEEPCNT=127,set=ok get=127,set=ok get=127
+sockopt value: tcp4 client TCP_KEEPCNT=128,set=EINVAL get=9,set=ok get=128
+sockopt value: tcp4 client TCP_KEEPCNT=255,set=EINVAL get=9,set=ok get=255
+sockopt value: tcp4 client TCP_KEEPCNT=256,set=EINVAL get=9,set=ok get=256
+sockopt value: tcp4 client TCP_USER_TIMEOUT=-1,set=Invalid_argument get=0,set=Invalid_argument get=Invalid_option
+sockopt value: tcp4 client TCP_USER_TIMEOUT=0,set=ok get=0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_MAXSEG=0,set=ok get=32741,set=EINVAL get=16332
+sockopt value: tcp4 client TCP_MAXSEG=87,set=EINVAL get=32741,set=EINVAL get=16332
+sockopt value: tcp4 client TCP_MAXSEG=88,set=ok get=32741,set=EINVAL get=16332
+sockopt value: tcp4 client TCP_MAXSEG=536,set=ok get=32741,set=ok get=536
+sockopt value: tcp4 client TCP_MAXSEG=32767,set=ok get=32741,set=EINVAL get=16332
+sockopt value: tcp4 client TCP_MAXSEG=32768,set=EINVAL get=32741,set=EINVAL get=16332
+sockopt value: tcp4 client TCP_MAXSEG=70000,set=EINVAL get=32741,set=EINVAL get=16332
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=0,set=ok get=0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=1,set=ok get=1,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=2,set=ok get=3,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=3,set=ok get=3,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=4,set=ok get=7,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=10,set=ok get=15,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=100,set=ok get=127,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_DEFER_ACCEPT=1000,set=ok get=1087,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_SYNCNT=0,set=Invalid_argument get=6,set=Invalid_argument get=Invalid_option
+sockopt value: tcp4 client TCP_SYNCNT=1,set=ok get=1,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_SYNCNT=127,set=ok get=127,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_SYNCNT=128,set=EINVAL get=6,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_SYNCNT=255,set=EINVAL get=6,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_SYNCNT=256,set=Invalid_argument get=6,set=Invalid_argument get=Invalid_option
+sockopt value: tcp4 client TCP_WINDOW_CLAMP=0,set=EINVAL get=65536,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_WINDOW_CLAMP=1,set=ok get=1152,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_WINDOW_CLAMP=100,set=ok get=1152,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_WINDOW_CLAMP=2000,set=ok get=2000,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_WINDOW_CLAMP=100000000,set=ok get=100000000,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_FASTOPEN=0,set=EINVAL get=0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_FASTOPEN=1000000,set=EINVAL get=0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client IP_TTL=-1,set=Invalid_argument get=64,set=Invalid_argument get=64
+sockopt value: tcp4 client IP_TTL=0,set=Invalid_argument get=64,set=Invalid_argument get=64
+sockopt value: tcp4 client IP_TTL=1,set=ok get=1,set=ok get=1
+sockopt value: tcp4 client IP_TTL=255,set=ok get=255,set=ok get=255
+sockopt value: tcp4 client IP_TTL=256,set=Invalid_argument get=64,set=Invalid_argument get=64
+sockopt value: tcp4 client SO_LINGER=none,set=ok get=none,set=ok get=none
+sockopt value: tcp4 client SO_LINGER=0,set=ok get=0,set=ok get=0
+sockopt value: tcp4 client SO_LINGER=327,set=ok get=327,set=ok get=327
+sockopt value: tcp4 client SO_LINGER=328,set=ok get=328,set=ok get=328
+sockopt value: tcp4 client SO_LINGER=32767,set=ok get=32767,set=ok get=32767
+sockopt value: tcp4 client SO_LINGER=32768,set=ok get=32768,set=Numerical argument out of domain get=none
+sockopt value: tcp4 client SO_LINGER=100000,set=ok get=100000,set=Numerical argument out of domain get=none
+sockopt value: tcp4 client TCP_LINGER2=none,set=ok get=60,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_LINGER2=0,set=ok get=60,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_LINGER2=-1,set=Invalid_argument get=60,set=Invalid_argument get=Invalid_option
+sockopt value: tcp4 client TCP_LINGER2=1,set=ok get=1,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_LINGER2=60,set=ok get=60,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_LINGER2=120,set=ok get=120,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_LINGER2=121,set=ok get=120,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_LINGER2=100000,set=ok get=120,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client SO_RCVTIMEO=0,set=ok get=0,set=ok get=0
+sockopt value: tcp4 client SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0
+sockopt value: tcp4 client SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0
+sockopt value: tcp4 client SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06
+sockopt value: tcp4 client SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09
+sockopt value: tcp4 client TCP_CONGESTION=cubic,set=ok get=cubic,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_CONGESTION=nope,set=Not_found ENOENT get=cubic,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_CONGESTION=,set=EINVAL get=cubic,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client TCP_CONGESTION=xxxxxxxxxxxxxxxxxxxx,set=Not_found ENOENT get=cubic,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client IP_LOCAL_PORT_RANGE=0-0,set=ok get=0-0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client IP_LOCAL_PORT_RANGE=40000-0,set=ok get=40000-0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client IP_LOCAL_PORT_RANGE=0-40000,set=ok get=0-40000,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client IP_LOCAL_PORT_RANGE=5-4,set=Invalid_argument get=0-0,set=Invalid_argument get=Invalid_option
+sockopt value: tcp4 client IP_LOCAL_PORT_RANGE=-1-0,set=Invalid_argument get=0-0,set=Invalid_argument get=Invalid_option
+sockopt value: tcp4 client IP_LOCAL_PORT_RANGE=0-65536,set=Invalid_argument get=0-0,set=Invalid_argument get=Invalid_option
+sockopt value: tcp4 client IP_MTU_DISCOVER=want,set=ok get=want,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client IP_MTU_DISCOVER=dont,set=ok get=dont,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 client IP_MTU_DISCOVER=probe,set=ok get=probe,set=Invalid_option get=Invalid_option
+sockopt value: unix client SO_SNDBUF=0,set=ok get=4608,set=EINVAL get=8192
+sockopt value: unix client SO_SNDBUF=1,set=ok get=4608,set=ok get=1
+sockopt value: unix client SO_SNDBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: unix client SO_SNDBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: unix client SO_SNDBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: unix client SO_SNDBUF=-1,set=ok get=15000000,set=EINVAL get=8192
+sockopt value: unix client SO_RCVBUF=0,set=ok get=2304,set=EINVAL get=8192
+sockopt value: unix client SO_RCVBUF=1,set=ok get=2304,set=ok get=1
+sockopt value: unix client SO_RCVBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: unix client SO_RCVBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: unix client SO_RCVBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: unix client SO_RCVBUF=-1,set=ok get=15000000,set=EINVAL get=8192
+sockopt value: unix client SO_RCVLOWAT=0,set=ok get=1,set=EINVAL get=1
+sockopt value: unix client SO_RCVLOWAT=-1,set=ok get=2147483647,set=EINVAL get=1
+sockopt value: unix client SO_RCVLOWAT=1000000000,set=ok get=1000000000,set=ok get=8192
+sockopt value: unix client SO_LINGER=none,set=ok get=none,set=ok get=none
+sockopt value: unix client SO_LINGER=0,set=ok get=0,set=ok get=0
+sockopt value: unix client SO_LINGER=327,set=ok get=327,set=ok get=327
+sockopt value: unix client SO_LINGER=328,set=ok get=328,set=ok get=328
+sockopt value: unix client SO_LINGER=32767,set=ok get=32767,set=ok get=32767
+sockopt value: unix client SO_LINGER=32768,set=ok get=32768,set=Numerical argument out of domain get=none
+sockopt value: unix client SO_LINGER=100000,set=ok get=100000,set=Numerical argument out of domain get=none
+sockopt value: unix client SO_RCVTIMEO=0,set=ok get=0,set=ok get=0
+sockopt value: unix client SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0
+sockopt value: unix client SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0
+sockopt value: unix client SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06
+sockopt value: unix client SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09
+sockopt value: udp4 SO_SNDBUF=0,set=ok get=4608,set=EINVAL get=9216
+sockopt value: udp4 SO_SNDBUF=1,set=ok get=4608,set=ok get=1
+sockopt value: udp4 SO_SNDBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: udp4 SO_SNDBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: udp4 SO_SNDBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: udp4 SO_SNDBUF=-1,set=ok get=15000000,set=EINVAL get=9216
+sockopt value: udp4 SO_RCVBUF=0,set=ok get=2304,set=EINVAL get=786896
+sockopt value: udp4 SO_RCVBUF=1,set=ok get=2304,set=ok get=1
+sockopt value: udp4 SO_RCVBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: udp4 SO_RCVBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: udp4 SO_RCVBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: udp4 SO_RCVBUF=-1,set=ok get=15000000,set=EINVAL get=786896
+sockopt value: udp4 SO_RCVLOWAT=0,set=ok get=1,set=EINVAL get=1
+sockopt value: udp4 SO_RCVLOWAT=-1,set=ok get=2147483647,set=EINVAL get=1
+sockopt value: udp4 SO_RCVLOWAT=1000000000,set=ok get=1000000000,set=ok get=786896
+sockopt value: udp4 SO_LINGER=none,set=ok get=none,set=ok get=none
+sockopt value: udp4 SO_LINGER=0,set=ok get=0,set=ok get=0
+sockopt value: udp4 SO_LINGER=327,set=ok get=327,set=ok get=327
+sockopt value: udp4 SO_LINGER=328,set=ok get=328,set=ok get=328
+sockopt value: udp4 SO_LINGER=32767,set=ok get=32767,set=ok get=32767
+sockopt value: udp4 SO_LINGER=32768,set=ok get=32768,set=Numerical argument out of domain get=none
+sockopt value: udp4 SO_LINGER=100000,set=ok get=100000,set=Numerical argument out of domain get=none
+sockopt value: udp4 SO_RCVTIMEO=0,set=ok get=0,set=ok get=0
+sockopt value: udp4 SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0
+sockopt value: udp4 SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0
+sockopt value: udp4 SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06
+sockopt value: udp4 SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09
+sockopt value: unix dgram SO_SNDBUF=0,set=ok get=4608,set=EINVAL get=2048
+sockopt value: unix dgram SO_SNDBUF=1,set=ok get=4608,set=ok get=1
+sockopt value: unix dgram SO_SNDBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: unix dgram SO_SNDBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: unix dgram SO_SNDBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: unix dgram SO_SNDBUF=-1,set=ok get=15000000,set=EINVAL get=2048
+sockopt value: unix dgram SO_RCVBUF=0,set=ok get=2304,set=EINVAL get=4096
+sockopt value: unix dgram SO_RCVBUF=1,set=ok get=2304,set=ok get=1
+sockopt value: unix dgram SO_RCVBUF=3000,set=ok get=6000,set=ok get=3000
+sockopt value: unix dgram SO_RCVBUF=100000,set=ok get=200000,set=ok get=100000
+sockopt value: unix dgram SO_RCVBUF=100000000,set=ok get=15000000,set=ok get=8388608
+sockopt value: unix dgram SO_RCVBUF=-1,set=ok get=15000000,set=EINVAL get=4096
+sockopt value: unix dgram SO_RCVLOWAT=0,set=ok get=1,set=EINVAL get=1
+sockopt value: unix dgram SO_RCVLOWAT=-1,set=ok get=2147483647,set=EINVAL get=1
+sockopt value: unix dgram SO_RCVLOWAT=1000000000,set=ok get=1000000000,set=ok get=4096
+sockopt value: unix dgram SO_LINGER=none,set=ok get=none,set=ok get=none
+sockopt value: unix dgram SO_LINGER=0,set=ok get=0,set=ok get=0
+sockopt value: unix dgram SO_LINGER=327,set=ok get=327,set=ok get=327
+sockopt value: unix dgram SO_LINGER=328,set=ok get=328,set=ok get=328
+sockopt value: unix dgram SO_LINGER=32767,set=ok get=32767,set=ok get=32767
+sockopt value: unix dgram SO_LINGER=32768,set=ok get=32768,set=Numerical argument out of domain get=none
+sockopt value: unix dgram SO_LINGER=100000,set=ok get=100000,set=Numerical argument out of domain get=none
+sockopt value: unix dgram SO_RCVTIMEO=0,set=ok get=0,set=ok get=0
+sockopt value: unix dgram SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0
+sockopt value: unix dgram SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0
+sockopt value: unix dgram SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06
+sockopt value: unix dgram SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09
+sockopt value: tcp4 listener TCP_FASTOPEN=0,set=ok get=0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 listener TCP_FASTOPEN=1,set=ok get=1,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 listener TCP_FASTOPEN=4096,set=ok get=4096,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 listener TCP_FASTOPEN=4097,set=ok get=4096,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 listener TCP_FASTOPEN=1000000,set=ok get=4096,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 listener TCP_MAXSEG=0,set=ok get=536,set=EINVAL get=512
+sockopt value: tcp4 listener TCP_MAXSEG=88,set=ok get=88,set=EINVAL get=512
+sockopt value: tcp4 listener TCP_MAXSEG=176,set=ok get=176,set=ok get=176
+sockopt value: tcp4 listener TCP_MAXSEG=512,set=ok get=512,set=ok get=512
+sockopt value: tcp4 listener TCP_MAXSEG=1000,set=ok get=1000,set=EINVAL get=512
+sockopt value: tcp4 listener TCP_MAXSEG=32767,set=ok get=32767,set=EINVAL get=512
+sockopt value: tcp4 listener TCP_WINDOW_CLAMP=0,set=EINVAL get=0,set=Invalid_option get=Invalid_option
+sockopt value: tcp4 listener TCP_WINDOW_CLAMP=100,set=ok get=1152,set=Invalid_option get=Invalid_option
+sockopt fill: tcp4 sndbuf=0 rcvbuf=2000,queued=2555846,queued=278528
+sockopt fill: tcp4 sndbuf=0 rcvbuf=10000,queued=2564038,queued=278528
+sockopt fill: tcp4 sndbuf=0 rcvbuf=100000,queued=2689536,queued=363520
+sockopt fill: tcp4 sndbuf=2000 rcvbuf=0,queued=89573,queued=17408
+sockopt fill: tcp4 sndbuf=2000 rcvbuf=2000,queued=34789,queued=17408
+sockopt fill: tcp4 sndbuf=2000 rcvbuf=10000,queued=42981,queued=17408
+sockopt fill: tcp4 sndbuf=2000 rcvbuf=100000,queued=130048,queued=82944
+sockopt fill: tcp4 sndbuf=10000 rcvbuf=0,queued=89573,queued=120832
+sockopt fill: tcp4 sndbuf=10000 rcvbuf=2000,queued=34789,queued=25600
+sockopt fill: tcp4 sndbuf=10000 rcvbuf=10000,queued=42981,queued=49152
+sockopt fill: tcp4 sndbuf=10000 rcvbuf=100000,queued=130048,queued=25600
+sockopt fill: tcp4 sndbuf=100000 rcvbuf=0,queued=280576,queued=280576
+sockopt fill: tcp4 sndbuf=100000 rcvbuf=2000,queued=198494,queued=231424
+sockopt fill: tcp4 sndbuf=100000 rcvbuf=10000,queued=206686,queued=231424
+sockopt fill: tcp4 sndbuf=100000 rcvbuf=100000,queued=321536,queued=313344
+sockopt fill: unix sndbuf=2000 rcvbuf=0,queued=2048,queued=1024
+sockopt fill: unix sndbuf=2000 rcvbuf=2000,queued=2048,queued=1024
+sockopt fill: unix sndbuf=2000 rcvbuf=10000,queued=2048,queued=1024
+sockopt fill: unix sndbuf=2000 rcvbuf=100000,queued=2048,queued=1024
+sockopt fill: unix sndbuf=10000 rcvbuf=0,queued=9216,queued=9216
+sockopt fill: unix sndbuf=10000 rcvbuf=2000,queued=9216,queued=9216
+sockopt fill: unix sndbuf=10000 rcvbuf=10000,queued=9216,queued=9216
+sockopt fill: unix sndbuf=10000 rcvbuf=100000,queued=9216,queued=9216
+sockopt fill: unix sndbuf=100000 rcvbuf=0,queued=89088,queued=99328
+sockopt fill: unix sndbuf=100000 rcvbuf=2000,queued=89088,queued=99328
+sockopt fill: unix sndbuf=100000 rcvbuf=10000,queued=89088,queued=99328
+sockopt fill: unix sndbuf=100000 rcvbuf=100000,queued=89088,queued=99328
+sockopt udp rcvbuf=1: send 99,kept=1,kept=0
+sockopt udp rcvbuf=3000: send 99,kept=2,kept=2
+sockopt udp rcvbuf=10000: send 99,kept=8,kept=9
+sockopt udp rcvbuf=50000: send 99,kept=43,kept=48
+sockopt udp rcvbuf=100000: send 99,kept=86,kept=96
+sockopt udp rcvbuf=1000000: send 99,kept=99,kept=99
+sockopt unix dgram sndbuf=1: size=1000,sent=2,sent=0 then EMSGSIZE
+sockopt unix dgram sndbuf=1: size=8000,sent=0 then EMSGSIZE,sent=0 then EMSGSIZE
+sockopt unix dgram sndbuf=3000: size=1000,sent=3,sent=240 then ENOBUFS
+sockopt unix dgram sndbuf=3000: size=8000,sent=0 then EMSGSIZE,sent=0 then EMSGSIZE
+sockopt unix dgram sndbuf=10000: size=1000,sent=9,sent=240 then ENOBUFS
+sockopt unix dgram sndbuf=10000: size=8000,sent=2,sent=0 then ENOBUFS
+sockopt unix dgram sndbuf=50000: size=1000,sent=44,sent=240 then ENOBUFS
+sockopt unix dgram sndbuf=50000: size=8000,sent=7,sent=0 then ENOBUFS
+sockopt unix dgram sndbuf=1000000: size=1000,sent=660,sent=240 then ENOBUFS
+sockopt unix dgram sndbuf=1000000: size=8000,sent=121,sent=0 then ENOBUFS
+sockopt unix dgram rcvbuf=1: size=1000,sent=100,sent=0 then ENOBUFS
+sockopt unix dgram rcvbuf=3000: size=1000,sent=100,sent=120 then ENOBUFS
+sockopt unix dgram rcvbuf=10000: size=1000,sent=100,sent=540 then ENOBUFS
 off loopback: connect 10.1.2.3,ENETUNREACH,not recorded
 off loopback: connect 2001:db8::1,ENETUNREACH,not recorded
 off loopback: connect ::2,ENETUNREACH,not recorded

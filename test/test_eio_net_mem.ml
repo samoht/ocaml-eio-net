@@ -1159,57 +1159,95 @@ let test_connect_ignores_latency_hint () =
       Alcotest.(check string)
         "connected with hints set" "ok" (Cstruct.to_string buf))
 
-let test_connect_refuses_semantic_option () =
+(* An option set at a connect is read back on the connection. *)
+let test_connect_options () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8083) in
   let _listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
-  match
+  let flow =
     Eio.Net.connect ~sw
       ~options:Eio.Net.Sockopt.[ (TCP_NODELAY, true); (SO_KEEPALIVE, true) ]
       net addr
-  with
-  | exception Invalid_argument msg ->
-      Alcotest.(check string)
-        "refusal names the option"
-        "eio-net.mem does not support socket option SO_KEEPALIVE" msg
-  | _ -> Alcotest.fail "keepalive on a mem connect should be refused"
+  in
+  Alcotest.(check bool)
+    "SO_KEEPALIVE" true
+    (Eio.Net.getsockopt flow Eio.Net.Sockopt.SO_KEEPALIVE)
 
-(* [setsockopt] follows [connect]'s rule: the options whose effect the queues
-   already have are accepted on a connection and on a listener, and every
-   other one is refused by name, rather than ignored. A datagram socket has no
-   such option, and refuses them all. *)
-let test_setsockopt_follows_the_connect_rule () =
+let invalid_option f =
+  match f () with
+  | exception Eio.Io (Eio.Net.E Invalid_option, _) -> ()
+  | _ -> Alcotest.fail "expected Invalid_option"
+
+(* A socket reads back what was set, and the kernel's default otherwise:
+   Linux doubles a buffer size, macOS keeps it. An option the socket's kernel
+   lacks for its family raises what eio_posix raises. *)
+let test_sockopt_read_back () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
+  let open Eio.Net.Sockopt in
   let net = Eio_net_mem.v ~sw () in
-  let refused what set opt =
-    match set () with
-    | exception Invalid_argument msg ->
-        Alcotest.(check string)
-          (what ^ ": the refusal names the option")
-          (Fmt.str "eio-net.mem does not support socket option %s" opt)
-          msg
-    | () -> Alcotest.failf "%s: %s was accepted and ignored" what opt
-  in
   let flow, _ = Eio_net_mem.pipe () in
-  Eio.Net.setsockopt flow Eio.Net.Sockopt.TCP_NODELAY true;
-  Eio.Net.setsockopt flow Eio.Net.Sockopt.TCP_QUICKACK true;
-  refused "a connection"
-    (fun () -> Eio.Net.setsockopt flow Eio.Net.Sockopt.SO_KEEPALIVE true)
-    "SO_KEEPALIVE";
+  Alcotest.(check bool)
+    "SO_KEEPALIVE default" false
+    (Eio.Net.getsockopt flow SO_KEEPALIVE);
+  Eio.Net.setsockopt flow SO_KEEPALIVE true;
+  Alcotest.(check bool)
+    "SO_KEEPALIVE" true
+    (Eio.Net.getsockopt flow SO_KEEPALIVE);
+  Alcotest.(check int)
+    "SO_RCVBUF default" 131072
+    (Eio.Net.getsockopt flow SO_RCVBUF);
+  Eio.Net.setsockopt flow SO_SNDBUF 10000;
+  Alcotest.(check int)
+    "SO_SNDBUF on Linux" 20000
+    (Eio.Net.getsockopt flow SO_SNDBUF);
+  let macos, _ = Eio_net_mem.pipe ~os:`Macos () in
+  Eio.Net.setsockopt macos SO_SNDBUF 10000;
+  Alcotest.(check int)
+    "SO_SNDBUF on macOS" 10000
+    (Eio.Net.getsockopt macos SO_SNDBUF);
+  invalid_option (fun () -> Eio.Net.setsockopt macos TCP_CORK true);
   let listener =
     Eio.Net.listen ~sw ~backlog:1 net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 8088))
   in
-  Eio.Net.setsockopt listener Eio.Net.Sockopt.TCP_NODELAY true;
-  refused "a listener"
-    (fun () -> Eio.Net.setsockopt listener Eio.Net.Sockopt.SO_RCVBUF 4096)
-    "SO_RCVBUF";
+  Eio.Net.setsockopt listener TCP_DEFER_ACCEPT 5;
+  Alcotest.(check int)
+    "TCP_DEFER_ACCEPT, in retransmissions" 7
+    (Eio.Net.getsockopt listener TCP_DEFER_ACCEPT);
   let datagram = Eio.Net.datagram_socket ~sw net `UdpV4 in
-  refused "a datagram socket"
-    (fun () -> Eio.Net.setsockopt datagram Eio.Net.Sockopt.TCP_NODELAY true)
-    "TCP_NODELAY"
+  invalid_option (fun () -> Eio.Net.setsockopt datagram TCP_NODELAY true)
+
+(* The send and receive buffers bound what a connection queues: a writer to
+   a peer that does not read waits sooner. *)
+let test_buffers_bound_the_queue () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Net.setsockopt client Eio.Net.Sockopt.SO_SNDBUF 2000;
+  Eio.Net.setsockopt server Eio.Net.Sockopt.SO_RCVBUF 2000;
+  let queued = ref 0 in
+  let chunk = Cstruct.create 1024 in
+  Eio.Fiber.first
+    (fun () ->
+      while true do
+        queued := !queued + Eio.Flow.single_write client [ chunk ]
+      done)
+    (fun () ->
+      for _ = 1 to 64 do
+        Eio.Fiber.yield ()
+      done);
+  Alcotest.(check int) "32 KiB in flight and half the window" 34768 !queued
+
+(* A TCP socket that lingers for no time resets its peer as it closes. *)
+let test_linger_zero_resets () =
+  Eio_mock.Backend.run @@ fun () ->
+  let client, server = Eio_net_mem.pipe () in
+  Eio.Net.setsockopt client Eio.Net.Sockopt.SO_LINGER (Some 0);
+  Eio.Resource.close client;
+  match Eio.Flow.single_read server (Cstruct.create 1) with
+  | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> ()
+  | _ -> Alcotest.fail "expected a reset"
 
 (* A connection made on a switch is closed when that switch finishes, as
    [Eio.Net.connect] says of every socket: the server's end then reads EOF and a
@@ -2580,10 +2618,12 @@ let suite =
         test_read_after_peer_close;
       Alcotest.test_case "connect ignores a latency hint" `Quick
         test_connect_ignores_latency_hint;
-      Alcotest.test_case "connect refuses a semantic option" `Quick
-        test_connect_refuses_semantic_option;
-      Alcotest.test_case "setsockopt follows the connect rule" `Quick
-        test_setsockopt_follows_the_connect_rule;
+      Alcotest.test_case "connect options" `Quick test_connect_options;
+      Alcotest.test_case "socket options read back" `Quick
+        test_sockopt_read_back;
+      Alcotest.test_case "buffers bound the queue" `Quick
+        test_buffers_bound_the_queue;
+      Alcotest.test_case "SO_LINGER 0 resets" `Quick test_linger_zero_resets;
       Alcotest.test_case "connect closes at switch end" `Quick
         test_connect_closes_at_switch_end;
       Alcotest.test_case "a datagram roundtrip" `Quick test_datagram_roundtrip;

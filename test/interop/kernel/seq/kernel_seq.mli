@@ -36,8 +36,11 @@ val scenarios : string list
     [listening_addr] after a close, the names of IPv4-compatible and abstract
     addresses, the address a failed connect keeps bound, a Unix path with a NUL,
     connects bound at the IPv6 wildcard address next to IPv4 holds on their
-    port, connects and datagrams off the loopback interface, timed closes, and
-    connects that run out of ephemeral ports. *)
+    port, connects and datagrams off the loopback interface, socket options
+    (each one's default and a value set, on every kind of socket, edge values,
+    those an accepted socket takes and those of a connect, and what the buffer
+    sizes and [SO_LINGER] change), timed closes, and connects that run out of
+    ephemeral ports. *)
 
 val timed : string -> bool
 (** [timed name] is [true] for a scenario that lets time pass: TIME_WAIT and

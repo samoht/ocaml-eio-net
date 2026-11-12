@@ -20,8 +20,9 @@ work="$(mktemp -d /tmp/kernel-traces.XXXXXX)"
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/sock"
 
+# A loaded Mac takes more than 2 s for the longer datagram scenarios.
 for t in $traces; do
-  KERNEL_DIR="$work/sock" "$record" "$t" >"$work/$t.macos"
+  KERNEL_TIMEOUT=10 KERNEL_DIR="$work/sock" "$record" "$t" >"$work/$t.macos"
 done
 
 docker run --rm -v "$src:/src:ro" -v "$work:/out" "$image" bash -euc "

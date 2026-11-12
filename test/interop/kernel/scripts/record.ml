@@ -10,7 +10,8 @@
                             other interface, those that run out of ephemeral
                             ports only, when $KERNEL_NARROW_PORTS is set on a
                             host whose range is narrowed to a few ports, and
-                            the others otherwise
+                            the others otherwise, each given
+                            $KERNEL_TIMEOUT seconds (2 by default)
    record overlay A B       is A, with B's outcome where A has none
    record merge LINUX MACOS joins two recordings of the same sequences *)
 
@@ -37,6 +38,9 @@ let scenarios () =
   let clock = Eio.Stdenv.clock env in
   let loopback_only = Sys.getenv_opt "KERNEL_LOOPBACK_ONLY" <> None in
   let narrow = Sys.getenv_opt "KERNEL_NARROW_PORTS" <> None in
+  let timeout =
+    Option.fold ~none:2. ~some:float_of_string (Sys.getenv_opt "KERNEL_TIMEOUT")
+  in
   let run name =
     if
       Kernel_seq.narrow_ports name <> narrow
@@ -46,7 +50,7 @@ let scenarios () =
       Kernel_seq.scenario ~wait:(Eio.Time.sleep clock) net name
     else
       match
-        Eio.Time.with_timeout_exn clock 2. (fun () ->
+        Eio.Time.with_timeout_exn clock timeout (fun () ->
             Kernel_seq.scenario net name)
       with
       | r -> r
