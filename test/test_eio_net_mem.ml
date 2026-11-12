@@ -764,6 +764,157 @@ let test_macos_connect () =
     "after 75 s" true
     (Mtime.Span.equal waited Mtime.Span.(75 * s))
 
+(* A TCP connection that goes silent [after] seconds past its last byte, its
+   client set up by [setup]: how the client's [op] ends, and when, in seconds
+   past that byte, then what a read, a write and a read do. The times are
+   those measured on Linux, with a peer whose socket filter drops every
+   segment, and on macOS, with a peer that sends through a source route no
+   host answers. *)
+let silent ?(os = `Linux) ?(after = 0.5) ?(setup = ignore) op =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = env#mono_clock in
+  let net = Eio_net_mem.v ~os ~capacity:4096 ~clock ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let c = Eio.Net.connect ~sw net addr in
+  let s, _ = Eio.Net.accept ~sw l in
+  setup c;
+  let byte = Cstruct.create 1 in
+  Eio.Flow.copy_string "c" c;
+  Eio.Flow.read_exact s byte;
+  Eio.Flow.copy_string "s" s;
+  Eio.Flow.read_exact c byte;
+  let t0 = Eio.Time.Mono.now clock in
+  Eio.Time.Mono.sleep clock after;
+  Eio_net_mem.Private.silence c;
+  let ended f =
+    match Eio.Time.Timeout.(run_exn (seconds clock 3600.)) f with
+    | () -> "returned"
+    | exception Eio.Time.Timeout -> "waits"
+    | exception End_of_file -> "eof"
+    | exception
+        Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ETIMEDOUT, call, _)), _) ->
+        "ETIMEDOUT " ^ call
+    | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> "reset"
+  in
+  let first = ended (fun () -> op c) in
+  let at = Mtime.span t0 (Eio.Time.Mono.now clock) in
+  let buf = Cstruct.create 16 in
+  let read () = ignore (Eio.Flow.single_read c buf : int) in
+  let write () = Eio.Flow.copy_string "x" c in
+  if first = "waits" then first
+  else
+    let r1 = ended read in
+    let w = ended write in
+    let r2 = ended read in
+    Fmt.str "%s at %gs, then %s, %s, %s" first
+      (Mtime.Span.to_float_ns at /. 1e9)
+      r1 w r2
+
+let read c = ignore (Eio.Flow.single_read c (Cstruct.create 16) : int)
+
+let fill c =
+  while true do
+    Eio.Flow.copy_string (String.make 1024 'x') c
+  done
+
+let write_read c =
+  Eio.Flow.copy_string (String.make 100 'x') c;
+  read c
+
+let keepalive ?user_timeout (idle, intvl, cnt) c =
+  let module O = Eio.Net.Sockopt in
+  Eio.Net.setsockopt c O.SO_KEEPALIVE true;
+  Eio.Net.setsockopt c O.TCP_KEEPIDLE idle;
+  Eio.Net.setsockopt c O.TCP_KEEPINTVL intvl;
+  Eio.Net.setsockopt c O.TCP_KEEPCNT cnt;
+  Option.iter (Eio.Net.setsockopt c O.TCP_USER_TIMEOUT) user_timeout
+
+let user_timeout ms c = Eio.Net.setsockopt c Eio.Net.Sockopt.TCP_USER_TIMEOUT ms
+
+(* Linux: with nothing unacknowledged, keepalive probes once the idle time has
+   passed since the last segment received, a probe the live peer answered
+   included, then gives up after the count of probes with ETIMEDOUT; with
+   TCP_USER_TIMEOUT, at the first probe that time past that segment. Data
+   unacknowledged stops the probes: the connection then fails once it has
+   waited TCP_USER_TIMEOUT, or 948.6 s, as tcp_retries2 = 15 does on
+   loopback. The first read or write reports the error, then reads end and
+   writes raise EPIPE. With nothing to send and no keepalive, a read waits for
+   ever. *)
+let test_silent_linux () =
+  let check name expected got = Alcotest.(check string) name expected got in
+  let ends = "then eof, reset, eof" in
+  check "keepalive"
+    ("ETIMEDOUT readv at 5s, " ^ ends)
+    (silent ~setup:(keepalive (2, 1, 3)) read);
+  check "keepalive, answered once"
+    ("ETIMEDOUT readv at 7s, " ^ ends)
+    (silent ~after:3.5 ~setup:(keepalive (2, 1, 3)) read);
+  check "keepalive and a user timeout"
+    ("ETIMEDOUT readv at 3s, " ^ ends)
+    (silent ~setup:(keepalive ~user_timeout:3000 (2, 1, 3)) read);
+  check "keepalive and a longer user timeout"
+    ("ETIMEDOUT readv at 4s, " ^ ends)
+    (silent ~setup:(keepalive ~user_timeout:3500 (2, 1, 10)) read);
+  check "a user timeout"
+    ("ETIMEDOUT readv at 3.5s, " ^ ends)
+    (silent ~setup:(user_timeout 3000) write_read);
+  check "a user timeout, nothing sent" "waits"
+    (silent ~setup:(user_timeout 3000) read);
+  check "a blocked writer" ("ETIMEDOUT writev at 949.1s, " ^ ends) (silent fill);
+  check "a blocked writer with keepalive"
+    ("ETIMEDOUT writev at 949.1s, " ^ ends)
+    (silent ~setup:(keepalive (2, 1, 3)) fill);
+  check "data unacknowledged"
+    ("ETIMEDOUT readv at 949.1s, " ^ ends)
+    (silent write_read);
+  check "nothing" "waits" (silent read)
+
+(* macOS: keepalive gives up as on Linux, data unacknowledged or not, and data
+   unacknowledged for 18 s fails the connection. A write raises EPIPE and
+   leaves ETIMEDOUT to the next read. *)
+let test_silent_macos () =
+  let check name expected got = Alcotest.(check string) name expected got in
+  let os = `Macos in
+  check "keepalive" "ETIMEDOUT readv at 5s, then eof, reset, eof"
+    (silent ~os ~setup:(keepalive (2, 1, 3)) read);
+  check "keepalive, answered once" "ETIMEDOUT readv at 7s, then eof, reset, eof"
+    (silent ~os ~after:3.5 ~setup:(keepalive (2, 1, 3)) read);
+  check "a blocked writer" "reset at 18.5s, then ETIMEDOUT readv, reset, eof"
+    (silent ~os fill);
+  check "a blocked writer with keepalive"
+    "reset at 5s, then ETIMEDOUT readv, reset, eof"
+    (silent ~os ~setup:(keepalive (2, 1, 3)) fill);
+  check "data unacknowledged" "ETIMEDOUT readv at 18.5s, then eof, reset, eof"
+    (silent ~os write_read);
+  check "nothing" "waits" (silent ~os read)
+
+(* Each end gives up on its own: the peer of an end that timed out still
+   waits. *)
+let test_silent_peer_waits () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = env#mono_clock in
+  let net = Eio_net_mem.v ~clock ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let c = Eio.Net.connect ~sw net addr in
+  let s, _ = Eio.Net.accept ~sw l in
+  keepalive (1, 1, 1) c;
+  Eio_net_mem.Private.silence c;
+  let ended f =
+    match Eio.Time.Timeout.(run_exn (seconds clock 60.)) f with
+    | () -> "returned"
+    | exception Eio.Time.Timeout -> "waits"
+    | exception Eio.Io _ -> "failed"
+  in
+  Alcotest.(check (pair string string))
+    "client, server" ("failed", "waits")
+    (Eio.Fiber.pair
+       (fun () -> ended (fun () -> read c))
+       (fun () -> ended (fun () -> read s)))
+
 (* Under [`Macos] a Unix-domain address that starts with a NUL names no
    file, the empty path binds nothing, and getnameinfo names no Unix
    address. *)
@@ -2602,6 +2753,12 @@ let suite =
       Alcotest.test_case "macOS: buffers" `Quick test_macos_capacity;
       Alcotest.test_case "macOS: a connect to 127.0.0.2 times out" `Quick
         test_macos_connect;
+      Alcotest.test_case "a silent connection gives up as Linux does" `Quick
+        test_silent_linux;
+      Alcotest.test_case "a silent connection gives up as macOS does" `Quick
+        test_silent_macos;
+      Alcotest.test_case "a silent connection's peer still waits" `Quick
+        test_silent_peer_waits;
       Alcotest.test_case "macOS: Unix addresses" `Quick test_macos_unix;
       Alcotest.test_case "a connection's queue is bounded by default" `Quick
         test_default_capacity;

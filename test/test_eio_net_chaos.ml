@@ -957,6 +957,49 @@ let test_hang_silences () =
     "AF_UNIX" "timeout ab timeout timeout 4096 reset"
     (run (`Unix "/tmp/s.sock"))
 
+(* A writer blocked behind a server whose read hung gives up once its data
+   has gone unacknowledged long enough: after 948.6 s with ETIMEDOUT on Linux,
+   as tcp_retries2 = 15 does over loopback, and after 18 s with EPIPE on
+   macOS. A network with no clock never gives up. *)
+let test_hang_times_out_writer () =
+  let run ?clock os =
+    Eio_mock.Backend.run_full @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let f (op : Op.t) =
+      if op.kind = `Read && op.side = `Server then Some Fault.Hang else None
+    in
+    let clock = if clock = Some () then Some env#mono_clock else None in
+    let mem = Eio_net_mem.v ~os ~capacity:4096 ?clock ~sw () in
+    let net = Chaos.wrap ~os ~clock:env#clock f mem in
+    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
+    let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    let server, _ = Eio.Net.accept ~sw l in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        (try ignore (read1 server) with Eio.Io _ | End_of_file -> ());
+        `Stop_daemon);
+    let t0 = Eio.Time.now env#clock in
+    let ended =
+      match
+        Eio.Time.with_timeout env#clock 3600. (fun () ->
+            while true do
+              Eio.Flow.copy_string (String.make 1024 'x') client
+            done;
+            Ok ())
+      with
+      | Ok () | Error `Timeout -> "waits"
+      | exception
+          Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ETIMEDOUT, _, _)), _) ->
+          "ETIMEDOUT"
+      | exception e when is_reset e -> "reset"
+    in
+    Fmt.str "%s after %gs" ended (Eio.Time.now env#clock -. t0)
+  in
+  Alcotest.(check string)
+    "Linux" "ETIMEDOUT after 948.6s" (run ~clock:() `Linux);
+  Alcotest.(check string) "macOS" "reset after 18s" (run ~clock:() `Macos);
+  Alcotest.(check string) "no clock" "waits after 3600s" (run `Linux)
+
 (* --- Domains ------------------------------------------------------------- *)
 
 (* Writers in two domains share one count of bytes written: with a reset on
@@ -1245,6 +1288,8 @@ let suite =
         test_unix_hang_keeps_written;
       Alcotest.test_case "a hang silences the connection" `Quick
         test_hang_silences;
+      Alcotest.test_case "a hang times out a blocked writer" `Quick
+        test_hang_times_out_writer;
       Alcotest.test_case "an AF_UNIX hang holds a write under way" `Quick
         test_unix_hang_stops_write;
       Alcotest.test_case "a write after the peer's close" `Quick
