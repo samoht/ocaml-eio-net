@@ -14,8 +14,9 @@
     A bind that fails in [listen] or [datagram_socket] raises the raw
     [Unix.Unix_error] eio_posix raises there, so that one handler serves both:
     [EADDRINUSE], [EADDRNOTAVAIL] or [EINVAL] from ["bind"], and [ENAMETOOLONG]
-    with the path for a Unix path [sun_path] cannot hold. Every other error is
-    an {!Eio.Io} error, marked by one of these codes. *)
+    with the path for a Unix path [sun_path] cannot hold. A socket option the
+    kernel refuses raises the error eio_posix raises ({!section-options}). Every
+    other error is an {!Eio.Io} error, marked by one of these codes. *)
 
 type Eio.Exn.Backend.t +=
   | Closed
@@ -192,8 +193,9 @@ val v :
     AF_UNIX, less in small writes. Under [`Macos] it defaults to 1 MiB over TCP,
     what macOS's buffers grow to on loopback from about 330 KiB, and 8 KiB over
     AF_UNIX, as macOS holds. A [capacity] is what every connection queues, over
-    TCP and over a Unix path, above the default too. Raises [Invalid_argument]
-    if [capacity] is not positive.
+    TCP and over a Unix path, above the default too, and it bounds what a
+    socket's send and receive buffers give ({!section-options}). Raises
+    [Invalid_argument] if [capacity] is not positive.
 
     On [clock], the end of a TCP connection whose FIN went first holds its
     address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
@@ -352,15 +354,50 @@ val connection : _ Eio.Net.stream_socket -> int option
     these raises the error that {!Address_family} marks, as macOS's bind(2)
     fails with EAFNOSUPPORT for both.
 
-    [connect], and [setsockopt] on a connection or a listener, accept and ignore
-    the socket options whose effect these queues already have: [TCP_NODELAY] and
-    [TCP_QUICKACK], which ask that writes not be coalesced and that
-    acknowledgements not be delayed, neither of which happens here. They refuse
-    every other option with [Invalid_argument], naming it, because ignoring one
-    that would change what a caller observes is a wrong answer with no symptom.
-    A caller cannot tell an ignored option from an applied one, so a test that
-    must know an option took effect needs a real socket. [getsockopt] raises
-    [Invalid_argument] on every socket.
+    {1:options Socket options}
+
+    [setsockopt], [getsockopt] and the [options] of a [connect] take every
+    option {!Eio.Net.Sockopt} names, and the [Unix] options of {!Eio_unix.Net},
+    on every socket, and answer as the chosen kernel does on a host with
+    loopback only, as recorded through eio_posix:
+
+    - A socket reads back what it set, as the kernel keeps it, and the kernel's
+      default otherwise. Linux doubles [SO_SNDBUF] and [SO_RCVBUF], within a
+      minimum and its maximum of 7500000 bytes, keeps [TCP_DEFER_ACCEPT] as a
+      count of retransmissions and the timeouts in milliseconds; macOS keeps a
+      buffer size as given, up to 8 MiB. The defaults are the recording hosts':
+      on Linux a TCP connection has a send buffer of 2626560 bytes and a receive
+      buffer of 131072, and [TCP_CONGESTION] is ["cubic"], ["reno"] the only
+      other.
+    - An option or a value the kernel refuses for the socket raises what
+      eio_posix raises: [Eio.Net.E Invalid_option] for [ENOPROTOOPT], and for an
+      option of Linux's under [`Macos]; [Eio.Exn.Not_available] for
+      [EOPNOTSUPP], such as a TCP option on a Unix-domain socket under Linux;
+      and an unclassified [Eio_unix.Unix_error] otherwise, such as [EINVAL].
+      Linux refuses to turn [SO_DEBUG] on, with [EACCES], as it refuses a
+      process without [CAP_NET_ADMIN]. A value Eio itself checks raises
+      [Invalid_argument].
+    - An accepted socket takes its listener's options as the kernel passes them
+      on. On Linux a TCP one takes all but [TCP_DEFER_ACCEPT] and
+      [TCP_FASTOPEN], and a Unix-domain one none. On macOS it takes all but the
+      low-water marks, the timeouts and, over TCP, [TCP_KEEPIDLE].
+    - [SO_SNDBUF] and [SO_RCVBUF] size the queue of each direction of a
+      connection, in place of the default capacity and within one {!v} or
+      {!pipe} is given. On Linux over TCP it is the writer's send buffer, at
+      least 32 KiB, and half the reader's receive buffer, its window; over a
+      Unix path, half the writer's send buffer. On macOS over TCP it is the
+      writer's send buffer and what the reader's receive buffer grows to as data
+      comes, 128 KiB more than one set and 176 KiB when none is, or the send
+      buffer and 16 KiB for one under 16 KiB; over a Unix path, the writer's
+      send buffer. On Linux this is within 15% of what the kernel queues in
+      writes of 1 KiB. On a datagram socket they replace the buffers
+      {!section-datagrams} describes.
+    - A TCP socket whose [SO_LINGER] is [Some 0] resets its peer as it closes,
+      as both kernels abort the connection.
+    - Every other option is kept and read back, and has no other effect: no
+      keepalive probe is sent, no timeout ends a read, an accept does not wait
+      for data under [TCP_DEFER_ACCEPT], and a read does not wait for
+      [SO_RCVLOWAT] bytes.
 
     {1:datagrams Datagrams}
 
@@ -375,20 +412,20 @@ val connection : _ Eio.Net.stream_socket -> int option
     Those then share it, as on Linux: a datagram reaches the one bound at the
     most specific address, the address itself, then the IPv4 wildcard, then the
     IPv6 one, and of those bound at the same address the latest, and once it
-    closes the one before. [reuse_port] raises [Invalid_argument], and
-    [setsockopt] refuses every option. The socket is closed, and its address
-    free again, when the switch passed to [datagram_socket] finishes; a send, a
-    receive or a shutdown on it then raises [Invalid_argument].
+    closes the one before. [reuse_port] raises [Invalid_argument]. The socket is
+    closed, and its address free again, when the switch passed to
+    [datagram_socket] finishes; a send, a receive or a shutdown on it then
+    raises [Invalid_argument].
 
     A datagram reaches a socket by the rule a [connect] reaches a listener, and
     arrives whole, after every datagram sent to it before: the network never
-    cuts or reorders one. A socket queues what Linux's default receive buffer
-    holds, 229376 bytes on the kernel the tests record, each datagram counted
-    with the memory Linux gives it: 199 datagrams of up to about 450 bytes, 99
-    of 1000, 3 of 60000. Over UDP a datagram past that is lost, and the send
-    returns as on Linux, which frees the memory of the datagrams a receiver
-    takes only once they reach a quarter of the buffer, or the receiver took
-    every datagram queued when it found none taken. On a Unix path the send
+    cuts or reorders one. A socket queues what its receive buffer holds, by
+    default 229376 bytes as on the kernel the tests record, each datagram
+    counted with the memory Linux gives it: 199 datagrams of up to about 450
+    bytes, 99 of 1000, 3 of 60000. Over UDP a datagram past that is lost, and
+    the send returns as on Linux, which frees the memory of the datagrams a
+    receiver takes only once they reach a quarter of the buffer, or the receiver
+    took every datagram queued when it found none taken. On a Unix path the send
     waits until the receiver takes one, as it does while the receiver holds more
     than 10 datagrams, Linux's [max_dgram_qlen], or while the sender's own
     datagrams not yet received fill its send buffer of the same size: 299 of a
@@ -409,9 +446,10 @@ val connection : _ Eio.Net.stream_socket -> int option
     over UDP, and {!Not_connected} on a Unix path, as Linux says, since no
     socket is connected. A datagram longer than 65507 bytes to an IPv4 address,
     65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default send
-    buffer allows, raises the error that {!Message_too_long} marks. These are
-    Linux's limits: under [`Macos] they are 9216 bytes over UDP and 2048 on a
-    Unix path, macOS's defaults. One sent to UDP port 0 raises the error that
+    buffer allows, or its send buffer less 32 bytes for a smaller one, raises
+    the error that {!Message_too_long} marks. These are Linux's limits: under
+    [`Macos] the limit is the socket's send buffer, by default 9216 bytes over
+    UDP and 2048 on a Unix path. One sent to UDP port 0 raises the error that
     {!Invalid_port} marks, as on Linux; under [`Macos] it is sent, and lost.
 
     A datagram sent from an IPv6 address to an IPv4-mapped one, or the reverse,
@@ -522,12 +560,12 @@ val connection : _ Eio.Net.stream_socket -> int option
       route ({!Host_unreachable}). From [::1] an IPv4-mapped destination is not
       available, and from an IPv4-mapped address other than the wildcard an IPv6
       one has no route. A socket bound at an IPv4-mapped address sees IPv4
-      senders as IPv4. A receiver holds 786896 bytes over UDP, each datagram
-      counted by its length, and 4096 on a Unix path, each counted as at least
-      128 bytes, which fits what one Mac holds of datagrams of 1 to 2000 bytes.
-      A datagram past that is lost over UDP, and on a Unix path the send raises
-      the [ENOBUFS] error eio_posix raises, where Linux waits; a receive frees
-      what it takes at once.
+      senders as IPv4. A receiver holds its receive buffer, by default 786896
+      bytes over UDP, each datagram counted by its length, and 4096 on a Unix
+      path, each counted as at least 128 bytes, which fits what one Mac holds of
+      datagrams of 1 to 2000 bytes. A datagram past that is lost over UDP, and
+      on a Unix path the send raises the [ENOBUFS] error eio_posix raises, where
+      Linux waits; a receive frees what it takes at once.
     - Unix paths. [sun_path] holds 103 bytes. There is no abstract namespace: a
       path with a NUL anywhere names no file, and the empty path binds nothing,
       with [EINVAL].

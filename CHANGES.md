@@ -42,6 +42,10 @@ Initial release.
   it against real sockets.
 - `?capacity` sets what each direction of a connection queues, to show a peer
   that writes without reading.
+- `setsockopt`, `getsockopt` and the options of a connect take every option of
+  `Eio.Net.Sockopt` and `Eio_unix.Net`, and answer as the chosen kernel does,
+  defaults and refusals included. `SO_SNDBUF` and `SO_RCVBUF` size the
+  queues, and `SO_LINGER` at 0 resets the peer on close.
 
 ### eio-net.chaos
 

@@ -131,10 +131,11 @@ variable and prints nothing. For a scenario a check does not try,
 - `eio-net.connect`: a classifier of failed connects, refused or unreachable.
 - `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, their
   equality, and host name resolution.
-- `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets.
-  A connection queues what Linux's default buffers hold, and a datagram
-  socket what its receive buffer holds; a small `?capacity` shows a peer that
-  writes without reading.
+- `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets,
+  and the socket options each kernel takes. A connection queues what Linux's
+  default buffers hold, or what its `SO_SNDBUF` and `SO_RCVBUF` give, and a
+  datagram socket what its receive buffer holds; a small `?capacity` shows a
+  peer that writes without reading.
   It follows Linux by default, and macOS where the two kernels differ with
   `` ~os:`Macos ``, which `Eio_net_chaos.check` takes too.
 - `eio-net.chaos`: `check`, which runs a workload under the network faults

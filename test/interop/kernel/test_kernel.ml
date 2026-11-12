@@ -238,8 +238,91 @@ let without_ipv6 name mem =
 
 let is_number s = s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s
 
+(* The text of [s] with each number cut out, and the numbers. *)
+let numbers s =
+  let text = Buffer.create 16 and ns = ref [] and n = Buffer.create 8 in
+  let flush () =
+    if Buffer.length n > 0 then begin
+      ns := int_of_string (Buffer.contents n) :: !ns;
+      Buffer.add_char text '#';
+      Buffer.clear n
+    end
+  in
+  String.iter
+    (function
+      | '0' .. '9' as c -> Buffer.add_char n c
+      | c ->
+          flush ();
+          Buffer.add_char text c)
+    s;
+  flush ();
+  (Buffer.contents text, List.rev !ns)
+
+(* [mem] and [kernel] say the same but for their numbers, each of mem's
+   within [factor] of the kernel's. *)
+let within factor ~mem ~kernel =
+  let tm, nm = numbers mem and tk, nk = numbers kernel in
+  tm = tk
+  && List.compare_lengths nm nk = 0
+  && List.for_all2
+       (fun m k ->
+         let m = float m and k = float k in
+         m <= factor *. k && k <= factor *. m)
+       nm nk
+
 let scenario_exceptions : scenario_exception list =
   [
+    {
+      why =
+        "a stream queues what mem works out from the buffers set, within 15% \
+         of what Linux holds in writes of 1 KiB, as the overhead of each \
+         segment and write is Linux's own";
+      oses = [ `Linux ];
+      holds =
+        (fun name ~mem ~kernel ->
+          starts_with ~prefix:"sockopt fill: " name && within 1.15 ~mem ~kernel);
+    };
+    {
+      why =
+        "macOS writes nothing into less room than a write's length and the \
+         low-water mark, so a Unix stream with a small send buffer queues up \
+         to half of what mem does";
+      oses = [ `Macos ];
+      holds =
+        (fun name ~mem ~kernel ->
+          starts_with ~prefix:"sockopt fill: unix" name
+          && within 2. ~mem ~kernel);
+    };
+    {
+      why =
+        "macOS sizes the buffers of a TCP socket set before it connects, or \
+         taken from its listener, to whole segments as it connects; mem keeps \
+         the size set";
+      oses = [ `Macos ];
+      holds =
+        (fun name ~mem ~kernel ->
+          List.mem name
+            [
+              "sockopt inherit: tcp4 server SO_SNDBUF";
+              "sockopt inherit: tcp4 server SO_RCVBUF";
+              "sockopt connect: tcp4 client SO_SNDBUF";
+              "sockopt connect: tcp4 client SO_RCVBUF";
+            ]
+          &&
+          let tm, nm = numbers mem and tk, nk = numbers kernel in
+          tm = tk && List.for_all2 ( <= ) nm nk);
+    };
+    {
+      why =
+        "macOS counts a datagram's memory in mbufs, which mem approximates by \
+         its length";
+      oses = [ `Macos ];
+      holds =
+        (fun name ~mem ~kernel ->
+          (starts_with ~prefix:"sockopt udp rcvbuf" name
+          || starts_with ~prefix:"sockopt unix dgram rcvbuf" name)
+          && within 2. ~mem ~kernel);
+    };
     {
       why =
         "the recording host has no IPv6 address but loopback, so glibc leaves \
@@ -350,6 +433,15 @@ let timing_dependent_scenarios : (string * string) list =
       "the reset races the bind: two recordings on one Mac differ" );
     ("connect 127.0.0.1 from 0.0.0.0 to ::1", "two recordings on one Mac differ");
   ]
+  @ List.filter_map
+      (fun name ->
+        if starts_with ~prefix:"sockopt fill: tcp4" name then
+          Some
+            ( name,
+              "macOS grows a TCP receive buffer as data comes, so what a \
+               writer queues differs from one recording to the next" )
+        else None)
+      scenarios
 
 (* mem runs on a mock clock, which moves only when every fiber waits, as the
    kernel's timers run on a scenario's real time. An untimed scenario has 2

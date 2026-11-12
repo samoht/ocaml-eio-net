@@ -686,22 +686,571 @@ module Files = struct
     | Some _ | None -> ()
 end
 
-(* A stream option is ignored only where the queues already provide what it
-   asks for, so ignoring it yields the requested behaviour rather than
-   withholding it: [TCP_NODELAY] and [TCP_QUICKACK]. Every other option would
-   change what a caller observes and is refused by name, as is every option on
-   a datagram socket. *)
+(* Socket options, as the kernel [os] names answers them on a host with
+   loopback only: what a socket reads back, defaults included, with the
+   kernel's rounding and limits, and the error eio_posix raises where the
+   kernel refuses an option for the socket's family or type. Options whose
+   effect mem has no model of are kept and read back. The send and receive
+   buffers size the queues: [resized] tells the socket's queues. *)
 module Sockopt = struct
-  let refuse opt =
-    Fmt.invalid_arg "eio-net.mem does not support socket option %a"
-      Eio.Net.Sockopt.pp opt
+  module O = Eio.Net.Sockopt
 
-  let stream : type a. a Eio.Net.Sockopt.t -> unit = function
-    | Eio.Net.Sockopt.TCP_NODELAY -> ()
-    | Eio.Net.Sockopt.TCP_QUICKACK -> ()
-    | opt -> refuse opt
+  type family = V4 | V6 | Local
+  type kind = Unconnected | Listener | Client | Server | Datagram
 
-  let datagram : type a. a Eio.Net.Sockopt.t -> unit = refuse
+  type t = {
+    os : os;
+    family : family;
+    mutable kind : kind;
+    mutable v6only : bool;
+    mutable debug : bool;
+    mutable broadcast : bool;
+    mutable reuseaddr : bool;
+    mutable keepalive : bool;
+    mutable dontroute : bool;
+    mutable oobinline : bool;
+    mutable reuseport : bool;
+    mutable nodelay : bool;
+    mutable sndbuf : int option;
+    mutable rcvbuf : int option;
+    mutable rcvlowat : int;
+    mutable sndlowat : int option;
+    mutable linger : int option;
+    mutable rcvtimeo : float;
+    mutable sndtimeo : float;
+    mutable keepidle : int option;
+    mutable keepintvl : int option;
+    mutable keepcnt : int option;
+    mutable congestion : string;
+    mutable cork : bool;
+    mutable user_timeout : int;
+    mutable user_mss : int;
+    mutable maxseg : int option;
+    mutable linger2 : int;
+    mutable defer_accept : int;
+    mutable syncnt : int;
+    mutable window_clamp : int option;
+    mutable quickack : bool;
+    mutable fastopen : int;
+    mutable freebind : bool;
+    mutable bind_no_port : bool;
+    mutable port_range : int * int;
+    mutable ttl : int;
+    mutable mtu_discover : [ `Want | `Dont | `Do | `Probe ];
+    mutable resized : unit -> unit;
+  }
+
+  let v ~os ~family kind =
+    {
+      os;
+      family;
+      kind;
+      v6only = false;
+      debug = false;
+      broadcast = false;
+      reuseaddr = false;
+      keepalive = false;
+      dontroute = false;
+      oobinline = false;
+      reuseport = false;
+      nodelay = false;
+      sndbuf = None;
+      rcvbuf = None;
+      rcvlowat = 1;
+      sndlowat = None;
+      linger = None;
+      rcvtimeo = 0.;
+      sndtimeo = 0.;
+      keepidle = None;
+      keepintvl = None;
+      keepcnt = None;
+      congestion = "cubic";
+      cork = false;
+      user_timeout = 0;
+      user_mss = 0;
+      maxseg = None;
+      linger2 = 0;
+      defer_accept = 0;
+      syncnt = 6;
+      window_clamp = None;
+      quickack = true;
+      fastopen = 0;
+      freebind = false;
+      bind_no_port = false;
+      port_range = (0, 0);
+      ttl = 64;
+      mtu_discover = `Want;
+      resized = ignore;
+    }
+
+  let family_of_ip (ip : Eio.Net.Ipaddr.v4v6) =
+    if String.length (ip :> string) = 4 then V4 else V6
+
+  (* Linux marks an IPv6 socket bound at an address other than the wildcard
+     and the IPv4-mapped ones as IPv6 only. *)
+  let bound t (ip : Eio.Net.Ipaddr.v4v6) =
+    if
+      t.os = Linux && t.family = V6
+      && (not (is_v4 ip))
+      && not (same ip (any ip))
+    then t.v6only <- true
+
+  let tcp t = t.family <> Local && t.kind <> Datagram
+  let connected t = t.kind = Client || t.kind = Server
+
+  (* The send and receive buffers each kernel gives a socket. *)
+  let default_sndbuf t =
+    match (t.os, t.family, t.kind) with
+    | Linux, (V4 | V6), (Unconnected | Listener) -> 16384
+    | Linux, (V4 | V6), (Client | Server) -> 2626560
+    | Linux, _, _ -> 229376
+    | Macos, (V4 | V6), (Unconnected | Listener) -> 131072
+    | Macos, V4, Client -> 146988
+    | Macos, V6, Client -> 146808
+    | Macos, V4, Server -> 132792
+    | Macos, V6, Server -> 132132
+    | Macos, (V4 | V6), Datagram -> 9216
+    | Macos, Local, Datagram -> 2048
+    | Macos, Local, _ -> 8192
+
+  let default_rcvbuf t =
+    match (t.os, t.family, t.kind) with
+    | Linux, (V4 | V6), (Unconnected | Listener | Client | Server) -> 131072
+    | Linux, _, _ -> 229376
+    | Macos, (V4 | V6), (Unconnected | Listener) -> 131072
+    | Macos, V4, Client -> 408300
+    | Macos, V6, Client -> 407800
+    | Macos, V4, Server -> 132792
+    | Macos, V6, Server -> 132132
+    | Macos, (V4 | V6), Datagram -> 786896
+    | Macos, Local, Datagram -> 4096
+    | Macos, Local, _ -> 8192
+
+  let sndbuf t = Option.value t.sndbuf ~default:(default_sndbuf t)
+  let rcvbuf t = Option.value t.rcvbuf ~default:(default_rcvbuf t)
+
+  (* macOS's maximum segment size before a connection, and that of each end
+     of one over loopback, whose MTU is 16384. *)
+  let default_maxseg t =
+    match (t.family, t.kind) with
+    | V4, Client -> 16332
+    | V6, Client -> 16312
+    | V4, Server -> 4024
+    | V6, Server -> 4004
+    | V6, _ -> 1024
+    | _ -> 512
+
+  (* Linux's maximum segment size of a connection over loopback, less the
+     12 bytes of the timestamp option from a size the socket set. *)
+  let linux_mss t =
+    let base =
+      match (t.family, t.kind) with
+      | V4, Client -> 32741
+      | V6, Client -> 32732
+      | _ -> 32768
+    in
+    if t.user_mss > 0 then min base (t.user_mss - 12) else base
+
+  let listener ~os : Eio.Net.Sockaddr.stream -> t = function
+    | `Unix _ -> v ~os ~family:Local Listener
+    | `Tcp (ip, _) ->
+        let t = v ~os ~family:(family_of_ip ip) Listener in
+        bound t ip;
+        t
+
+  let client ~os : Eio.Net.Sockaddr.stream -> t = function
+    | `Unix _ -> v ~os ~family:Local Unconnected
+    | `Tcp (ip, _) -> v ~os ~family:(family_of_ip ip) Unconnected
+
+  let datagram ~os : Eio.Net.Sockaddr.datagram -> t = function
+    | `Unix _ -> v ~os ~family:Local Datagram
+    | `Udp (ip, _) ->
+        let t = v ~os ~family:(family_of_ip ip) Datagram in
+        bound t ip;
+        t
+
+  (* Becomes an end of a connection. *)
+  let connect t kind =
+    t.kind <- kind;
+    match t.os with
+    | Linux -> t.maxseg <- Some (linux_mss t)
+    | Macos -> t.maxseg <- None
+
+  (* What an accepted socket takes of its listener's options: on Linux a TCP
+     one all but [TCP_DEFER_ACCEPT] and [TCP_FASTOPEN], a Unix-domain one
+     none; on macOS all but the low-water marks and the timeouts, and over
+     TCP the keepalive idle time. *)
+  let accepted l =
+    let fresh = v ~os:l.os ~family:l.family Server in
+    let t =
+      match (l.os, l.family) with
+      | Linux, Local -> fresh
+      | Linux, _ -> { l with kind = Server; defer_accept = 0; fastopen = 0 }
+      | Macos, family ->
+          {
+            l with
+            kind = Server;
+            rcvlowat = 1;
+            sndlowat = None;
+            rcvtimeo = 0.;
+            sndtimeo = 0.;
+            keepidle = (if family = Local then l.keepidle else None);
+          }
+    in
+    connect t Server;
+    t.resized <- ignore;
+    t
+
+  let error op code = raise (Posix.sockopt_error op code)
+
+  (* An option of Linux's that eio_posix does not find on macOS. *)
+  let missing () = raise (Eio.Net.err Invalid_option)
+
+  type level = Socket | Tcp | Ip | Ipv6 | Linux_tcp | Linux_ip
+
+  let level : type a. a Eio.Net.Sockopt.t -> level = function
+    | O.TCP_NODELAY | O.TCP_KEEPIDLE | O.TCP_KEEPINTVL | O.TCP_KEEPCNT
+    | O.TCP_MAXSEG ->
+        Tcp
+    | O.TCP_CONGESTION | O.TCP_CORK | O.TCP_USER_TIMEOUT | O.TCP_LINGER2
+    | O.TCP_DEFER_ACCEPT | O.TCP_SYNCNT | O.TCP_WINDOW_CLAMP | O.TCP_QUICKACK
+    | O.TCP_FASTOPEN ->
+        Linux_tcp
+    | O.IP_TTL -> Ip
+    | O.IP_FREEBIND | O.IP_BIND_ADDRESS_NO_PORT | O.IP_LOCAL_PORT_RANGE
+    | O.IP_MTU | O.IP_MTU_DISCOVER ->
+        Linux_ip
+    | O.IPV6_ONLY -> Ipv6
+    | _ -> Socket
+
+  (* The kernel's refusal of an option at a level the socket's family or
+     type lacks. On macOS an IP or TCP option on a Unix-domain socket is read
+     as the local option of the same number, which [get] answers. *)
+  let gate op t level =
+    let fail code = error op code in
+    let set = op = `Set in
+    match (t.os, level, t.family) with
+    | _, Socket, _ -> ()
+    | Macos, (Linux_tcp | Linux_ip), _ -> missing ()
+    | Linux, _, Local -> fail `Not_supported
+    | Linux, (Tcp | Linux_tcp), V4 when t.kind = Datagram ->
+        fail (if set then `No_option else `Not_supported)
+    | Linux, (Tcp | Linux_tcp), V6 when t.kind = Datagram -> fail `No_option
+    | Linux, Ipv6, V4 -> fail (if set then `No_option else `Not_supported)
+    | Linux, _, _ -> ()
+    | Macos, Ipv6, Local -> fail `Not_supported
+    | Macos, _, Local -> if set then fail `Not_supported
+    | Macos, Tcp, _ when t.kind = Datagram -> fail `Invalid
+    | Macos, Ipv6, V4 | Macos, Ip, V6 -> fail `Invalid
+    | Macos, _, _ -> ()
+
+  (* What setsockopt(2) takes of a float: whole seconds and microseconds,
+     cut as OCaml's Unix cuts them. Linux keeps whole milliseconds, rounded
+     up, and a negative time as none; macOS refuses it. *)
+  let timeout t f =
+    if f < 0. then if t.os = Linux then 0. else error `Set `Domain
+    else
+      let sec = Float.to_int f in
+      let usec = Float.to_int (1e6 *. (f -. Float.of_int sec)) in
+      let sec, usec =
+        match t.os with
+        | Linux ->
+            let ms = (usec + 999) / 1000 in
+            if ms = 1000 then (sec + 1, 0) else (sec, ms * 1000)
+        | Macos -> (sec, usec)
+      in
+      Float.of_int sec +. (Float.of_int usec /. 1e6)
+
+  (* Linux's [TCP_DEFER_ACCEPT] is a number of SYN-ACK retransmissions, the
+     first after a second, each after twice as long, at most 120 seconds. *)
+  let secs_to_retrans secs =
+    if secs <= 0 then 0
+    else
+      let rec go res timeout period =
+        if secs > period && res < 255 then
+          let timeout = min (2 * timeout) 120 in
+          go (res + 1) timeout (period + timeout)
+        else res
+      in
+      go 1 1 1
+
+  let retrans_to_secs n =
+    if n <= 0 then 0
+    else
+      let rec go n timeout period =
+        if n <= 1 then period
+        else
+          let timeout = min (2 * timeout) 120 in
+          go (n - 1) timeout (period + timeout)
+      in
+      go n 1 1
+
+  (* Linux takes a buffer size as unsigned, at most [wmem_max] or
+     [rmem_max], doubles it for its bookkeeping and keeps a minimum; macOS
+     keeps it as it is, at most [kern.ipc.maxsockbuf]. *)
+  let buffer t ~min:least n =
+    match t.os with
+    | Linux ->
+        let n = if n < 0 || n > 7500000 then 7500000 else n in
+        max (2 * n) least
+    | Macos -> if n <= 0 then error `Set `Invalid else min n 8388608
+
+  (* Up to the first NUL and 15 bytes, as Linux reads the name. *)
+  let congestion name =
+    let name =
+      match String.index_opt name '\000' with
+      | Some i -> String.sub name 0 i
+      | None -> name
+    in
+    if String.length name > 15 then String.sub name 0 15 else name
+
+  let non_negative name v =
+    if v < 0 then Fmt.invalid_arg "%s must be non-negative, got %d" name v
+
+  (* The checks Eio makes before it calls setsockopt(2). *)
+  let check : type a. a Eio.Net.Sockopt.t -> a -> unit =
+   fun opt v ->
+    match opt with
+    | O.TCP_KEEPIDLE -> non_negative "O.TCP_KEEPIDLE" v
+    | O.TCP_KEEPINTVL -> non_negative "O.TCP_KEEPINTVL" v
+    | O.TCP_KEEPCNT -> non_negative "O.TCP_KEEPCNT" v
+    | O.TCP_USER_TIMEOUT -> non_negative "O.TCP_USER_TIMEOUT" v
+    | O.TCP_MAXSEG -> non_negative "O.TCP_MAXSEG" v
+    | O.TCP_LINGER2 -> (
+        match v with
+        | Some n when n < 0 ->
+            Fmt.invalid_arg "O.TCP_LINGER2 must be non-negative, got %d" n
+        | _ -> ())
+    | O.TCP_DEFER_ACCEPT -> non_negative "O.TCP_DEFER_ACCEPT" v
+    | O.TCP_SYNCNT ->
+        if v < 1 || v > 255 then
+          Fmt.invalid_arg "O.TCP_SYNCNT must be between 1 and 255, got %d" v
+    | O.TCP_WINDOW_CLAMP -> non_negative "O.TCP_WINDOW_CLAMP" v
+    | O.TCP_FASTOPEN ->
+        if v < 0 then
+          Fmt.invalid_arg
+            "O.TCP_FASTOPEN queue length must be non-negative, got %d" v
+    | O.IP_LOCAL_PORT_RANGE ->
+        let lower, upper = v in
+        if lower < 0 || lower > 65535 then
+          Fmt.invalid_arg
+            "O.IP_LOCAL_PORT_RANGE lower bound must be 0-65535, got %d" lower;
+        if upper < 0 || upper > 65535 then
+          Fmt.invalid_arg
+            "O.IP_LOCAL_PORT_RANGE upper bound must be 0-65535, got %d" upper;
+        if lower <> 0 && upper <> 0 && lower > upper then
+          Fmt.invalid_arg
+            "O.IP_LOCAL_PORT_RANGE lower bound (%d) must be <= upper bound (%d)"
+            lower upper
+    | O.IP_TTL ->
+        if v < 1 || v > 255 then
+          Fmt.invalid_arg "O.IP_TTL must be between 1 and 255, got %d" v
+    | O.IP_MTU -> invalid_arg "O.IP_MTU is a read-only socket option"
+    | _ -> ()
+
+  let set : type a. t -> a Eio.Net.Sockopt.t -> a -> unit =
+   fun t opt v ->
+    let opt = Posix.canonical opt in
+    check opt v;
+    gate `Set t (level opt);
+    let invalid () = error `Set `Invalid in
+    let linux = t.os = Linux in
+    match opt with
+    | _ when Posix.extra opt <> None -> error `Set `No_option
+    | O.SO_DEBUG ->
+        (* Only CAP_NET_ADMIN turns it on, on Linux. *)
+        if linux && v then error `Set `Denied else t.debug <- v
+    | O.SO_BROADCAST -> t.broadcast <- v
+    | O.SO_REUSEADDR -> t.reuseaddr <- v
+    | O.SO_KEEPALIVE -> t.keepalive <- v
+    | O.SO_DONTROUTE -> t.dontroute <- v
+    | O.SO_OOBINLINE -> t.oobinline <- v
+    | O.SO_REUSEPORT -> t.reuseport <- v
+    | O.SO_SNDBUF ->
+        t.sndbuf <- Some (buffer t ~min:4608 v);
+        t.resized ()
+    | O.SO_RCVBUF ->
+        t.rcvbuf <- Some (buffer t ~min:2304 v);
+        t.resized ()
+    | O.SO_RCVLOWAT -> (
+        match t.os with
+        | Linux ->
+            let v = if v < 0 then 0x7fffffff else v in
+            let v =
+              if not (tcp t) then v
+              else
+                min v (match t.rcvbuf with Some b -> b / 2 | None -> 16777216)
+            in
+            t.rcvlowat <- (if v = 0 then 1 else v)
+        | Macos -> if v < 1 then invalid () else t.rcvlowat <- min v (rcvbuf t))
+    | O.SO_SNDLOWAT ->
+        if linux then error `Set `No_option
+        else if v < 1 then invalid ()
+        else t.sndlowat <- Some (min v (sndbuf t))
+    | O.SO_LINGER -> (
+        match v with
+        | Some n when (not linux) && (n < 0 || n > 32767) -> error `Set `Domain
+        | v -> t.linger <- v)
+    | O.SO_RCVTIMEO -> t.rcvtimeo <- timeout t v
+    | O.SO_SNDTIMEO -> t.sndtimeo <- timeout t v
+    | O.TCP_NODELAY -> t.nodelay <- v
+    | O.TCP_KEEPIDLE ->
+        if linux then
+          if v < 1 || v > 32767 then invalid () else t.keepidle <- Some v
+        else t.keepidle <- (if v = 0 then None else Some v)
+    | O.TCP_KEEPINTVL ->
+        if linux then
+          if v < 1 || v > 32767 then invalid () else t.keepintvl <- Some v
+        else t.keepintvl <- (if v = 0 then None else Some v)
+    | O.TCP_KEEPCNT ->
+        if linux then
+          if v < 1 || v > 127 then invalid () else t.keepcnt <- Some v
+        else t.keepcnt <- (if v = 0 then None else Some v)
+    | O.TCP_MAXSEG -> (
+        match t.os with
+        | Linux ->
+            if v <> 0 && (v < 88 || v > 32767) then invalid ()
+            else t.user_mss <- v
+        | Macos ->
+            let current = Option.value t.maxseg ~default:(default_maxseg t) in
+            if v <= 0 || v > current || v + 40 < 216 then invalid ()
+            else t.maxseg <- Some v)
+    | O.TCP_CONGESTION -> (
+        match congestion v with
+        | "" -> invalid ()
+        | ("reno" | "cubic") as name -> t.congestion <- name
+        | _ -> error `Set `Unknown)
+    | O.TCP_CORK -> t.cork <- v
+    | O.TCP_USER_TIMEOUT -> t.user_timeout <- v
+    | O.TCP_LINGER2 ->
+        t.linger2 <- (match v with None -> 0 | Some n -> min n 120)
+    | O.TCP_DEFER_ACCEPT -> t.defer_accept <- secs_to_retrans v
+    | O.TCP_SYNCNT -> if v > 127 then invalid () else t.syncnt <- v
+    | O.TCP_WINDOW_CLAMP ->
+        if v = 0 then
+          if t.kind = Unconnected then t.window_clamp <- Some 0 else invalid ()
+        else t.window_clamp <- Some (max v 1152)
+    | O.TCP_QUICKACK -> t.quickack <- v
+    | O.TCP_FASTOPEN ->
+        (* The queue is at most [net.core.somaxconn] long. *)
+        if connected t then invalid () else t.fastopen <- min v 4096
+    | O.IP_FREEBIND -> t.freebind <- v
+    | O.IP_BIND_ADDRESS_NO_PORT -> t.bind_no_port <- v
+    | O.IP_LOCAL_PORT_RANGE -> t.port_range <- v
+    | O.IP_TTL -> t.ttl <- v
+    | O.IP_MTU_DISCOVER -> t.mtu_discover <- v
+    | O.IPV6_ONLY -> if t.kind = Unconnected then t.v6only <- v else invalid ()
+    | _ -> missing ()
+
+  (* macOS's answer to an IP or TCP option on a Unix-domain socket: the local
+     option of the same number, LOCAL_PEERCRED for [TCP_NODELAY] and
+     LOCAL_PEERPID or LOCAL_PEERUUID for [TCP_MAXSEG] and [IP_TTL], read as
+     an integer; mem has no peer process and gives 0. *)
+  let local_macos : type a. t -> a Eio.Net.Sockopt.t -> a =
+   fun t opt ->
+    let fail code = error `Get code in
+    match opt with
+    | O.TCP_NODELAY -> (
+        match t.kind with
+        | Datagram -> fail `Invalid
+        | Client | Server -> false
+        | Unconnected | Listener -> fail `Not_connected)
+    | O.TCP_MAXSEG -> if connected t then 0 else fail `Not_connected
+    | O.IP_TTL -> if connected t then 0 else fail `Not_connected
+    | _ -> fail `Not_supported
+
+  let get : type a. t -> a Eio.Net.Sockopt.t -> a =
+   fun t opt ->
+    let opt = Posix.canonical opt in
+    gate `Get t (level opt);
+    let linux = t.os = Linux in
+    match (Posix.extra opt, opt) with
+    | Some Acceptconn, _ -> if linux then t.kind = Listener else missing ()
+    | Some Error, _ -> 0
+    | Some Type, _ -> if t.kind = Datagram then 2 else 1
+    | None, _ when t.os = Macos && t.family = Local && level opt <> Socket ->
+        local_macos t opt
+    | None, opt -> (
+        match opt with
+        | O.SO_DEBUG -> t.debug
+        | O.SO_BROADCAST -> t.broadcast
+        | O.SO_REUSEADDR -> t.reuseaddr
+        | O.SO_KEEPALIVE -> t.keepalive
+        | O.SO_DONTROUTE -> t.dontroute
+        | O.SO_OOBINLINE -> t.oobinline
+        | O.SO_REUSEPORT -> t.reuseport && not (linux && t.family = Local)
+        | O.SO_SNDBUF -> sndbuf t
+        | O.SO_RCVBUF -> rcvbuf t
+        | O.SO_RCVLOWAT -> t.rcvlowat
+        | O.SO_SNDLOWAT -> (
+            match t.sndlowat with
+            | Some n -> n
+            | None ->
+                if linux || (t.family = Local && t.kind = Datagram) then 1
+                else 2048)
+        | O.SO_LINGER -> t.linger
+        | O.SO_RCVTIMEO -> t.rcvtimeo
+        | O.SO_SNDTIMEO -> t.sndtimeo
+        | O.TCP_NODELAY -> t.nodelay
+        | O.TCP_KEEPIDLE -> Option.value t.keepidle ~default:7200
+        | O.TCP_KEEPINTVL -> Option.value t.keepintvl ~default:75
+        | O.TCP_KEEPCNT ->
+            Option.value t.keepcnt ~default:(if linux then 9 else 8)
+        | O.TCP_MAXSEG -> (
+            match t.os with
+            | Linux -> (
+                match t.maxseg with
+                | Some n when connected t -> n
+                | _ -> if t.user_mss > 0 then t.user_mss else 536)
+            | Macos -> Option.value t.maxseg ~default:(default_maxseg t))
+        | O.TCP_CONGESTION -> t.congestion
+        | O.TCP_CORK -> t.cork
+        | O.TCP_USER_TIMEOUT -> t.user_timeout
+        | O.TCP_LINGER2 -> Some (if t.linger2 = 0 then 60 else t.linger2)
+        | O.TCP_DEFER_ACCEPT -> retrans_to_secs t.defer_accept
+        | O.TCP_SYNCNT -> t.syncnt
+        | O.TCP_WINDOW_CLAMP -> (
+            match t.window_clamp with
+            | Some n -> n
+            | None -> if connected t then 65536 else 0)
+        | O.TCP_QUICKACK -> t.quickack
+        | O.TCP_FASTOPEN -> t.fastopen
+        | O.IP_FREEBIND -> t.freebind
+        | O.IP_BIND_ADDRESS_NO_PORT -> t.bind_no_port
+        | O.IP_LOCAL_PORT_RANGE -> t.port_range
+        | O.IP_TTL -> t.ttl
+        | O.IP_MTU ->
+            if not (connected t) then error `Get `Not_connected
+            else if t.family = V4 then 65535
+            else 65536
+        | O.IP_MTU_DISCOVER -> t.mtu_discover
+        | O.IPV6_ONLY -> t.v6only
+        | _ -> missing ())
+
+  (* What a direction of a connection queues once a buffer is set: on Linux
+     over TCP the writer's send buffer, of which it holds at least 32 KiB in
+     flight, and half the reader's receive buffer, its window; over a Unix
+     path half the writer's send buffer, the rest going to each write's
+     overhead. On macOS over TCP the writer's send buffer and what the
+     reader's receive buffer grows to as data comes, 128 KiB more than one
+     set and 176 KiB when none is, or 16 KiB in flight for a send buffer
+     smaller than that; over a Unix path the writer's send buffer. [None]
+     when the queue keeps its capacity. *)
+  let queue ~local ~writer ~reader =
+    match (writer.sndbuf, reader.rcvbuf) with
+    | None, None -> None
+    | _ when local && writer.sndbuf = None -> None
+    | _ -> (
+        let snd = sndbuf writer in
+        match (writer.os, local) with
+        | Linux, false -> Some (max snd 32768 + (rcvbuf reader / 2))
+        | Linux, true -> Some (snd / 2)
+        | Macos, false ->
+            let window =
+              match reader.rcvbuf with Some r -> r + 131072 | None -> 180224
+            in
+            Some (snd + if snd < 16384 then 16384 else window)
+        | Macos, true -> Some snd)
 end
 
 (* Fibers waiting on a pipe, first come first served, in a doubly-linked
@@ -840,7 +1389,7 @@ module Pipe = struct
     mutable fin_sent : bool;
     os : os;
     local : bool;
-    capacity : int;
+    mutable capacity : int;
     mutable size : int; (* Bytes queued and not yet read. *)
     mutable unacked : int;
     readers : Waiters.t;
@@ -892,6 +1441,9 @@ module Pipe = struct
     locked t (fun t ->
         f t;
         ((), Waiters.take_all t.readers @ Waiters.take_all t.writers))
+
+  (* A socket's buffer changed: the queue holds [capacity] bytes now. *)
+  let resize t capacity = update t (fun t -> t.capacity <- capacity)
 
   (* On macOS a write that fails on a reset leaves it to the next read, as
      it raises EPIPE without clearing the socket's pending error. *)
@@ -1109,6 +1661,7 @@ module Flow = struct
       mutable on_close : reset:bool -> abort:bool -> unit;
       mutable on_fin : unit -> unit;
       connection : int;
+      opts : Sockopt.t;
     }
 
     (* [abort] resets the peer, as a connection a listener drops unaccepted
@@ -1202,12 +1755,19 @@ module Flow = struct
       end;
       if now = `Now then teardown t
 
-    let close t = close_with ~abort:false t
+    (* A TCP socket that lingers for no time resets its peer as it closes,
+       as both kernels abort the connection then. *)
+    let close t =
+      let abort = (not t.from_peer.local) && t.opts.linger = Some 0 in
+      close_with ~abort t
+
     let read_methods = []
-    let setsockopt _ opt _ = Sockopt.stream opt
+
+    let setsockopt t opt v =
+      use t "setsockopt" @@ fun () -> Sockopt.set t.opts opt v
 
     let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
-     fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
+     fun t opt -> use t "getsockopt" @@ fun () -> Sockopt.get t.opts opt
   end
 
   type (_, _, _) Eio.Resource.pi +=
@@ -1220,7 +1780,7 @@ module Flow = struct
 
   type t = Impl.t * Impl.tag Eio.Net.stream_socket_ty Eio.Resource.t
 
-  let v ~connection ~from_peer ~to_peer =
+  let v ~connection ~opts ~from_peer ~to_peer =
     let impl =
       Impl.
         {
@@ -1235,6 +1795,7 @@ module Flow = struct
           on_close = (fun ~reset:_ ~abort:_ -> ());
           on_fin = ignore;
           connection;
+          opts;
         }
     in
     (impl, Eio.Resource.T (impl, handler))
@@ -1252,18 +1813,41 @@ module Flow = struct
     | Linux -> if local then 256 * 1024 else 4 * 1024 * 1024
     | Macos -> if local then 8 * 1024 else 1024 * 1024
 
-  (* A connection to itself: what it writes, it reads. *)
-  let self ~os ~capacity =
-    let connection = Atomic.fetch_and_add connections 1 in
-    let pipe = Pipe.v ~os ~local:false ~capacity in
-    v ~connection ~from_peer:pipe ~to_peer:pipe
+  (* What a direction queues: [capacity] until a socket sets a buffer, and at
+     most a [capacity] the test gave, [bound]. *)
+  let queue ~local ~capacity ~bound ~writer ~reader =
+    match Sockopt.queue ~local ~writer ~reader with
+    | None -> capacity
+    | Some q -> if bound then min q capacity else q
 
-  let pair ~os ~local ~capacity =
+  (* A connection to itself: what it writes, it reads. *)
+  let self ~os ~capacity ~bound ~(opts : Sockopt.t) =
     let connection = Atomic.fetch_and_add connections 1 in
-    let to_client = Pipe.v ~os ~local ~capacity in
-    let to_server = Pipe.v ~os ~local ~capacity in
-    let client = v ~connection ~from_peer:to_client ~to_peer:to_server in
-    let server = v ~connection ~from_peer:to_server ~to_peer:to_client in
+    let size () =
+      queue ~local:false ~capacity ~bound ~writer:opts ~reader:opts
+    in
+    let pipe = Pipe.v ~os ~local:false ~capacity:(size ()) in
+    opts.resized <- (fun () -> Pipe.resize pipe (size ()));
+    v ~connection ~opts ~from_peer:pipe ~to_peer:pipe
+
+  let pair ~os ~local ~capacity ~bound ~client:(c : Sockopt.t)
+      ~server:(s : Sockopt.t) =
+    let connection = Atomic.fetch_and_add connections 1 in
+    let size writer reader = queue ~local ~capacity ~bound ~writer ~reader in
+    let to_client = Pipe.v ~os ~local ~capacity:(size s c) in
+    let to_server = Pipe.v ~os ~local ~capacity:(size c s) in
+    let resized () =
+      Pipe.resize to_client (size s c);
+      Pipe.resize to_server (size c s)
+    in
+    c.resized <- resized;
+    s.resized <- resized;
+    let client =
+      v ~connection ~opts:c ~from_peer:to_client ~to_peer:to_server
+    in
+    let server =
+      v ~connection ~opts:s ~from_peer:to_server ~to_peer:to_client
+    in
     (client, server)
 
   let connection (Eio.Resource.T (t, ops) : _ Eio.Net.stream_socket) =
@@ -1313,6 +1897,7 @@ module Listening_socket = struct
     mutable hooks : Eio.Switch.hook list;
     reuse : bool;
     hold : Ports.hold option;
+    opts : Sockopt.t;
   }
 
   (* Linux's accept queue takes one connection more than the backlog, which
@@ -1373,6 +1958,7 @@ module Listening_socket = struct
               hooks = [];
               reuse = reuse_addr;
               hold;
+              opts = Sockopt.listener ~os:hub.ports.os addr;
             }
           in
           Hashtbl.replace hub.listeners addr t;
@@ -1490,10 +2076,15 @@ module Listening_socket = struct
       invalid_arg "eio-net.mem: listening_addr on a closed listener";
     t.addr
 
-  let setsockopt _ opt _ = Sockopt.stream opt
+  let open_opts t =
+    if Mutex.protect t.lock (fun () -> t.closing) then
+      invalid_arg "eio-net.mem: socket option on a closed listener";
+    t.opts
+
+  let setsockopt t opt v = Sockopt.set (open_opts t) opt v
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
-   fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
+   fun t opt -> Sockopt.get (open_opts t) opt
 end
 
 (* A datagram socket bound at [addr]: the datagrams sent to it and not yet
@@ -1534,6 +2125,7 @@ module Datagram_socket = struct
     mutable recv_shut : bool;
     mutable release : Eio.Switch.hook;
     hold : Ports.hold option;
+    opts : Sockopt.t;
   }
 
   and datagram = {
@@ -1542,10 +2134,6 @@ module Datagram_socket = struct
     size : int;
     sender : t option;
   }
-
-  (* Linux's default receive and send buffers, [rmem_default] and
-     [wmem_default], on the kernel the tests record. *)
-  let buffer = 229376
 
   (* The memory a UDP datagram of [n] bytes takes in a receive queue over
      loopback, as Linux allocates it: a head of 896 bytes or a power of two
@@ -1575,11 +2163,9 @@ module Datagram_socket = struct
      datagrams makes a send to it wait. *)
   let max_dgram_qlen = 10
 
-  (* macOS's receive buffers, net.inet.udp.recvspace and
-     net.local.dgram.recvspace, and what a datagram of [n] bytes takes of
-     them: its length, and at least 128 bytes on a Unix path, which fits
-     what one Mac holds of 1, 500, 1000 and 2000 bytes. *)
-  let macos_buffer ~local = if local then 4096 else 786896
+  (* What a datagram of [n] bytes takes of a macOS receive buffer: its
+     length, and at least 128 bytes on a Unix path, which fits what one Mac
+     holds of 1, 500, 1000 and 2000 bytes. *)
   let macos_size ~local n = if local then max n 128 else n
 
   (* A port of zero with none of the range free is bind(2)'s EADDRINUSE. *)
@@ -1631,6 +2217,7 @@ module Datagram_socket = struct
         recv_shut = false;
         release = Eio.Switch.null_hook;
         hold;
+        opts = Sockopt.datagram ~os:hub.os addr;
       }
     in
     (* The latest bound of sockets sharing an address takes its datagrams,
@@ -1648,11 +2235,12 @@ module Datagram_socket = struct
           (reaching ip)
     | `Unix _ -> Hashtbl.find_opt hub.sockets addr
 
-  (* The longest datagram a socket sends to [dst]: UDP's payload over IPv4 or
-     IPv6, or what Linux's default send buffer (212992 bytes, less 32) lets a
-     Unix-domain socket send. *)
-  let max_length : Eio.Net.Sockaddr.datagram -> int = function
-    | `Unix _ -> 212960
+  (* The longest datagram [t] sends to [dst]: UDP's payload over IPv4 or
+     IPv6, or on a Unix path 212960 bytes, what Linux sends with a send
+     buffer of 212992 bytes, and less, its send buffer less 32, for a smaller
+     one. *)
+  let max_length t : Eio.Net.Sockaddr.datagram -> int = function
+    | `Unix _ -> min 212960 (Sockopt.sndbuf t.opts - 32)
     | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
 
   (* A send a socket refuses, in the order Linux checks: a Unix-domain socket
@@ -1675,8 +2263,7 @@ module Datagram_socket = struct
      side. *)
   let refusal_macos t (dst : Eio.Net.Sockaddr.datagram) len =
     let wild x = same (unmap x) (any (unmap x)) in
-    let limit = match t.addr with `Unix _ -> 2048 | `Udp _ -> 9216 in
-    if len > limit then Some Message_too_long
+    if len > Sockopt.sndbuf t.opts then Some Message_too_long
     else
       match (t.addr, dst) with
       | `Unix _, `Udp _ -> Some Address_family
@@ -1705,7 +2292,7 @@ module Datagram_socket = struct
     let len = Cstruct.lenv bufs in
     if t.hub.os = Macos then refusal_macos t dst len
     else
-      let too_long = len > max_length dst in
+      let too_long = len > max_length t dst in
       (* Without SO_BROADCAST a broadcast is refused, and a socket bound at
        a wildcard address has no route to send one, nor a multicast one. *)
       let routed b d port =
@@ -1779,7 +2366,7 @@ module Datagram_socket = struct
     let delivered =
       Mutex.protect peer.lock @@ fun () ->
       if peer.closed then `Lost
-      else if peer.rmem + size > macos_buffer ~local then
+      else if peer.rmem + size > Sockopt.rcvbuf peer.opts then
         if local then `Full else `Lost
       else begin
         peer.rmem <- peer.rmem + size;
@@ -1804,7 +2391,10 @@ module Datagram_socket = struct
     else
       let n = String.length data in
       let delivered =
-        if local && Mutex.protect t.lock (fun () -> t.wmem >= buffer) then `Wait
+        if
+          local
+          && Mutex.protect t.lock (fun () -> t.wmem >= Sockopt.sndbuf t.opts)
+        then `Wait
         else
           Mutex.protect peer.lock @@ fun () ->
           if local && peer.recv_shut then `Refused
@@ -1824,7 +2414,7 @@ module Datagram_socket = struct
               match dst with `Udp (d, _) -> is_v4 d | `Unix _ -> false
             in
             let size = udp_size ~v4 n in
-            if peer.rmem + size > buffer then `Lost
+            if peer.rmem + size > Sockopt.rcvbuf peer.opts then `Lost
             else begin
               peer.rmem <- peer.rmem + size;
               Queue.push
@@ -1859,7 +2449,7 @@ module Datagram_socket = struct
     | None when t.hub.os = Macos -> freed t d
     | None ->
         t.unfreed <- t.unfreed + d.size;
-        if t.unfreed >= buffer / 4 || t.batch = 0 then begin
+        if t.unfreed >= Sockopt.rcvbuf t.opts / 4 || t.batch = 0 then begin
           t.rmem <- t.rmem - t.unfreed;
           t.unfreed <- 0
         end
@@ -1999,10 +2589,15 @@ module Datagram_socket = struct
           t.recv_shut <- true );
     Eio.Condition.broadcast t.hub.room
 
-  let setsockopt _ opt _ = Sockopt.datagram opt
+  let open_opts t =
+    if Mutex.protect t.lock (fun () -> t.closed) then
+      invalid_arg "eio-net.mem: socket option on a closed datagram socket";
+    t.opts
+
+  let setsockopt t opt v = Sockopt.set (open_opts t) opt v
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
-   fun _ _ -> invalid_arg "eio-net.mem: getsockopt is not supported"
+   fun t opt -> Sockopt.get (open_opts t) opt
 end
 
 (* Host and service resolution as glibc's getaddrinfo(3) reads numbers, on
@@ -2322,6 +2917,8 @@ module Network = struct
     datagrams : Datagram_socket.hub;
     capacity : int -> int;
         (* What a connection queues each way, from the kernel's default. *)
+    bounded : bool;
+        (* The test gave [capacity]: it bounds what buffers set give too. *)
     sleep : (float -> unit) option;
   }
 
@@ -2359,11 +2956,13 @@ module Network = struct
         (if sw == t.sw then [ sw ] else [ sw; t.sw ]);
     socket
 
-  let rec check_options : Eio.Net.Sockopt.settings -> unit = function
+  (* The options of a [connect], set in order before it binds and connects,
+     as eio_posix sets them. *)
+  let rec set_options opts : Eio.Net.Sockopt.settings -> unit = function
     | [] -> ()
-    | (opt, _) :: rest ->
-        Sockopt.stream opt;
-        check_options rest
+    | (opt, v) :: rest ->
+        Sockopt.set opts opt v;
+        set_options opts rest
 
   (* Holds the address of a client that connects to [ip] at [dport] in the
      listeners' ports, until [release]: the loopback address of its
@@ -2451,7 +3050,7 @@ module Network = struct
     | `Tcp (lip, _) -> `Tcp (seen_by lip ip, port)
 
   (* A connect for a client that holds [local], if it is a TCP one. *)
-  let connect_held t ~sw ~bind_to
+  let connect_held t ~sw ~bind_to ~opts
       ~(release : ?until:Mtime.t -> ?time_wait:bool -> unit -> unit) addr local
       =
     let listener =
@@ -2502,7 +3101,8 @@ module Network = struct
         let capacity =
           t.capacity (Flow.default_capacity ~os:t.os ~local:false)
         in
-        let flow = Flow.self ~os:t.os ~capacity in
+        Sockopt.connect opts Client;
+        let flow = Flow.self ~os:t.os ~capacity ~bound:t.bounded ~opts in
         let ends = Ends.v t.hub.Listening_socket.ports in
         (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
         Flow.on_close flow (fun ~reset ~abort:_ ->
@@ -2526,7 +3126,11 @@ module Network = struct
         let capacity =
           t.capacity (Flow.default_capacity ~os:t.os ~local:unix)
         in
-        let client, server = Flow.pair ~os:t.os ~local:unix ~capacity in
+        Sockopt.connect opts Client;
+        let client, server =
+          Flow.pair ~os:t.os ~local:unix ~capacity ~bound:t.bounded ~client:opts
+            ~server:(Sockopt.accepted listener.opts)
+        in
         (* The accepted socket holds the listener's port at the address the
            client reached, with the listener's [SO_REUSEADDR], and as one
            bound at a wildcard address if the listener is, as Linux's
@@ -2606,9 +3210,10 @@ module Network = struct
      its flow closes; one bound at an address a socket holds finds it in
      use. *)
   let connect t ~bind_to ~options ~sw addr =
-    check_options options;
-    Eio.Switch.check sw;
     let os = t.os in
+    let opts = Sockopt.client ~os addr in
+    set_options opts options;
+    Eio.Switch.check sw;
     (* macOS binds before it looks at the destination. *)
     (match (os, bind_to) with
     | Macos, Some (`Unix path) -> check_path ~os path
@@ -2622,7 +3227,9 @@ module Network = struct
     in
     check_bind ~os bind_to addr;
     (match bind_to with
-    | Some (`Tcp (ip, _)) -> check_local ~os ~tcp:true ip
+    | Some (`Tcp (ip, _)) ->
+        check_local ~os ~tcp:true ip;
+        Sockopt.bound opts ip
     | Some (`Unix path) -> check_path ~os path
     | None -> ());
     let bind_to =
@@ -2656,7 +3263,7 @@ module Network = struct
       | `Path path -> Files.leave t.hub.files path Client
       | `Nothing -> ()
     in
-    match connect_held t ~sw ~bind_to ~release addr local with
+    match connect_held t ~sw ~bind_to ~opts ~release addr local with
     | flow -> flow
     | exception e ->
         (* eio_posix and eio_linux keep a failed connect's socket on [sw], so
@@ -2762,13 +3369,21 @@ let connection = Flow.connection
 
 let pipe ?os ?capacity () =
   let os = kernel os in
-  let capacity =
-    capacity_rule capacity (Flow.default_capacity ~os ~local:false)
+  let end_ kind =
+    let opts = Sockopt.v ~os ~family:V4 Unconnected in
+    Sockopt.connect opts kind;
+    opts
   in
-  let (_, client), (_, server) = Flow.pair ~os ~local:false ~capacity in
+  let (_, client), (_, server) =
+    Flow.pair ~os ~local:false
+      ~capacity:
+        (capacity_rule capacity (Flow.default_capacity ~os ~local:false))
+      ~bound:(Option.is_some capacity) ~client:(end_ Client)
+      ~server:(end_ Server)
+  in
   (client, server)
 
-let network ?os ~capacity ?clock ~sw () =
+let network ?os ~capacity ~bounded ?clock ~sw () =
   let os = kernel os in
   let files = Files.v () in
   let now = Option.map (fun clock () -> Eio.Time.Mono.now clock) clock in
@@ -2791,11 +3406,14 @@ let network ?os ~capacity ?clock ~sw () =
       room = Eio.Condition.create ();
     }
   in
-  Eio.Resource.T (Network.{ sw; os; hub; datagrams; capacity; sleep }, handler)
+  Eio.Resource.T
+    (Network.{ sw; os; hub; datagrams; capacity; bounded; sleep }, handler)
 
 let v ?os ?capacity ?clock ~sw () =
-  network ?os ~capacity:(capacity_rule capacity) ?clock ~sw ()
+  network ?os ~capacity:(capacity_rule capacity)
+    ~bounded:(Option.is_some capacity) ?clock ~sw ()
 
 module Private = struct
-  let v = network
+  let v ?os ~capacity ?clock ~sw () =
+    network ?os ~capacity ~bounded:true ?clock ~sw ()
 end
