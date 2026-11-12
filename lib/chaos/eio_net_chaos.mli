@@ -62,7 +62,10 @@
     datagram at a time. A program that never fails the calls still waiting on a
     connection that died passes unless the workload waits for every call and
     checks how each ended. A garbled datagram is random bytes, so a parser that
-    rejects most noise but accepts some may pass.
+    rejects most noise but accepts some may pass. A peer that stops is a read
+    that hangs until the peer's own timeout cancels it, so a program that blocks
+    on a peer that never reads passes if that peer gives up and closes, as a
+    stopped process would not.
 
     {2 Failures and replay}
 
@@ -160,13 +163,13 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     ordered (unix(7)). A connect may be refused, but neither times out nor finds
     no route; an accepted connection may have been closed by its client; a peer
     may close, crash or stop, and its reader still gets every byte whose write
-    returned, while the writes of a peer that stops wait until its reader gives
-    up; reads may take what several writes sent. A write of up to 32 KiB arrives
-    whole, so there are no one-byte reads or writes, and a cut lands between two
-    writes; a larger one is cut short when every connection queues 32 KiB, as
-    Linux cuts a 300,000-byte write to what its socket's buffer takes. No
-    datagram is lost, duplicated, reordered or garbled, and the outage refuses
-    connects only.
+    returned, while the writes of a peer that stops wait, one under way where it
+    stands, until its reader gives up; reads may take what several writes sent.
+    A write of up to 32 KiB arrives whole, so there are no one-byte reads or
+    writes, and a cut lands between two writes; a larger one is cut short when
+    every connection queues 32 KiB, as Linux cuts a 300,000-byte write to what
+    its socket's buffer takes. No datagram is lost, duplicated, reordered or
+    garbled, and the outage refuses connects only.
 
     A run passes if [run] returns. [run] catches the errors its program may
     raise and checks the results itself: any exception that escapes it fails the
@@ -252,14 +255,15 @@ module Fault : sig
             Over IP a read that hangs holds what is queued, as a path that drops
             every segment does. On a Unix-domain connection it is a peer that
             stops, as AF_UNIX keeps in the reader's queue what a returned write
-            sent (unix(7)): the reads return the bytes queued or on their way,
-            then the first that finds none waits until a cancel ends it, and the
-            peer's writes on that connection wait with it. The wait also ends
-            when the peer closes the connection or shuts down its sending, this
-            end shuts down its receiving, or the connection breaks: the read
-            then returns what the socket has, end of file included. On a network
-            other than {!Eio_net_mem}, where the wrapper does not see the peer,
-            the read holds what is queued, as over IP. *)
+            sent (unix(7)): the peer's writes on that connection wait from then
+            on, one under way where it stands, the reads return the bytes queued
+            when it stopped, and the first that finds none waits until a cancel
+            ends it. The wait also ends when the peer closes the connection or
+            shuts down its sending, this end shuts down its receiving, or the
+            connection breaks: the read then returns what the socket has, end of
+            file included. On a network other than {!Eio_net_mem}, where the
+            wrapper does not see the peer, the read holds what is queued, as
+            over IP. *)
     | Reset
         (** Over IP, the connection is reset at both ends, and the bytes not yet
             read are lost. At each end the first read or write that follows
@@ -270,14 +274,16 @@ module Fault : sig
             reader's queue what a returned write sent, so each end reads that
             first. The other end then reads [Connection_reset] once, if the
             crashed end left bytes unread, as AF_UNIX reports it, then end of
-            file; the crashed end reads end of file. The writes of both raise
-            [Connection_reset], as AF_UNIX's EPIPE, which leaves the reset to
-            the reads. On a network other than {!Eio_net_mem}, each end of a
-            Unix-domain connection reads what is queued, then [Connection_reset]
-            once. On an accept, the accept succeeds and the connection it
-            returns is reset, as Linux hands over one whose client left first.
-            On a connect, it is a refusal, as a reset answering the handshake
-            is. *)
+            file; the crashed end reads end of file. The crashed end's code
+            still runs, so it still reads what was queued to it: a program may
+            hold that what its peer's returned writes sent arrives. The writes
+            of both raise [Connection_reset], as AF_UNIX's EPIPE, which leaves
+            the reset to the reads. On a network other than {!Eio_net_mem}, each
+            end of a Unix-domain connection reads what is queued, then
+            [Connection_reset] once. On an accept, the accept succeeds and the
+            connection it returns is reset, as Linux hands over one whose client
+            left first. On a connect, it is a refusal, as a reset answering the
+            handshake is. *)
     | Eof
         (** One end closes, as a FIN does: no byte already written is lost. On a
             read, the peer closed: the read returns what the peer wrote before,
