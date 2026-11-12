@@ -15,7 +15,10 @@ open! Hermetic
      completion or a timer, moves the clock on by 1 us, as real time passes
      while a program runs, and a run stops after [max_turns] turns;
    - [charge] takes a turn for a call that does not suspend, as a network
-     operation does, so a loop of them moves the clock and meets the limits.
+     operation does, so a loop of them moves the clock and meets the limits;
+   - [Eio_unix.run_in_systhread] runs its function at once, in the
+     scheduler, so a run stays deterministic; the fiber resumes on its next
+     turn, as it would once the systhread is done.
 
    A loop run by the library reopens commit 495b8c2, which removed one along
    with the eio.mock dependency: hang detection and deterministic virtual time
@@ -235,7 +238,14 @@ let run ~limit main =
                     fork ~new_fiber f)
             | Eio.Private.Effects.Get_context ->
                 Some (fun k -> Effect.Deep.continue k fiber)
-            | _ -> None);
+            | e ->
+                Option.map
+                  (fun run k ->
+                    let v = run () in
+                    let k = { Suspended.k; fiber } in
+                    Lf_queue.push t.run_q (fun () -> Suspended.continue k v);
+                    schedule t)
+                  (Posix.systhread e));
       }
   in
   let new_fiber = Fiber_context.make_root () in

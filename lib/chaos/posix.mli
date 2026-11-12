@@ -9,3 +9,8 @@ val unreachable : unit -> exn
 
 val emfile : unit -> exn
 (** [emfile ()] is the error of an accept with no descriptor left. *)
+
+val systhread : 'a Effect.t -> (unit -> 'a) option
+(** [systhread e] is [Some run] iff [e] is the effect of
+    [Eio_unix.run_in_systhread]: [run ()] calls its function in the calling
+    thread and is the effect's answer. *)

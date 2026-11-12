@@ -105,7 +105,9 @@
     completion or a timer, moves them by 1 us, as a program's work takes time,
     and so does each network operation, one that never waits included: a listen,
     a send, a lookup or a close. When every fiber waits they move to the next
-    timer, so a timeout of an hour takes no time.
+    timer, so a timeout of an hour takes no time. A call of
+    [Eio_unix.run_in_systhread] runs its function at once, in the run's own
+    thread, so the run stays deterministic.
 
     A run hangs, and fails, when every fiber waits and no timer is due, when it
     is still running after an hour of its clock, and when the same network

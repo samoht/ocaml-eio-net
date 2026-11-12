@@ -32,8 +32,10 @@ val run :
     next timer when every fiber waits, which is a wait of 1 ms or more if that
     timer was set for 1 ms or more, or the clock moves that much. [charge ()]
     takes a turn in the fiber that calls it, for work that does not suspend:
-    past the limits, that fiber waits for ever and the run stops. It returns
-    what [main] returns, and raises what [main] raises.
+    past the limits, that fiber waits for ever and the run stops.
+    [Eio_unix.run_in_systhread] runs its function at once, outside any fiber,
+    and its caller resumes on its next turn. It returns what [main] returns, and
+    raises what [main] raises.
 
     @raise Deadlock_detected if every fiber waits and no timer is due.
     @raise Time_limit if the clock would move past [limit].
