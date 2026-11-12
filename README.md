@@ -129,8 +129,9 @@ variable and prints nothing. For a scenario a check does not try,
 - `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, and host
   name resolution.
 - `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets.
-  Writes never wait unless `?capacity` bounds the bytes a connection queues;
-  a small capacity shows a peer that writes without reading.
+  A connection queues what Linux's default buffers hold, and a datagram
+  socket what its receive buffer holds; a small `?capacity` shows a peer that
+  writes without reading.
 - `eio-net.chaos`: `check`, which runs a workload under the network faults
   it may meet, and the wrapper it uses.
 - `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's

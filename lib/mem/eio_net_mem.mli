@@ -30,10 +30,13 @@ type Eio.Exn.Backend.t +=
             - A write to a TCP peer that shut down both ways: the first is lost
               and resets the connection, as Linux resets it then, so the peer's
               next read raises the reset and every later write does. A write to
-              a full queue first waits for room, as Linux holds data the peer's
-              window refuses, and then raises the reset.
+              a full queue waits, as Linux holds data the peer's window refuses
+              and the peer's reads free no room, until the peer closes.
             - A write on a Unix-domain connection whose peer shut its receive
-              side, as EPIPE.
+              side, as EPIPE. One that waits on a full queue raises it once its
+              own end shuts its send side or the peer shuts its receive side, as
+              a blocking write(2) on Linux and eio_linux do; eio_posix keeps
+              waiting, as Linux's poll(2) reports no change then.
 
             The first read or write that raises the reset reports it, as a
             socket clears its pending error: reads after it raise [End_of_file],
@@ -43,16 +46,19 @@ type Eio.Exn.Backend.t +=
 
             A read after the peer closed or shut its send otherwise raises
             [End_of_file] once the queued bytes are read. A read after this end
-            shut its receive side returns the bytes queued and those that arrive
-            after, as on Linux, and raises [End_of_file] once none is queued;
-            macOS drops them. A read into an empty buffer raises [End_of_file],
-            as Eio's backends do. On TCP, a write after the peer shut its
-            receive side, and only that, is queued and read in the same way. A
-            read, a write or a shutdown on a flow after its own close raises
-            [Invalid_argument], as Eio's own sockets do. One already in flight
-            finishes against the open socket, and the socket closes once none
-            is, as Eio defers a descriptor's close to its users: a read waiting
-            across its flow's close still gets what the peer writes. *)
+            shut its receive side returns the bytes queued, and raises
+            [End_of_file] once none is; macOS drops them. As Linux then
+            advertises no more room to the writer, what it reads frees none: a
+            writer waiting on a full queue keeps waiting, and the bytes it
+            writes into room left at the shutdown arrive and are read too. A
+            read into an empty buffer raises [End_of_file], as Eio's backends
+            do. On TCP, a write after the peer shut its receive side, and only
+            that, is queued and read in the same way. A read, a write or a
+            shutdown on a flow after its own close raises [Invalid_argument], as
+            Eio's own sockets do. One already in flight finishes against the
+            open socket, and the socket closes once none is, as Eio defers a
+            descriptor's close to its users: a read waiting across its flow's
+            close still gets what the peer writes. *)
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes
@@ -89,13 +95,17 @@ type Eio.Exn.Backend.t +=
             [ENETUNREACH]; and of the one a [connect] to a broadcast or
             multicast address raises, which no route reaches. The network has
             the loopback interface only, so a [connect] or a datagram [send] to
-            an address off it raises it too, as on a host with loopback only:
-            any but 127.0.0.0/8, [::1], the wildcard addresses and their
-            IPv4-mapped forms, multicast and broadcast aside. An IPv4-compatible
-            address such as [::127.0.0.1] is off it. A datagram from an
-            IPv4-mapped address to an IPv6 one off loopback raises it before the
-            error that {!Address_family} marks, as Linux finds no route first.
-        *)
+            an address off it raises it too, as on a host with loopback only,
+            from any source: any but 127.0.0.0/8, [::1], the wildcard addresses
+            and their IPv4-mapped forms, IPv4 multicast and broadcast aside. An
+            IPv4-compatible address such as [::127.0.0.1] and an IPv6 multicast
+            one are off it. A datagram to an IPv4 broadcast or multicast address
+            from a socket bound at a wildcard address raises it too, as that
+            socket has no route to send it. From an IPv4-mapped address, a
+            [connect] or a datagram to an IPv6 address off loopback raises it
+            before the error that {!Address_family} marks, as Linux finds no
+            route first, and a [connect] to a link-local one the error that
+            {!Invalid_address} marks. *)
   | Address_family
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             bound to an IPv4-mapped address raises at an IPv6 one, and a
@@ -133,11 +143,16 @@ type Eio.Exn.Backend.t +=
             IPv6 address, or a multicast one of interface or link scope, which
             needs a scope that Eio's addresses do not carry, or any IPv6
             multicast one; [listen] and [datagram_socket] raise those raw. It is
-            also the code of the one a [connect] raises at a link-local address,
-            or from a loopback address to an IPv4 address outside 127.0.0.0/8,
-            which Linux cannot route, or at the empty Unix path; and of the one
-            a datagram [send] raises at an address its socket cannot send to,
-            described in {!section-datagrams}. *)
+            also the code of the one a [connect] raises at a link-local address
+            or at the empty Unix path; and of the one a datagram [send] raises
+            at an address its socket cannot send to, described in
+            {!section-datagrams}. *)
+  | Broadcast
+        (** The backend code of the [Eio.Fs.Permission_denied] error a datagram
+            [send] raises at 127.255.255.255, the broadcast address of
+            loopback's network, or at 255.255.255.255 from a socket bound at a
+            loopback address, where Linux fails it with [EACCES] as the socket
+            has no [SO_BROADCAST]. *)
 
 (** {1 Networks} *)
 

@@ -14,6 +14,7 @@ type Eio.Exn.Backend.t +=
   | Address_not_available
   | Name_too_long
   | Invalid_address
+  | Broadcast
 
 let () =
   Eio.Exn.Backend.register_pp (fun ppf -> function
@@ -55,6 +56,9 @@ let () =
         true
     | Invalid_address ->
         Format.pp_print_string ppf "Invalid address (eio-net.mem)";
+        true
+    | Broadcast ->
+        Format.pp_print_string ppf "Broadcast not allowed (eio-net.mem)";
         true
     | _ -> false)
 
@@ -148,6 +152,10 @@ let multicast_v4 ip = first_byte ip >= 224 && first_byte ip <= 239
 let broadcast (ip : Eio.Net.Ipaddr.v4v6) =
   String.equal (ip :> string) "\255\255\255\255"
 
+(* The broadcast address of loopback's network, 127.0.0.0/8. *)
+let lo_broadcast (ip : Eio.Net.Ipaddr.v4v6) =
+  String.equal (ip :> string) "\127\255\255\255"
+
 (* A link-local IPv6 address, or a multicast one of interface or link scope,
    which needs a scope that Eio's addresses do not carry. *)
 let needs_scope (ip : Eio.Net.Ipaddr.v4v6) =
@@ -157,9 +165,10 @@ let needs_scope (ip : Eio.Net.Ipaddr.v4v6) =
      || (raw.[0] = '\xff' && Char.code raw.[1] land 0x0f <= 2))
 
 (* The network has the loopback interface only, which reaches 127.0.0.0/8,
-   ::1 and the wildcard addresses, which stand for loopback, and routes
+   ::1 and the wildcard addresses, which stand for loopback, and routes IPv4
    multicast and broadcast: a host with loopback only has no route to any
-   other address, an IPv4-compatible one such as ::127.0.0.1 included. *)
+   other address, an IPv4-compatible one such as ::127.0.0.1 and an IPv6
+   multicast one included. *)
 let off_loopback ip =
   let ip = unmap ip in
   if is_v4 ip then
@@ -167,20 +176,7 @@ let off_loopback ip =
       (first_byte ip = 127
       || same ip (any ip)
       || multicast_v4 ip || broadcast ip)
-  else
-    not
-      (same ip Eio.Net.Ipaddr.V6.loopback
-      || same ip (any ip)
-      || first_byte ip = 0xff)
-
-(* A loopback address routes only to loopback and multicast ones. *)
-let unroutable b d =
-  let b = unmap b and d = unmap d in
-  is_v4 b && is_v4 d
-  && (not (same b (any b)))
-  && first_byte b = 127
-  && first_byte d <> 127
-  && not (multicast_v4 d)
+  else not (same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip))
 
 (* eio_posix raises bind(2)'s errors from [listen] and [datagram_socket] as a
    raw [Unix.Unix_error], and a [connect]'s as an {!Eio.Io} error. *)
@@ -626,7 +622,9 @@ end
    reader has closed: the first write to it is lost and answered with a reset,
    which [refused] then makes every later write raise; on a Unix-domain
    connection, [local], the first write raises it, as EPIPE. [rcv_shut] says the reader
-   shut its receive side: it reads what is queued, then end-of-file. Once it
+   shut its receive side: it reads what is queued, then end-of-file, and as
+   Linux then sends no window update, what it reads frees no room: [unacked]
+   counts it. Once it
    has also shut its send side, [fin_sent], data reaching a TCP reader resets
    the connection, as Linux resets it in FIN-WAIT; a write to a Unix-domain
    reader that shut its receive side raises the reset, as EPIPE. *)
@@ -644,6 +642,7 @@ module Pipe = struct
     local : bool;
     capacity : int;
     mutable size : int; (* Bytes queued and not yet read. *)
+    mutable unacked : int;
     readers : Waiters.t;
     writers : Waiters.t;
   }
@@ -662,6 +661,7 @@ module Pipe = struct
       fin_sent = false;
       capacity;
       size = 0;
+      unacked = 0;
       readers = Waiters.v ();
       writers = Waiters.v ();
     }
@@ -733,8 +733,9 @@ module Pipe = struct
         if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
       end
       else if t.rcv_shut && t.local then leave (`Raise (reset_exn ()))
-      else if Waiters.must_wait t.writers ~turn || t.size >= t.capacity then
-        (`Wait (Waiters.queue t.writers ~turn), [])
+      else if
+        Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
+      then (`Wait (Waiters.queue t.writers ~turn), [])
       else if t.rcv_shut && t.fin_sent then begin
         (* Data a full queue held back resets the connection once it is
            sent; a write that waited for room reports the reset. *)
@@ -744,10 +745,12 @@ module Pipe = struct
       end
       else begin
         if turn then t.writers.turn <- false;
-        let k = min n (t.capacity - t.size) in
+        let k = min n (t.capacity - t.size - t.unacked) in
         push t bufs k;
         t.size <- t.size + k;
-        let next = if t.size < t.capacity then Waiters.pass t.writers else [] in
+        let next =
+          if t.size + t.unacked < t.capacity then Waiters.pass t.writers else []
+        in
         (`Done k, Waiters.pass t.readers @ next)
       end
     in
@@ -795,10 +798,11 @@ module Pipe = struct
         if turn then t.readers.turn <- false;
         let n = take t dst 0 in
         t.size <- t.size - n;
+        if t.rcv_shut then t.unacked <- t.unacked + n;
         let next =
           if Queue.is_empty t.queued then [] else Waiters.pass t.readers
         in
-        (`Read n, Waiters.pass t.writers @ next)
+        (`Read n, (if t.rcv_shut then [] else Waiters.pass t.writers) @ next)
       end
       else if t.reset then begin
         t.reset <- false;
@@ -819,7 +823,8 @@ module Pipe = struct
   let shut t = update t (fun t -> t.shut <- true)
 
   (* The reader shuts its receive side: it still reads what is queued and
-     what arrives, as on Linux, and end-of-file once nothing is. *)
+     what arrives, as on Linux, and end-of-file once nothing is; what it
+     reads frees no room for the writer. *)
   let shut_receive t = update t (fun t -> t.rcv_shut <- true)
 
   (* The reader shut its send side. *)
@@ -1375,9 +1380,16 @@ module Datagram_socket = struct
   let refusal t dst bufs =
     let len = Cstruct.lenv bufs in
     let too_long = len > max_length dst in
+    (* Without SO_BROADCAST a broadcast is refused, and a socket bound at
+       a wildcard address has no route to send one, nor a multicast one. *)
     let routed b d port =
+      let b = unmap b and d4 = unmap d in
+      let wildcard = same b (any b) in
       if port = 0 then Some Invalid_port
-      else if unroutable b d then Some Invalid_address
+      else if lo_broadcast d4 || (broadcast d4 && not wildcard) then
+        Some Broadcast
+      else if wildcard && (broadcast d4 || multicast_v4 d4) then
+        Some Network_unreachable
       else if off_loopback d then Some Network_unreachable
       else if too_long then Some Message_too_long
       else None
@@ -1504,7 +1516,9 @@ module Datagram_socket = struct
       | dst, _ -> dst
     in
     Option.iter
-      (fun code -> raise (Eio.Exn.create (Eio.Exn.X code)))
+      (function
+        | Broadcast -> raise (Eio.Fs.err (Permission_denied Broadcast))
+        | code -> raise (Eio.Exn.create (Eio.Exn.X code)))
       (refusal t dst bufs);
     (* A send that waits looks for its destination again, as Linux does. *)
     Eio.Condition.loop_no_mutex t.hub.room @@ fun () ->
@@ -1934,8 +1948,14 @@ module Network = struct
     match (bind_to, addr) with
     | None, _ | Some (`Unix _), `Unix _ -> ()
     | Some (`Tcp (b, _)), `Tcp (d, _)
-      when String.length (b :> string) = String.length (d :> string) ->
-        Option.iter fail (cross_family b d)
+      when String.length (b :> string) = String.length (d :> string) -> (
+        match cross_family b d with
+        (* Linux finds no route, or no scope, before the families apart. *)
+        | Some Address_family when first_byte d = 0xff ->
+            fail Network_unreachable
+        | Some Address_family when needs_scope d -> fail Invalid_address
+        | Some Address_family when off_loopback d -> fail Network_unreachable
+        | code -> Option.iter fail code)
     | Some (`Tcp _), `Tcp (d, _) when String.length (d :> string) = 16 ->
         fail Invalid_address
     | Some (`Tcp _), `Unix _ -> fail Invalid_address
@@ -1965,20 +1985,16 @@ module Network = struct
     let refused () =
       raise (Eio.Net.err (Connection_failure (Refused No_listener)))
     in
-    (* No route reaches broadcast or multicast, nor an address outside
-       127.0.0.0/8 from a loopback one, and a link-local one needs a scope,
-       as on Linux. *)
+    (* A connect reaches no broadcast or multicast address, nor one off
+       loopback, and a link-local one needs a scope, as on Linux. *)
     (match addr with
     | `Tcp (d, _) ->
         let d' = unmap d in
         if
-          (is_v4 d' && (multicast_v4 d' || broadcast d'))
+          (is_v4 d' && (multicast_v4 d' || broadcast d' || lo_broadcast d'))
           || ((not (is_v4 d')) && first_byte d' = 0xff)
         then fail Network_unreachable;
         if needs_scope d' then fail Invalid_address;
-        (match bind_to with
-        | Some (`Tcp (b, _)) when unroutable b d -> fail Invalid_address
-        | _ -> ());
         if off_loopback d then fail Network_unreachable
     | `Unix _ -> ());
     (* A connect bound at its own destination opens to itself, as Linux's
