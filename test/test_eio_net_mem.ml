@@ -600,8 +600,6 @@ let test_unix_path_not_found () =
   | exception Eio.Io (Eio.Fs.E (Not_found _), _) -> ()
   | () -> Alcotest.fail "sent to a missing path"
 
-(* With a capacity, a write takes what fits and waits while the queue is
-   full, so a writer that ignores flow control shows. *)
 (* A closed Unix-domain datagram socket leaves its file, as Eio's POSIX backend
    removes none: a send there is refused, and a bind there finds the address
    in use. *)
@@ -623,6 +621,8 @@ let test_closed_datagram_path () =
   | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
   | _ -> Alcotest.fail "bound a path whose file is still there"
 
+(* With a capacity, a write takes what fits and waits while the queue is
+   full, so a writer that ignores flow control shows. *)
 let test_capacity () =
   Eio_mock.Backend.run @@ fun () ->
   let client, server = Eio_net_mem.pipe ~capacity:4 () in
@@ -679,6 +679,29 @@ let test_default_capacity () =
   in
   queued (`Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)) (4 * 1024 * 1024);
   queued (`Unix "/tmp/queued.sock") (256 * 1024)
+
+(* A capacity above the kernel's default is what a connection queues, over
+   TCP and over a Unix path, under either kernel. *)
+let test_large_capacity () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let capacity = 8 * 1024 * 1024 in
+  let queued os addr =
+    let net = Eio_net_mem.v ~os ~capacity ~sw () in
+    let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+    let client = Eio.Net.connect ~sw net (Eio.Net.listening_addr l) in
+    let _ = Eio.Net.accept ~sw l in
+    let n = Eio.Flow.single_write client [ Cstruct.create (capacity + 1) ] in
+    Alcotest.(check int) "the bytes queued" capacity n
+  in
+  List.iter
+    (fun os ->
+      queued os (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0));
+      queued os (`Unix "/tmp/large.sock"))
+    [ `Linux; `Macos ];
+  let client, _server = Eio_net_mem.pipe ~os:`Macos ~capacity () in
+  let n = Eio.Flow.single_write client [ Cstruct.create (capacity + 1) ] in
+  Alcotest.(check int) "a pipe queues its capacity" capacity n
 
 (* Under [`Macos] a connection queues what macOS's buffers hold: at least
    the 1 MiB its TCP autotuning grows to, and AF_UNIX's 8 KiB. *)
@@ -2536,6 +2559,8 @@ let suite =
       Alcotest.test_case "a Unix path with no socket" `Quick
         test_unix_path_not_found;
       Alcotest.test_case "a capacity bounds the queue" `Quick test_capacity;
+      Alcotest.test_case "a capacity above the default" `Quick
+        test_large_capacity;
       Alcotest.test_case "macOS: buffers" `Quick test_macos_capacity;
       Alcotest.test_case "macOS: a connect to 127.0.0.2 times out" `Quick
         test_macos_connect;
