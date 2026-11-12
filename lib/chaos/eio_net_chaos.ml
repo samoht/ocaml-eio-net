@@ -10,7 +10,7 @@ type env =
 module Op = Op
 module Fault = Fault
 
-let wrap ~clock f net = Wrapper.v ~clock ~outage:false f net
+let wrap ?os ~clock f net = Wrapper.v ?os ~clock ~outage:false f net
 let pair = Wrapper.pair
 let outage (env : env) = Wrapper.outage env#net
 
@@ -67,7 +67,7 @@ let waits_on net ~root tids =
 
 (* A run of [s]: why it failed if it did. [observe] sees each operation and
    the fault it met. *)
-let exec_with ~observe run (s : Plan.scenario) =
+let exec_with ~os ~observe run (s : Plan.scenario) =
   let faults = Plan.faults s in
   let f op =
     let fault = faults op in
@@ -89,9 +89,9 @@ let exec_with ~observe run (s : Plan.scenario) =
         | Some Tiny_buffers -> Some Plan.tiny_buffer
         | _ -> None
       in
-      let base = Eio_net_mem.v ?capacity ~clock:mono_clock ~sw () in
+      let base = Eio_net_mem.v ~os ?capacity ~clock:mono_clock ~sw () in
       let net =
-        Wrapper.v ~max_ops ~split:(Plan.split s) ~charge ~clock
+        Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
           ~outage:(s.lasting = Some Outage) f base
       in
       wrapped := Some net;
@@ -151,7 +151,7 @@ let kept = 10_000
 
 (* A run of [s]: the operations a report shows, and why it failed if it
    did. *)
-let exec_shown run (s : Plan.scenario) =
+let exec_shown ~os run (s : Plan.scenario) =
   let head = ref [] and n = ref 0 in
   let tail = Queue.create () and left_out = ref 0 in
   let observe op fault =
@@ -167,7 +167,7 @@ let exec_shown run (s : Plan.scenario) =
       end
     end
   in
-  let failed = exec_with ~observe run s in
+  let failed = exec_with ~os ~observe run s in
   ( {
       head = List.rev !head;
       left_out = !left_out;
@@ -177,8 +177,8 @@ let exec_shown run (s : Plan.scenario) =
 
 (* A run of a scenario with no lasting condition: all its operations, and why
    it failed if it did. *)
-let exec run s =
-  let shown, failed = exec_shown run s in
+let exec ~os run s =
+  let shown, failed = exec_shown ~os run s in
   (shown.head, failed)
 
 (* {1 Reports} *)
@@ -348,7 +348,7 @@ let digest (trace : Plan.trace) =
 
 (* Where a run with no fault first differs from [first], if it does, seen
    as it runs, so that its operations are not kept. *)
-let diverges run (first : Plan.trace) =
+let diverges ~os run (first : Plan.trace) =
   let rest = ref first and diverged = ref None in
   let observe op _ =
     if Option.is_none !diverged then
@@ -358,7 +358,7 @@ let diverges run (first : Plan.trace) =
           diverged := Fmt.kstr Option.some "%a, then %a" Op.pp x Op.pp op
       | [] -> diverged := Fmt.kstr Option.some "%a, then nothing" Op.pp op
   in
-  ignore (exec_with ~observe run Plan.none : string option);
+  ignore (exec_with ~os ~observe run Plan.none : string option);
   match (!diverged, !rest) with
   | Some d, _ -> Some d
   | None, (x, _) :: _ -> Fmt.kstr Option.some "%a, then nothing" Op.pp x
@@ -384,7 +384,7 @@ let parse_replay r =
 let find k = List.find_opt (fun s -> Plan.key s = k)
 
 (* The scenario a replay names, if the check still has it. *)
-let scenario run ~first ~linear k =
+let scenario ~os run ~first ~linear k =
   match find k linear with
   | Some s -> Some (s, `Linear)
   | None when k = Plan.key Plan.none -> Some (Plan.none, `Linear)
@@ -397,7 +397,7 @@ let scenario run ~first ~linear k =
           | Some i -> (
               match find (String.sub k 0 i) linear with
               | Some ({ rules = [ r ]; _ } as s1) ->
-                  let after, _ = exec run s1 in
+                  let after, _ = exec ~os run s1 in
                   Plan.seconds r ~first ~after
                   |> find k
                   |> Option.map (fun s -> (s, `Sampled))
@@ -414,10 +414,13 @@ let first_failed ~hash trace error =
     { head = trace; left_out = 0; tail = [] }
     hash (Plan.key Plan.none)
 
-let check ?(budget = 2_000) ?replay run =
+let check ?os ?(budget = 2_000) ?replay run =
+  let os =
+    match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux
+  in
   if budget < 1 then Fmt.invalid_arg "%s: the budget is %d" name budget;
   let replay = Option.map parse_replay replay in
-  let first, failed = exec run Plan.none in
+  let first, failed = exec ~os run Plan.none in
   Option.iter (first_failed ~hash:(digest first) first) failed;
   if first = [] then
     fail "the workload makes no network operation, so it tests nothing";
@@ -425,11 +428,11 @@ let check ?(budget = 2_000) ?replay run =
     (fail
        "two runs with no fault made different operations (%s); the workload \
         must be deterministic")
-    (diverges run first);
+    (diverges ~os run first);
   let hash = digest first in
   let linear = Plan.linear first in
   let attempt ?matched tier s =
-    let shown, failed = exec_shown run s in
+    let shown, failed = exec_shown ~os run s in
     Option.iter (report ?matched ~hash ~tier s shown) failed;
     shown.head
   in
@@ -445,7 +448,7 @@ let check ?(budget = 2_000) ?replay run =
                "the replay named first run %s, and the workload's is now %s" h
                hash)
       in
-      match scenario run ~first ~linear k with
+      match scenario ~os run ~first ~linear k with
       | Some (s, tier) -> ignore (attempt ?matched tier s : Plan.trace)
       | None when h = hash ->
           fail "the replay names %s, a scenario this check no longer has" k

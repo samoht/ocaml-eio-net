@@ -145,8 +145,13 @@ type env =
 
 (** {1:checks Checks} *)
 
-val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
-(** [check ~budget ~replay run] calls [run] many times, each with a fresh
+val check :
+  ?os:[< `Linux | `Macos ] ->
+  ?budget:int ->
+  ?replay:string ->
+  (env -> unit) ->
+  unit
+(** [check ~os ~budget ~replay run] calls [run] many times, each with a fresh
     in-memory network of {!Eio_net_mem}. The first run has no fault.
 
     The linear tier tries each of these alone:
@@ -193,6 +198,11 @@ val check : ?budget:int -> ?replay:string -> (env -> unit) -> unit
     raise and checks the results itself: any exception that escapes it fails the
     check, an injected [Eio.Io] included. So does a hang, a first run that makes
     no network operation, and two first runs that make different ones.
+
+    [os] (defaults to [`Linux]) is the kernel the network follows, as
+    {!Eio_net_mem.v} takes it. Under [`Macos] a connect that times out takes 75
+    seconds, TIME_WAIT lasts 30, and a Unix-domain crash reads as end of file at
+    both ends, as macOS reports no reset on AF_UNIX.
 
     [budget] (defaults to [2_000]) bounds the runs. [replay] runs only the
     scenario a failure named.
@@ -349,15 +359,17 @@ module Fault : sig
 end
 
 val wrap :
+  ?os:[< `Linux | `Macos ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   _ Eio.Net.t ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [wrap ~clock f net] is [net] with [f] asked about each operation before it
-    runs, on the connections and the datagram sockets it makes. The operation
+(** [wrap ~os ~clock f net] is [net] with [f] asked about each operation before
+    it runs, on the connections and the datagram sockets it makes. The operation
     meets the fault [f] answers; [clock] times stalls and timeouts. [f] may also
     act: count or log. [getaddrinfo], [getnameinfo] and datagram sends pass
-    through.
+    through. [os] (defaults to [`Linux]) is the kernel whose rules the faults
+    follow, as {!check} says: pass the one [net] follows.
 
     The network, its connections and its datagram sockets may be used from
     several domains at once. [f] is called by one of them at a time, in the
@@ -387,10 +399,12 @@ val wrap :
     has not handed up yet, and the datagrams a socket holds back. *)
 
 val pair :
+  ?os:[< `Linux | `Macos ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-(** [pair ~clock f] is a connected pair of in-memory streams, the client end
+(** [pair ~os ~clock f] is a connected pair of in-memory streams, the client end
     first, with [f] asked about each read and write of either end, as {!wrap}
-    asks: [socket] is [1]. A fuzzer drives it from its input. *)
+    asks: [socket] is [1]. Its streams follow [os] (defaults to [`Linux]), as
+    {!Eio_net_mem.pipe} takes it. A fuzzer drives it from its input. *)

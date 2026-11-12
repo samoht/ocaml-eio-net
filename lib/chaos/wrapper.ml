@@ -39,6 +39,7 @@ type freeze = { thawed : unit Eio.Promise.t; thaw : unit Eio.Promise.u }
    crashed with bytes unread: it reads ECONNRESET once its queue is empty. *)
 type conn = {
   lock : Mutex.t;
+  os : [ `Linux | `Macos ];
   family : Op.family;
   paired : bool;
   broken : [ `Open | `Reset | `Closed of Op.side ] Atomic.t;
@@ -49,9 +50,10 @@ type conn = {
   mutable reset_to : Op.side option;
 }
 
-let conn ~paired family =
+let conn ~os ~paired family =
   {
     lock = Mutex.create ();
+    os;
     family;
     paired;
     broken = Atomic.make `Open;
@@ -88,13 +90,15 @@ let shutdown s cmd =
 (* What the socket of the end [side] does once [conn] broke: on a close, the
    closer's sends end, so its peer reads what it wrote, then end of file. A
    Unix-domain closer's receives end too: it reads what is queued, then end
-   of file. *)
+   of file. On macOS, whose receive shutdown drops what is queued, the peer
+   shuts its sends instead, whose writes the wrapper refuses. *)
 let shut conn broken (side, s) =
-  match broken with
-  | `Reset -> shutdown s `All
-  | `Closed closer when side = closer ->
-      shutdown s (match conn.family with `Inet -> `Send | `Unix -> `All)
-  | `Closed _ | `Open -> ()
+  match (broken, conn.family, conn.os) with
+  | `Reset, _, _ -> shutdown s `All
+  | `Closed _, `Unix, `Macos -> shutdown s `Send
+  | `Closed closer, family, _ when side = closer ->
+      shutdown s (match family with `Inet -> `Send | `Unix -> `All)
+  | (`Closed _ | `Open), _, _ -> ()
 
 (* [at] is the end whose operation met the fault. Over a network that pairs no
    ends, a closer that is not there is the real peer: [at]'s receive side is
@@ -117,12 +121,13 @@ let break conn ~at how =
 
 (* On AF_UNIX a reset is the crash of the end [crashed], which closes its
    socket: its peer reads ECONNRESET once its queue is empty, only if
-   [crashed] left bytes unread, as unix(7) sockets report it, and end of file
-   otherwise. *)
+   [crashed] left bytes unread, as unix(7) sockets report it on Linux, and
+   end of file otherwise, as always on macOS. *)
 let crash conn ~at ~crashed =
   Mutex.protect conn.lock (fun () ->
       if
-        Atomic.get conn.broken = `Open
+        conn.os = `Linux
+        && Atomic.get conn.broken = `Open
         && conn.sent.(ix (other crashed)) > conn.taken.(ix crashed)
       then conn.reset_to <- Some (other crashed));
   break conn ~at (`Closed crashed)
@@ -169,6 +174,7 @@ type ctx = {
   f : Op.t -> Fault.t option;
   split : Op.t -> bool;
   mutable splits : int;
+  os : [ `Linux | `Macos ];
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   charge : (unit -> unit) option;
   outage : bool;
@@ -191,12 +197,13 @@ type ctx = {
   overrun : bool Atomic.t;
 }
 
-let ctx ?(max_ops = max_int) ?(split = fun _ -> false) ?charge ~clock ~outage f
-    =
+let ctx ?(max_ops = max_int) ?os ?(split = fun _ -> false) ?charge ~clock
+    ~outage f =
   {
     f;
     split;
     splits = 0;
+    os = (match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux);
     clock :> float Eio.Time.clock_ty Eio.Resource.t;
     charge;
     outage;
@@ -362,14 +369,14 @@ let pending ctx ~family id =
       p
   | None ->
       let number, set = Eio.Promise.create () in
-      let p = { number; set; c = conn ~paired:true family } in
+      let p = { number; set; c = conn ~os:ctx.os ~paired:true family } in
       Hashtbl.replace ctx.pending id p;
       p
 
 (* The connection a connect made, numbered [socket]. *)
 let client_conn ctx ~socket ~family sock =
   match Eio_net_mem.connection sock with
-  | None -> conn ~paired:false family
+  | None -> conn ~os:ctx.os ~paired:false family
   | Some id ->
       let p = locked ctx (fun () -> pending ctx ~family id) in
       Eio.Promise.resolve p.set socket;
@@ -378,7 +385,9 @@ let client_conn ctx ~socket ~family sock =
 (* The number and the connection of an accepted socket. *)
 let server_conn ctx ~family sock =
   match Eio_net_mem.connection sock with
-  | None -> (locked ctx (fun () -> next_socket ctx), conn ~paired:false family)
+  | None ->
+      ( locked ctx (fun () -> next_socket ctx),
+        conn ~os:ctx.os ~paired:false family )
   | Some id ->
       let p = locked ctx (fun () -> pending ctx ~family id) in
       (Eio.Promise.await p.number, p.c)
@@ -1101,7 +1110,10 @@ module Network = struct
              miss. *)
           go ()
       | Some Timeout ->
-          Eio.Time.sleep ctx.clock 133.;
+          (* Linux gives up after its sixth SYN retry, macOS after
+             net.inet.tcp.keepinit. *)
+          Eio.Time.sleep ctx.clock
+            (match ctx.os with `Linux -> 133. | `Macos -> 75.);
           raise (Posix.timeout ())
       | Some Unreachable -> raise (Posix.unreachable ())
       | Some Hang -> Eio.Fiber.await_cancel ()
@@ -1164,20 +1176,20 @@ module Network = struct
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
-let v ?max_ops ?split ?charge ~clock ~outage f (net : _ Eio.Net.t) :
+let v ?max_ops ?os ?split ?charge ~clock ~outage f (net : _ Eio.Net.t) :
     [ `Generic ] Eio.Net.ty Eio.Resource.t =
   Eio.Resource.T
     ( {
-        Network.ctx = ctx ?max_ops ?split ?charge ~clock ~outage f;
+        Network.ctx = ctx ?max_ops ?os ?split ?charge ~clock ~outage f;
         net :> [ `Generic ] Eio.Net.ty Eio.Resource.t;
       },
       Network.handler )
 
-let pair ~clock f =
-  let ctx = ctx ~clock ~outage:false f in
-  let c, s = Eio_net_mem.pipe () in
+let pair ?os ~clock f =
+  let ctx = ctx ?os ~clock ~outage:false f in
+  let c, s = Eio_net_mem.pipe ?os () in
   let socket = locked ctx (fun () -> next_socket ctx) in
-  let conn = conn ~paired:true `Inet in
+  let conn = conn ~os:ctx.os ~paired:true `Inet in
   ( Flow.v ctx ~socket ~side:`Client ~family:`Inet ~conn (c :> stream),
     Flow.v ctx ~socket ~side:`Server ~family:`Inet ~conn (s :> stream) )
 

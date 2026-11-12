@@ -4,6 +4,7 @@ type Eio.Exn.Backend.t += Injected_fault
 
 val v :
   ?max_ops:int ->
+  ?os:[< `Linux | `Macos ] ->
   ?split:(Op.t -> bool) ->
   ?charge:(unit -> unit) ->
   clock:_ Eio.Time.clock ->
@@ -11,20 +12,21 @@ val v :
   (Op.t -> Fault.t option) ->
   _ Eio.Net.t ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~max_ops ~charge ~clock ~outage f net] is [net] with [f] asked about each
-    operation, as {!Eio_net_chaos.wrap} documents. [outage] is what {!outage}
-    says of it. Each network operation, a listen, a send, a lookup or a close
-    included, first calls [charge] (defaults to none). Once [max_ops] (defaults
-    to none) operations [f] was asked about were made, every operation waits for
-    ever, and {!overrun} holds. Those of which [split] (defaults to none) holds
-    do not count: {!splits} does. *)
+(** [v ~max_ops ~os ~charge ~clock ~outage f net] is [net] with [f] asked about
+    each operation, as {!Eio_net_chaos.wrap} documents. [outage] is what
+    {!outage} says of it. Each network operation, a listen, a send, a lookup or
+    a close included, first calls [charge] (defaults to none). Once [max_ops]
+    (defaults to none) operations [f] was asked about were made, every operation
+    waits for ever, and {!overrun} holds. Those of which [split] (defaults to
+    none) holds do not count: {!splits} does. *)
 
 val pair :
+  ?os:[< `Linux | `Macos ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-(** [pair ~clock f] is {!Eio_net_chaos.pair}. *)
+(** [pair ~os ~clock f] is {!Eio_net_chaos.pair}. *)
 
 val outage : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
 (** [outage net] is the [outage] [net] was made with by {!v}, and [false] for
