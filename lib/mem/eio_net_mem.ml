@@ -156,6 +156,23 @@ let needs_scope (ip : Eio.Net.Ipaddr.v4v6) =
   && ((raw.[0] = '\xfe' && Char.code raw.[1] land 0xc0 = 0x80)
      || (raw.[0] = '\xff' && Char.code raw.[1] land 0x0f <= 2))
 
+(* The network has the loopback interface only, which reaches 127.0.0.0/8,
+   ::1 and the wildcard addresses, which stand for loopback, and routes
+   multicast and broadcast: a host with loopback only has no route to any
+   other address, an IPv4-compatible one such as ::127.0.0.1 included. *)
+let off_loopback ip =
+  let ip = unmap ip in
+  if is_v4 ip then
+    not
+      (first_byte ip = 127
+      || same ip (any ip)
+      || multicast_v4 ip || broadcast ip)
+  else
+    not
+      (same ip Eio.Net.Ipaddr.V6.loopback
+      || same ip (any ip)
+      || first_byte ip = 0xff)
+
 (* A loopback address routes only to loopback and multicast ones. *)
 let unroutable b d =
   let b = unmap b and d = unmap d in
@@ -1255,6 +1272,7 @@ module Datagram_socket = struct
     let routed b d port =
       if port = 0 then Some Invalid_port
       else if unroutable b d then Some Invalid_address
+      else if off_loopback d then Some Network_unreachable
       else if too_long then Some Message_too_long
       else None
     in
@@ -1787,16 +1805,17 @@ module Network = struct
        127.0.0.0/8 from a loopback one, and a link-local one needs a scope,
        as on Linux. *)
     (match addr with
-    | `Tcp (d, _) -> (
+    | `Tcp (d, _) ->
         let d' = unmap d in
         if
           (is_v4 d' && (multicast_v4 d' || broadcast d'))
           || ((not (is_v4 d')) && first_byte d' = 0xff)
         then fail Network_unreachable;
         if needs_scope d' then fail Invalid_address;
-        match bind_to with
+        (match bind_to with
         | Some (`Tcp (b, _)) when unroutable b d -> fail Invalid_address
-        | _ -> ())
+        | _ -> ());
+        if off_loopback d then fail Network_unreachable
     | `Unix _ -> ());
     (* A connect bound at its own destination opens to itself, as Linux's
        simultaneous open does. *)

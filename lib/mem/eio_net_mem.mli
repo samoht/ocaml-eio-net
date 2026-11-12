@@ -87,7 +87,12 @@ type Eio.Exn.Backend.t +=
             bound to an IPv6 address raises at an IPv4-mapped one, and a
             datagram [send] from such a socket, where Linux fails with
             [ENETUNREACH]; and of the one a [connect] to a broadcast or
-            multicast address raises, which no route reaches. *)
+            multicast address raises, which no route reaches. The network has
+            the loopback interface only, so a [connect] or a datagram [send] to
+            an address off it raises it too, as on a host with loopback only:
+            any but 127.0.0.0/8, [::1], the wildcard addresses and their
+            IPv4-mapped forms, multicast and broadcast aside. An IPv4-compatible
+            address such as [::127.0.0.1] is off it. *)
   | Address_family
         (** The backend code of the unclassified {!Eio.Io} error a [connect]
             bound to an IPv4-mapped address raises at an IPv6 one, and a
