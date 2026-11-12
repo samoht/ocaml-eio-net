@@ -19,8 +19,8 @@
   "\| Frame channels for Eio over datagram sockets, length-prefixed streams
   "\| and in-memory pairs. An in-memory network, and a check that runs a
   "\| workload on it under network faults, test protocols without real
-  "\| sockets. POSIX adapters
-  "\| add batched datagrams, Unix-domain sockets and interface addresses.
+  "\| sockets. POSIX adapters add batched datagrams, Unix-domain sockets
+  "\| and interface addresses.
   )
  (tags (eio network framing test))
  (depends
