@@ -45,60 +45,79 @@ let key s =
 let is_number s =
   s <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) s
 
-let is_fault_key k =
-  let number p f =
-    String.starts_with ~prefix:p k
-    &&
-    let n = String.length p in
-    f (String.sub k n (String.length k - n))
-  in
-  List.mem k
-    [
-      "hang";
-      "reset";
-      "eof";
-      "refuse";
-      "timeout";
-      "unreachable";
-      "emfile";
-      "drop";
-      "dup";
-      "reorder";
-    ]
-  || number "short" is_number || number "garble" is_number
-  || number "stall" (fun d -> Option.is_some (float_of_string_opt d))
+(* A datagram or a connect held back, a read or a write that moves one byte,
+   and the noise in place of a datagram. *)
+let late = Fault.Stall 0.05
+let mild = Fault.Short 1
+let noise = Fault.Garble 12
 
-(* KIND SOCKET SIDE @ AT . FAULT, as [rule_key] writes it. *)
-let is_rule_key r =
+(* The faults the plans give a rule of each kind, alone or as the mild
+   second of a pair, over either family. *)
+let planned : Op.kind -> Fault.t list = function
+  | `Connect -> [ Refuse; Timeout; Unreachable; late ]
+  | `Accept -> [ Reset; Eof ]
+  | `Read -> [ Reset; Eof; Hang; mild ]
+  | `Write -> [ Reset; Eof; mild ]
+  | `Recv -> [ Drop; Dup; Reorder; noise; late ]
+
+let number s = if is_number s then int_of_string_opt s else None
+
+(* KIND SOCKET SIDE @ AT . FAULT, as [rule_key] writes it, of a rule the
+   plans make: a socket from 1, the side of its kind, and one of its
+   faults. *)
+let rule_of_key r =
   match String.index_opt r '@' with
-  | None -> false
+  | None -> None
   | Some i -> (
       let head = String.sub r 0 i
       and tail = String.sub r (i + 1) (String.length r - i - 1) in
       match String.index_opt tail '.' with
-      | None -> false
+      | None -> None
       | Some j ->
           let at = String.sub tail 0 j
           and fault = String.sub tail (j + 1) (String.length tail - j - 1) in
           let n = String.length head in
-          n > 0
-          && (head.[n - 1] = 'c' || head.[n - 1] = 's')
-          && List.exists
-               (fun kind ->
-                 let p = Op.kind_name kind in
-                 String.starts_with ~prefix:p head
-                 && is_number
-                      (String.sub head (String.length p)
-                         (n - 1 - String.length p)))
-               [ `Connect; `Accept; `Read; `Write; `Recv ]
-          && is_number at && is_fault_key fault)
+          let side =
+            if n = 0 then None
+            else
+              match head.[n - 1] with
+              | 'c' -> Some `Client
+              | 's' -> Some `Server
+              | _ -> None
+          in
+          List.find_map
+            (fun kind ->
+              let p = Op.kind_name kind in
+              let m = String.length p in
+              let own =
+                match kind with
+                | `Connect | `Recv -> `Client
+                | `Accept -> `Server
+                | `Read | `Write -> Option.value side ~default:`Client
+              in
+              match (side, number at) with
+              | Some side, Some at
+                when side = own && n > m && String.starts_with ~prefix:p head
+                -> (
+                  match number (String.sub head m (n - 1 - m)) with
+                  | Some socket when socket >= 1 ->
+                      List.find_opt
+                        (fun f -> Fault.key f = fault)
+                        (planned kind)
+                      |> Option.map (fun fault ->
+                          { kind; socket; side; at; fault })
+                  | _ -> None)
+              | _ -> None)
+            [ `Connect; `Accept; `Read; `Write; `Recv ])
 
 let is_key k =
   k = "none"
   || List.exists (fun l -> lasting_name l = k) lastings
   ||
-  match String.split_on_char '+' k with
-  | ([ _ ] | [ _; _ ]) as rs -> List.for_all is_rule_key rs
+  match List.map rule_of_key (String.split_on_char '+' k) with
+  | [ Some _ ] -> true
+  | [ Some a; Some b ] ->
+      (a.kind, a.socket, a.side, a.at) <> (b.kind, b.socket, b.side, b.at)
   | _ -> false
 
 let rule_text r =
@@ -250,9 +269,8 @@ let structural_rules (trace : trace) =
       | `Connect, `Unix -> [ r Refuse ]
       | `Accept, `Inet -> [ r Reset ]
       | `Accept, `Unix -> [ r Eof ]
-      | `Recv, `Inet ->
-          [ r Drop; r Dup; r Reorder; r (Garble 12); r (Stall 0.05) ]
-      | `Recv, `Unix -> [ r (Stall 0.05) ]
+      | `Recv, `Inet -> [ r Drop; r Dup; r Reorder; r noise; r late ]
+      | `Recv, `Unix -> [ r late ]
       | (`Read | `Write), _ -> [])
     trace
 
@@ -312,9 +330,9 @@ let seconds r1 ~first ~(after : trace) =
               }
             in
             match (op.kind, op.family) with
-            | (`Read | `Write), `Inet -> [ r (Short 1) ]
+            | (`Read | `Write), `Inet -> [ r mild ]
             | (`Read | `Write), `Unix -> []
-            | (`Connect | `Recv), _ -> [ r (Stall 0.05) ]
+            | (`Connect | `Recv), _ -> [ r late ]
             | `Accept, _ -> [])
           after
       in

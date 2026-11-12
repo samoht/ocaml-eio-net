@@ -40,7 +40,9 @@ val text : scenario -> string
 
 val is_key : string -> bool
 (** [is_key k] is [true] iff [k] has the form of a scenario's {!key}: ["none"],
-    a lasting condition, or one or two rules. *)
+    a lasting condition, or one rule, or two at distinct positions. A rule names
+    a socket from [1], the side of its kind, and a fault the plans give that
+    kind. *)
 
 val linear : trace -> scenario list
 (** [linear first] is the linear tier of a check whose first run is [first]:

@@ -319,11 +319,14 @@ let diverges run (first : Plan.trace) =
 (* A replay is [net/HASH/KEY], with the 8 hexadecimal digits of a first
    run's digest and a scenario's key. *)
 let parse_replay r =
-  let hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
+  let hex = function
+    | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
+    | _ -> false
+  in
   match String.split_on_char '/' r with
   | [ "net"; h; k ]
     when String.length h = 8 && String.for_all hex h && Plan.is_key k ->
-      (h, k)
+      (String.lowercase_ascii h, k)
   | _ ->
       fail
         "~replay:%S is not a replay of eio-net: one is net/HASH/SCENARIO, HASH \
