@@ -1040,6 +1040,49 @@ let test_connections_paired_across_domains () =
   Eio.Fiber.both client client;
   Alcotest.(check int) "misdirected faults" 0 (Atomic.get wrong)
 
+(* An AF_UNIX read that hangs stops its peer where it stands: a write of
+   1 MB under way, blocked on a queue of 32 KiB, sends no more, so the reads
+   take what is queued and wait. Once the read is cancelled, the peer goes on
+   and the reads get the rest. *)
+let test_unix_hang_stops_write () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let armed = ref false in
+  let f (op : Op.t) =
+    if !armed && op.kind = `Read && op.side = `Server then (
+      armed := false;
+      Some Fault.Hang)
+    else None
+  in
+  let net =
+    Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~capacity:32768 ~sw ())
+  in
+  let addr = `Unix "/tmp/s.sock" in
+  let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+  let client = Eio.Net.connect ~sw net addr in
+  let server, _ = Eio.Net.accept ~sw l in
+  let wrote = ref false in
+  Eio.Fiber.fork ~sw (fun () ->
+      Eio.Flow.write client [ Cstruct.create 1_000_000 ];
+      wrote := true);
+  Eio.Time.sleep env#clock 0.05;
+  armed := true;
+  let buf = Cstruct.create 65536 in
+  let rec drain total =
+    match
+      Eio.Time.with_timeout env#clock 1.0 (fun () ->
+          Ok (Eio.Flow.single_read server buf))
+    with
+    | Ok n -> drain (total + n)
+    | Error `Timeout -> total
+  in
+  let stopped = drain 0 in
+  if stopped > 65536 then
+    Alcotest.failf "the reads took %d bytes from a peer that stopped" stopped;
+  Alcotest.(check bool) "the write waits" false !wrote;
+  Alcotest.(check int) "then the rest" 1_000_000 (stopped + drain 0);
+  Alcotest.(check bool) "the write returned" true !wrote
+
 let suite =
   ( "eio_net_chaos",
     [
@@ -1097,6 +1140,8 @@ let suite =
         test_unix_cut_keeps_written;
       Alcotest.test_case "an AF_UNIX hang keeps the bytes written" `Quick
         test_unix_hang_keeps_written;
+      Alcotest.test_case "an AF_UNIX hang stops a write under way" `Quick
+        test_unix_hang_stops_write;
       Alcotest.test_case "a write after the peer's close" `Quick
         test_write_after_peer_close;
       Alcotest.test_case "no IP fault on a Unix-domain socket" `Quick
