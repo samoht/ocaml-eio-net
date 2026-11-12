@@ -22,12 +22,11 @@ let fail fmt = Fmt.failwith ("%s: " ^^ fmt) name
 (* The operations a run may make: a run that makes more spins, or is more
    than a check plans from, and the trace it keeps stays bounded. *)
 let max_ops = 100_000
+let too_large = "a busy loop, or a workload too large for a check"
 
 let ops_message =
-  Fmt.str
-    "the run hangs in a busy loop, or is too large for a check: it made %d \
-     network operations"
-    max_ops
+  "the run made 100,000 network operations, more than a check plans from: "
+  ^ too_large
 
 (* A run of [s]: why it failed if it did. [observe] sees each operation and
    the fault it met. *)
@@ -69,10 +68,10 @@ let exec_with ~observe run (s : Plan.scenario) =
         Some
           "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
            loop"
-    | exception Quiet_mock.Busy_time ->
+    | exception Quiet_mock.Too_many_turns ->
         Some
-          "the run kept the CPU busy for 10 s, more than half its time: a busy \
-           loop"
+          ("the run took 10,000,000 turns, more than a check can repeat: "
+         ^ too_large)
     | exception x -> Some (Printexc.to_string x)
   in
   match !wrapped with

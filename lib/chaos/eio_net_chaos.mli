@@ -107,19 +107,21 @@
     hour takes no time.
 
     A run hangs, and fails, when every fiber waits and no timer is due, when it
-    is still running after an hour of its clock, and when it takes ten million
-    turns in a row without a wait of 1 ms or more: a busy loop. So is a run
-    whose turns, 1 us each, add up to more than 10 s and to half its clock or
-    more, as a loop that sleeps 1 ms after each burst of work does. A heartbeat
-    or a poll every millisecond waits, so it runs to its end. So does a run that
-    makes 100000 network operations, more than a check plans from, so that a
-    run's operations stay bounded, and one in which the same network operation
-    fails 10000 times on the same target while its clock stands still, as a loop
-    that retries at once with no wait in between makes them: a connect to one
-    address, or a read or a write on one accepted connection or on any of the
-    connections a client made to one address. Failures on distinct targets, as a
-    scan of many ports makes, do not count together, and an end of file is an
-    answer: it counts only against the connection it ended. *)
+    is still running after an hour of its clock, and when the same network
+    operation fails 10000 times on the same target while its clock stands still,
+    as a loop that retries at once with no wait in between makes them: a connect
+    to one address, or a read or a write on one accepted connection or on any of
+    the connections a client made to one address. Failures on distinct targets,
+    as a scan of many ports makes, do not count together, and an end of file is
+    an answer: it counts only against the connection it ended.
+
+    A run also stops, and fails, after ten million turns. A check repeats a run
+    hundreds of times, so it cannot check a larger one, and the limit bounds the
+    CPU time of each run. If none of its turns was a wait of 1 ms or more, the
+    report calls the run a busy loop; otherwise, a busy loop or a workload too
+    large for a check. A run fails the same way after 100,000 network
+    operations, as a check plans from each of them, so that the operations it
+    keeps stay bounded. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
