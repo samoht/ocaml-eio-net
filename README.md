@@ -209,6 +209,51 @@ that connection alone and goes to `?on_error`.
 process runs out of descriptors, the loop then waits for one to be free. With
 the default classifier, that error ends the loop.
 
+## Limitations
+
+`eio-net.mem` models one host:
+
+- It has a loopback interface only, and follows one kernel at a time: Linux
+  by default, macOS with `` ~os:`Macos ``. Run a check under each `?os` your
+  program targets.
+- Socket options other than `TCP_NODELAY` and `TCP_QUICKACK` raise
+  `Invalid_argument`, and so does `getsockopt`. Use `?capacity` where a test
+  would set `SO_SNDBUF`, and a real socket to test an option.
+- Unix paths live in a namespace of their own, not in the file system: a
+  missing directory or a denied permission fails no bind. Test those on real
+  sockets.
+- Host resolution knows numeric addresses and `localhost` only. Give tests
+  addresses, not host names.
+- A socket bound at port 0 takes a port of 49152-65535 in a fixed order,
+  where Linux's default range is 32768-60999 and kernels pick UDP ports at
+  random. Read the port a listener got with `Eio.Net.listening_addr`.
+- An unbound UDP socket takes its port when it is created, so a full port
+  range raises `EADDRINUSE` there, not at its first send. Handle the error
+  where the socket is made.
+- Under `` `Macos ``, a loopback segment arrives at once, where macOS delivers
+  it asynchronously, and what a Unix-domain datagram receiver holds is an
+  approximation measured on one Mac. Test code that depends on either on real
+  sockets.
+
+`eio-net.chaos` has limits of its own:
+
+- A garbled datagram is random bytes, so a parser that rejects most noise but
+  accepts some may pass. Fuzz the parser on its own.
+- After an AF_UNIX crash, the crashed end's code still runs and reads what was
+  queued to it. Check what the other end sees.
+- A peer that stops is a read that hangs until that peer's own timeout ends
+  it, so a program blocked on it passes once the peer gives up and closes.
+  Assert the program's latency to catch it.
+- A datagram is delayed alone, and for 50 ms. Ask for longer or grouped
+  delays with `Eio_net_chaos.wrap`.
+- `EMFILE` on accept is never tried, as `Eio.Net.run_server` stops on it. Ask
+  for `Eio_net_chaos.Fault.Emfile` with `Eio_net_chaos.wrap`.
+- A run of more than 10,000,000 turns or 100,000 network operations fails as
+  too large, and so does a check whose linear tier needs more runs than its
+  budget. Shrink the workload, or raise `~budget` for the linear tier.
+- `Eio_net_chaos.wrap` follows the kernel `?os` names, Linux by default, not
+  the host's. Over a real network, pass the host's kernel.
+
 ## Related work
 
 Tokio's
