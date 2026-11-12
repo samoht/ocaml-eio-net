@@ -836,7 +836,30 @@ let test_malformed_scenario () =
       "read1c@0.reset+";
       "read1x@0.reset";
       "";
+      "read1c@0.stall-1";
+      "read1c@0.stallnan";
+      "read1c@0.stall1e308";
+      "read1c@0.short0";
+      "read1c@0.garble12";
+      "connect1c@0.hang";
+      "accept1s@0.timeout";
+      "accept1s@0.emfile";
+      "read0c@0.reset";
+      "read1c@0.reset+read1c@0.eof";
+      "read1c@99999999999999999999999.reset";
     ]
+
+(* The hash of a replay may be written in either case. *)
+let test_replay_case () =
+  let replay = replay_of (Expect.report (fun () -> mutant ())) in
+  let h = hash replay in
+  let upper =
+    Fmt.str "net/%s/%s" (String.uppercase_ascii h)
+      (String.concat "/" (List.tl (List.tl (String.split_on_char '/' replay))))
+  in
+  let report = Expect.report (fun () -> mutant ~replay ()) in
+  let report' = Expect.report (fun () -> mutant ~replay:upper ()) in
+  Alcotest.(check string) "report" report report'
 
 let first_fails error =
   refused_with ("Eio_net_chaos.check: the run with no fault failed: " ^ error)
@@ -1085,6 +1108,8 @@ let suite =
         test_linear_memory;
       Alcotest.test_case "a report collapses no single line" `Quick
         test_report_shows_three;
+      Alcotest.test_case "a replay's hash may be uppercase" `Quick
+        test_replay_case;
       Alcotest.test_case "a malformed scenario is refused" `Quick
         test_malformed_scenario;
       Alcotest.test_case "a server that yields while it computes" `Quick
