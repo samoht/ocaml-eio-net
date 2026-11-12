@@ -1252,6 +1252,11 @@ module Flow = struct
     | Linux -> if local then 256 * 1024 else 4 * 1024 * 1024
     | Macos -> if local then 8 * 1024 else 1024 * 1024
 
+  (* A network's capacity lowers the default and never raises it. *)
+  let capacity ~os ~local = function
+    | None -> default_capacity ~os ~local
+    | Some c -> min c (default_capacity ~os ~local)
+
   (* A connection to itself: what it writes, it reads. *)
   let self ~os ~capacity =
     let connection = Atomic.fetch_and_add connections 1 in
@@ -2483,10 +2488,7 @@ module Network = struct
             raise (Posix.timed_out ())
         | None -> Eio.Fiber.await_cancel ())
     | None, `Tcp _ when to_itself ->
-        let capacity =
-          Option.value t.capacity
-            ~default:(Flow.default_capacity ~os:t.os ~local:false)
-        in
+        let capacity = Flow.capacity ~os:t.os ~local:false t.capacity in
         let flow = Flow.self ~os:t.os ~capacity in
         let ends = Ends.v t.hub.Listening_socket.ports in
         (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
@@ -2508,10 +2510,7 @@ module Network = struct
     | Some listener, _ when Listening_socket.is_closed listener -> refused ()
     | Some listener, _ -> (
         let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
-        let capacity =
-          Option.value t.capacity
-            ~default:(Flow.default_capacity ~os:t.os ~local:unix)
-        in
+        let capacity = Flow.capacity ~os:t.os ~local:unix t.capacity in
         let client, server = Flow.pair ~os:t.os ~local:unix ~capacity in
         (* The accepted socket holds the listener's port at the address the
            client reached, with the listener's [SO_REUSEADDR], and as one
@@ -2748,10 +2747,7 @@ let connection = Flow.connection
 
 let pipe ?os ?capacity () =
   let os = kernel os in
-  let capacity =
-    Option.value (check_capacity capacity)
-      ~default:(Flow.default_capacity ~os ~local:false)
-  in
+  let capacity = Flow.capacity ~os ~local:false (check_capacity capacity) in
   let (_, client), (_, server) = Flow.pair ~os ~local:false ~capacity in
   (client, server)
 

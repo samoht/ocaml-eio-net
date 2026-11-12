@@ -191,8 +191,8 @@ val v :
     about 2.6 MiB over TCP before it waits, and at most about 250 KiB over
     AF_UNIX, less in small writes. Under [`Macos] it defaults to 1 MiB over TCP,
     what macOS's buffers grow to on loopback from about 330 KiB, and 8 KiB over
-    AF_UNIX, as macOS holds. Raises [Invalid_argument] if [capacity] is not
-    positive.
+    AF_UNIX, as macOS holds. A [capacity] above the default has no effect.
+    Raises [Invalid_argument] if [capacity] is not positive.
 
     On [clock], the end of a TCP connection whose FIN went first holds its
     address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
