@@ -539,13 +539,13 @@ let test_net_connect_refused () =
   | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> ()
   | _ -> Alcotest.fail "the connect went through"
 
-let test_net_connect_timeout () =
+let connect_timeout ~os =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net =
-    Chaos.wrap ~clock:env#clock
+    Chaos.wrap ~os ~clock:env#clock
       (nth `Connect 1 Fault.Timeout)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~os ~sw ())
   in
   (match Eio.Net.connect ~sw net addr with
   | exception
@@ -555,7 +555,13 @@ let test_net_connect_timeout () =
           _ ) ->
       ()
   | _ -> Alcotest.fail "the connect went through");
-  Alcotest.(check (float 0.)) "after 133 s" 133. (Eio.Time.now env#clock)
+  Eio.Time.now env#clock
+
+(* A connect that times out takes 133 s, as on Linux, and 75 s under
+   [`Macos], macOS's net.inet.tcp.keepinit. *)
+let test_net_connect_timeout () =
+  Alcotest.(check (float 0.)) "after 133 s" 133. (connect_timeout ~os:`Linux);
+  Alcotest.(check (float 0.)) "after 75 s" 75. (connect_timeout ~os:`Macos)
 
 (* A connect with no route to its host fails at once, as eio_posix reports
    it. *)
@@ -719,9 +725,10 @@ let test_unix_cut_keeps_written () =
    unix(7) sockets report it; otherwise it reads end of file. Its writes
    raise EPIPE, a reset to Eio, which leaves the reset to its reads. The
    crashed end reads what is queued to it, then end of file, and its writes
-   raise EPIPE. *)
+   raise EPIPE. Under [`Macos] the survivor reads end of file, as macOS
+   reports no reset on AF_UNIX. *)
 let test_unix_reset_survivor () =
-  let run ~unread ~on =
+  let run ?(os = `Linux) ~unread ~on () =
     Eio_mock.Backend.run_full @@ fun env ->
     Eio.Switch.run @@ fun sw ->
     let fired = ref false in
@@ -731,7 +738,7 @@ let test_unix_reset_survivor () =
         Some Fault.Reset)
       else None
     in
-    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let net = Chaos.wrap ~os ~clock:env#clock f (Eio_net_mem.v ~os ~sw ()) in
     let addr = `Unix "/tmp/s.sock" in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
     let client = Eio.Net.connect ~sw net addr in
@@ -761,16 +768,26 @@ let test_unix_reset_survivor () =
   in
   Alcotest.(check string)
     "the server crashes with bytes unread" "reset reset end end u reset"
-    (run ~unread:true ~on:`Read);
+    (run ~unread:true ~on:`Read ());
   Alcotest.(check string)
     "the server crashes with none" "end reset end end end reset"
-    (run ~unread:false ~on:`Read);
+    (run ~unread:false ~on:`Read ());
   Alcotest.(check string)
     "the client crashes with bytes unread" "reset reset reset end u reset"
-    (run ~unread:true ~on:`Write);
+    (run ~unread:true ~on:`Write ());
   Alcotest.(check string)
     "the client crashes with none" "reset reset end end end reset"
-    (run ~unread:false ~on:`Write)
+    (run ~unread:false ~on:`Write ());
+  let os = `Macos in
+  Alcotest.(check string)
+    "macOS: the server crashes with bytes unread" "end reset end end u reset"
+    (run ~os ~unread:true ~on:`Read ());
+  Alcotest.(check string)
+    "macOS: the client crashes with bytes unread" "reset reset end end u reset"
+    (run ~os ~unread:true ~on:`Write ());
+  Alcotest.(check string)
+    "macOS: the client crashes with none" "reset reset end end end reset"
+    (run ~os ~unread:false ~on:`Write ())
 
 (* After the client closes, as an end of stream on the server's first read
    says, the server reads what the client wrote, then writes twice and reads
