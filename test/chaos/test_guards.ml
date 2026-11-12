@@ -718,18 +718,29 @@ let tiny_sleeps () =
   done
 
 (* A loop that yields 9,900,000 times, then sleeps 1 ms, for ever: each
-   sleep ends a run of turns in a row, but its turns are nearly all of its
-   clock. *)
+   sleep is a wait, but its turns are nearly all of its clock. *)
 let bursts () =
   Eio_net_chaos.check @@ fun env ->
   touch env;
-  (* Its own bound, past the turns a run may take in all: without it, a run
-     with no such limit yields until its clock reaches the hour. *)
+  (* Its own bound, past the turns a run may take: without it, a run with no
+     limit on its turns yields until its clock reaches the hour. *)
   let n = ref 0 in
   while true do
     incr n;
     if !n > 3 then failwith "ran 3 bursts";
     for _ = 1 to 9_900_000 do
+      Eio.Fiber.yield ()
+    done;
+    Eio.Time.sleep env#clock 0.001
+  done
+
+(* A worker that does [n] jobs, each 1000 yields of work, and sleeps 1 ms
+   between two jobs: 1001 turns a job. *)
+let jobs ?budget n () =
+  Eio_net_chaos.check ?budget @@ fun env ->
+  touch env;
+  for _ = 1 to n do
+    for _ = 1 to 1000 do
       Eio.Fiber.yield ()
     done;
     Eio.Time.sleep env#clock 0.001
@@ -833,21 +844,22 @@ let first_fails error =
 let busy =
   "the run woke 10,000,000 times without waiting 1 ms or more: a busy loop"
 
-let busy_cpu =
-  "the run kept the CPU busy for 10 s, more than half its time: a busy loop"
+let too_large =
+  "the run took 10,000,000 turns, more than a check can repeat: a busy loop, \
+   or a workload too large for a check"
 
 let ops =
-  "the run hangs in a busy loop, or is too large for a check: it made 100000 \
-   network operations"
+  "the run made 100,000 network operations, more than a check plans from: a \
+   busy loop, or a workload too large for a check"
 
-(* 200 fibers on a 20 ms heartbeat for 1200 s of the clock: twelve million
+(* 200 fibers on a 20 ms heartbeat for 600 s of the clock: six million
    turns, each heartbeat a wait. *)
 let heartbeats () =
   Eio_net_chaos.check ~budget:2 @@ fun env ->
   touch env;
   Eio.Fiber.all
     (List.init 200 (fun _ () ->
-         while Eio.Time.now env#clock < 1200. do
+         while Eio.Time.now env#clock < 600. do
            Eio.Time.sleep env#clock 0.02
          done))
 
@@ -931,9 +943,14 @@ let suite =
         (first_fails busy tiny_sleeps);
       Alcotest.test_case "a poll that never succeeds is a busy loop" `Quick
         (first_fails busy yield_poll);
-      Alcotest.test_case "bursts of yields between 1 ms sleeps are a busy loop"
+      Alcotest.test_case "bursts of yields between 1 ms sleeps are too large"
         `Quick
-        (first_fails busy_cpu bursts);
+        (first_fails too_large bursts);
+      Alcotest.test_case "9000 jobs between 1 ms sleeps are no busy loop" `Quick
+        (refused_with "Eio_net_chaos.check: the linear tier needs"
+           (jobs ~budget:2 9000));
+      Alcotest.test_case "20000 jobs between 1 ms sleeps are too large" `Quick
+        (first_fails too_large (jobs ~budget:2 20_000));
       Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
       Alcotest.test_case "many fibers on a heartbeat are no busy loop" `Quick
         (refused_with "Eio_net_chaos.check: the linear tier needs" heartbeats);
