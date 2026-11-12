@@ -1756,6 +1756,97 @@ let test_no_ephemeral_port_for_a_connect () =
          ignore
            (Eio.Net.connect ~sw ~bind_to net addr : _ Eio.Net.stream_socket)))
 
+(* [n] short connections to [addr] that each leave the client's port in
+   TIME_WAIT, as the client closes first; [false] once a connect finds no
+   port. *)
+let short_connections ~sw net l addr n =
+  let rec go i =
+    i = 0
+    ||
+    match Eio.Net.connect ~sw net addr with
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_not_available, _) -> false
+    | c ->
+        let s, _ = Eio.Net.accept ~sw l in
+        Eio.Resource.close c;
+        Eio.Resource.close s;
+        go (i - 1)
+  in
+  go n
+
+(* An unbound connect's port is unique to its destination, as on Linux, so
+   20000 short connections to two listeners within a second pass, though
+   their clients hold their ports in TIME_WAIT; one destination still runs
+   out once its 16384 ports are held, with EADDRNOTAVAIL, while the other
+   connects. *)
+let test_ports_per_destination () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.Mono.make () in
+  let net = Eio_net_mem.v ~clock ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let a = `Tcp (lo, 8172) and b = `Tcp (lo, 8173) in
+  let la = Eio.Net.listen ~sw ~backlog:1 net a in
+  let lb = Eio.Net.listen ~sw ~backlog:1 net b in
+  Alcotest.(check bool)
+    "10000 to each" true
+    (List.for_all Fun.id
+       (List.init 20 (fun i ->
+            if i mod 2 = 0 then short_connections ~sw net la a 1000
+            else short_connections ~sw net lb b 1000)));
+  Alcotest.(check bool)
+    "6384 more to one" true
+    (short_connections ~sw net la a 6384);
+  Alcotest.(check bool)
+    "one more to it" true
+    (fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL) (fun () ->
+         ignore (Eio.Net.connect ~sw net a : _ Eio.Net.stream_socket)));
+  Alcotest.(check bool)
+    "one more to the other" true
+    (short_connections ~sw net lb b 1)
+
+(* A port in TIME_WAIT toward a destination is free again for a connect to
+   it once a second has passed since the peer's FIN, as Linux reuses it on
+   loopback with [tcp_tw_reuse] at its default, 2. A port held by a connect
+   bound with [bind_to] stays its own, open or in TIME_WAIT. *)
+let test_time_wait_reuse () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.Mono.make () in
+  let net = Eio_net_mem.v ~clock ~sw () in
+  let wait n =
+    Eio_mock.Clock.Mono.set_time clock
+      (Mtime.add_span (Eio.Time.Mono.now clock) Mtime.Span.(n * ms)
+      |> Option.get)
+  in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let a = `Tcp (lo, 8174) and b = `Tcp (lo, 8175) in
+  let la = Eio.Net.listen ~sw ~backlog:1 net a in
+  let lb = Eio.Net.listen ~sw ~backlog:1 net b in
+  let bound =
+    let c = Eio.Net.connect ~sw ~bind_to:(`Tcp (lo, 0)) net b in
+    let s, peer = Eio.Net.accept ~sw lb in
+    Eio.Resource.close c;
+    Eio.Resource.close s;
+    match peer with `Tcp (_, p) -> p | `Unix _ -> 0
+  in
+  Alcotest.(check bool)
+    "16383 to one" true
+    (short_connections ~sw net la a 16383);
+  let unavailable () =
+    fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL) (fun () ->
+        ignore (Eio.Net.connect ~sw net a : _ Eio.Net.stream_socket))
+  in
+  Alcotest.(check bool) "at once" true (unavailable ());
+  wait 1000;
+  Alcotest.(check bool) "after 1 s" true (unavailable ());
+  wait 1;
+  let c = Eio.Net.connect ~sw net a in
+  let _, peer = Eio.Net.accept ~sw la in
+  Eio.Resource.close c;
+  Alcotest.(check bool)
+    "after 1.001 s, not at the bound port" true
+    (match peer with `Tcp (_, p) -> p <> bound | `Unix _ -> false)
+
 (* A listener's close defers to the accept waiting on it, as Eio defers a
    descriptor's close to its users: the listener takes connections until
    that accept returns one, and only then closes, so a later accept raises
@@ -2549,6 +2640,9 @@ let suite =
         test_no_ephemeral_port_for_a_datagram_socket;
       Alcotest.test_case "no ephemeral port for a connect" `Quick
         test_no_ephemeral_port_for_a_connect;
+      Alcotest.test_case "ports per destination" `Quick
+        test_ports_per_destination;
+      Alcotest.test_case "TIME_WAIT reuse" `Quick test_time_wait_reuse;
       Alcotest.test_case "a wildcard destination" `Quick
         test_wildcard_destination;
       Alcotest.test_case "a connect under a finished switch" `Quick
