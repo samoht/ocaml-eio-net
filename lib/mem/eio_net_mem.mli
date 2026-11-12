@@ -173,9 +173,10 @@ val v :
     datagram one. On a real system the loopback order, and whether IPv6
     addresses come at all, depend on the host's addresses and its [/etc/hosts]:
     glibc leaves them out on a host with no IPv6 address but loopback, and turns
-    ["localhost"]'s [::1] into [127.0.0.1]. The order here is the one glibc and
-    macOS give on a dual-stack host, fixed so that a test sees the same
-    addresses everywhere.
+    ["localhost"]'s [::1] into [127.0.0.1]. The order here is glibc's on a
+    dual-stack host, [::1] before [127.0.0.1] and each address as a stream one
+    before a datagram one, fixed so that a test sees the same addresses
+    everywhere; macOS gives the datagram one first.
 
     [getnameinfo] names [127.0.0.1], IPv4-mapped, IPv4-compatible ([::7f00:1])
     or neither, and [::1] ["localhost"], as [/etc/hosts] does, and gives any
