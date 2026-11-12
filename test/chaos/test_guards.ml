@@ -741,6 +741,35 @@ let test_tiny_budget () =
   if contains report "loops for ever" then
     Alcotest.failf "the report calls the workload a loop: %s" report
 
+(* A check keeps no run's operations once it has planned from them: over
+   the 1500 runs of a linear tier, each of 300 datagrams, the live words grow
+   by less than 100000, where the operations of every run take millions. *)
+let test_linear_memory () =
+  let runs = ref 0 and first = ref 0 and most = ref 0 in
+  let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
+  Eio_net_chaos.check (fun env ->
+      incr runs;
+      ( Eio.Switch.run @@ fun sw ->
+        let sink = Eio.Net.datagram_socket ~sw env#net (udp 5020) in
+        let src = Eio.Net.datagram_socket ~sw env#net (udp 5021) in
+        let buf = Cstruct.create 16 in
+        for _ = 1 to 300 do
+          Eio.Net.send src ~dst:(udp 5020) [ Cstruct.of_string "x" ];
+          try
+            ignore
+              (Eio.Time.with_timeout_exn env#clock 0.1 (fun () ->
+                   Eio.Net.recv sink buf))
+          with Eio.Time.Timeout -> ()
+        done );
+      if !runs mod 100 = 2 then begin
+        Gc.full_major ();
+        let live = (Gc.stat ()).live_words in
+        if !runs = 2 then first := live else most := max !most live
+      end);
+  let grown = !most - !first in
+  if grown > 100_000 then
+    Alcotest.failf "the live words grew by %d over the check" grown
+
 let first_fails error =
   refused_with ("Eio_net_chaos.check: the run with no fault failed: " ^ error)
 
@@ -793,6 +822,8 @@ let suite =
       Alcotest.test_case "a poll that never succeeds is a busy loop" `Quick
         (first_fails busy yield_poll);
       Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
+      Alcotest.test_case "a check keeps no run's operations" `Quick
+        test_linear_memory;
       Alcotest.test_case "a server that yields while it computes" `Quick
         (Expect.passes compute);
       Alcotest.test_case "a server that streams until its client leaves" `Quick

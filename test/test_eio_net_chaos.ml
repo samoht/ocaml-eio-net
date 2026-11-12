@@ -933,7 +933,8 @@ let test_reads_shared_across_domains () =
 (* Receivers in two domains share a datagram socket that duplicates and holds
    back datagrams: together they receive each datagram, and as many twice as
    [f] duplicated. Which datagram a fault lands on depends on which receive
-   takes the lock first. *)
+   takes the lock first. The sender waits for each hundred to be received,
+   as the socket's receive buffer holds 199 of them. *)
 let test_datagrams_shared_across_domains () =
   Eio_main.run @@ fun env ->
   let domain_mgr = Eio.Stdenv.domain_mgr env in
@@ -956,13 +957,15 @@ let test_datagrams_shared_across_domains () =
   let rx = Eio.Net.datagram_socket ~sw net (loopback 9000) in
   let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
   let counts = Array.init k (fun _ -> Atomic.make 0) in
+  let received = Atomic.make 0 in
   let receiver () =
     Eio.Domain_manager.run domain_mgr (fun () ->
         let rec loop () =
           match recv1 rx with
           | "stop" -> ()
           | s ->
-              Atomic.incr counts.(int_of_string s);
+              if Atomic.fetch_and_add counts.(int_of_string s) 1 = 0 then
+                Atomic.incr received;
               loop ()
         in
         loop ())
@@ -970,7 +973,12 @@ let test_datagrams_shared_across_domains () =
   let sender () =
     for i = 0 to k - 1 do
       Eio.Net.send tx ~dst:(loopback 9000)
-        [ Cstruct.of_string (string_of_int i) ]
+        [ Cstruct.of_string (string_of_int i) ];
+      (* One may be held back until the next arrives. *)
+      if i mod 100 = 99 then
+        while Atomic.get received < i do
+          Eio.Fiber.yield ()
+        done
     done;
     for _ = 1 to 2 do
       Eio.Net.send tx ~dst:(loopback 9000) [ Cstruct.of_string "stop" ]

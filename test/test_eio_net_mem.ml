@@ -2049,7 +2049,8 @@ let test_datagrams_keep_order () =
   let net = Eio_net_mem.v ~sw () in
   let server = Eio.Net.datagram_socket ~sw net (udp 9001) in
   let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
-  let n = 1000 in
+  (* What the receive buffer holds of datagrams this short. *)
+  let n = 199 in
   for i = 1 to n do
     Eio.Net.send client ~dst:(udp 9001) [ Cstruct.of_string (string_of_int i) ]
   done;
@@ -2136,6 +2137,105 @@ let test_connection () =
   Alcotest.(check bool)
     "another socket" true
     (Eio_net_mem.connection (mock :> _ Eio.Net.stream_socket) = None)
+
+(* The datagram a socket has queued, if any, without waiting. *)
+let poll sock buf =
+  Eio.Fiber.first
+    (fun () -> Some (Eio.Net.recv sock buf))
+    (fun () ->
+      Eio.Fiber.yield ();
+      None)
+
+(* A UDP socket that does not read keeps what Linux's default receive buffer
+   holds and drops the rest, each datagram counted with the memory Linux
+   gives it: the counts kept of 300 datagrams of each length, measured on
+   Linux over IPv4 and IPv6. Once read, the buffer takes as many again. *)
+let test_udp_receive_buffer () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let port = ref 6000 in
+  let kept ip n =
+    incr port;
+    Eio.Switch.run @@ fun sw ->
+    let r = Eio.Net.datagram_socket ~sw net (`Udp (ip, !port)) in
+    let s = Eio.Net.datagram_socket ~sw net (`Udp (ip, 0)) in
+    let data = Cstruct.create n and buf = Cstruct.create 65536 in
+    let fill () =
+      for _ = 1 to 300 do
+        Eio.Net.send s ~dst:(`Udp (ip, !port)) [ data ]
+      done
+    in
+    let rec drain k =
+      match poll r buf with Some _ -> drain (k + 1) | None -> k
+    in
+    fill ();
+    let k = drain 0 in
+    fill ();
+    let again = drain 0 in
+    Alcotest.(check int) (Fmt.str "%d bytes, again" n) k again;
+    k
+  in
+  List.iter
+    (fun (n, v4, v6) ->
+      Alcotest.(check int)
+        (Fmt.str "%d bytes over IPv4" n)
+        v4
+        (kept Eio.Net.Ipaddr.V4.loopback n);
+      Alcotest.(check int)
+        (Fmt.str "%d bytes over IPv6" n)
+        v6
+        (kept Eio.Net.Ipaddr.V6.loopback n))
+    [
+      (1, 199, 199);
+      (444, 199, 179);
+      (500, 179, 179);
+      (1000, 99, 99);
+      (1600, 99, 52);
+      (4000, 27, 27);
+      (10000, 13, 13);
+      (20000, 10, 10);
+      (60000, 3, 3);
+    ]
+
+(* A Unix-domain datagram send waits while its receiver holds more than 10
+   datagrams, Linux's max_dgram_qlen, or while the sender's datagrams not yet
+   received fill its send buffer, and goes on once the receiver takes one:
+   the counts sent before the first wait, measured on Linux. *)
+let test_unix_dgram_queue () =
+  Eio_main.run @@ fun _ ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let sent_before_wait n =
+    Eio.Switch.run @@ fun sw ->
+    let path = Fmt.str "/tmp/r%d.sock" n in
+    let r = Eio.Net.datagram_socket ~sw net (`Unix path) in
+    let s = Eio.Net.datagram_socket ~sw net (`Unix "") in
+    let sent = ref 0 in
+    let data = Cstruct.create n in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        for _ = 1 to 20 do
+          Eio.Net.send s ~dst:(`Unix path) [ data ];
+          incr sent
+        done;
+        `Stop_daemon);
+    for _ = 1 to 10 do
+      Eio.Fiber.yield ()
+    done;
+    let before = !sent in
+    ignore (Eio.Net.recv r (Cstruct.create 300_000));
+    for _ = 1 to 10 do
+      Eio.Fiber.yield ()
+    done;
+    Alcotest.(check int)
+      (Fmt.str "%d bytes, after a receive" n)
+      (before + 1) !sent;
+    before
+  in
+  List.iter
+    (fun (n, sent) ->
+      Alcotest.(check int) (Fmt.str "%d bytes" n) sent (sent_before_wait n))
+    [ (1, 11); (20000, 11); (30000, 7); (65536, 4); (200000, 2) ]
 
 let suite =
   ( "eio_net_mem",
@@ -2227,6 +2327,10 @@ let suite =
         test_datagram_reaches_like_a_kernel;
       Alcotest.test_case "a closed datagram socket's path" `Quick
         test_closed_datagram_path;
+      Alcotest.test_case "a UDP receive buffer drops past Linux's" `Quick
+        test_udp_receive_buffer;
+      Alcotest.test_case "a Unix-domain datagram send waits for room" `Quick
+        test_unix_dgram_queue;
       Alcotest.test_case "a Unix-domain write after peer close" `Quick
         test_unix_write_after_peer_close;
       Alcotest.test_case "a closed listener refuses connects" `Quick
