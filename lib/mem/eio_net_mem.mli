@@ -371,8 +371,9 @@ val connection : _ Eio.Net.stream_socket -> int option
 
     After a socket shut its send side, a send raises the connection reset that
     {!Closed} marks, as EPIPE, and so does one to a Unix-domain socket that shut
-    its receive side. A socket that shut its receive side still receives what is
-    queued and, over UDP, what arrives after, as on Linux.
+    its receive side, a send that waits for room included. A socket that shut
+    its receive side still receives what is queued and, over UDP, what arrives
+    after, as on Linux.
 
     A send without a destination raises the error that {!No_destination} marks
     over UDP, and {!Not_connected} on a Unix path, as Linux says, since no

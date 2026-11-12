@@ -1530,8 +1530,11 @@ module Datagram_socket = struct
         | Broadcast -> raise (Eio.Fs.err (Permission_denied Broadcast))
         | code -> raise (Eio.Exn.create (Eio.Exn.X code)))
       (refusal t dst bufs);
-    (* A send that waits looks for its destination again, as Linux does. *)
+    (* A send that waits looks for its destination again, as Linux does, and
+       a Unix-domain one fails once its socket shuts its sending. *)
     Eio.Condition.loop_no_mutex t.hub.room @@ fun () ->
+    if local && Mutex.protect t.lock (fun () -> t.send_shut) then
+      raise (reset_exn ());
     let file =
       match dst with
       | `Unix path -> Files.find t.hub.files ~stream:false path
@@ -1604,16 +1607,18 @@ module Datagram_socket = struct
       Eio.Condition.broadcast t.readable
     end
 
+  (* A send waiting for room on this socket, or from it, looks again. *)
   let shutdown t cmd =
-    Mutex.protect t.lock @@ fun () ->
-    if t.closed then
-      invalid_arg "eio-net.mem: shutdown on a closed datagram socket";
-    match cmd with
-    | `Send -> t.send_shut <- true
-    | `Receive -> t.recv_shut <- true
-    | `All ->
-        t.send_shut <- true;
-        t.recv_shut <- true
+    ( Mutex.protect t.lock @@ fun () ->
+      if t.closed then
+        invalid_arg "eio-net.mem: shutdown on a closed datagram socket";
+      match cmd with
+      | `Send -> t.send_shut <- true
+      | `Receive -> t.recv_shut <- true
+      | `All ->
+          t.send_shut <- true;
+          t.recv_shut <- true );
+    Eio.Condition.broadcast t.hub.room
 
   let setsockopt _ opt _ = Sockopt.datagram opt
 
