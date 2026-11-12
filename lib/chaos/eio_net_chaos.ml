@@ -234,6 +234,7 @@ let find k = List.find_opt (fun s -> Plan.key s = k)
 let scenario ~bound run ~first ~linear k =
   match find k linear with
   | Some s -> Some (s, `Linear)
+  | None when k = Plan.key Plan.none -> Some (Plan.none, `Linear)
   | None -> (
       match find k (Plan.others first) with
       | Some s -> Some (s, `Sampled)
@@ -248,6 +249,15 @@ let scenario ~bound run ~first ~linear k =
                   |> find k
                   |> Option.map (fun s -> (s, `Sampled))
               | _ -> None)))
+
+(* A failure of the run with no fault, with its operations and the replay
+   that runs it again. *)
+let first_failed ~hash trace error =
+  Fmt.failwith
+    "%s: the run with no fault failed: %s@\n\
+    \  trace:@\n\
+     %a  replay:   ~replay:\"net/%s/%s\""
+    name error pp_trace trace hash (Plan.key Plan.none)
 
 let check ?(budget = 2_000) ?replay run =
   if budget < 1 then Fmt.invalid_arg "%s: the budget is %d" name budget;
@@ -264,7 +274,7 @@ let check ?(budget = 2_000) ?replay run =
          and was stopped there. Shrink the workload, or raise ~budget."
         n budget)
     overrun;
-  Option.iter (fail "the run with no fault failed: %s") failed;
+  Option.iter (first_failed ~hash:(digest first) first) failed;
   if first = [] then
     fail "the workload makes no network operation, so it tests nothing";
   let again, _, _ = exec ~bound:budget run Plan.none in

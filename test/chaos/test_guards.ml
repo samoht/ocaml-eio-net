@@ -235,12 +235,22 @@ let test_nondeterministic () =
     (fun () -> Eio_net_chaos.check run)
     ()
 
+(* A run with no fault that fails is reported with its operations and the
+   replay that runs it again. *)
 let test_first_run_fails () =
-  refused_with "Eio_net_chaos.check: the run with no fault failed: Eio.Io"
-    (fun () ->
-      Eio_net_chaos.check (fun env ->
-          Eio.Switch.run @@ fun sw -> ignore (Eio.Net.connect ~sw env#net addr)))
-    ()
+  let run ?replay () =
+    Eio_net_chaos.check ?replay (fun env ->
+        Eio.Switch.run @@ fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
+  in
+  refused_with "Eio_net_chaos.check: the run with no fault failed: Eio.Io" run
+    ();
+  let report = Expect.report run in
+  Alcotest.(check string) "trace" "" (Expect.field "trace" report);
+  if not (List.mem "    #1 connect 1c @0" (String.split_on_char '\n' report))
+  then Alcotest.failf "no operation in %S" report;
+  let replay = replay_of report in
+  Alcotest.(check bool) "replay" true (String.ends_with ~suffix:"/none" replay);
+  Alcotest.(check string) "replayed" report (Expect.report (run ~replay))
 
 (* A check runs inside another event loop as it does outside one. *)
 let test_nested () =

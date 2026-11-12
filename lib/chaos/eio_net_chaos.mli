@@ -67,11 +67,12 @@
 
     A check is deterministic. A failure raises [Failure] with the scenario, the
     tier that found it, the operations of the failing run, and the
-    [~replay:"..."] argument that runs that scenario alone. A block of up to
-    eight operations repeated three times or more shows its first and last
-    instances, and a report longer than that keeps its first and last hundred
-    lines and those around its first fault, so its size is bounded by the
-    workload's structure rather than its bytes. The scenario is found by its
+    [~replay:"..."] argument that runs that scenario alone; a failure of the run
+    with no fault, with its operations and the replay that runs it again. A
+    block of up to eight operations repeated three times or more shows its first
+    and last instances, and a report longer than that keeps its first and last
+    hundred lines and those around its first fault, so its size is bounded by
+    the workload's structure rather than its bytes. The scenario is found by its
     position and fault, so a replay still runs after a fix that changes the
     workload's first run, such as the size of its reads: a failure then says the
     scenario was re-matched, and a re-matched replay that passes returns as any
