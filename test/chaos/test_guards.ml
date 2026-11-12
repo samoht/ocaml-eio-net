@@ -1002,6 +1002,17 @@ let slow_reply () =
           Eio.Fiber.yield ()
         done
 
+(* A workload that runs work in a systhread, as an Eio program offloads a
+   blocking call, and gets its result or its exception. *)
+let systhread () =
+  Eio_net_chaos.check @@ fun env ->
+  touch env;
+  if Eio_unix.run_in_systhread (fun () -> 6 * 7) <> 42 then
+    failwith "a wrong result";
+  match Eio_unix.run_in_systhread (fun () -> raise Exit) with
+  | () -> failwith "no exception"
+  | exception Exit -> ()
+
 (* A ping-pong that never ends holds a bounded trace while it runs: the
    live words, sampled as it goes, stay under three million. *)
 let test_busy_memory () =
@@ -1108,6 +1119,8 @@ let suite =
         test_linear_memory;
       Alcotest.test_case "a report collapses no single line" `Quick
         test_report_shows_three;
+      Alcotest.test_case "a workload may run work in a systhread" `Quick
+        (Expect.passes systhread);
       Alcotest.test_case "a replay's hash may be uppercase" `Quick
         test_replay_case;
       Alcotest.test_case "a malformed scenario is refused" `Quick
