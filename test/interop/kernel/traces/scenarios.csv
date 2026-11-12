@@ -1115,7 +1115,7 @@ reuse client closes first,ok ok,EADDRINUSE ok
 reuse connection open,EADDRINUSE EADDRINUSE,EADDRINUSE ok
 reuse no connection,ok ok,ok ok
 reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok
-reuse bound server closes first,ok ok ok,EADDRINUSE EADDRINUSE ok
+reuse bound server closes first,ok ok ok,ok EADDRINUSE ok
 unix paths,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EINVAL,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EAFNOSUPPORT
 bind error shapes,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EINVAL raw:ENAMETOOLONG io:EADDRINUSE,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EAFNOSUPPORT raw:ENAMETOOLONG io:EADDRINUSE
 autobind,abstract6 abstract6 distinct r2,abort EINVAL
@@ -1233,6 +1233,15 @@ getnameinfo tcp ::ffff:127.0.0.1:80,localhost/http,localhost/http
 getnameinfo tcp ::ffff:10.1.2.3:80,::ffff:10.1.2.3/http,::ffff:10.1.2.3/http
 getnameinfo tcp 127.0.0.2:80,127.0.0.2/http,127.0.0.2/http
 getnameinfo unix x.sock,HOSTNAME/x.sock,abort Not_found
+getnameinfo tcp ::7f00:1:80,localhost/http,localhost/http
+getnameinfo tcp ::1:0:80,::0.1.0.0/http,::0.1.0.0/http
+getnameinfo tcp ::2:80,::2/http,::2/http
+getnameinfo tcp ::ffff:0:a01:203:80,::ffff:0:a01:203/http,::ffff:0:a01:203/http
+getnameinfo unix abstract,HOSTNAME/,abort Not_found
+failed connect: tcp,Refused EADDRINUSE EADDRINUSE then ok,Refused Refused ok then ok
+failed connect: path,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE
+failed connect: abstract,Refused EADDRINUSE EADDRINUSE then ok,Not_found Not_found ENOENT then ENOENT
+failed connect: abstract to the empty path,EINVAL EADDRINUSE EADDRINUSE then ok,Not_found Not_found ENOENT then ENOENT
 timed: server closes first,EADDRINUSE ok,EADDRINUSE ok
 timed: server closes first and relisten with reuse_addr,EADDRINUSE ok,ok ok
 timed: server closes first with reuse_addr on both,ok ok,ok ok

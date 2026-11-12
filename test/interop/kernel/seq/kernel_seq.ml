@@ -901,6 +901,55 @@ let listening_addr_closed net =
       Eio.Resource.close l;
       ignore (Eio.Net.listening_addr l))
 
+(* A connect that fails keeps its socket on its switch, bound: twice in one
+   switch, then a third probe of the bound address in that switch, then a
+   listen there once it ends. The third probe is a listen, except at a path:
+   eio_posix's listen unlinks a path it never bound when its switch ends. *)
+let failed_connect ~bind ~dst net =
+  let file =
+    match bind with
+    | `Unix p when p <> "" && p.[0] <> '\000' -> Some p
+    | _ -> None
+  in
+  Option.iter unlink file;
+  let connect sw =
+    outcome (fun () ->
+        ignore (Eio.Net.connect ~sw ~bind_to:bind net dst);
+        "ok")
+  in
+  let during =
+    attempt_s (fun sw ->
+        let first = connect sw in
+        let second = connect sw in
+        let third =
+          match file with Some _ -> connect sw | None -> listen_at net bind
+        in
+        String.concat " " [ first; second; third ])
+  in
+  let after = listen_at net bind in
+  Option.iter unlink file;
+  during ^ " then " ^ after
+
+let failed_connect_cases =
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  (* Two free ports. *)
+  let free net =
+    Eio.Switch.run @@ fun sw ->
+    let port () = port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0))) in
+    let a = port () in
+    (a, port ())
+  in
+  [
+    ( "tcp",
+      fun net ->
+        let a, b = free net in
+        failed_connect ~bind:(`Tcp (lo, a)) ~dst:(`Tcp (lo, b)) net );
+    ("path", failed_connect ~bind:(`Unix "fc.sock") ~dst:(`Unix "fc-none.sock"));
+    ("abstract", failed_connect ~bind:(abstract "k") ~dst:(abstract "kk"));
+    ( "abstract to the empty path",
+      failed_connect ~bind:(abstract "m") ~dst:(`Unix "") );
+  ]
+
 (* A Unix address's host is the host's name. *)
 let gni_host addr net =
   let host, service = Eio.Net.getnameinfo net addr in
@@ -1230,7 +1279,15 @@ let untimed_scenarios : (string * (net -> string)) list =
         ("tcp ::ffff:10.1.2.3:80", `Tcp (ip "::ffff:10.1.2.3", 80));
         ("tcp 127.0.0.2:80", `Tcp (ip "127.0.0.2", 80));
         ("unix x.sock", `Unix "x.sock");
+        ("tcp ::7f00:1:80", `Tcp (ip "::7f00:1", 80));
+        ("tcp ::1:0:80", `Tcp (ip "::1:0", 80));
+        ("tcp ::2:80", `Tcp (ip "::2", 80));
+        ("tcp ::ffff:0:a01:203:80", `Tcp (ip "::ffff:0:a01:203", 80));
+        ("unix abstract", `Unix "\000abc");
       ]
+  @ List.map
+      (fun (name, f) -> ("failed connect: " ^ name, f))
+      failed_connect_cases
 
 let scenario_list : (string * (wait:(float -> unit) -> net -> string)) list =
   let untimed (name, f) = (name, fun ~wait:_ net -> f net) in

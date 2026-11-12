@@ -182,9 +182,9 @@ let scenario_exceptions : scenario_exception list =
          localhost";
       holds =
         (fun name ~mem ~linux ->
+          let mh, ms = split_last '/' mem and lh, ls = split_last '/' linux in
           starts_with ~prefix:"getnameinfo unix" name
-          && starts_with ~prefix:"localhost/" mem
-          && starts_with ~prefix:"HOSTNAME/" linux);
+          && mh = "localhost" && lh = "HOSTNAME" && ms = ls);
     };
     {
       why =
@@ -202,6 +202,25 @@ let scenario_exceptions : scenario_exception list =
           | _ -> false);
     };
   ]
+  @ List.map
+      (fun (why, prefixes) ->
+        {
+          why;
+          holds =
+            (fun name ~mem:_ ~linux:_ ->
+              List.exists (fun prefix -> starts_with ~prefix name) prefixes);
+        })
+      [
+        ( "pending: a failed connect frees its bound address at once",
+          [ "failed connect: " ] );
+        ( "pending: getnameinfo names IPv4-compatible and abstract addresses \
+           otherwise",
+          [
+            "getnameinfo tcp ::7f00:1";
+            "getnameinfo tcp ::1:0";
+            "getnameinfo unix abstract";
+          ] );
+      ]
 
 let scenario_rows () =
   let file = Filename.concat "traces" "scenarios.csv" in

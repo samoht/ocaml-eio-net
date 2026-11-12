@@ -33,7 +33,8 @@ val scenarios : string list
     service resolution, bind error shapes, autobind, UDP reuse, datagram error
     order, edge addresses, a connect to itself, a listener closed with
     connections queued, Linux's abstract Unix addresses and the empty path,
-    [listening_addr] after a close, and timed closes. *)
+    [listening_addr] after a close, the names of IPv4-compatible and abstract
+    addresses, the address a failed connect keeps bound, and timed closes. *)
 
 val timed : string -> bool
 (** [timed name] is [true] for a scenario that lets time pass: TIME_WAIT and
