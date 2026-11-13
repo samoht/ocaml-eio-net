@@ -37,7 +37,7 @@
   (ipaddr (>= 5.3.0))
   fpath
   (conf-linux-libc-dev (= :os linux))
-  (alcotest :with-test)
+  (alcotest (and :with-test (>= 1.7.0)))
   (alcobar :with-test)
   (ohex :with-test)
   (eio_main :with-test)
