@@ -351,9 +351,9 @@ module Fault : sig
             Linux, the connection stays queued and its client sees nothing, and
             every accept on the network fails the same way until the program
             frees a descriptor, by closing a connection, socket or listener of
-            the network. The next accept then returns that connection, with its
-            data. {!check} does not try it, as {!Eio.Net.run_server} stops on
-            it. *)
+            the network, or by ending the switch that holds one. The next accept
+            then returns that connection, with its data. {!check} does not try
+            it, as {!Eio.Net.run_server} stops on it. *)
     | Drop  (** The datagram is lost; the receive waits for the next one. *)
     | Dup  (** The datagram arrives now and again on the next receive. *)
     | Reorder  (** The datagram arrives after the next one. *)
@@ -403,7 +403,8 @@ val wrap :
 
     A read or a write after the flow's own close raises [Invalid_argument]
     before [f] is asked, as Eio's own sockets do. A close drops the bytes a read
-    has not handed up yet, and the datagrams a socket holds back. *)
+    has not handed up yet, and the datagrams a socket holds back, and so does
+    the end of the switch a socket was made under, which closes it. *)
 
 val pair :
   ?os:[< `Linux | `Macos ] ->

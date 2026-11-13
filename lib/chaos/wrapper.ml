@@ -339,8 +339,8 @@ let guard ?eof ctx target f =
       | _ -> failed ctx target);
       Printexc.raise_with_backtrace e bt
 
-(* A close frees a descriptor, so the accepts that [Fault.Emfile] fails go
-   through again. *)
+(* A close frees a descriptor, as does the end of the switch that closes a
+   socket, so the accepts that [Fault.Emfile] fails go through again. *)
 let free ctx = locked ctx (fun () -> ctx.exhausted <- false)
 
 let ask ctx kind ~socket ~side ~family ~offset ~length =
@@ -406,6 +406,7 @@ module Flow = struct
     mutable wrote_after_end : bool;
     mutable cut_short : bool;
     mutable hushed : bool;
+    mutable release : Eio.Switch.hook;
   }
 
   (* Under [t.lock]. The end of a broken connection's reads: a reset is
@@ -540,6 +541,23 @@ module Flow = struct
           t.conn.sent.(ix t.side) <- t.conn.sent.(ix t.side) + n);
     n
 
+  (* Drops what the wrapper keeps for the socket, once: on its close, or when
+     the switch it was made under finishes and closes it. *)
+  let release t =
+    let was_open =
+      Mutex.protect t.lock (fun () ->
+          let was_open = not t.closed in
+          t.leftover <- Cstruct.empty;
+          t.closed <- true;
+          was_open)
+    in
+    if was_open then free t.ctx
+
+  let drop t =
+    Eio.Switch.remove_hook t.release;
+    release t;
+    Eio.Resource.close t.sock
+
   module Impl = struct
     type tag = [ `Generic ]
     type nonrec t = t
@@ -671,15 +689,7 @@ module Flow = struct
 
     let close t =
       charge t.ctx;
-      let was_open =
-        Mutex.protect t.lock (fun () ->
-            let was_open = not t.closed in
-            t.leftover <- Cstruct.empty;
-            t.closed <- true;
-            was_open)
-      in
-      Eio.Resource.close t.sock;
-      if was_open then free t.ctx
+      drop t
 
     let setsockopt t opt v =
       charge t.ctx;
@@ -692,31 +702,39 @@ module Flow = struct
 
   let handler = Eio.Net.Pi.stream_socket (module Impl)
 
-  let v ?remote ctx ~socket ~side ~family ~conn sock : stream =
+  let v ?remote ?sw ctx ~socket ~side ~family ~conn sock =
     join conn side sock;
-    Eio.Resource.T
-      ( {
-          ctx;
-          socket;
-          side;
-          family;
-          peer =
-            (match remote with
-            | Some addr -> Remote addr
-            | None -> End (socket, side));
-          sock;
-          conn;
-          lock = Mutex.create ();
-          leftover = Cstruct.empty;
-          delivered = 0;
-          written = 0;
-          closed = false;
-          reset_reported = false;
-          wrote_after_end = false;
-          cut_short = false;
-          hushed = false;
-        },
-        handler )
+    let t =
+      {
+        ctx;
+        socket;
+        side;
+        family;
+        peer =
+          (match remote with
+          | Some addr -> Remote addr
+          | None -> End (socket, side));
+        sock;
+        conn;
+        lock = Mutex.create ();
+        leftover = Cstruct.empty;
+        delivered = 0;
+        written = 0;
+        closed = false;
+        reset_reported = false;
+        wrote_after_end = false;
+        cut_short = false;
+        hushed = false;
+        release = Eio.Switch.null_hook;
+      }
+    in
+    Option.iter
+      (fun sw ->
+        t.release <- Eio.Switch.on_release_cancellable sw (fun () -> release t))
+      sw;
+    t
+
+  let resource t : stream = Eio.Resource.T (t, handler)
 end
 
 module Datagram = struct
@@ -727,8 +745,9 @@ module Datagram = struct
      receives: a duplicate, a held datagram released, or one taken before a
      stall. [held] holds the datagrams to deliver after the next one. Both are
      kept in the state while a receive waits, so a cancelled receive loses
-     none, and both go with a close. [lock] guards them, the count and
-     [closed], and is never held across a receive of the base socket. *)
+     none, and both go with a close, or with the switch the socket was made
+     under. [lock] guards them, the count and [closed], and is never held
+     across a receive of the base socket. *)
   type t = {
     ctx : ctx;
     socket : int;
@@ -739,6 +758,7 @@ module Datagram = struct
     mutable held : datagram list;
     mutable received : int;
     mutable closed : bool;
+    mutable release : Eio.Switch.hook;
   }
 
   let check t =
@@ -761,6 +781,17 @@ module Datagram = struct
   let noise ~socket ~offset k =
     let rng = Random.State.make [| socket; offset |] in
     String.init (max 0 k) (fun _ -> Char.chr (Random.State.int rng 256))
+
+  let release t =
+    let was_open =
+      Mutex.protect t.lock (fun () ->
+          let was_open = not t.closed in
+          t.ready <- [];
+          t.held <- [];
+          t.closed <- true;
+          was_open)
+    in
+    if was_open then free t.ctx
 
   let shutdown_of (Eio.Resource.T (t, ops) : socket) =
     let module X = (val Eio.Resource.get ops Eio.Flow.Pi.Shutdown) in
@@ -863,15 +894,11 @@ module Datagram = struct
       charge t.ctx;
       shutdown_of t.sock cmd
 
-    (* A datagram kept back goes with the socket. *)
     let close t =
       charge t.ctx;
-      Mutex.protect t.lock (fun () ->
-          t.ready <- [];
-          t.held <- [];
-          t.closed <- true);
-      Eio.Resource.close t.sock;
-      free t.ctx
+      Eio.Switch.remove_hook t.release;
+      release t;
+      Eio.Resource.close t.sock
 
     let setsockopt t opt v =
       charge t.ctx;
@@ -884,37 +911,60 @@ module Datagram = struct
 
   let handler = Eio.Net.Pi.datagram_socket (module Impl)
 
-  let v ctx ~family (sock : socket) : socket =
+  let v ~sw ctx ~family (sock : socket) : socket =
     let socket = locked ctx (fun () -> next_socket ctx) in
-    Eio.Resource.T
-      ( {
-          ctx;
-          socket;
-          family;
-          sock;
-          lock = Mutex.create ();
-          ready = [];
-          held = [];
-          received = 0;
-          closed = false;
-        },
-        handler )
+    let t =
+      {
+        ctx;
+        socket;
+        family;
+        sock;
+        lock = Mutex.create ();
+        ready = [];
+        held = [];
+        received = 0;
+        closed = false;
+        release = Eio.Switch.null_hook;
+      }
+    in
+    t.release <- Eio.Switch.on_release_cancellable sw (fun () -> release t);
+    Eio.Resource.T (t, handler)
 end
 
 module Listener = struct
   (* [held] holds the connections an accept took and did not return, oldest
      first: one failed with EMFILE, which stays queued until a descriptor is
      freed, or one whose accept [f] raised in or hung until a cancel. The next
-     accepts return them, as the kernel's queue would. *)
+     accepts return them, as the kernel's queue would, and the listener's
+     close closes them. [ctx.lock] guards [held] and [closed]. *)
   type t = {
     ctx : ctx;
     l : [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
-    mutable held : (stream * Eio.Net.Sockaddr.stream) list;
+    mutable held : (Flow.t * Eio.Net.Sockaddr.stream) list;
+    mutable closed : bool;
+    mutable release : Eio.Switch.hook;
     number : int;
     family : Op.family;
   }
 
   let hold t c = locked t.ctx (fun () -> t.held <- c :: t.held)
+
+  let release t =
+    let held =
+      locked t.ctx (fun () ->
+          if t.closed then None
+          else begin
+            t.closed <- true;
+            let held = t.held in
+            t.held <- [];
+            Some held
+          end)
+    in
+    Option.iter
+      (fun held ->
+        List.iter (fun (flow, _) -> Flow.drop flow) held;
+        free t.ctx)
+      held
 
   module Impl = struct
     type tag = [ `Generic ]
@@ -924,7 +974,8 @@ module Listener = struct
       let ctx = t.ctx in
       let queued =
         locked ctx (fun () ->
-            if ctx.exhausted then `Exhausted
+            if t.closed then `Accept
+            else if ctx.exhausted then `Exhausted
             else
               match t.held with
               | c :: rest ->
@@ -934,7 +985,7 @@ module Listener = struct
       in
       match queued with
       | `Exhausted -> raise (Posix.emfile ())
-      | `Held c -> c
+      | `Held (flow, peer) -> (Flow.resource flow, peer)
       | `Accept -> accept_base t ~sw
 
     and accept_base t ~sw =
@@ -943,7 +994,7 @@ module Listener = struct
       let sock = (sock :> stream) in
       let family = t.family in
       let socket, conn = server_conn ctx ~family sock in
-      let flow = Flow.v ctx ~socket ~side:`Server ~family ~conn sock in
+      let flow = Flow.v ~sw ctx ~socket ~side:`Server ~family ~conn sock in
       let fault =
         match
           locked ctx (fun () ->
@@ -963,14 +1014,14 @@ module Listener = struct
           (* The client left first: the accept succeeds and the connection
              is reset at both ends. *)
           break conn ~at:`Server `Reset;
-          (flow, peer)
+          (Flow.resource flow, peer)
       | Some Reset ->
           (* A Unix-domain client that left first closed: no reset. *)
           break conn ~at:`Server (`Closed `Client);
-          (flow, peer)
+          (Flow.resource flow, peer)
       | Some Eof ->
           break conn ~at:`Server (`Closed `Client);
-          (flow, peer)
+          (Flow.resource flow, peer)
       | Some Emfile ->
           locked ctx (fun () ->
               ctx.exhausted <- true;
@@ -981,19 +1032,20 @@ module Listener = struct
           Eio.Fiber.await_cancel ()
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;
-          (flow, peer)
+          (Flow.resource flow, peer)
       | Some
           ( Short _ | Refuse | Timeout | Unreachable | Drop | Dup | Reorder
           | Garble _ )
       | None ->
-          (flow, peer)
+          (Flow.resource flow, peer)
 
     let accept t ~sw = guard t.ctx (Accept t.number) (fun () -> accept_ t ~sw)
 
     let close t =
       charge t.ctx;
+      Eio.Switch.remove_hook t.release;
       Eio.Resource.close t.l;
-      free t.ctx
+      release t
 
     let listening_addr t =
       charge t.ctx;
@@ -1046,7 +1098,8 @@ module Network = struct
           (Eio.Net.connect ?bind_to ~options ~sw t.net addr :> stream)
         in
         let conn = client_conn ctx ~socket ~family sock in
-        Flow.v ~remote:addr ctx ~socket ~side:`Client ~family ~conn sock
+        Flow.resource
+          (Flow.v ~remote:addr ~sw ctx ~socket ~side:`Client ~family ~conn sock)
       in
       match fault with
       | Some (Fault.Refuse | Reset) -> raise (refused_exn ())
@@ -1076,22 +1129,28 @@ module Network = struct
     let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
       charge t.ctx;
       let l = Eio.Net.listen ~reuse_addr ~reuse_port ~backlog ~sw t.net addr in
-      Eio.Resource.T
-        ( {
-            Listener.ctx = t.ctx;
-            family = Op.family_of_stream addr;
-            l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
-            held = [];
-            number =
-              locked t.ctx (fun () ->
-                  t.ctx.listeners <- t.ctx.listeners + 1;
-                  t.ctx.listeners);
-          },
-          Listener.handler )
+      let listener =
+        {
+          Listener.ctx = t.ctx;
+          family = Op.family_of_stream addr;
+          l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
+          held = [];
+          closed = false;
+          release = Eio.Switch.null_hook;
+          number =
+            locked t.ctx (fun () ->
+                t.ctx.listeners <- t.ctx.listeners + 1;
+                t.ctx.listeners);
+        }
+      in
+      listener.release <-
+        Eio.Switch.on_release_cancellable sw (fun () ->
+            Listener.release listener);
+      Eio.Resource.T (listener, Listener.handler)
 
     let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
       charge t.ctx;
-      Datagram.v t.ctx
+      Datagram.v ~sw t.ctx
         ~family:(Op.family_of_datagram addr)
         (Eio.Net.datagram_socket ~reuse_addr ~reuse_port ~sw t.net addr
           :> Datagram.socket)
@@ -1135,8 +1194,10 @@ let pair ?os ~clock f =
   let c, s = Eio_net_mem.pipe ?os () in
   let socket = locked ctx (fun () -> next_socket ctx) in
   let conn = conn ~os:ctx.os ~paired:true `Inet in
-  ( Flow.v ctx ~socket ~side:`Client ~family:`Inet ~conn (c :> stream),
-    Flow.v ctx ~socket ~side:`Server ~family:`Inet ~conn (s :> stream) )
+  ( Flow.resource
+      (Flow.v ctx ~socket ~side:`Client ~family:`Inet ~conn (c :> stream)),
+    Flow.resource
+      (Flow.v ctx ~socket ~side:`Server ~family:`Inet ~conn (s :> stream)) )
 
 let outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
