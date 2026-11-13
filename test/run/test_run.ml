@@ -44,6 +44,58 @@ let scripted ?(addr = addr) ~sw net failures =
   Eio.Resource.T
     ({ Scripted.inner; failures }, Eio.Net.Pi.listening_socket (module Scripted))
 
+(* A socket whose shutdown, once it has shut [inner] down, waits for the
+   socket to be closed: the connection it ends is over before the shutdown
+   returns, as when a shutdown yields and its handler ends meanwhile. *)
+module Slow_shutdown = struct
+  type t = {
+    inner : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t;
+    closed : unit Eio.Promise.t;
+    set_closed : unit Eio.Promise.u;
+  }
+
+  type tag = [ `Generic ]
+
+  let read_methods = []
+  let single_read t buf = Eio.Flow.single_read t.inner buf
+  let single_write t bufs = Eio.Flow.single_write t.inner bufs
+  let copy t ~src = Eio.Flow.copy src t.inner
+
+  let shutdown t cmd =
+    Eio.Flow.shutdown t.inner cmd;
+    Eio.Promise.await t.closed
+
+  let close t =
+    Eio.Resource.close t.inner;
+    ignore (Eio.Promise.try_resolve t.set_closed () : bool)
+
+  let setsockopt t opt v = Eio.Net.setsockopt t.inner opt v
+  let getsockopt t opt = Eio.Net.getsockopt t.inner opt
+end
+
+(* A listener whose accepted sockets are [Slow_shutdown] ones. *)
+module Slow_listener = struct
+  type t = [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t
+  type tag = [ `Generic ]
+
+  let accept t ~sw =
+    let inner, addr = Eio.Net.accept ~sw t in
+    let closed, set_closed = Eio.Promise.create () in
+    ( Eio.Resource.T
+        ( { Slow_shutdown.inner; closed; set_closed },
+          Eio.Net.Pi.stream_socket (module Slow_shutdown) ),
+      addr )
+
+  let close t = Eio.Resource.close t
+  let listening_addr t = Eio.Net.listening_addr t
+  let setsockopt t opt v = Eio.Net.setsockopt t opt v
+  let getsockopt t opt = Eio.Net.getsockopt t opt
+end
+
+let slow_listener ~sw net =
+  let inner = Eio.Net.listen ~sw ~backlog:16 net addr in
+  Eio.Resource.T (inner, Eio.Net.Pi.listening_socket (module Slow_listener))
+
 (* A protocol whose head is one line: it answers each line with [ok LINE] until
    its peer ends, saying before each line that the head is incomplete and its
    progress the bytes buffered, and once the line is in that it is complete.
@@ -365,6 +417,28 @@ let test_each_loop_reads_failures_with_its_classifier () =
   | None -> Alcotest.fail "the strict loop read EPERM as the lenient one");
   check_no_error seen
 
+(* The loop sheds a stalled head when its one connection is held, and that
+   connection ends before the shutdown returns. The slot it frees serves the
+   next peer. *)
+let test_a_connection_ending_during_its_shedding () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let seen, on_error = errors () in
+  let shed = ref false in
+  Eio.Switch.run @@ fun clients ->
+  Eio.Switch.run @@ fun scope ->
+  let listening = slow_listener ~sw:scope net in
+  Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+      Eio_net_accept.run ~max_connections:1 ~on_error listening
+        (line_server ?served:None));
+  stall ~sw:clients net "x" ~on_end:(fun () -> shed := true);
+  settle 1;
+  Alcotest.(check string)
+    "the fresh peer is answered" "ok fresh\n" (exchange net "fresh\n");
+  Alcotest.(check bool) "the stalled peer was shed" true !shed;
+  check_no_error seen
+
 (* A connection whose head is complete is being served and is never shed: a
    peer past [max_connections] waits for one to end. *)
 let complete_heads_are_not_shed n () =
@@ -628,6 +702,8 @@ let suite =
         test_no_classifier_reads_the_portable_errors;
       Alcotest.test_case "each loop reads failures with its classifier" `Quick
         test_each_loop_reads_failures_with_its_classifier;
+      Alcotest.test_case "a connection ending during its shedding" `Quick
+        test_a_connection_ending_during_its_shedding;
       Alcotest.test_case "10 complete heads are not shed" `Quick
         (complete_heads_are_not_shed 10);
       Alcotest.test_case "100 complete heads are not shed" `Quick
