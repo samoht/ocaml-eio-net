@@ -11,7 +11,8 @@ val of_connected_datagram_fd :
     over the connected Unix datagram descriptor [fd], with one datagram per
     frame, of at most [max_frame] bytes (defaults to [65536]). The caller owns
     [fd], which is put in non-blocking mode and stays open when [sw] finishes;
-    the channel is usable until then.
+    the channel is usable until then, and a send or a receive raises
+    [Invalid_argument] once it has.
 
     On Darwin, {!Eio_net.Frame.send_batch} uses [sendmsg_x] and
     {!Eio_net.Frame.recv_batch} uses [recvmsg_x] to transfer up to [max_batch]

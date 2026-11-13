@@ -13,6 +13,10 @@ external recv_batch_raw :
 let eio f x =
   try f x with Unix.Unix_error (e, fn, arg) -> raise (Eio_unix.Err.v e fn arg)
 
+(* [use fd f] is [f] on the descriptor of [fd], which the channel's switch
+   closes: once it has, it raises Eio's error for a closed descriptor. *)
+let use fd f = Eio_unix.Fd.use_exn "Eio_net_unix.Frame" fd f
+
 let widen_datagram_buffers fd =
   let send = 2 * 1024 * 1024 in
   let recv = send * 2 in
@@ -37,7 +41,7 @@ let last_received lengths =
   received 1
 
 (* [receiver ~max_frame ~max_batch socket fd] is the [recv] and [recv_batch]
-   of the channel over [fd], which [socket] wraps. *)
+   of the channel over [socket], whose descriptor is [fd]. *)
 let receiver ~max_frame ~max_batch socket fd =
   let check = check_length ~max_frame in
   (* One byte of headroom tells a datagram longer than [max_frame] from one
@@ -68,7 +72,10 @@ let receiver ~max_frame ~max_batch socket fd =
     let _source, first_len = Eio.Net.recv socket recv_buffers.(0) in
     recv_lengths.(0) <- first_len;
     let extra =
-      match recv_batch_raw fd recv_buffers recv_lengths 1 max_batch with
+      match
+        use fd (fun fd ->
+            recv_batch_raw fd recv_buffers recv_lengths 1 max_batch)
+      with
       | extra -> extra
       | exception Unix.Unix_error (e, fn, arg) ->
           failed := Some (Eio_unix.Err.v e fn arg);
@@ -108,9 +115,13 @@ let sender ~max_frame ~max_batch fd =
      the wait is a sleep that doubles from 50 us to 10 ms. *)
   let rec send_prepared ~backoff first count =
     if first < count then
-      match eio (send_batch_raw fd send_buffers send_lengths first) count with
+      match
+        use fd
+          (eio (fun fd ->
+               send_batch_raw fd send_buffers send_lengths first count))
+      with
       | 0 ->
-          Eio_unix.await_writable fd;
+          use fd Eio_unix.await_writable;
           send_prepared ~backoff:min_backoff first count
       | -1 ->
           Eio_unix.sleep (float backoff *. 1e-6);
@@ -135,6 +146,7 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
      block; a blocking one would stall every fiber of the domain instead. *)
   eio Unix.set_nonblock fd;
   let socket = Eio_unix.Net.import_socket_datagram ~sw ~close_unix:false fd in
+  let fd = Eio_unix.Resource.fd socket in
   (* Receiving and sending have their own buffers: a frame waiting to go out
      is not overwritten by one coming in. *)
   let recv, recv_batch = receiver ~max_frame ~max_batch socket fd in
