@@ -179,6 +179,38 @@ let accept_race pool seed =
     Alcotest.failf "seed %d: %d accepted connections wrote, %d clients read"
       seed (Atomic.get written) read_x
 
+(* Two Unix-domain datagram sockets on two domains send to each other and
+   read what the other sent: each reads every datagram, in order, however
+   their sends and receives interleave. *)
+let dgram_exchange pool seed =
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let a = `Unix "/tmp/a.sock" and b = `Unix "/tmp/b.sock" in
+  let sa = Eio.Net.datagram_socket ~sw net a in
+  let sb = Eio.Net.datagram_socket ~sw net b in
+  (* Rounds of as many datagrams as a receiver queues before a send waits. *)
+  let rounds = 200 and burst = 10 in
+  let run f = Eio.Executor_pool.submit_exn pool ~weight:1.0 f in
+  let side sock dst i () =
+    spin (Random.State.make [| seed; i |]);
+    let buf = Cstruct.create 8 in
+    List.concat
+      (List.init rounds (fun r ->
+           for k = 0 to burst - 1 do
+             Eio.Net.send sock ~dst
+               [ Cstruct.of_string (string_of_int ((r * burst) + k)) ]
+           done;
+           List.init burst (fun _ ->
+               let _, len = Eio.Net.recv sock buf in
+               int_of_string (Cstruct.to_string ~len buf))))
+  in
+  let got_a, got_b =
+    Eio.Fiber.pair (fun () -> run (side sa b 0)) (fun () -> run (side sb a 1))
+  in
+  let all = List.init (rounds * burst) Fun.id in
+  if got_a <> all || got_b <> all then
+    Alcotest.failf "seed %d: a datagram was lost or reordered" seed
+
 (* A few seeds by default; [dune build @test/conc-long] sets EIO_NET_LONG and
    runs 2000, as the kernel's outcome sets were measured. *)
 let seeds = if Sys.getenv_opt "EIO_NET_LONG" = None then 10 else 2000
@@ -210,4 +242,6 @@ let suite =
           (with_pool close_vs_write);
         Alcotest.test_case "connects racing an accept and a close" `Quick
           (with_pool accept_race);
+        Alcotest.test_case "datagrams exchanged across domains" `Quick
+          (with_pool dgram_exchange);
       ] )

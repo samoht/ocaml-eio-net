@@ -1441,6 +1441,35 @@ let unix_blocked_send who net =
   unlink "bs.s";
   !result
 
+(* A Unix-domain datagram socket sends to its own path: what it reads back,
+   and from where, then how many more it sends itself before a send waits or
+   fails. Its send buffer is set, as the host's default varies. *)
+let unix_self_send net =
+  Eio.Switch.run @@ fun sw ->
+  unlink "self.sock";
+  let s = Eio.Net.datagram_socket ~sw net (`Unix "self.sock") in
+  Eio.Net.setsockopt s Eio.Net.Sockopt.SO_SNDBUF 10000;
+  let send () =
+    Eio.Net.send s ~dst:(`Unix "self.sock") [ Cstruct.of_string "abc" ]
+  in
+  let back =
+    outcome (fun () ->
+        send ();
+        let src, n = now (fun () -> Eio.Net.recv s (Cstruct.create 8)) in
+        Fmt.str "r%d from %s" n (shape (src :> Eio.Net.Sockaddr.t)))
+  in
+  let rec fill n =
+    if n >= 1000 then "queued more"
+    else
+      match now send with
+      | () -> fill (n + 1)
+      | exception Blocked -> Fmt.str "queued=%d blk" n
+      | exception e -> Fmt.str "queued=%d then %s" n (classify e)
+  in
+  let r = back ^ " " ^ fill 0 in
+  unlink "self.sock";
+  r
+
 (* UDP datagrams of 1000 bytes sent and received in [steps] over loopback:
    how many the receiver then holds, as Linux frees the memory of those
    read only in batches. *)
@@ -2260,6 +2289,7 @@ let untimed_scenarios : (string * (net -> string)) list =
       ( "unix dgram blocked send: receiver shuts receive",
         unix_blocked_send `Receiver );
       ("unix dgram blocked send: sender shuts send", unix_blocked_send `Sender);
+      ("unix dgram self-send", unix_self_send);
     ]
   @ List.map
       (fun (name, steps) -> ("udp rmem: " ^ name, udp_rmem steps))

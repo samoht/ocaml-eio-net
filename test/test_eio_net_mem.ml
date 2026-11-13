@@ -2719,6 +2719,22 @@ let test_unix_dgram_queue () =
       Alcotest.(check int) (Fmt.str "%d bytes" n) sent (sent_before_wait n))
     [ (1, 11); (20000, 11); (30000, 7); (65536, 4); (200000, 2) ]
 
+(* A Unix-domain datagram socket that sends to its own path reads its
+   datagram back, from itself, on Linux and on macOS. *)
+let test_unix_dgram_self_send () =
+  Eio_main.run @@ fun _ ->
+  List.iter
+    (fun os ->
+      Eio.Switch.run @@ fun sw ->
+      let net = Eio_net_mem.v ~os ~sw () in
+      let self = `Unix "/tmp/self.sock" in
+      let s = Eio.Net.datagram_socket ~sw net self in
+      Eio.Net.send s ~dst:self [ Cstruct.of_string "me" ];
+      let src, got = recv_string s in
+      Alcotest.(check string) "read back" "me" got;
+      Alcotest.check datagram_addr "from itself" self src)
+    [ `Linux; `Macos ]
+
 let suite =
   ( "eio_net_mem",
     [
@@ -2829,6 +2845,8 @@ let suite =
         test_udp_receive_buffer;
       Alcotest.test_case "a Unix-domain datagram send waits for room" `Quick
         test_unix_dgram_queue;
+      Alcotest.test_case "a Unix-domain datagram sent to itself" `Quick
+        test_unix_dgram_self_send;
       Alcotest.test_case "a Unix-domain write after peer close" `Quick
         test_unix_write_after_peer_close;
       Alcotest.test_case "a closed listener refuses connects" `Quick

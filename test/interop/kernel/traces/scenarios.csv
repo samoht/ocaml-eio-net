@@ -1286,6 +1286,7 @@ unix dgram sndbuf: size=100000,sent=3,sent=0 then EMSGSIZE
 unix dgram sndbuf: size=212960,sent=1,sent=0 then EMSGSIZE
 unix dgram blocked send: receiver shuts receive,queued=11 blk Reset,abort ENOBUFS
 unix dgram blocked send: sender shuts send,queued=11 blk Reset,abort ENOBUFS
+unix dgram self-send,r3 from unix:self.sock queued=27 blk,r3 from unix:self.sock queued=32 then ENOBUFS
 udp rmem: send 99 recv 3 send 10,kept=96,kept=106
 udp rmem: send 99 recv 24 send 10,kept=75,kept=85
 udp rmem: send 99 recv 25 send 10,kept=84,kept=84
