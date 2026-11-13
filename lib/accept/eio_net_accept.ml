@@ -125,12 +125,15 @@ let least_progressed pool mine =
     (Atomic.get pool.all) None
 
 (* Every connection of [loop] is held: shed its least progressed incomplete
-   head, if it holds one, and wait for one of its connections to end. *)
+   head, if it holds one, and wait for one of its connections to end. The
+   count is read first, as a connection may end while it is shed. *)
 let free_a_slot loop =
+  let count = loop.count in
   Option.iter
     (fun (c, _) -> shed c.head)
     (least_progressed loop.pool (fun c -> c.loop = loop.id));
-  Eio.Condition.await_no_mutex loop.ended
+  Eio.Condition.loop_no_mutex loop.ended (fun () ->
+      if loop.count < count then Some () else None)
 
 (* No descriptor is left: shed the least progressed incomplete head of
    [pool], if one is held, and wait for a connection of any of its loops to
