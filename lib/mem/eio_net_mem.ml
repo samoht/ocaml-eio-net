@@ -2377,7 +2377,9 @@ module Datagram_socket = struct
      not yet freed, [unfreed], and [wmem] that of the Unix-domain datagrams
      this socket sent that are still queued, as Linux counts them; [batch] is
      the datagrams left of those queued when a receive last found none taken.
-     All are guarded by [lock], [wmem] by the sender's. *)
+     All are guarded by [lock] but [wmem], which is atomic: no socket takes
+     another's lock while it holds its own, as one sending to itself or two
+     sending to each other would. *)
   and t = {
     hub : hub;
     addr : Eio.Net.Sockaddr.datagram;
@@ -2386,7 +2388,7 @@ module Datagram_socket = struct
     mutable rmem : int;
     mutable unfreed : int;
     mutable batch : int;
-    mutable wmem : int;
+    wmem : int Atomic.t;
     readable : Eio.Condition.t;
     mutable closed : bool;
     mutable send_shut : bool;
@@ -2428,7 +2430,7 @@ module Datagram_socket = struct
     256 + pow2 512 + paged
 
   (* A Unix-domain socket whose queue holds more than [max_dgram_qlen]
-     datagrams makes a send to it wait. *)
+     datagrams makes a send to it wait, but its own send to itself. *)
   let max_dgram_qlen = 10
 
   (* What a datagram of [n] bytes takes of a macOS receive buffer: its
@@ -2478,7 +2480,7 @@ module Datagram_socket = struct
         rmem = 0;
         unfreed = 0;
         batch = 0;
-        wmem = 0;
+        wmem = Atomic.make 0;
         readable = Eio.Condition.create ();
         closed = false;
         send_shut = false;
@@ -2659,19 +2661,16 @@ module Datagram_socket = struct
     else
       let n = String.length data in
       let delivered =
-        if
-          local
-          && Mutex.protect t.lock (fun () -> t.wmem >= Sockopt.sndbuf t.opts)
-        then `Wait
+        if local && Atomic.get t.wmem >= Sockopt.sndbuf t.opts then `Wait
         else
           Mutex.protect peer.lock @@ fun () ->
           if local && peer.recv_shut then `Refused
           else if peer.closed then `Lost
           else if local then
-            if Queue.length peer.queued > max_dgram_qlen then `Wait
+            if peer != t && Queue.length peer.queued > max_dgram_qlen then `Wait
             else begin
               let size = unix_size n in
-              Mutex.protect t.lock (fun () -> t.wmem <- t.wmem + size);
+              ignore (Atomic.fetch_and_add t.wmem size);
               Queue.push
                 { src = source t ~dst peer; data; size; sender = Some t }
                 peer.queued;
@@ -2703,9 +2702,7 @@ module Datagram_socket = struct
   let freed t d =
     t.rmem <- t.rmem - d.size;
     Option.iter
-      (fun s ->
-        if s == t then s.wmem <- s.wmem - d.size
-        else Mutex.protect s.lock (fun () -> s.wmem <- s.wmem - d.size))
+      (fun s -> ignore (Atomic.fetch_and_add s.wmem (-d.size)))
       d.sender
 
   (* A datagram a receive takes. A UDP one's memory is freed with that of
