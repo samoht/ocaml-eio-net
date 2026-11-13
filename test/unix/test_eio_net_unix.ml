@@ -801,6 +801,72 @@ let test_connect_failure () =
       (Unix.ETIMEDOUT, "none", "none");
     ]
 
+(* Lets the event loop run, and take the results of the system threads, 64
+   times or until [until ()]. *)
+let settle ?(until = fun () -> false) () =
+  for _ = 1 to 64 do
+    if not (until ()) then Eio_unix.run_in_systhread ignore
+  done
+
+(* A listener whose backlog is full: on Linux a connect waits for room, and
+   a timeout ends the wait, and an accept that makes room lets it through;
+   on macOS a connect is refused at once. *)
+let test_local_connect_at_full_backlog () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  Eio.Switch.run @@ fun sw ->
+  let p = Filename.concat (Filename.temp_dir "full" "") "s" in
+  let l =
+    Eio_net_unix.Local.listen ~sw ~net ~backlog:1 ~perm:0o600 Eio.Path.(fs / p)
+  in
+  let rec fill n =
+    let s = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    Unix.set_nonblock s;
+    match Unix.connect s (Unix.ADDR_UNIX p) with
+    | () ->
+        Eio.Switch.on_release sw (fun () -> Unix.close s);
+        fill (n + 1)
+    | exception Unix.Unix_error ((EAGAIN | ECONNREFUSED), _, _) ->
+        Unix.close s;
+        n
+  in
+  Alcotest.(check bool) "the backlog takes some" true (fill 0 > 0);
+  let connect () = Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / p) in
+  match Lazy.force system with
+  | "Darwin" -> (
+      match connect () with
+      | _ -> Alcotest.fail "connected past a full backlog"
+      | exception
+          Eio.Io (Eio.Net.E (Eio.Net.Connection_failure (Eio.Net.Refused _)), _)
+        ->
+          ())
+  | _ ->
+      let clock = Eio_mock.Clock.make () in
+      let result = ref None and stuck = ref false in
+      Eio.Fiber.both
+        (fun () ->
+          result :=
+            Some
+              (Eio.Time.with_timeout clock 1.0 (fun () ->
+                   Ok (ignore (connect ())))))
+        (fun () ->
+          settle ();
+          Eio_mock.Clock.advance clock;
+          settle ~until:(fun () -> Option.is_some !result) ();
+          (* A connect that ignores its cancellation is let through. *)
+          if Option.is_none !result then begin
+            stuck := true;
+            ignore (Eio.Net.accept ~sw l)
+          end);
+      Alcotest.(check bool) "the timeout ends the wait" false !stuck;
+      Alcotest.(check bool) "timed out" true (!result = Some (Error `Timeout));
+      Eio.Fiber.both
+        (fun () -> ignore (connect ()))
+        (fun () ->
+          settle ();
+          ignore (Eio.Net.accept ~sw l))
+
 let suite =
   ( "eio_net_unix",
     [
@@ -831,6 +897,8 @@ let suite =
         test_local_connect_through_net_alone;
       Alcotest.test_case "a local connect confined to its directory" `Quick
         test_local_connect_at_is_confined;
+      Alcotest.test_case "a local connect to a full backlog" `Quick
+        test_local_connect_at_full_backlog;
       Alcotest.test_case "connected datagram batch" `Quick
         test_connected_datagram_batch;
       Alcotest.test_case "connected datagram duplex" `Quick

@@ -9,6 +9,7 @@
   eio-net.mem
   eio
   eio.unix
+  eio.mock
   eio_main
   alcotest
   fmt
