@@ -1000,6 +1000,109 @@ let test_hang_times_out_writer () =
   Alcotest.(check string) "macOS" "reset after 18s" (run ~clock:() `Macos);
   Alcotest.(check string) "no clock" "waits after 3600s" (run `Linux)
 
+(* --- Switch release ------------------------------------------------------- *)
+
+let invalid_after_release name f =
+  match f () with
+  | exception Invalid_argument _ -> ()
+  | _ -> Alcotest.failf "%s went through after its switch finished" name
+
+(* A connection closed by its switch drops what the wrapper read ahead: a read
+   then raises [Invalid_argument], as on the bare socket. *)
+let test_flow_released_with_switch () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock (fun _ -> None) (Eio_net_mem.v ~sw ())
+  in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let server =
+    Eio.Switch.run @@ fun csw ->
+    let client = Eio.Net.connect ~sw:csw net addr in
+    let server, _ = Eio.Net.accept ~sw:csw l in
+    Eio.Flow.copy_string "hello" client;
+    let buf = Cstruct.create 1 in
+    Alcotest.(check int) "one byte" 1 (Eio.Flow.single_read server buf);
+    server
+  in
+  invalid_after_release "a read" (fun () -> read1 server)
+
+(* A switch that closes a connection frees a descriptor, as a close does: the
+   accept that EMFILE failed then takes the queued connection. *)
+let test_emfile_freed_by_switch () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Accept 2 Fault.Emfile)
+      (Eio_net_mem.v ~sw ())
+  in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+  let l = Eio.Net.listen ~sw ~backlog:2 net addr in
+  let second =
+    Eio.Switch.run @@ fun csw ->
+    let _first = Eio.Net.connect ~sw:csw net addr in
+    let _held, _ = Eio.Net.accept ~sw:csw l in
+    let second = Eio.Net.connect ~sw net addr in
+    Eio.Flow.copy_string "hi" second;
+    (match Eio.Net.accept ~sw l with
+    | exception e when is_emfile e -> ()
+    | _ -> Alcotest.fail "an accept went through with no descriptor left");
+    second
+  in
+  let server, _ = Eio.Net.accept ~sw l in
+  Alcotest.(check string) "the queued connection" "hi" (read1 server);
+  Eio.Flow.close second
+
+(* A listener closed by its switch refuses an accept as the bare one does, and
+   resets the connection it held back, as a kernel resets its queue. *)
+let test_listener_released_with_switch () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock
+      (nth `Accept 1 Fault.Emfile)
+      (Eio_net_mem.v ~sw ())
+  in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+  let l, client =
+    Eio.Switch.run @@ fun lsw ->
+    let l = Eio.Net.listen ~sw:lsw ~backlog:1 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    Eio.Flow.copy_string "hi" client;
+    (match Eio.Net.accept ~sw l with
+    | exception e when is_emfile e -> ()
+    | _ -> Alcotest.fail "the first accept went through");
+    (l, client)
+  in
+  invalid_after_release "an accept" (fun () -> Eio.Net.accept ~sw l);
+  match read1 client with
+  | exception e when is_reset e -> ()
+  | exception End_of_file -> Alcotest.fail "the client read end of file"
+  | s -> Alcotest.failf "the client read %S" s
+
+(* A datagram socket closed by its switch drops the datagrams it holds back,
+   and a close before the switch finishes is not undone by it. *)
+let test_dgram_released_with_switch () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net =
+    Chaos.wrap ~clock:env#clock (nth `Recv 1 Fault.Dup) (Eio_net_mem.v ~sw ())
+  in
+  let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  let rx, closed =
+    Eio.Switch.run @@ fun dsw ->
+    let rx = Eio.Net.datagram_socket ~sw:dsw net (loopback 9000) in
+    let closed = Eio.Net.datagram_socket ~sw:dsw net `UdpV4 in
+    Eio.Net.close closed;
+    Eio.Net.send tx ~dst:(loopback 9000) [ Cstruct.of_string "x" ];
+    Alcotest.(check string) "first copy" "x" (recv1 rx);
+    (rx, closed)
+  in
+  invalid_after_release "a receive" (fun () -> recv1 rx);
+  invalid_after_release "a receive" (fun () -> recv1 closed)
+
 (* --- Domains ------------------------------------------------------------- *)
 
 (* Writers in two domains share one count of bytes written: with a reset on
@@ -1296,6 +1399,14 @@ let suite =
         test_write_after_peer_close;
       Alcotest.test_case "no IP fault on a Unix-domain socket" `Quick
         test_unix_has_no_ip_faults;
+      Alcotest.test_case "a flow released with its switch" `Quick
+        test_flow_released_with_switch;
+      Alcotest.test_case "a switch frees a descriptor" `Quick
+        test_emfile_freed_by_switch;
+      Alcotest.test_case "a listener released with its switch" `Quick
+        test_listener_released_with_switch;
+      Alcotest.test_case "a datagram socket released with its switch" `Quick
+        test_dgram_released_with_switch;
       Alcotest.test_case "writes counted across domains" `Quick
         test_writes_counted_across_domains;
       Alcotest.test_case "reads shared across domains" `Quick
