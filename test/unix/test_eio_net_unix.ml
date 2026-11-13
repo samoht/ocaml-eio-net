@@ -168,6 +168,9 @@ let test_offload_write_skips_empty_buffers () =
   Alcotest.(check int)
     "the payload is written" 7
     (Eio_net_unix.Stream.offload_single_write fd bufs);
+  Alcotest.(check int)
+    "empty buffers alone write nothing" 0
+    (Eio_net_unix.Stream.offload_single_write fd [ Cstruct.empty ]);
   let got = Bytes.create 16 in
   let n = Unix.read b got 0 16 in
   Alcotest.(check string)

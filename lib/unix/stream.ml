@@ -3,14 +3,20 @@ external writev : Unix.file_descr -> (Cstruct.buffer * int * int) array -> int
 
 let iov_max = 256
 
-let offload_single_write fd bufs =
-  let bufs = List.filteri (fun i _ -> i < iov_max) bufs in
-  let iov =
-    Array.of_list
-      (List.map
-         (fun c -> (c.Cstruct.buffer, c.Cstruct.off, c.Cstruct.len))
-         bufs)
+(* The iovecs of the first [iov_max] non-empty buffers of [bufs], in one pass
+   that reads no further. *)
+let iovecs bufs =
+  let rec take n acc = function
+    | _ when n = iov_max -> acc
+    | [] -> acc
+    | { Cstruct.len = 0; _ } :: rest -> take n acc rest
+    | { Cstruct.buffer; off; len } :: rest ->
+        take (n + 1) ((buffer, off, len) :: acc) rest
   in
+  Array.of_list (List.rev (take 0 [] bufs))
+
+let offload_single_write fd bufs =
+  let iov = iovecs bufs in
   let rec attempt () =
     let wrote =
       try
@@ -28,7 +34,7 @@ let offload_single_write fd bufs =
       attempt ()
     end
   in
-  attempt ()
+  if Array.length iov = 0 then 0 else attempt ()
 
 let offload_writer flow =
   match Eio_unix.Resource.fd_opt flow with
