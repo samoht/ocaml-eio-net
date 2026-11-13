@@ -357,6 +357,174 @@ let test_flow_buffer_follows_read_side () =
       ("all", fun s -> Eio.Flow.shutdown s `All);
     ]
 
+(* --- Identity ------------------------------------------------------------- *)
+
+(* The kernel the tests run on, as uname -s names it. *)
+let host_os =
+  lazy
+    (let ic = Unix.open_process_args_in "uname" [| "uname"; "-s" |] in
+     let s = String.trim (In_channel.input_all ic) in
+     ignore (Unix.close_process_in ic);
+     match s with "Darwin" -> `Macos | _ -> `Linux)
+
+let os_name = function `Linux -> "Linux" | `Macos -> "macOS"
+
+let identity_outcome f =
+  match f () with
+  | s -> s
+  | exception End_of_file -> "EOF"
+  | exception Invalid_argument _ -> "Invalid_argument"
+  | exception Eio.Time.Timeout -> "blocks"
+  | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> "Reset"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (code, _, _)), _) ->
+      Unix.error_message code
+  | exception Eio.Io (e, _) -> Fmt.str "%a" Eio.Exn.pp_err e
+
+(* One run on [net]: the client writes "hello", shuts its sends if [fin], the
+   server reads one byte, which a wrapper may read ahead of, then meets
+   [ending], and each end reads and writes; each step's outcome follows.
+   The connection lives in a switch of its own, which [`Release] ends. Real
+   sockets wait [pause] after each step, as macOS's loopback delivers
+   asynchronously. *)
+let identity_run ~clock ~pause ~addr ~fin ending net =
+  let log = ref [] in
+  let step name f =
+    let r = identity_outcome f in
+    if pause > 0. then Eio.Time.sleep clock pause;
+    log := (name ^ ": " ^ r) :: !log
+  in
+  let read name flow =
+    step name (fun () ->
+        Eio.Time.with_timeout_exn clock 0.05 (fun () ->
+            let buf = Cstruct.create 16 in
+            let n = Eio.Flow.single_read flow buf in
+            Cstruct.to_string ~len:n buf))
+  in
+  let write name flow =
+    step name (fun () ->
+        string_of_int (Eio.Flow.single_write flow [ Cstruct.of_string "xy" ]))
+  in
+  let after c s =
+    read "S read" s;
+    read "S read again" s;
+    write "S write" s;
+    read "C read" c;
+    write "C write" c
+  in
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let addr = Eio.Net.listening_addr l in
+  let c, s =
+    Eio.Switch.run @@ fun csw ->
+    let c = Eio.Net.connect ~sw:csw net addr in
+    let s, _ = Eio.Net.accept ~sw:csw l in
+    step "C write" (fun () ->
+        Eio.Flow.copy_string "hello" c;
+        "ok");
+    if fin then
+      step "C shutdown send" (fun () ->
+          Eio.Flow.shutdown c `Send;
+          "ok");
+    step "S read 1" (fun () ->
+        let buf = Cstruct.create 1 in
+        let n = Eio.Flow.single_read s buf in
+        Cstruct.to_string ~len:n buf);
+    let shut name cmd =
+      step name (fun () ->
+          Eio.Flow.shutdown s cmd;
+          "ok")
+    in
+    (match ending with
+    | `Receive -> shut "S shutdown receive" `Receive
+    | `Send -> shut "S shutdown send" `Send
+    | `All -> shut "S shutdown all" `All
+    | `Close ->
+        step "S close" (fun () ->
+            Eio.Flow.close s;
+            "ok")
+    | `Release -> ());
+    if ending <> `Release then after c s;
+    (c, s)
+  in
+  if ending = `Release then after c s;
+  List.rev !log
+
+let endings =
+  [
+    (`Receive, "receive shutdown");
+    (`Send, "send shutdown");
+    (`All, "full shutdown");
+    (`Close, "close");
+    (`Release, "switch release");
+  ]
+
+(* [identity ~clock ~real ~os ~make] runs each scenario on the network
+   [make ~sw], bare and wrapped with no fault under [os], and checks that
+   every step has the same outcome. [real] is for the host's sockets. *)
+let identity ~clock ~real ~os ~make =
+  let n = ref 0 in
+  List.iter
+    (fun family ->
+      List.iter
+        (fun fin ->
+          List.iter
+            (fun (ending, ending_name) ->
+              incr n;
+              let addr =
+                match family with
+                | `Tcp -> `Tcp (Eio.Net.Ipaddr.V4.loopback, 0)
+                | `Unix when real ->
+                    `Unix
+                      (Filename.concat
+                         (Filename.get_temp_dir_name ())
+                         (Fmt.str "eio-net-identity-%d-%d.sock" (Unix.getpid ())
+                            !n))
+                | `Unix -> `Unix "/identity.sock"
+              in
+              let run wrap =
+                Eio.Switch.run @@ fun sw ->
+                let net = make ~sw in
+                let net =
+                  if wrap then Chaos.wrap ~os ~clock (fun _ -> None) net
+                  else net
+                in
+                Fun.protect
+                  ~finally:(fun () ->
+                    match addr with
+                    | `Unix path when real -> (
+                        try Sys.remove path with Sys_error _ -> ())
+                    | `Unix _ | `Tcp _ -> ())
+                  (fun () ->
+                    identity_run ~clock
+                      ~pause:(if real then 0.02 else 0.)
+                      ~addr ~fin ending net)
+              in
+              let bare = run false in
+              let name =
+                Fmt.str "%s %s %s%s, %s" (os_name os)
+                  (if real then "real" else "mem")
+                  (match family with `Tcp -> "TCP" | `Unix -> "AF_UNIX")
+                  (if fin then " after the peer's FIN" else "")
+                  ending_name
+              in
+              Alcotest.(check (list string)) name bare (run true))
+            endings)
+        [ false; true ])
+    [ `Tcp; `Unix ]
+
+(* A wrapper that injects no fault does what its network does: on eio-net.mem
+   under each kernel, and on the host's real sockets. *)
+let test_fault_free_identity () =
+  Eio_main.run @@ fun env ->
+  let clock = env#clock in
+  List.iter
+    (fun os ->
+      identity ~clock ~real:false ~os ~make:(fun ~sw ->
+          Eio_net_mem.v ~os ~sw ()))
+    [ `Linux; `Macos ];
+  identity ~clock ~real:true ~os:(Lazy.force host_os) ~make:(fun ~sw:_ ->
+      (env#net :> [ `Generic ] Eio.Net.ty Eio.Resource.t))
+
 (* --- Datagrams ----------------------------------------------------------- *)
 
 let loopback port = `Udp (Eio.Net.Ipaddr.V4.loopback, port)
@@ -1357,6 +1525,8 @@ let suite =
         test_flow_write_after_close;
       Alcotest.test_case "flow buffer follows the read side" `Quick
         test_flow_buffer_follows_read_side;
+      Alcotest.test_case "a fault-free wrapper does what its network does"
+        `Quick test_fault_free_identity;
       Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
       Alcotest.test_case "datagram dup" `Quick test_dgram_dup;
       Alcotest.test_case "datagram reorder" `Quick test_dgram_reorder;
