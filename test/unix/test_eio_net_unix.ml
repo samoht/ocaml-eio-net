@@ -140,6 +140,36 @@ let test_connected_datagram_send_refused () =
   | exception Eio.Io _ -> ());
   Unix.close fa
 
+(* A channel is usable until its switch finishes: a send after that raises
+   the error Eio raises for a closed descriptor, as a receive does, and
+   nothing reaches the peer. *)
+let test_connected_datagram_send_after_switch () =
+  Eio_main.run @@ fun _env ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  let a =
+    Eio.Switch.run @@ fun sw ->
+    Eio_net_unix.Frame.of_connected_datagram_fd ~sw fa
+  in
+  let closed f =
+    match f () with
+    | _ -> false
+    | exception Invalid_argument m ->
+        String.ends_with ~suffix:"file descriptor used after calling close!" m
+  in
+  Alcotest.(check bool)
+    "a receive raises" true
+    (closed (fun () -> Eio_net.Frame.recv a));
+  Alcotest.(check bool)
+    "a send raises" true
+    (closed (fun () ->
+         Eio_net.Frame.send a [ Cstruct.of_string "after-switch" ]));
+  Unix.set_nonblock fb;
+  (match Unix.recv fb (Bytes.create 64) 0 64 [] with
+  | n -> Alcotest.failf "the peer received %d bytes" n
+  | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) -> ());
+  Unix.close fa;
+  Unix.close fb
+
 (* A write the system refuses is an [Eio.Io] error: the read end of a pipe
    takes no write (EBADF). *)
 let test_offload_write_refused () =
@@ -809,6 +839,8 @@ let suite =
         test_connected_datagram_concurrent_senders;
       Alcotest.test_case "connected datagram send refused" `Quick
         test_connected_datagram_send_refused;
+      Alcotest.test_case "connected datagram send after the switch" `Quick
+        test_connected_datagram_send_after_switch;
       Alcotest.test_case "offloaded write refused" `Quick
         test_offload_write_refused;
       Alcotest.test_case "offloaded write skips empty buffers" `Quick
