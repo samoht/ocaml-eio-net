@@ -174,6 +174,21 @@ let test_offload_write_skips_empty_buffers () =
     "the peer reads it" "payload" (Bytes.sub_string got 0 n);
   Unix.close b
 
+(* A call reads no further into its buffers than the 256 it passes, so a
+   partial write costs the same whatever follows: here the list never ends,
+   and the call writes 256 one-byte buffers of it. *)
+let test_offload_write_reads_a_bounded_prefix () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Unix.socketpair ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Unix.set_nonblock a;
+  let fd = Eio_unix.Fd.of_unix ~sw ~blocking:false ~close_unix:true a in
+  let rec endless = Cstruct.empty :: Cstruct.of_string "x" :: endless in
+  Alcotest.(check int)
+    "256 bytes are written" 256
+    (Eio_net_unix.Stream.offload_single_write fd endless);
+  Unix.close b
+
 (* A connected UDP socket holds a datagram from its peer and the error an
    ICMP port unreachable left when the peer had gone. A batch that receives
    the datagram and then meets the error returns the datagram, and the next
@@ -795,6 +810,8 @@ let suite =
         test_offload_write_refused;
       Alcotest.test_case "offloaded write skips empty buffers" `Quick
         test_offload_write_skips_empty_buffers;
+      Alcotest.test_case "offloaded write reads a bounded prefix" `Quick
+        test_offload_write_reads_a_bounded_prefix;
       Alcotest.test_case "connected datagram error after a datagram" `Quick
         test_connected_datagram_error_after_a_datagram;
       Alcotest.test_case "connected datagram longer than max_frame" `Quick
