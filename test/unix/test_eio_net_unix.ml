@@ -808,6 +808,23 @@ let settle ?(until = fun () -> false) () =
     if not (until ()) then Eio_unix.run_in_systhread ignore
   done
 
+(* Runs [f] with [Eio_unix.sleep] on [mono]. *)
+let with_mono_clock mono f =
+  Effect.Deep.match_with f ()
+    {
+      retc = Fun.id;
+      exnc = raise;
+      effc =
+        (fun (type a) (e : a Effect.t) ->
+          match e with
+          | Eio_unix.Private.Get_monotonic_clock ->
+              Some
+                (fun (k : (a, _) Effect.Deep.continuation) ->
+                  Effect.Deep.continue k
+                    (mono :> Eio.Time.Mono.ty Eio.Resource.t))
+          | _ -> None);
+    }
+
 (* A listener whose backlog is full: on Linux a connect waits for room, and
    a timeout ends the wait, and an accept that makes room lets it through;
    on macOS a connect is refused at once. *)
@@ -843,21 +860,34 @@ let test_local_connect_at_full_backlog () =
           ())
   | _ ->
       let clock = Eio_mock.Clock.make () in
+      let mono = Eio_mock.Clock.Mono.make () in
       let result = ref None and stuck = ref false in
       Eio.Fiber.both
         (fun () ->
           result :=
             Some
               (Eio.Time.with_timeout clock 1.0 (fun () ->
-                   Ok (ignore (connect ())))))
+                   Ok (ignore (with_mono_clock mono connect)))))
         (fun () ->
-          settle ();
+          (* The connect first opens the directory in a system thread, which
+             no cancellation ends, then sleeps between attempts on [mono]:
+             the timeout fires once it waits for room. *)
+          let waiting () =
+            Option.is_some !result || Eio_mock.Clock.Mono.try_advance mono
+          in
+          while not (waiting ()) do
+            Eio_unix.run_in_systhread ignore
+          done;
           Eio_mock.Clock.advance clock;
           settle ~until:(fun () -> Option.is_some !result) ();
           (* A connect that ignores its cancellation is let through. *)
           if Option.is_none !result then begin
             stuck := true;
-            ignore (Eio.Net.accept ~sw l)
+            ignore (Eio.Net.accept ~sw l);
+            while Option.is_none !result do
+              ignore (Eio_mock.Clock.Mono.try_advance mono);
+              Eio_unix.run_in_systhread ignore
+            done
           end);
       Alcotest.(check bool) "the timeout ends the wait" false !stuck;
       Alcotest.(check bool) "timed out" true (!result = Some (Error `Timeout));
