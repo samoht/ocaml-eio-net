@@ -15,9 +15,10 @@ val bind_error :
     a NUL past its first byte, and [ENOENT] from the unlink(2) of such a path.
 *)
 
-val timed_out : unit -> exn
-(** [timed_out ()] is the error eio_posix raises for a connect whose handshake
-    times out. *)
+val timed_out : [ `Connect | `Read | `Write ] -> exn
+(** [timed_out op] is the [ETIMEDOUT] eio_posix raises for a connect whose
+    handshake times out, or for a read or a write on a connection the kernel
+    gave up on. *)
 
 val no_buffer_space : unit -> exn
 (** [no_buffer_space ()] is the error eio_posix raises for a datagram that finds

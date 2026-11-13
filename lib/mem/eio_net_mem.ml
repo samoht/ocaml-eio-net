@@ -72,6 +72,16 @@ let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
 type os = Linux | Macos
 
 let kernel = function None | Some `Linux -> Linux | Some `Macos -> Macos
+
+(* The clock a network was given: TCP's timers run on it. *)
+type timer = { now : unit -> Mtime.t; sleep_until : Mtime.t -> unit }
+
+let timer clock =
+  {
+    now = (fun () -> Eio.Time.Mono.now clock);
+    sleep_until = (fun t -> Eio.Time.Mono.sleep_until clock t);
+  }
+
 let mapped_prefix = "\000\000\000\000\000\000\000\000\000\000\xff\xff"
 
 (* The IPv4 address an IPv4-mapped IPv6 address stands for, or [ip]. *)
@@ -1251,6 +1261,58 @@ module Sockopt = struct
             in
             Some (snd + if snd < 16384 then 16384 else window)
         | Macos, true -> Some snd)
+
+  (* When a TCP end whose connection went silent at [silenced] gives up, with
+     ETIMEDOUT, if it does: [last] is when it last received a segment, and
+     [oldest] when it sent the oldest byte not acknowledged. Keepalive
+     probes once the idle time has passed since the last segment, a probe the
+     live peer answered included, and gives up after [cnt] more intervals,
+     or with [TCP_USER_TIMEOUT] at the first probe that long past the last
+     segment. Data not acknowledged for [TCP_USER_TIMEOUT], or for 948.6 s on
+     Linux (tcp_retries2 = 15 over loopback) and 18 s on macOS, gives up too.
+     On Linux it stops the probes. Measured over loopback, with a peer whose
+     segments were all dropped. *)
+  let give_up t ~silenced ~last ~oldest =
+    let ns = Mtime.to_uint64_ns
+    and secs n = Int64.(mul (of_int n) 1_000_000_000L) in
+    let at n = Some (Mtime.of_uint64_ns n) in
+    let user = Int64.(mul (of_int t.user_timeout) 1_000_000L) in
+    let linux = t.os = Linux in
+    let keepalive =
+      if not t.keepalive then None
+      else
+        let idle = secs (Option.value t.keepidle ~default:7200) in
+        let intvl = secs (Option.value t.keepintvl ~default:75) in
+        let cnt = Option.value t.keepcnt ~default:(if linux then 9 else 8) in
+        let ceil a b = if a <= 0L then 0L else Int64.(div (add a (pred b)) b) in
+        (* The last probe the live peer answered, or the last segment. *)
+        let quiet =
+          Int64.(
+            mul idle (max 0L (pred (ceil (sub (ns silenced) (ns last)) idle))))
+        in
+        let base = Int64.add (ns last) quiet in
+        let probes =
+          if user > 0L then max 1L (ceil (Int64.sub user idle) intvl)
+          else Int64.of_int cnt
+        in
+        at Int64.(add base (add idle (mul probes intvl)))
+    in
+    let retransmit =
+      match oldest with
+      | None -> None
+      | Some u ->
+          let span =
+            if user > 0L then user
+            else if linux then 948_600_000_000L
+            else secs 18
+          in
+          at (Int64.add (ns u) span)
+    in
+    match (linux, keepalive, retransmit) with
+    | true, _, Some _ -> retransmit
+    | _, None, r | _, r, None -> r
+    | false, Some k, Some r ->
+        if Mtime.is_earlier k ~than:r then keepalive else retransmit
 end
 
 (* Fibers waiting on a pipe, first come first served, in a doubly-linked
@@ -1381,7 +1443,10 @@ end
    reads the [n] bytes of [Some n], then waits until its own [rcv_shut]; the
    writer fills the queue, then waits until its own [shut]. What the reader
    reads frees no room, and neither end's close or shutdown reaches the
-   other. *)
+   other. A TCP pipe with a [timer] keeps when its writer last sent a byte
+   while the connection was live, [last], when it went silent, [silenced],
+   and when the oldest byte sent since then, or lost then, was written,
+   [oldest]: when each end gives up follows. *)
 module Pipe = struct
   type t = {
     mutex : Mutex.t;
@@ -1394,6 +1459,10 @@ module Pipe = struct
     mutable rcv_shut : bool;
     mutable fin_sent : bool;
     mutable silent : int option;
+    timer : timer option;
+    mutable last : Mtime.t;
+    mutable silenced : Mtime.t;
+    mutable oldest : Mtime.t option;
     os : os;
     local : bool;
     mutable capacity : int;
@@ -1403,10 +1472,22 @@ module Pipe = struct
     writers : Waiters.t;
   }
 
-  let v ~os ~local ~capacity =
+  exception Expired
+
+  let now t = match t.timer with Some c -> c.now () | None -> Mtime.min_stamp
+
+  let v ~os ~local ~timer ~capacity =
+    let timer = if local then None else timer in
+    let born =
+      match timer with Some c -> c.now () | None -> Mtime.min_stamp
+    in
     {
       os;
       local;
+      timer;
+      last = born;
+      silenced = born;
+      oldest = None;
       mutex = Mutex.create ();
       queued = Queue.create ();
       head = 0;
@@ -1431,18 +1512,50 @@ module Pipe = struct
     Waiters.wake woken;
     result
 
-  (* Waits for the wake-up of [waiter], registered in [q]. *)
-  let await t q (p, waiter) =
-    match Eio.Promise.await p with
-    | () -> ()
-    | exception (Eio.Cancel.Cancelled _ as e) ->
-        locked t (fun _ ->
-            if Waiters.remove q waiter then ((), [])
-            else begin
-              q.turn <- false;
-              ((), Waiters.pass q)
-            end);
-        raise e
+  (* Waits for the wake-up of [waiter], registered in [q], and at most until
+     [until ()], which a time already past makes raise [Expired]: [false] if
+     that time came first, and the waiter left without the turn. *)
+  let await ?until t q (p, waiter) =
+    let leave () =
+      locked t (fun _ ->
+          if Waiters.remove q waiter then ((), [])
+          else begin
+            q.turn <- false;
+            ((), Waiters.pass q)
+          end)
+    in
+    let deadline =
+      match (t.timer, until) with
+      | Some c, Some until -> Option.map (fun d -> (c, d)) (until ())
+      | _ -> None
+    in
+    match deadline with
+    | Some (c, d) when not (Mtime.is_later d ~than:(c.now ())) ->
+        leave ();
+        raise Expired
+    | _ -> (
+        let wait () =
+          match deadline with
+          | None ->
+              Eio.Promise.await p;
+              true
+          | Some (c, d) ->
+              Eio.Fiber.first
+                (fun () ->
+                  Eio.Promise.await p;
+                  true)
+                (fun () ->
+                  c.sleep_until d;
+                  false)
+        in
+        match wait () with
+        | true -> true
+        | false ->
+            leave ();
+            false
+        | exception (Eio.Cancel.Cancelled _ as e) ->
+            leave ();
+            raise e)
 
   (* Changes the state under the mutex and wakes every waiter. *)
   let update t f =
@@ -1500,7 +1613,7 @@ module Pipe = struct
   let room t =
     if t.size + t.unacked < t.capacity then Waiters.pass t.writers else []
 
-  let rec write ?(turn = false) t ~back bufs =
+  let rec write ?(turn = false) ?until t ~back bufs =
     let n = Cstruct.lenv bufs in
     let result =
       locked t @@ fun t ->
@@ -1514,7 +1627,13 @@ module Pipe = struct
         else if
           Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
         then (`Wait (Waiters.queue t.writers ~turn), [])
-        else (`Done (queue t ~turn bufs n), room t)
+        else
+          let k = queue t ~turn bufs n in
+          if k > 0 && Option.is_none t.oldest && Option.is_some t.timer then begin
+            t.oldest <- Some (now t);
+            (`Sent k, room t)
+          end
+          else (`Done k, room t)
       else if t.refused then leave `Refused
       else if n = 0 then
         if t.local && t.gone then leave (`Raise (reset_exn ()))
@@ -1548,12 +1667,17 @@ module Pipe = struct
       end
       else
         let k = queue t ~turn bufs n in
+        if k > 0 && Option.is_some t.timer then t.last <- now t;
         (`Done k, Waiters.pass t.readers @ room t)
     in
     match result with
     | `Wait w ->
-        await t t.writers w;
-        write ~turn:true t ~back bufs
+        let turn = await ?until t t.writers w in
+        write ~turn ?until t ~back bufs
+    | `Sent n ->
+        (* The writer's reads now wait for an acknowledgement too. *)
+        update back ignore;
+        n
     | `Raise e -> raise e
     | `Shut ->
         (* EPIPE after our own send shutdown; on TCP it reports a pending
@@ -1591,7 +1715,7 @@ module Pipe = struct
     | _ -> got
 
   (* What is queued drains before a reset or the end of the stream. *)
-  let rec read ?(turn = false) t dst =
+  let rec read ?(turn = false) ?until t dst =
     let result =
       locked t @@ fun t ->
       if Waiters.must_wait t.readers ~turn then
@@ -1633,8 +1757,8 @@ module Pipe = struct
     | `Read n -> n
     | `Raise e -> raise e
     | `Wait w ->
-        await t t.readers w;
-        read ~turn:true t dst
+        let turn = await ?until t t.readers w in
+        read ~turn ?until t dst
 
   let shut t = update t (fun t -> t.shut <- true)
 
@@ -1671,9 +1795,22 @@ module Pipe = struct
   let silence t =
     update t (fun t ->
         if Option.is_none t.silent then
-          if not t.local then t.silent <- Some 0
+          if not t.local then begin
+            t.silent <- Some 0;
+            t.silenced <- now t;
+            if t.size > 0 && Option.is_some t.timer then
+              t.oldest <- Some (now t)
+          end
           else if not (t.shut || t.reset || t.gone || t.refused || t.rcv_shut)
           then t.silent <- Some t.size)
+
+  (* A silent TCP pipe with a timer: when it went silent, when its writer last
+     sent a byte before, and when it wrote the oldest one not acknowledged. *)
+  let timing t =
+    Mutex.protect t.mutex (fun () ->
+        match (t.silent, t.timer) with
+        | Some _, Some _ -> Some (t.silenced, t.last, t.oldest)
+        | _ -> None)
 
   (* The reader closes: bytes it left unread answer the writer with a reset,
      which refuses its writes at once. *)
@@ -1698,7 +1835,8 @@ module Flow = struct
        opened under finishes, removed once the flow is closed. A close defers
        to the operations in flight, [users], as Eio's [Rcfd] defers a
        descriptor's: [closing] refuses new ones at once, and the last user
-       closes the socket, [closed]. *)
+       closes the socket, [closed]. [given_up] says the end gave up on its
+       silent peer, and whether it reported ETIMEDOUT yet. *)
     type t = {
       to_peer : Pipe.t;
       from_peer : Pipe.t;
@@ -1712,7 +1850,64 @@ module Flow = struct
       mutable on_fin : unit -> unit;
       connection : int;
       opts : Sockopt.t;
+      mutable given_up : [ `No | `Pending | `Reported ];
     }
+
+    (* When this end gives up on its silent peer, if it does; the earliest
+       time once it has. *)
+    let until t () =
+      if Mutex.protect t.lock (fun () -> t.given_up <> `No) then
+        Some Mtime.min_stamp
+      else
+        match Pipe.timing t.from_peer with
+        | None -> None
+        | Some (silenced, sent, _) -> (
+            match Pipe.timing t.to_peer with
+            | None -> None
+            | Some (_, acked, oldest) ->
+                Sockopt.give_up t.opts ~silenced
+                  ~last:
+                    (if Mtime.is_later sent ~than:acked then sent else acked)
+                  ~oldest)
+
+    (* The error [op] meets once this end gave up: on Linux ETIMEDOUT once,
+       for the first read or write, then end-of-file and EPIPE; on macOS
+       EPIPE for each write, and ETIMEDOUT once for the first read, which
+       a write leaves pending. The first wakes every waiter of this end. *)
+    let gave_up t (op : [ `Read | `Write ]) =
+      let first, report =
+        Mutex.protect t.lock @@ fun () ->
+        let first = t.given_up = `No in
+        if first then t.given_up <- `Pending;
+        let report =
+          t.given_up = `Pending && (op = `Read || t.from_peer.os = Linux)
+        in
+        if report then t.given_up <- `Reported;
+        (first, report)
+      in
+      if first then begin
+        Pipe.update t.from_peer ignore;
+        Pipe.update t.to_peer ignore
+      end;
+      if report then Posix.timed_out (op :> [ `Connect | `Read | `Write ])
+      else match op with `Read -> End_of_file | `Write -> reset_exn ()
+
+    (* Runs [f] with the deadline of a silent end, or raises what this end
+       meets if it has given up. *)
+    let watched t op f =
+      if Option.is_none t.from_peer.timer then f None
+      else
+        let until = until t in
+        let expired =
+          match until () with
+          | Some d -> not (Mtime.is_later d ~than:(Pipe.now t.from_peer))
+          | None -> false
+        in
+        if expired then raise (gave_up t op)
+        else
+          match f (Some until) with
+          | v -> v
+          | exception Pipe.Expired -> raise (gave_up t op)
 
     (* [abort] resets the peer, as a connection a listener drops unaccepted
        is; otherwise the peer reads end-of-file, or a reset if this end left
@@ -1753,7 +1948,9 @@ module Flow = struct
           Printexc.raise_with_backtrace e bt
 
     let single_write t bufs =
-      use t "write" @@ fun () -> Pipe.write t.to_peer ~back:t.from_peer bufs
+      use t "write" @@ fun () ->
+      watched t `Write @@ fun until ->
+      Pipe.write ?until t.to_peer ~back:t.from_peer bufs
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
 
@@ -1762,28 +1959,30 @@ module Flow = struct
     let single_read t buf =
       use t "read" @@ fun () ->
       if Cstruct.length buf = 0 then raise End_of_file
-      else Pipe.read t.from_peer buf
+      else watched t `Read @@ fun until -> Pipe.read ?until t.from_peer buf
 
     (* macOS refuses to shut down the receive side of a socket that reads
        end-of-file, and Eio ignores the ENOTCONN: nothing is shut down. *)
     let shutdown t cmd =
       use t "shutdown" @@ fun () ->
-      match cmd with
-      | (`Receive | `All)
-        when t.from_peer.os = Macos && Pipe.receive_ended t.from_peer ->
-          ()
-      | `Send ->
-          Pipe.shut t.to_peer;
-          Pipe.fin_sent t.from_peer;
-          t.on_fin ()
-      | `Receive -> Pipe.shut_receive t.from_peer
-      | `All ->
-          Pipe.shut t.to_peer;
-          Pipe.fin_sent t.from_peer;
-          Pipe.shut_receive t.from_peer;
-          if t.from_peer.os = Macos && not t.from_peer.local then
-            Pipe.open_window t.from_peer;
-          t.on_fin ()
+      (* An end that gave up is closed: Eio ignores the ENOTCONN. *)
+      if Mutex.protect t.lock (fun () -> t.given_up = `No) then
+        match cmd with
+        | (`Receive | `All)
+          when t.from_peer.os = Macos && Pipe.receive_ended t.from_peer ->
+            ()
+        | `Send ->
+            Pipe.shut t.to_peer;
+            Pipe.fin_sent t.from_peer;
+            t.on_fin ()
+        | `Receive -> Pipe.shut_receive t.from_peer
+        | `All ->
+            Pipe.shut t.to_peer;
+            Pipe.fin_sent t.from_peer;
+            Pipe.shut_receive t.from_peer;
+            if t.from_peer.os = Macos && not t.from_peer.local then
+              Pipe.open_window t.from_peer;
+            t.on_fin ()
 
     let close_with ~abort t =
       let now =
@@ -1813,8 +2012,14 @@ module Flow = struct
 
     let read_methods = []
 
+    (* An option set on a silent end moves when it gives up. *)
     let setsockopt t opt v =
-      use t "setsockopt" @@ fun () -> Sockopt.set t.opts opt v
+      use t "setsockopt" @@ fun () ->
+      Sockopt.set t.opts opt v;
+      if Option.is_some (Pipe.timing t.from_peer) then begin
+        Pipe.update t.from_peer ignore;
+        Pipe.update t.to_peer ignore
+      end
 
     let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
      fun t opt -> use t "getsockopt" @@ fun () -> Sockopt.get t.opts opt
@@ -1852,6 +2057,7 @@ module Flow = struct
           on_fin = ignore;
           connection;
           opts;
+          given_up = `No;
         }
     in
     (impl, Eio.Resource.T (impl, handler))
@@ -1877,21 +2083,21 @@ module Flow = struct
     | Some q -> if bound then min q capacity else q
 
   (* A connection to itself: what it writes, it reads. *)
-  let self ~os ~capacity ~bound ~(opts : Sockopt.t) =
+  let self ~os ~timer ~capacity ~bound ~(opts : Sockopt.t) =
     let connection = Atomic.fetch_and_add connections 1 in
     let size () =
       queue ~local:false ~capacity ~bound ~writer:opts ~reader:opts
     in
-    let pipe = Pipe.v ~os ~local:false ~capacity:(size ()) in
+    let pipe = Pipe.v ~os ~local:false ~timer ~capacity:(size ()) in
     opts.resized <- (fun () -> Pipe.resize pipe (size ()));
     v ~connection ~opts ~from_peer:pipe ~to_peer:pipe
 
-  let pair ~os ~local ~capacity ~bound ~client:(c : Sockopt.t)
+  let pair ~os ~local ~timer ~capacity ~bound ~client:(c : Sockopt.t)
       ~server:(s : Sockopt.t) =
     let connection = Atomic.fetch_and_add connections 1 in
     let size writer reader = queue ~local ~capacity ~bound ~writer ~reader in
-    let to_client = Pipe.v ~os ~local ~capacity:(size s c) in
-    let to_server = Pipe.v ~os ~local ~capacity:(size c s) in
+    let to_client = Pipe.v ~os ~local ~timer ~capacity:(size s c) in
+    let to_server = Pipe.v ~os ~local ~timer ~capacity:(size c s) in
     let resized () =
       Pipe.resize to_client (size s c);
       Pipe.resize to_server (size c s)
@@ -2982,6 +3188,7 @@ module Network = struct
     bounded : bool;
         (* The test gave [capacity]: it bounds what buffers set give too. *)
     sleep : (float -> unit) option;
+    timer : timer option;
   }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
@@ -3157,14 +3364,16 @@ module Network = struct
         match t.sleep with
         | Some sleep ->
             sleep 75.;
-            raise (Posix.timed_out ())
+            raise (Posix.timed_out `Connect)
         | None -> Eio.Fiber.await_cancel ())
     | None, `Tcp _ when to_itself ->
         let capacity =
           t.capacity (Flow.default_capacity ~os:t.os ~local:false)
         in
         Sockopt.connect opts Client;
-        let flow = Flow.self ~os:t.os ~capacity ~bound:t.bounded ~opts in
+        let flow =
+          Flow.self ~os:t.os ~timer:t.timer ~capacity ~bound:t.bounded ~opts
+        in
         let ends = Ends.v t.hub.Listening_socket.ports in
         (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
         Flow.on_close flow (fun ~reset ~abort:_ ->
@@ -3190,7 +3399,8 @@ module Network = struct
         in
         Sockopt.connect opts Client;
         let client, server =
-          Flow.pair ~os:t.os ~local:unix ~capacity ~bound:t.bounded ~client:opts
+          Flow.pair ~os:t.os ~local:unix ~timer:t.timer ~capacity
+            ~bound:t.bounded ~client:opts
             ~server:(Sockopt.accepted listener.opts)
         in
         (* The accepted socket holds the listener's port at the address the
@@ -3437,7 +3647,7 @@ let pipe ?os ?capacity () =
     opts
   in
   let (_, client), (_, server) =
-    Flow.pair ~os ~local:false
+    Flow.pair ~os ~local:false ~timer:None
       ~capacity:
         (capacity_rule capacity (Flow.default_capacity ~os ~local:false))
       ~bound:(Option.is_some capacity) ~client:(end_ Client)
@@ -3450,6 +3660,7 @@ let network ?os ~capacity ~bounded ?clock ~sw () =
   let files = Files.v () in
   let now = Option.map (fun clock () -> Eio.Time.Mono.now clock) clock in
   let sleep = Option.map (fun clock d -> Eio.Time.Mono.sleep clock d) clock in
+  let timer = Option.map timer clock in
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;
@@ -3469,7 +3680,8 @@ let network ?os ~capacity ~bounded ?clock ~sw () =
     }
   in
   Eio.Resource.T
-    (Network.{ sw; os; hub; datagrams; capacity; bounded; sleep }, handler)
+    ( Network.{ sw; os; hub; datagrams; capacity; bounded; sleep; timer },
+      handler )
 
 let v ?os ?capacity ?clock ~sw () =
   network ?os ~capacity:(capacity_rule capacity)

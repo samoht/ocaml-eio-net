@@ -96,7 +96,8 @@ The tests follow a few rules:
   connection.
 - Every program on the network meets the faults, the test's own peers
   included. A connection may go silent for good, as when a host loses power,
-  and no close or reset then ends a wait on it: each read needs a timeout,
+  and no close or reset then ends a wait on it, only the kernel's keepalive
+  or retransmission timeouts: each read needs a timeout,
   and so does each write that may fill a socket's buffer. Test servers use
   `Eio.Net.run_server ~on_error:ignore`, test clients catch
   `Eio.Io _ | End_of_file`, and both parse strictly. Two fibers of
@@ -227,10 +228,13 @@ real network, pass the host's kernel.
 
 ### What a check can miss
 
-- A connection that goes silent stays silent: no keepalive ends a read on it,
-  even with `SO_KEEPALIVE` set, and no retransmission timeout ends a write,
-  where Linux gives up after about 15 minutes. A program that relies on either
-  fails as a hang: give it a timeout of its own.
+- A connection that goes silent ends a wait only as the kernel would, by the
+  times measured over loopback: after the keepalive probes, or once a byte
+  sent goes unacknowledged for `TCP_USER_TIMEOUT`, or else for 948.6 s on
+  Linux and 18 s on macOS. Over a real network the retransmission timeout
+  grows with the round-trip time, so a program whose own deadline is close to
+  these may behave otherwise there. With no keepalive and nothing
+  unacknowledged, a read waits for ever and the check reports a hang.
 - A garbled datagram is random bytes, so a parser that accepts some noise may
   pass. Fuzz the parser on its own.
 - A datagram is delayed alone, and for 50 ms. Ask for longer or grouped delays

@@ -202,6 +202,18 @@ val v :
     or 30 seconds under [`Macos]. Without a clock there is no TIME_WAIT: an
     address is free once both ends close.
 
+    On [clock], each end of a TCP connection gone silent ({!Private.silence})
+    gives up on its peer as Linux does, measured over loopback. With
+    [SO_KEEPALIVE] and no byte unacknowledged, it probes once [TCP_KEEPIDLE] has
+    passed since the last segment it received. Its probes go [TCP_KEEPINTVL]
+    apart, and it gives up one interval after the [TCP_KEEPCNT]th, or with
+    [TCP_USER_TIMEOUT] at the first probe that long after that segment. A byte
+    it sent unacknowledged stops the probes, and ends the connection
+    [TCP_USER_TIMEOUT] later, or 948.6 seconds later, as [tcp_retries2] at 15
+    does. The first read or write then raises [ETIMEDOUT]; later reads return
+    end-of-file and writes raise [EPIPE]. With no keepalive and nothing
+    unacknowledged, or without a clock, a wait on it lasts for ever.
+
     Host resolution reads numbers as glibc's getaddrinfo(3) does, on a
     dual-stack host with no services database and no name server. The service is
     read first: as strtoul(3) reads it in base 10, the whole string, with
@@ -394,10 +406,12 @@ val connection : _ Eio.Net.stream_socket -> int option
       {!section-datagrams} describes.
     - A TCP socket whose [SO_LINGER] is [Some 0] resets its peer as it closes,
       as both kernels abort the connection.
+    - [SO_KEEPALIVE], [TCP_KEEPIDLE], [TCP_KEEPINTVL], [TCP_KEEPCNT] and
+      [TCP_USER_TIMEOUT] say when an end of a silent connection gives up ({!v}).
+      No probe crosses a live one.
     - Every other option is kept and read back, and has no other effect: no
-      keepalive probe is sent, no timeout ends a read, an accept does not wait
-      for data under [TCP_DEFER_ACCEPT], and a read does not wait for
-      [SO_RCVLOWAT] bytes.
+      timeout ends a read, an accept does not wait for data under
+      [TCP_DEFER_ACCEPT], and a read does not wait for [SO_RCVLOWAT] bytes.
 
     {1:datagrams Datagrams}
 
@@ -550,7 +564,10 @@ val connection : _ Eio.Net.stream_socket -> int option
       reset reaches a read even after end-of-file, and a write that raises it
       leaves it to the next read. A Unix-domain reset reads as end-of-file. A
       write to a Unix-domain end that shut its receive side succeeds, its bytes
-      dropped.
+      dropped. An end of a silent connection keeps probing with bytes
+      unacknowledged, and gives up 18 seconds after the first of them was sent,
+      as measured over loopback. A write then raises [EPIPE] and leaves
+      [ETIMEDOUT] to the next read.
     - Datagrams. A shutdown does nothing, as the socket is not connected. A send
       checks the length first. Then a Unix-domain socket refuses an IP address
       with the error that {!Address_family} marks; an IPv4 one a path with
@@ -601,7 +618,8 @@ module Private : sig
       An end then waits for bytes until its own receive shutdown, after which it
       reads end of file. Each end's writes fill its queue, then wait until its
       own send shutdown, after which they raise the reset. Neither end's
-      shutdown or close reaches the other. For eio-net.chaos; it may change at
+      shutdown or close reaches the other. On the network's clock, each end of a
+      TCP connection gives up as {!v} says. For eio-net.chaos; it may change at
       any release.
 
       @raise Invalid_argument if [s] is not a connection of this library. *)

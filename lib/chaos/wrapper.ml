@@ -622,9 +622,11 @@ module Flow = struct
           if Cstruct.lenv bufs > 0 then
             go (Cstruct.shiftv bufs (base_write t bufs))
         in
+        (* On a silent connection the error is the base's own: the end
+           gave up on its peer. *)
         match go (takev n bufs) with
         | () -> n
-        | exception Eio.Io _ when broken t -> write_reset t
+        | exception Eio.Io _ when broken t && not (silent t) -> write_reset t
       in
       if n < 0 then total
       else if total = 0 then 0

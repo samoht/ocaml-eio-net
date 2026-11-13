@@ -42,9 +42,10 @@
 
     {b Every program on the network meets the faults}, the test's own peers
     included. A connection may go silent for good, as when a host loses power,
-    and no close or reset then ends a wait on it: give each read a timeout, and
-    each write that may fill a socket's buffer, in test servers and clients
-    alike. Write test servers with [Eio.Net.run_server ~on_error:ignore]; catch
+    and no close or reset then ends a wait on it, only the kernel's keepalive or
+    retransmission timeouts: give each read a timeout, and each write that may
+    fill a socket's buffer, in test servers and clients alike. Write test
+    servers with [Eio.Net.run_server ~on_error:ignore]; catch
     [Eio.Io _ | End_of_file] in test clients; and parse strictly in both: a peer
     that takes a partial line for a whole one turns an injected end of stream
     into a wrong answer. Under [Eio.Fiber.both] or [Eio.Fiber.all], two fibers
@@ -278,16 +279,18 @@ module Fault : sig
             connection, as AF_UNIX queues at the reader what a returned write
             sent (unix(7)), and nothing more over IP, not even an end of stream
             already sent, then waits. Its writes fill its buffer, then wait.
-            Neither end's shutdown or close reaches the other. A wait ends only
-            with a cancel or the end's own shutdown: a read then returns end of
-            file, and a write raises [Connection_reset]. Of later faults on the
+            Neither end's shutdown or close reaches the other. A wait ends with
+            a cancel or the end's own shutdown: a read then returns end of file,
+            and a write raises [Connection_reset]. Of later faults on the
             connection, only {!constructor-Short} and {!constructor-Stall} act.
-            A kernel ends such a wait only with a keepalive, or once data it
-            sent goes unacknowledged for about 15 minutes on Linux (tcp(7)); a
-            check models neither, so a program with no timeout of its own hangs.
-            {!check} silences a connection at a read. On a network other than
-            {!Eio_net_mem}, where the wrapper does not see the peer, only this
-            end's reads go silent.
+            Over TCP the end's kernel also gives up, with [ETIMEDOUT]: after its
+            keepalive probes, or once a byte it sent goes unacknowledged for
+            [TCP_USER_TIMEOUT], or for 948.6 s on Linux and 18 s on macOS
+            ({!Eio_net_mem.v}). An end with no keepalive and nothing
+            unacknowledged waits for ever, so a program with no timeout of its
+            own hangs. {!check} silences a connection at a read. On a network
+            other than {!Eio_net_mem}, where the wrapper does not see the peer,
+            only this end's reads go silent.
 
             On a connect, an accept or a receive, the operation waits until a
             cancel ends it; a connect never does in {!check}, as the kernel

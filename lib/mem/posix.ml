@@ -1,7 +1,7 @@
 (* Outside the Hermetic prelude, which refuses Unix: eio_posix raises a raw
    Unix.Unix_error from listen and datagram_socket when bind(2) or the
    sockaddr conversion fails, and this builds the same exception. It reaches
-   nothing. It names Eio_unix.Unix_error for a timed-out connect. *)
+   nothing. It names Eio_unix.Unix_error for a connection that timed out. *)
 
 let bind_error = function
   | `In_use -> Unix.Unix_error (Unix.EADDRINUSE, "bind", "")
@@ -12,9 +12,14 @@ let bind_error = function
   | `No_file path -> Unix.Unix_error (Unix.ENOENT, "", path)
   | `Unlink path -> Unix.Unix_error (Unix.ENOENT, "unlink", path)
 
-let timed_out () =
-  Eio.Exn.create
-    (Eio.Exn.X (Eio_unix.Unix_error (Unix.ETIMEDOUT, "connect-in-progress", "")))
+let timed_out op =
+  let call =
+    match op with
+    | `Connect -> "connect-in-progress"
+    | `Read -> "readv"
+    | `Write -> "writev"
+  in
+  Eio.Exn.create (Eio.Exn.X (Eio_unix.Unix_error (Unix.ETIMEDOUT, call, "")))
 
 let no_buffer_space () =
   Eio.Exn.create (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENOBUFS, "sendmsg", "")))
