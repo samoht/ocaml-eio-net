@@ -154,6 +154,26 @@ let test_offload_write_refused () =
   | _ -> Alcotest.fail "a write to the read end of a pipe went through"
   | exception Eio.Io _ -> ()
 
+(* A write of 256 empty buffers and then a payload writes the payload: a
+   call passes at most 256 iovecs, and an empty buffer takes none of them. *)
+let test_offload_write_skips_empty_buffers () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let a, b = Unix.socketpair ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Unix.set_nonblock a;
+  let fd = Eio_unix.Fd.of_unix ~sw ~blocking:false ~close_unix:true a in
+  let bufs =
+    List.init 256 (fun _ -> Cstruct.empty) @ [ Cstruct.of_string "payload" ]
+  in
+  Alcotest.(check int)
+    "the payload is written" 7
+    (Eio_net_unix.Stream.offload_single_write fd bufs);
+  let got = Bytes.create 16 in
+  let n = Unix.read b got 0 16 in
+  Alcotest.(check string)
+    "the peer reads it" "payload" (Bytes.sub_string got 0 n);
+  Unix.close b
+
 (* A connected UDP socket holds a datagram from its peer and the error an
    ICMP port unreachable left when the peer had gone. A batch that receives
    the datagram and then meets the error returns the datagram, and the next
@@ -773,6 +793,8 @@ let suite =
         test_connected_datagram_send_refused;
       Alcotest.test_case "offloaded write refused" `Quick
         test_offload_write_refused;
+      Alcotest.test_case "offloaded write skips empty buffers" `Quick
+        test_offload_write_skips_empty_buffers;
       Alcotest.test_case "connected datagram error after a datagram" `Quick
         test_connected_datagram_error_after_a_datagram;
       Alcotest.test_case "connected datagram longer than max_frame" `Quick
