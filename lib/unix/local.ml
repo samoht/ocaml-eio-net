@@ -61,20 +61,34 @@ let parent ~sw path =
   | _ -> Fmt.invalid_arg "Eio_net_unix.Local: %a names no file" Eio.Path.pp path
 
 (* unix-socket.c, unix_sockaddr_init reaches a long path from its directory
-   (local_stubs.c). The connect blocks only while the listener's backlog is
-   full, on a thread of the pool. *)
+   (local_stubs.c). The socket is non-blocking, so each attempt returns at
+   once: Linux refuses a connect to a full backlog with EAGAIN, and it is
+   tried again after a pause, doubled up to [max_pause], which a
+   cancellation ends. *)
+let max_pause = 0.1
+
 let connect_at ~sw ~net:_ path =
   let sock = eio (fun () -> Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0) in
   match
+    Unix.set_nonblock sock;
     Eio.Switch.run ~name:"Local.connect_at" @@ fun dsw ->
     let dir, name = parent ~sw:dsw path in
     Eio_unix.Fd.use_exn "connect_at" dir @@ fun dir ->
-    eio @@ fun () ->
-    Eio_unix.run_in_systhread ~label:"local-connect" (fun () ->
-        connect_at_dir dir sock name)
+    let rec attempt pause =
+      match connect_at_dir dir sock name with
+      | () -> ()
+      | exception Unix.Unix_error (EINPROGRESS, _, _) -> (
+          Eio_unix.await_writable sock;
+          match Unix.getsockopt_error sock with
+          | None -> ()
+          | Some e -> raise (Unix.Unix_error (e, "connect", name)))
+      | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) ->
+          Eio_unix.sleep pause;
+          attempt (Float.min max_pause (2. *. pause))
+    in
+    eio (fun () -> attempt 0.001)
   with
   | () ->
-      Unix.set_nonblock sock;
       (Eio_unix.Net.import_socket_stream ~sw ~close_unix:true sock :> stream)
   | exception e ->
       Unix.close sock;
