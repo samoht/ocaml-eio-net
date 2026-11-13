@@ -402,9 +402,12 @@ val wrap :
     a read of it again and again spins, a reconnect after each does not.
 
     A read or a write after the flow's own close raises [Invalid_argument]
-    before [f] is asked, as Eio's own sockets do. A close drops the bytes a read
-    has not handed up yet, and the datagrams a socket holds back, and so does
-    the end of the switch a socket was made under, which closes it. *)
+    before [f] is asked, as Eio's own sockets do. A read takes from the socket
+    no more than it returns, so the bytes not yet read stay in the socket's
+    queue, where a shutdown or a close finds them. A close drops the datagrams a
+    socket holds back, and so does the end of the switch a socket was made
+    under, which closes it. With an [f] that answers [None], each operation does
+    what it does on [net], but for that guard. *)
 
 val pair :
   ?os:[< `Linux | `Macos ] ->

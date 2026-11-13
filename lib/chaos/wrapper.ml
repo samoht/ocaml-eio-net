@@ -382,13 +382,12 @@ let server_conn ctx ~family sock =
       (Eio.Promise.await p.number, p.c)
 
 module Flow = struct
-  (* [leftover] holds the bytes a base read took and no read has handed up:
-     they stand for the socket's own queue, so a close drops them and a
-     receive shutdown leaves them to read, as the base does with its queue.
-     [lock] guards them, [closed], which a close in another domain changes
-     while a read runs, and the counts of bytes, which readers and writers in
-     several domains share. It is never held across a read or a write of the
-     base socket. *)
+  (* A read takes from the base no more than it hands up, so the bytes not
+     yet read stay in the socket's own queue, which a shutdown or a close
+     treats as the base does. [lock] guards [closed], which a close in another
+     domain changes while a read runs, and the counts of bytes, which readers
+     and writers in several domains share. It is never held across a read or a
+     write of the base socket. *)
   type t = {
     ctx : ctx;
     socket : int;
@@ -398,14 +397,12 @@ module Flow = struct
     sock : stream;
     conn : conn;
     lock : Mutex.t;
-    mutable leftover : Cstruct.t;
     mutable delivered : int;
     mutable written : int;
     mutable closed : bool;
     mutable reset_reported : bool;
     mutable wrote_after_end : bool;
     mutable cut_short : bool;
-    mutable hushed : bool;
     mutable release : Eio.Switch.hook;
   }
 
@@ -413,7 +410,6 @@ module Flow = struct
      reported once, by the first read or write that meets it, and later reads
      return end of file, as a socket clears its pending error. *)
   let ended t =
-    t.leftover <- Cstruct.empty;
     match Atomic.get t.conn.broken with
     | `Reset when not t.reset_reported ->
         t.reset_reported <- true;
@@ -432,18 +428,13 @@ module Flow = struct
 
   let silent t = Atomic.get t.conn.broken = `Silent
 
-  (* Under [t.lock]. Over IP, a cut drops what is buffered at once, and so
-     does a silence. An AF_UNIX byte whose write returned is in the reader's
-     queue, so the reader reads it first, then meets the cut (unix(7)). The
-     peer of an end that closed reads on, to the end its socket now
-     reaches. *)
+  (* Under [t.lock]. Over IP, a cut drops what is queued at once. An AF_UNIX
+     byte whose write returned is in the reader's queue, so the reader reads
+     it first, then meets the cut (unix(7)). The peer of an end that closed
+     reads on, to the end its socket now reaches. *)
   let check_read t =
     if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
-    if t.family = `Inet && cut t then ended t;
-    if t.family = `Inet && (not t.hushed) && silent t then begin
-      t.hushed <- true;
-      t.leftover <- Cstruct.empty
-    end
+    if t.family = `Inet && cut t then ended t
 
   (* Under [t.lock]. A write that raises a reset reports it over IP; on
      AF_UNIX it raises EPIPE, which leaves the reset to the next read. *)
@@ -474,13 +465,16 @@ module Flow = struct
 
   let broken t = Atomic.get t.conn.broken <> `Open
 
-  (* Appends one base read to the buffer. A base error after a break is the
-     break's. A silence over a network that pairs no ends holds the reads. *)
-  let fill t =
+  (* One base read of at most [cap] bytes into [dst], or as many as [dst]
+     takes if [cap <= 0]. A base error after a break is the break's. A
+     silence over a network that pairs no ends holds the reads. *)
+  let deliver t dst ~cap =
+    Mutex.protect t.lock (fun () -> check_read t);
     if silent t && not t.conn.paired then Eio.Fiber.await_cancel ();
-    let scratch = Cstruct.create 0x4000 in
+    let len = Cstruct.length dst in
+    let dst = Cstruct.sub dst 0 (if cap <= 0 then len else min cap len) in
     let got =
-      match Eio.Flow.single_read t.sock scratch with
+      match Eio.Flow.single_read t.sock dst with
       | n -> n
       | exception (End_of_file | Eio.Io _) when cut t -> 0
       | exception End_of_file when t.conn.reset_to = Some t.side -> 0
@@ -488,35 +482,11 @@ module Flow = struct
     Mutex.protect t.lock @@ fun () ->
     check_read t;
     if got = 0 then ended t;
-    t.leftover <- Cstruct.append t.leftover (Cstruct.sub scratch 0 got)
-
-  (* Hands up at most [cap] buffered bytes, or all of them if [cap <= 0]. A
-     byte is taken from the buffer once, under the lock, so readers in several
-     domains neither lose nor duplicate one. *)
-  let rec deliver t dst ~cap =
-    let empty =
-      Mutex.protect t.lock (fun () ->
-          check_read t;
-          Cstruct.length t.leftover = 0)
-    in
-    if empty then fill t;
-    let n =
-      Mutex.protect t.lock @@ fun () ->
-      check_read t;
-      let avail = Cstruct.length t.leftover in
-      if avail = 0 then None
-      else
-        let want = if cap <= 0 then avail else min cap avail in
-        let n = min want (Cstruct.length dst) in
-        Cstruct.blit t.leftover 0 dst 0 n;
-        t.leftover <- Cstruct.sub t.leftover n (avail - n);
-        t.delivered <- t.delivered + n;
-        if t.family = `Unix && t.conn.paired then
-          Mutex.protect t.conn.lock (fun () ->
-              t.conn.taken.(ix t.side) <- t.conn.taken.(ix t.side) + n);
-        Some n
-    in
-    match n with Some n -> n | None -> deliver t dst ~cap
+    t.delivered <- t.delivered + got;
+    if t.family = `Unix && t.conn.paired then
+      Mutex.protect t.conn.lock (fun () ->
+          t.conn.taken.(ix t.side) <- t.conn.taken.(ix t.side) + got);
+    got
 
   let raise_broken t =
     Mutex.protect t.lock (fun () -> check_read t);
@@ -547,7 +517,6 @@ module Flow = struct
     let was_open =
       Mutex.protect t.lock (fun () ->
           let was_open = not t.closed in
-          t.leftover <- Cstruct.empty;
           t.closed <- true;
           was_open)
     in
@@ -717,14 +686,12 @@ module Flow = struct
         sock;
         conn;
         lock = Mutex.create ();
-        leftover = Cstruct.empty;
         delivered = 0;
         written = 0;
         closed = false;
         reset_reported = false;
         wrote_after_end = false;
         cut_short = false;
-        hushed = false;
         release = Eio.Switch.null_hook;
       }
     in
