@@ -1271,6 +1271,42 @@ let test_dgram_released_with_switch () =
   invalid_after_release "a receive" (fun () -> recv1 rx);
   invalid_after_release "a receive" (fun () -> recv1 closed)
 
+(* --- Lifecycle ----------------------------------------------------------- *)
+
+(* What [f net] gives on eio-net.mem, bare and wrapped with no fault. *)
+let bare_and_wrapped f =
+  let run wrap =
+    Eio_mock.Backend.run_full @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio_net_mem.v ~sw () in
+    let net =
+      if wrap then Chaos.wrap ~clock:env#clock (fun _ -> None) net else net
+    in
+    match f ~sw net with
+    | s -> s
+    | exception Invalid_argument _ -> "Invalid_argument"
+  in
+  (run false, run true)
+
+(* A read that waits as another fiber closes its flow hands up the bytes that
+   arrive next, as on eio_posix, whose descriptor stays open until the reads
+   in progress end. *)
+let test_read_pending_at_close () =
+  let bare, wrapped =
+    bare_and_wrapped @@ fun ~sw net ->
+    let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
+    let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+    let client = Eio.Net.connect ~sw net addr in
+    let server, _ = Eio.Net.accept ~sw l in
+    Eio.Fiber.pair
+      (fun () -> read1 client)
+      (fun () ->
+        Eio.Flow.close client;
+        Eio.Flow.copy_string "xyz" server)
+    |> fst
+  in
+  Alcotest.(check string) "the bytes that arrive" bare wrapped
+
 (* --- Domains ------------------------------------------------------------- *)
 
 (* Writers in two domains share one count of bytes written: with a reset on
@@ -1577,6 +1613,8 @@ let suite =
         test_listener_released_with_switch;
       Alcotest.test_case "a datagram socket released with its switch" `Quick
         test_dgram_released_with_switch;
+      Alcotest.test_case "a read pending at its flow's close" `Quick
+        test_read_pending_at_close;
       Alcotest.test_case "writes counted across domains" `Quick
         test_writes_counted_across_domains;
       Alcotest.test_case "reads shared across domains" `Quick
