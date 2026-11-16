@@ -2,8 +2,8 @@
     workload for {!Eio_net_chaos.check}: three requests, each on a connection of
     its own, tried three times. *)
 
-val keepalive : Eio_net_chaos.env -> unit
-(** [keepalive env] sets [SO_KEEPALIVE] with probes after 1 s, every 1 s, 3 of
+val probes : Eio_net_chaos.env -> unit
+(** [probes env] sets [SO_KEEPALIVE] with probes after 1 s, every 1 s, 3 of
     them. *)
 
 val user_timeout : Eio_net_chaos.env -> unit

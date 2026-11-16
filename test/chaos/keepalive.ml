@@ -69,6 +69,6 @@ let run ~using ~within (env : Eio_net_chaos.env) =
   | true, true -> failwith "a request was answered in the outage"
   | false, false -> failwith "a request failed three times"
 
-let keepalive env = run ~using:`Keepalive ~within:3600. env
+let probes env = run ~using:`Keepalive ~within:3600. env
 let user_timeout env = run ~using:`User_timeout ~within:300. env
 let nothing env = run ~using:`Nothing ~within:3600. env

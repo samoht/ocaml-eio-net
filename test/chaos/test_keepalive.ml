@@ -14,9 +14,9 @@ let suite =
   ( "keepalive",
     [
       Alcotest.test_case "keepalive: correct" `Quick
-        (Expect.passes (check keepalive));
+        (Expect.passes (check probes));
       Alcotest.test_case "keepalive: correct under macOS" `Quick
-        (Expect.passes (check ~os:`Macos keepalive));
+        (Expect.passes (check ~os:`Macos probes));
       Alcotest.test_case "TCP_USER_TIMEOUT: correct" `Quick
         (Expect.passes (check user_timeout));
       Alcotest.test_case "no option: a silent server hangs it" `Quick
