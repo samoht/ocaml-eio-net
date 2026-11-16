@@ -25,7 +25,13 @@
       and at least 200 runs: the faults the linear tier left, on other write
       ends, connections and datagrams, and pairs of faults, the second at a
       position of the run the first one changed. That is where a retry, or a
-      second connection after a reset, gets tested.
+      second connection after a reset, gets tested. When it has fewer runs than
+      scenarios of a kind, it splits them, in order, into as many groups of
+      neighbours as it has runs, and runs one scenario of each group, drawn from
+      a seed. Each draw may land on any scenario of its group, so a pattern that
+      repeats along the scenarios, as the faults tried at each position do,
+      hides no kind of fault from it, where taking every k-th scenario may meet
+      only one.
 
     A check never passes on a partial linear tier. One that needs more runs than
     its budget fails and says so: shrink the workload or raise [~budget].
@@ -91,12 +97,19 @@
     longer has fails, and one whose scenario is not of the form a failure names
     is refused.
 
+    The sampled tier draws its scenarios from a seed, the same one on every
+    check unless [~seed] gives another, so a check meets the same faults each
+    time. A replay names its scenario, not the draw that found it, so it needs
+    no seed.
+
     A check reads no environment variable and prints nothing. A test that wants
-    a larger budget at night reads its own:
+    a larger budget at night, or other faults in the sampled tier, reads its
+    own:
     {[
     let check run =
-      let budget = Option.map int_of_string (Sys.getenv_opt "CHAOS_BUDGET") in
-      Eio_net_chaos.check ?budget run
+      let int name = Option.map int_of_string (Sys.getenv_opt name) in
+      Eio_net_chaos.check ?budget:(int "CHAOS_BUDGET") ?seed:(int "CHAOS_SEED")
+        run
     ]}
 
     {2 Runs}
@@ -148,11 +161,12 @@ type env =
 val check :
   ?os:[< `Linux | `Macos ] ->
   ?budget:int ->
+  ?seed:int ->
   ?replay:string ->
   (env -> unit) ->
   unit
-(** [check ~os ~budget ~replay run] calls [run] many times, each with a fresh
-    in-memory network of {!Eio_net_mem}. The first run has no fault.
+(** [check ~os ~budget ~seed ~replay run] calls [run] many times, each with a
+    fresh in-memory network of {!Eio_net_mem}. The first run has no fault.
 
     The linear tier tries each of these alone:
 
@@ -204,8 +218,10 @@ val check :
     seconds, TIME_WAIT lasts 30, and a Unix-domain crash reads as end of file at
     both ends, as macOS reports no reset on AF_UNIX.
 
-    [budget] (defaults to [2_000]) bounds the runs. [replay] runs only the
-    scenario a failure named.
+    [budget] (defaults to [2_000]) bounds the runs. [seed] (defaults to [0])
+    draws the scenarios of the sampled tier: another seed meets other faults.
+    [replay] runs only the scenario a failure named, whatever the seed that
+    found it.
 
     @raise Failure with a report of the first failing run.
     @raise Invalid_argument if [budget] is less than [1]. *)

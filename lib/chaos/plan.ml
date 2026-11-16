@@ -394,12 +394,14 @@ let seconds r1 ~first ~(after : trace) =
           | _ -> None)
         (singles after @ benign)
 
-let spread n l =
+let sample rng n l =
   let len = List.length l in
   if len <= n then l
   else
     let a = Array.of_list l in
-    List.init n (fun i -> a.(i * len / n))
+    List.init n (fun i ->
+        let lo = i * len / n and hi = (i + 1) * len / n in
+        a.(lo + Random.State.int rng (hi - lo)))
 
 let sampled_share ~budget ~linear ~classes =
   let spend = min (budget - linear) (max 200 (linear / 2)) in

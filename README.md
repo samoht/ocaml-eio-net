@@ -120,7 +120,10 @@ The tests follow a few rules:
 Each run has its own event loop, whose clock moves only when every fiber
 waits, so a timeout of an hour takes no time. A check blocks the event loop it
 is called from until it ends. It is deterministic, reads no environment
-variable and prints nothing. For a scenario a check does not try,
+variable and prints nothing. The scenarios it samples, past those that follow
+the structure of the run, are drawn from a fixed seed: a nightly run may pass
+another with `~seed` to meet other faults, and the replay of a failure needs
+no seed. For a scenario a check does not try,
 `Eio_net_chaos.wrap ~clock f net` asks `f` about each operation, and
 `Eio_net_chaos.pair` gives a fuzzer two connected ends.
 

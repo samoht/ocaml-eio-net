@@ -56,9 +56,12 @@ val seconds : rule -> first:trace -> after:trace -> scenario list
 (** [seconds r ~first ~after] is the pairs of faults whose first is [r] and
     whose second lands after it, in [after], the run [r] alone made. *)
 
-val spread : int -> 'a list -> 'a list
-(** [spread n l] is [n] elements of [l], evenly spread, or [l] if it has [n] or
-    fewer. *)
+val sample : Random.State.t -> int -> 'a list -> 'a list
+(** [sample rng n l] is [l] if it has [n] or fewer elements. Otherwise it splits
+    [l] into [n] runs of consecutive elements whose lengths differ by one at
+    most, and is one element of each run, drawn with [rng], in the order of [l].
+    Unlike every [k]-th element, it meets each element of [l] for some state of
+    [rng], whatever the period of [l]. *)
 
 val sampled_share : budget:int -> linear:int -> classes:int -> int
 (** [sampled_share ~budget ~linear ~classes] is the runs of the sampled tier for

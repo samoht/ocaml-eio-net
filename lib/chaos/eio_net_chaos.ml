@@ -416,7 +416,7 @@ let first_failed ~hash trace error =
     { head = trace; left_out = 0; tail = [] }
     hash (Plan.key Plan.none)
 
-let check ?os ?(budget = 2_000) ?replay run =
+let check ?os ?(budget = 2_000) ?(seed = 0) ?replay run =
   let os =
     match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux
   in
@@ -468,9 +468,10 @@ let check ?os ?(budget = 2_000) ?replay run =
            ~budget."
           n budget;
       let others = Plan.others first in
+      let rng = Random.State.make [| seed |] in
       let share classes = Plan.sampled_share ~budget ~linear:n ~classes in
-      (* The second faults each run allows, spread as it ends, so no run's
-         operations outlive it: a share of the tier's, evenly. *)
+      (* The second faults each run allows, drawn as it ends, so no run's
+         operations outlive it: an even share of the tier's. *)
       let singles =
         List.length
           (List.filter
@@ -486,7 +487,7 @@ let check ?os ?(budget = 2_000) ?replay run =
           (fun (s : Plan.scenario) ->
             let after = attempt `Linear s in
             match s.rules with
-            | [ r ] -> Plan.spread quota (Plan.seconds r ~first ~after)
+            | [ r ] -> Plan.sample rng quota (Plan.seconds r ~first ~after)
             | _ -> [])
           linear
       in
@@ -496,5 +497,5 @@ let check ?os ?(budget = 2_000) ?replay run =
         (fun c ->
           List.iter
             (fun s -> ignore (attempt `Sampled s : Plan.trace))
-            (Plan.spread share c))
+            (Plan.sample rng share c))
         classes

@@ -64,6 +64,9 @@ Initial release.
 - Each run has its own event loop and a virtual clock, so a check is
   deterministic and an hour-long timeout takes no time. A run that hangs,
   spins or grows too large fails.
+- Past the scenarios that follow the run's structure, a check samples one
+  in each group of neighbours, drawn from a fixed seed, so no periodic
+  pattern in the workload hides a fault from it. `?seed` draws others.
 - A failure names its scenario and its operations, and `~replay` runs that
   scenario alone. `?os` picks the kernel the network follows, as in
   `eio-net.mem`.
