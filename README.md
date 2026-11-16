@@ -3,24 +3,37 @@
 Network channels and test networks for
 [Eio](https://github.com/ocaml-multicore/eio).
 
-Over a real network, a read may return a few bytes of a message or several
-messages at once. A peer may reset the connection, end the stream midway, or
-go silent for good. A connect may be refused or slow, and a datagram lost,
-duplicated or reordered. Loopback sockets in a test rarely do any of this, so the bugs that
-depend on it stay hidden. `eio-net` gives an Eio program an in-memory network,
-and `Eio_net_chaos.check`, which runs a workload on it many times, each time
-with a different fault chosen from what the workload does.
+- `Eio_net_chaos.check` runs a workload on an in-memory network under the
+  faults of a real one.
+- A frame channel makes one receive one frame, over a datagram socket, a
+  length-prefixed byte stream or an in-memory pair.
+- An accept loop bounds the connections it holds.
 
-It also gives a frame channel, where one receive is one frame, over a datagram
-socket, a length-prefixed byte stream or an in-memory pair, and an accept loop
-that bounds the connections it holds.
+## Installation
+
+<!-- $MDX skip -->
+```sh
+$ opam install eio-net
+```
 
 ## Chaos tests
 
-Here a client asks a server for a line, with a timeout and three attempts.
-The server bounds how long it waits for the request, as a client may go
-silent for good. The workload checks what the client got, and how long it
-took:
+A real network does what the loopback sockets of a test rarely do, so the bugs
+that depend on it stay hidden:
+
+- a read returns a few bytes of a message, or several messages at once;
+- a peer resets the connection, ends the stream midway or goes silent for
+  good;
+- a connect is refused or slow;
+- a datagram is lost, duplicated or reordered.
+
+`Eio_net_chaos.check` runs a workload on an in-memory network many times. Each
+run meets a different fault, chosen from what the workload does.
+
+In this example a client asks a server for a line. It has a timeout and tries
+three times. The server also bounds how long it waits for the request, since a
+client may go silent for good. The workload checks what the client got and how
+long it took:
 
 ```ocaml
 # let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080);;
@@ -84,85 +97,93 @@ val faults : (unit -> unit) -> string = <fun>
 - : string = "  faults:   connect of 1c at 0 times out"
 ```
 
-The failure also gives the tier that found it, the operations of the failing
-run, and a `~replay:"..."` argument that runs that scenario alone.
+The failure also lists the operations of the failing run, and gives a
+`~replay:"..."` argument that runs that scenario alone.
 
-The tests follow a few rules:
+### Writing a workload
 
-- At most two faults reach a run. A program that tries three times may be
-  asked to succeed, as here. A broker that fans a message out to three
-  subscribers may demand that one of them gets everything. A lasting
-  condition, such as one-byte reads, counts as one fault but reaches every
-  connection.
-- Every program on the network meets the faults, the test's own peers
-  included. A connection may go silent for good, as when a host loses power,
-  and no close or reset then ends a wait on it, only the kernel's keepalive
-  or retransmission timeouts: each read needs a timeout,
-  and so does each write that may fill a socket's buffer. Test servers use
-  `Eio.Net.run_server ~on_error:ignore`, test clients catch
-  `Eio.Io _ | End_of_file`, and both parse strictly. Two fibers of
-  `Eio.Fiber.both` that both meet a fault fail together with
-  `Eio.Exn.Multiple`, so catch the errors inside each fiber.
-- A connect that times out takes 133 seconds, as on Linux, and then fails
-  with the error eio_posix raises, which Eio does not classify as a
-  connection failure. A program with no connect timeout still succeeds, so
-  the test asserts its latency to catch it.
-- Ports are held as on Linux: the end of a connection that closes first
-  holds its port for 60 seconds, so a server that listens again on its port
-  within a run passes `~reuse_addr:true`. A client that binds no address
-  holds its port only toward its destination, and takes a port in TIME_WAIT
-  toward it again after a second, so short connections to a few servers do
-  not run out of ports.
-- In the outage run every connect is refused and every datagram lost.
-  `Eio_net_chaos.outage env` is then `true`, and the test checks what its
-  program does when it gives up.
+- **At most two faults reach a run.** The test of a program that tries three
+  times can therefore demand success, as in the example. The test of a broker
+  that fans a message out to three subscribers can demand that one of them
+  gets everything. A lasting condition, such as one-byte reads, counts as one
+  fault but reaches every connection.
+- **Every program on the network meets the faults**, the test's own peers
+  included. Write test servers with `Eio.Net.run_server ~on_error:ignore`,
+  catch `Eio.Io _ | End_of_file` in test clients, and parse strictly in both.
+- **Give each read a timeout**, and each write that may fill a socket's
+  buffer. A connection may go silent for good, as when a host loses power. No
+  close or reset then ends a wait on it, only the kernel's keepalive or
+  retransmission timeouts.
+- **Catch the errors inside each fiber.** Two fibers of `Eio.Fiber.both` that
+  both meet a fault fail together with `Eio.Exn.Multiple`.
+- **Assert latency.** A connect that times out takes 133 seconds, as on Linux.
+  It then fails with the error eio_posix raises, which Eio does not classify
+  as a connection failure. A program with no connect timeout still succeeds,
+  so the test bounds its latency to catch it.
+- **Listen again with `~reuse_addr:true`.** Ports are held as on Linux: the
+  end of a connection that closes first holds its port for 60 seconds. A
+  server that listens again on its port within a run needs the option.
+- **Check the outage run.** In that run every connect is refused and every
+  datagram lost. `Eio_net_chaos.outage env` is then `true`, and the test
+  checks what its program does when it gives up.
 
-Each run has its own event loop, whose clock moves only when every fiber
-waits, so a timeout of an hour takes no time. A check blocks the event loop it
-is called from until it ends. It is deterministic, reads no environment
-variable and prints nothing. The scenarios it samples, past those that follow
-the structure of the run, are drawn from a fixed seed: a nightly run may pass
-another with `~seed` to meet other faults, and the replay of a failure needs
-no seed. For a scenario a check does not try,
-`Eio_net_chaos.wrap ~clock f net` asks `f` about each operation, and
-`Eio_net_chaos.pair` gives a fuzzer two connected ends.
+### Runs
 
-## Libraries
+Each run has its own event loop. Its clock jumps to the next timer when every
+fiber waits, so a timeout of an hour takes no time. A check blocks the event
+loop it is called from until it ends.
 
-- `eio-net`: the `Eio_net.Frame` and `Eio_net.Datagram` channels.
-  `Eio_net.Relay` forwards connections and `Eio_net.Progress` ends a transfer
-  that moves too slowly.
-- `eio-net.framing`: the length-prefix codec of a frame channel over a byte
-  stream, with bounded frames, over `Eio.Buf_read`.
-- `eio-net.accept`: an accept loop that holds at most a given number of
-  connections.
-- `eio-net.connect`: a classifier of failed connects, refused or unreachable.
-- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, their
-  equality, and host name resolution.
-- `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets,
-  and the socket options each kernel takes. A connection queues what Linux's
-  default buffers hold, or what its `SO_SNDBUF` and `SO_RCVBUF` give, and a
-  datagram socket what its receive buffer holds; a small `?capacity` shows a
-  peer that writes without reading.
-  It follows Linux by default, and macOS where the two kernels differ with
-  `` ~os:`Macos ``, which `Eio_net_chaos.check` takes too.
-- `eio-net.chaos`: `check`, which runs a workload under the network faults
-  it may meet, and the wrapper it uses.
-- `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's
-  interface addresses and the Unix classifiers of failed connects and accepts.
+A check is deterministic. It reads no environment variable and prints nothing.
+Some of its scenarios are sampled from a fixed seed. A nightly run can pass
+another `~seed` to meet other faults, and the replay of a failure needs no
+seed.
 
-## Installation
+For a scenario a check does not try:
 
-<!-- $MDX skip -->
-```sh
-$ opam install eio-net
-```
+- `Eio_net_chaos.wrap ~clock f net` asks `f` about each operation of `net`;
+- `Eio_net_chaos.pair` gives a fuzzer two connected ends.
+
+### Limitations
+
+`eio-net.mem` is a host with a loopback interface only, and it follows one
+kernel at a time: Linux by default, macOS with `` ~os:`Macos ``. A pass says
+the program works under that kernel's rules on such a host, so run a check
+under each `?os` you ship on. `Eio_net_chaos.wrap` also follows the `?os` it is
+given, not the host's. Over a real network, pass the host's kernel.
+
+Kernel traces recorded on both systems check the model. The READMEs of the
+[kernel traces](test/interop/kernel/README.md), the
+[CPython vectors](test/interop/cpython-struct/README.md) and the
+[socket cases](test/oracle/README.md) say where each oracle comes from and how
+to regenerate it.
+
+A check can still miss a bug:
+
+- A silent connection ends a wait only as the kernel would, by the times
+  measured over loopback: after the keepalive probes, or once a byte sent goes
+  unacknowledged for `TCP_USER_TIMEOUT`, or else for 948.6 s on Linux and 18 s
+  on macOS. Over a real network the retransmission timeout grows with the
+  round-trip time, so a program whose own deadline is close to these may
+  behave otherwise there. With no keepalive and nothing unacknowledged, a read
+  waits for ever and the check reports a hang.
+- A garbled datagram is random bytes, so a parser that accepts some noise may
+  pass. Fuzz the parser on its own.
+- A datagram is delayed alone, and for 50 ms. `EMFILE` on accept is never
+  tried, as `Eio.Net.run_server` stops on it. Ask for longer or grouped
+  delays, or for `Eio_net_chaos.Fault.Emfile`, with `Eio_net_chaos.wrap`.
+- After an AF_UNIX crash, the crashed end's code still runs and reads what was
+  queued to it. Check what the other end sees.
+
+A test can also be too large. A run fails after 10,000,000 turns of its fibers
+or 100,000 network operations. A check fails when the scenarios it always runs
+need more runs than its budget, 2,000 by default. Shrink the workload, or
+raise `~budget`.
 
 ## Framing
 
-`Eio_net_framing` writes each payload after its length, as an unsigned
-big-endian integer. Here the length takes two bytes and payloads are at most
-8 bytes long:
+`Eio_net_framing` writes each payload after its length, an unsigned big-endian
+integer. In this example the length takes two bytes and a payload is at most 8
+bytes long:
 
 ```ocaml
 # let framing = Eio_net_framing.Config.v ~length_field:Uint16_be ~max_length:8 ();;
@@ -190,8 +211,6 @@ Exception: Eio_net_framing.Error: truncated payload: received 1 of 3 bytes
 payloads. `Eio_net.Frame.of_length_prefixed_flow ~framing flow` turns a byte
 stream into a frame channel with the same format.
 
-## Bounds
-
 A framing configuration accepts payloads up to 1 MiB by default, or 65535
 bytes with a two-byte length. `read` raises
 `Eio_net_framing.Error (Invalid_length _)` as soon as a prefix declares a
@@ -207,57 +226,44 @@ A datagram longer than a channel's `max_frame` (64 KiB by default) raises the
 `Eio_net_accept.run` holds at most `max_connections` connections. A
 connection's head is what its peer sends before it is served. When the loop is
 full and another peer connects, it drops the connection whose head is
-incomplete and has made the least progress. A protocol whose head is read
-through a layer of its own, as a TLS handshake reads its records off the
-socket, wraps the socket with `Eio_net_accept.reading_flow` so that the bytes
-the layer reads count as progress. An exception one connection raises ends
-that connection alone and goes to `?on_error`.
+incomplete and has made the least progress. An exception one connection raises
+ends that connection alone and goes to `?on_error`.
 
-`Eio_net_accept.run` reads a failed accept with the classifier it is given as
-`?classify`. Over a Unix network, pass `Eio_net_unix.accept_failure`: when the
-process runs out of descriptors, the loop then waits for one to be free. With
-the default classifier, that error ends the loop.
+Some protocols read the head through a layer of their own, such as TLS during
+its handshake. Wrap the socket with `Eio_net_accept.reading_flow` so that the
+bytes the layer reads count as progress.
 
-## What a check covers
+The loop reads a failed accept with the classifier given as `?classify`. Over
+a Unix network, pass `Eio_net_unix.accept_failure`: when the process runs out
+of descriptors, the loop then waits for one to be free. With the default
+classifier, that error ends the loop.
 
-### What a pass tells you
+## Libraries
 
-`eio-net.mem` is a host with a loopback interface only, and it follows one
-kernel at a time: Linux by default, macOS with `` ~os:`Macos ``. Kernel traces
-recorded on both systems check it. A pass says the program works under that
-kernel's rules on such a host, so run a check under each `?os` you ship on.
-`Eio_net_chaos.wrap` also follows the `?os` it is given, not the host's: over a
-real network, pass the host's kernel. Where each oracle comes from, and how to
-regenerate it, is in the READMEs of the
-[kernel traces](test/interop/kernel/README.md), the
-[CPython vectors](test/interop/cpython-struct/README.md) and the
-[socket cases](test/oracle/README.md).
+- `eio-net`: the `Eio_net.Frame` and `Eio_net.Datagram` channels.
+  `Eio_net.Relay` forwards connections and `Eio_net.Progress` ends a transfer
+  that moves too slowly.
+- `eio-net.framing`: the length-prefix codec of a frame channel over a byte
+  stream, with bounded frames, over `Eio.Buf_read`.
+- `eio-net.accept`: an accept loop that holds at most a given number of
+  connections.
+- `eio-net.connect`: a classifier of failed connects, refused or unreachable.
+- `eio-net.addr`: conversions between `Ipaddr` and Eio addresses, their
+  equality, and host name resolution.
+- `eio-net.mem`: an in-memory `Eio.Net.t` with stream and datagram sockets,
+  and the socket options each kernel takes. A small `?capacity` shows a peer
+  that writes without reading.
+- `eio-net.chaos`: `check`, which runs a workload under the network faults
+  it may meet, and the wrapper it uses.
+- `eio-net.unix`: batched datagram transfers, Unix-domain sockets, the host's
+  interface addresses and the Unix classifiers of failed connects and accepts.
 
-### What a check can miss
+The `.mli` files document each library. Those of `eio-net` are
+[`frame.mli`](lib/frame.mli), [`datagram.mli`](lib/datagram.mli),
+[`relay.mli`](lib/relay.mli) and [`progress.mli`](lib/progress.mli). Each
+sub-library has its own directory under [`lib/`](lib/).
 
-- A connection that goes silent ends a wait only as the kernel would, by the
-  times measured over loopback: after the keepalive probes, or once a byte
-  sent goes unacknowledged for `TCP_USER_TIMEOUT`, or else for 948.6 s on
-  Linux and 18 s on macOS. Over a real network the retransmission timeout
-  grows with the round-trip time, so a program whose own deadline is close to
-  these may behave otherwise there. With no keepalive and nothing
-  unacknowledged, a read waits for ever and the check reports a hang.
-- A garbled datagram is random bytes, so a parser that accepts some noise may
-  pass. Fuzz the parser on its own.
-- A datagram is delayed alone, and for 50 ms. Ask for longer or grouped delays
-  with `Eio_net_chaos.wrap`.
-- `EMFILE` on accept is never tried, as `Eio.Net.run_server` stops on it. Ask
-  for `Eio_net_chaos.Fault.Emfile` with `Eio_net_chaos.wrap`.
-- After an AF_UNIX crash, the crashed end's code still runs and reads what was
-  queued to it. Check what the other end sees.
-
-### How big a test can be
-
-A run fails as too large after 10,000,000 turns or 100,000 network operations.
-A check fails when its linear tier needs more runs than its budget, 2,000 by
-default. Shrink the workload, or raise `~budget`.
-
-### What mem models of each kernel
+## What mem models of each kernel
 
 <!-- Made from lib/mem/scope.ml: dune build @runtest --auto-promote -->
 
@@ -405,18 +411,11 @@ Notes:
 
 Tokio's
 [LengthDelimitedCodec](https://docs.rs/tokio-util/latest/tokio_util/codec/length_delimited/struct.LengthDelimitedCodec.html)
-does the same job in Rust, and also supports length fields at an offset or
-with an adjustment. [Angstrom](https://github.com/inhabitedtype/angstrom) and
+does the same job in Rust. It also supports length fields at an offset or with
+an adjustment. [Angstrom](https://github.com/inhabitedtype/angstrom) and
 [Faraday](https://github.com/inhabitedtype/faraday) parse and serialise any
 format in OCaml. `eio-net.framing` reads with Eio's own `Buf_read` and adds
 only the bounded frame.
-
-## API
-
-The `.mli` files document each library. Those of `eio-net` are
-[`frame.mli`](lib/frame.mli), [`datagram.mli`](lib/datagram.mli),
-[`relay.mli`](lib/relay.mli) and [`progress.mli`](lib/progress.mli). Each
-sub-library has its own directory under [`lib/`](lib/).
 
 ## Licence
 
