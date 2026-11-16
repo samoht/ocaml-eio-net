@@ -1,0 +1,17 @@
+(copy_files#
+ (files ../../lib/chaos/quiet_mock.{ml,mli}))
+
+(test
+ (name test)
+ (package eio-net)
+ (libraries
+  hermetic
+  eio-net.chaos
+  eio
+  eio.utils
+  eio.unix
+  psq
+  mtime
+  domain-local-await
+  unix
+  alcotest))
