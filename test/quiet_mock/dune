@@ -6,7 +6,6 @@
  (package eio-net)
  (libraries
   hermetic
-  eio-net.chaos
   eio
   eio.utils
   eio.unix

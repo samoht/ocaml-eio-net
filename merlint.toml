@@ -100,3 +100,9 @@ exclude = ["E606"]
 [[rules]]
 files = ["lib/mem/scope.ml"]
 exclude = ["E005"]
+
+# The quiet loop's test compiles a copy of the chaos check's private
+# Quiet_mock, as eio-fs's copy is tested: it links no chaos library.
+[[rules]]
+files = ["test/quiet_mock/*"]
+exclude = ["E606"]
