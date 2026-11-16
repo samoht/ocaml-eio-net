@@ -47,6 +47,9 @@ Initial release.
   defaults and refusals included. `SO_SNDBUF` and `SO_RCVBUF` size the
   queues, `SO_LINGER` at 0 resets the peer on close, and `TCP_LINGER2` bounds
   how long a closed end waits for its peer's FIN.
+- Each behaviour and socket option is classified once, under Linux and under
+  macOS, as modelled, approximated, stored only or unsupported, and a test
+  checks each option's class against what a connection does.
 - On a given clock, keepalive, `TCP_USER_TIMEOUT` and the retransmission
   timeout end a connection gone silent, at the times measured on each kernel.
 

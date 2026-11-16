@@ -1,0 +1,23 @@
+(copy_files#
+ (files ../../lib/mem/scope.{ml,mli}))
+
+(library
+ (name mem_scope)
+ (wrapped false)
+ (modules scope)
+ (libraries eio))
+
+(test
+ (name test)
+ (package eio-net)
+ (modules test test_scope)
+ (libraries
+  mem_scope
+  eio-net.mem
+  eio
+  eio.mock
+  cstruct
+  mtime
+  unix
+  alcotest
+  fmt))
