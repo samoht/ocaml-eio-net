@@ -1,11 +1,5 @@
 (** Unix adapters for frame channels, stream writes, sockets and the host's
-    interface addresses. Each module is a unit of its own, so that a unit naming
-    one imports only the interfaces that one names.
-
-    Unlike the other libraries of eio-net, this one is not compiled under the
-    [Hermetic] prelude: it makes the host's sockets with [Unix] and wraps
-    descriptors with [Eio_unix], which the prelude refuses. It reaches a file
-    only through the {!Eio.Path.t} it is handed ({!Local}). *)
+    interface addresses. *)
 
 module Frame = Frame
 (** Frame channels over Unix datagram descriptors. *)

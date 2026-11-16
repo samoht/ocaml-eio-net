@@ -55,7 +55,7 @@ val connected : kind -> bool
 
 val default_maxseg : family -> kind -> int
 (** [default_maxseg family kind] is macOS's maximum segment size before a
-    connection, and that of each end of one over loopback, whose MTU is 16384.
+    connection, and that of each end of one over loopback, whose MTU is 16,384.
 *)
 
 val socket_level : 'a Eio.Net.Sockopt.t -> bool

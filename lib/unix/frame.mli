@@ -12,7 +12,9 @@ val of_connected_datagram_fd :
     frame, of at most [max_length] bytes (defaults to [65536]). The caller owns
     [fd], which is put in non-blocking mode and stays open when [sw] finishes;
     the channel is usable until then, and a send or a receive raises
-    [Invalid_argument] once it has.
+    [Invalid_argument] once it has. It takes a [Unix.file_descr], as
+    {!Eio_unix.Net.import_socket_datagram} does, because the channel uses [fd]
+    until [sw] finishes, longer than {!Eio_unix.Fd.use_exn} lends one.
 
     On Darwin, {!Eio_net.Frame.send_batch} uses [sendmsg_x] and
     {!Eio_net.Frame.recv_batch} uses [recvmsg_x] to transfer up to [max_batch]
@@ -35,8 +37,9 @@ val of_connected_datagram_fd :
     and so do concurrent sends, a batch to its end, while a send and a receive
     run at the same time.
 
-    Raises [Invalid_argument] if [max_length] or [max_batch] is not positive, or
-    if [max_batch] exceeds [64]. *)
+    @raise Invalid_argument
+      if [max_length] or [max_batch] is not positive, or if [max_batch] exceeds
+      [64]. *)
 
 val widen_datagram_buffers : Unix.file_descr -> unit
 (** [widen_datagram_buffers fd] sets [SO_SNDBUF] to 2 MiB and [SO_RCVBUF] to 4

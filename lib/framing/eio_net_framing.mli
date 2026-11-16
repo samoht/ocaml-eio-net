@@ -76,9 +76,10 @@ module Config : sig
       {!constructor-Uint32_be} and [65535] for {!constructor-Uint16_be}) bytes
       long.
 
-      Raises [Invalid_argument] if [min_length] is negative, if [max_length] is
-      below [min_length], or if [max_length] exceeds the capacity of
-      [length_field] or [Sys.max_string_length]. *)
+      @raise Invalid_argument
+        if [min_length] is negative, if [max_length] is below [min_length], or
+        if [max_length] exceeds the capacity of [length_field] or
+        [Sys.max_string_length]. *)
 
   val length_field : t -> length_field
   (** [length_field c] is the length field of [c]. *)
@@ -166,6 +167,9 @@ val write :
     [encode ~prefixes c batch] to [sink] with one {!Eio.Flow.write}. The empty
     batch writes nothing.
 
-    Raises [Error (Invalid_length _)] before writing anything if
-    [encode c batch] is an error. An exception from [sink] propagates, and part
-    of the batch may then have been written. *)
+    An exception from [sink] propagates, and part of the batch may then have
+    been written.
+
+    @raise Error
+      with [Invalid_length _] before writing anything if [encode c batch] is an
+      error. *)

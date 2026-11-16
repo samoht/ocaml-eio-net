@@ -47,7 +47,7 @@ val of_socket :
     refusal; the oversized datagram is consumed. Concurrent receives run one at
     a time, as they share one buffer; sends share nothing and run at once.
 
-    Raises [Invalid_argument] if [max_length] is not positive. *)
+    @raise Invalid_argument if [max_length] is not positive. *)
 
 val recv : t -> Eio.Net.Sockaddr.datagram * string
 (** [recv c] is the next whole datagram received on [c], as a fresh string,

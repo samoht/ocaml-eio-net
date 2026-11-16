@@ -211,7 +211,7 @@ Exception: Eio_net_framing.Error: truncated payload: received 1 of 3 bytes
 payloads. `Eio_net.Frame.of_length_prefixed_flow ~framing flow` turns a byte
 stream into a frame channel with the same format.
 
-A framing configuration accepts payloads up to 1 MiB by default, or 65535
+A framing configuration accepts payloads up to 1 MiB by default, or 65,535
 bytes with a two-byte length. `read` raises
 `Eio_net_framing.Error (Invalid_length _)` as soon as a prefix declares a
 longer payload, before it reads any payload byte. A reader made with

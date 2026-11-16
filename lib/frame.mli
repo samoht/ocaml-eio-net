@@ -80,7 +80,7 @@ val of_datagram_socket :
     the source address of each datagram uses the addressed {!Datagram} channel
     instead.
 
-    Raises [Invalid_argument] if [max_length] is not positive. *)
+    @raise Invalid_argument if [max_length] is not positive. *)
 
 val of_length_prefixed_flow :
   ?framing:Eio_net_framing.Config.t -> _ Eio.Flow.two_way -> t

@@ -63,9 +63,10 @@ val connect_at :
     once with [Eio.Net.Connection_failure (Refused _)], as connect(2) refuses it
     there.
 
-    Raises [Invalid_argument] if [path] names no file ([""], ["/"], or a base
-    name of ["."] or [".."]) or if its directory has no descriptor of the host,
-    such as a directory of a mock file system. *)
+    @raise Invalid_argument
+      if [path] names no file ([""], ["/"], or a base name of ["."] or [".."])
+      or if its directory has no descriptor of the host, such as a directory of
+      a mock file system. *)
 
 val listen :
   ?replace:bool ->
@@ -104,7 +105,7 @@ val listen :
     getpeername(2) reports. Its connections keep the Unix platform's type, so
     that they pass descriptors ({!receive}).
 
-    Raises [Invalid_argument] as {!connect_at} does. *)
+    @raise Invalid_argument as {!connect_at} does. *)
 
 val receive :
   sw:Eio.Switch.t ->

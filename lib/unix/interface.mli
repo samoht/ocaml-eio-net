@@ -40,8 +40,8 @@ module type S = sig
       is the one the interface's link sees, with no scope embedded in it as a
       KAME stack (macOS, the BSDs) embeds it.
 
-      Raises the {!Eio.Io} error {!Eio_unix.Err.v} makes of a failed
-      getifaddrs(3). *)
+      @raise Eio.Io
+        with the error {!Eio_unix.Err.v} makes of a failed getifaddrs(3). *)
 
   type watch
   (** The type for subscriptions to the host's address changes. *)
@@ -52,8 +52,9 @@ module type S = sig
       a [PF_ROUTE] socket elsewhere. Releasing [sw] closes it. A caller that
       reads {!addresses} after opening the watch misses no change.
 
-      Raises the {!Eio.Io} error {!Eio_unix.Err.v} makes of a failure to open
-      the socket. *)
+      @raise Eio.Io
+        with the error {!Eio_unix.Err.v} makes of a failure to open the socket.
+  *)
 
   val changed : watch -> unit
   (** [changed w] waits until an address has been added to or removed from an

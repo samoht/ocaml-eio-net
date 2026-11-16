@@ -358,12 +358,12 @@ val pair :
 
     - A socket reads back what it set, as the kernel keeps it, and the kernel's
       default otherwise. Linux doubles [SO_SNDBUF] and [SO_RCVBUF], within a
-      minimum and its maximum of 7500000 bytes, keeps [TCP_DEFER_ACCEPT] as a
+      minimum and its maximum of 7,500,000 bytes, keeps [TCP_DEFER_ACCEPT] as a
       count of retransmissions and the timeouts in milliseconds; macOS keeps a
       buffer size as given, up to 8 MiB. The defaults are the recording hosts':
-      on Linux a TCP connection has a send buffer of 2626560 bytes and a receive
-      buffer of 131072, and [TCP_CONGESTION] is ["cubic"], ["reno"] the only
-      other.
+      on Linux a TCP connection has a send buffer of 2,626,560 bytes and a
+      receive buffer of 131,072, and [TCP_CONGESTION] is ["cubic"], ["reno"] the
+      only other.
     - An option or a value the kernel refuses for the socket raises what
       eio_posix raises: [Eio.Net.E Invalid_option] for [ENOPROTOOPT], and for an
       option of Linux's under [`Macos]; [Eio.Exn.Not_available] for
@@ -433,9 +433,9 @@ val pair :
       socket.
     - A datagram sent to an address that no socket binds is lost.
     - A [recv] into a buffer shorter than the datagram gets its first bytes.
-    - A socket queues what its receive buffer holds, by default 229376 bytes,
+    - A socket queues what its receive buffer holds, by default 229,376 bytes,
       each datagram counted with the memory Linux gives it: 199 datagrams of up
-      to about 450 bytes, 99 of 1000 bytes, or 3 of 60000.
+      to about 450 bytes, 99 of 1000 bytes, or 3 of 60,000.
     - Over UDP, a datagram past that is lost and its send returns. A receiver
       frees the memory of the datagrams it takes only once they reach a quarter
       of the buffer, or once it has taken every datagram that was queued when it
@@ -444,7 +444,7 @@ val pair :
       datagram. It also waits while the receiver holds more than 10 datagrams
       ([max_dgram_qlen]), or while the sender's own datagrams not yet received
       fill its send buffer, of the same size: 299 datagrams of a byte, 100 of
-      1000 bytes, or 12 of 20000.
+      1000 bytes, or 12 of 20,000.
 
     {2:datagram_shutdown Shutdown}
 
@@ -458,11 +458,12 @@ val pair :
 
     - A send without a destination raises {!No_destination} over UDP and
       {!Not_connected} on a Unix path, since no socket is connected.
-    - A datagram longer than 65507 bytes to an IPv4 address, 65527 to an IPv6
-      one, or 212960 to a Unix path raises {!Message_too_long}. The last is what
-      Linux's default send buffer allows; with a smaller send buffer the limit
-      is that buffer less 32 bytes. Under [`Macos] the limit is the socket's
-      send buffer, by default 9216 bytes over UDP and 2048 on a Unix path.
+    - A datagram longer than 65,507 bytes to an IPv4 address, 65,527 to an IPv6
+      one, or 212,960 to a Unix path raises {!Message_too_long}. The last is
+      what Linux's default send buffer allows; with a smaller send buffer the
+      limit is that buffer less 32 bytes. Under [`Macos] the limit is the
+      socket's send buffer, by default 9216 bytes over UDP and 2048 on a Unix
+      path.
     - A datagram to UDP port 0 raises {!Invalid_port}. Under [`Macos] it is
       sent, and lost.
     - A datagram from an IPv6 address to an IPv4-mapped one raises
@@ -480,8 +481,8 @@ val pair :
       other than a multicast one, raises {!Invalid_address}.
     - A datagram that is both too long and refused for its address meets the
       checks in Linux's order. A Unix-domain socket checks the address family
-      first. An IPv4 socket refuses a datagram of more than 65535 bytes first,
-      then its address, then the 65507-byte limit. An IPv6 socket checks the
+      first. An IPv4 socket refuses a datagram of more than 65,535 bytes first,
+      then its address, then the 65,507-byte limit. An IPv6 socket checks the
       address first.
 
     {1:paths Unix paths}
@@ -610,7 +611,7 @@ val pair :
       ({!Host_unreachable}). From [::1] an IPv4-mapped destination is not
       available, and from an IPv4-mapped address other than the wildcard an IPv6
       one has no route. A socket bound at an IPv4-mapped address sees IPv4
-      senders as IPv4. A receiver holds its receive buffer, by default 786896
+      senders as IPv4. A receiver holds its receive buffer, by default 786,896
       bytes over UDP, each datagram counted by its length, and 4096 on a Unix
       path, each counted as at least 128 bytes, which fits what one Mac holds of
       datagrams of 1 to 2000 bytes. A datagram past that is lost over UDP, and

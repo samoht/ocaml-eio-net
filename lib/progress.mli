@@ -29,7 +29,7 @@ val v : mono:_ Eio.Time.Mono.t -> min_rate:int -> window:Mtime.Span.t -> t
 (** [v ~mono ~min_rate ~window] is a transfer timed on [mono] whose windows last
     [window] and each move at least [min_rate] bytes a second.
 
-    Raises [Invalid_argument] if [min_rate] is not positive or [window] is zero.
+    @raise Invalid_argument if [min_rate] is not positive or [window] is zero.
 *)
 
 val move : t -> (unit -> int) -> int
