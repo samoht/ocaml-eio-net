@@ -1,11 +1,13 @@
-open Design
+open Long_runs
 
 (* The guards of a check. *)
 
 let read ~clock f = App.Frame.read ~clock f
 
 let mutant ?budget ?replay () =
-  After.test_d ?budget ?replay ~read:(App.Frame.read ~bug:`Single_read) ()
+  Clients.test_frames ?budget ?replay
+    ~read:(App.Frame.read ~bug:`Single_read)
+    ()
 
 let error_is expected f () =
   let error = Expect.field "error" (Expect.report f) in
@@ -86,7 +88,7 @@ let test_replay () =
   let report = Expect.report (fun () -> mutant ()) in
   let replay = replay_of report in
   same_failure report (Expect.report (fun () -> mutant ~replay ()));
-  After.test_d ~replay ~read ();
+  Clients.test_frames ~replay ~read ();
   let report = Expect.report (fun () -> resume ~bug:`Stale ()) in
   let replay = replay_of report in
   same_failure report (Expect.report (fun () -> resume ~replay ~bug:`Stale ()))
@@ -255,7 +257,7 @@ let test_first_run_fails () =
 (* A check runs inside another event loop as it does outside one. *)
 let test_nested () =
   Eio_mock.Backend.run @@ fun () ->
-  After.test_d ~read ();
+  Clients.test_frames ~read ();
   ignore (Expect.report (fun () -> mutant ()))
 
 (* A client that retries a refused connect at once spins in the outage,
@@ -1116,7 +1118,7 @@ let suite =
     [
       Alcotest.test_case "a run every fiber waits in hangs" `Quick
         (error_is "the run hangs: every fiber waits and no timer is due"
-           (After.test_d ~read:(App.Frame.read ~bug:`No_timeout)));
+           (Clients.test_frames ~read:(App.Frame.read ~bug:`No_timeout)));
       Alcotest.test_case "a run that keeps a timer going hangs" `Quick
         (error_is
            "the run hangs: it is still running after an hour of its clock"

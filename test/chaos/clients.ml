@@ -1,4 +1,4 @@
-(* The tests of the design: a framed reader, a client that retries, and a
+(* Tests of three clients: a framed reader, a client that retries, and a
    UDP request-response client. *)
 
 let msgs = [ "hello"; ""; "a longer message of 32 bytes...." ]
@@ -9,7 +9,7 @@ let rec is_prefix p l =
   | x :: p, y :: l -> x = y && is_prefix p l
   | _ -> false
 
-let test_d ?budget ?replay ~read () =
+let test_frames ?budget ?replay ~read () =
   Eio_net_chaos.check ?budget ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
@@ -59,7 +59,7 @@ let test_cut ~read () =
   | exception App.Frame.Truncated -> ()
   | _ -> failwith "an end mid-frame must raise Truncated"
 
-let test_e ~fetch () =
+let test_retries ~fetch () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
@@ -75,7 +75,7 @@ let test_e ~fetch () =
   | Ok v, _ -> Fmt.failwith "got %S" v
   | Error `Unreachable, false -> failwith "gave up"
 
-let test_f ~call () =
+let test_datagrams ~call () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in

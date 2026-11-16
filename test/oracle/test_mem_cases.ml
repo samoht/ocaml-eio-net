@@ -1,9 +1,9 @@
-(* Socket behaviour a review of eio-net.mem raised, measured on Linux and
-   macOS. A case names what it checks; none comes from gVisor. *)
+(* Socket behaviour of eio-net.mem beyond gVisor's tests, measured on Linux
+   and macOS. A case names what it checks. *)
 
 open Oracle
 
-let file = "review"
+let file = "mem"
 
 let per_stream ~test kinds expect body =
   List.map
@@ -36,7 +36,7 @@ let cases =
               Fmt.str "wrote %d" (Eio.Flow.single_write c [ Cstruct.empty ])));
       (* A connect bound to an address of another family fails: EINVAL on
          Linux, EAFNOSUPPORT on macOS. A path for TCP fails with EAFNOSUPPORT
-         on Linux 7.2, where the review measured EINVAL on another Linux. *)
+         on Linux 7.2, and with EINVAL on another Linux. *)
       [
         case ~file ~test:"BindToOtherFamily" ~variant:"127.0.0.1 to ::1"
           ~ipv6:true (expect ~macos:"EAFNOSUPPORT" "EINVAL") (fun ctx ->
@@ -262,4 +262,4 @@ let cases =
         ];
     ]
 
-let suite = Oracle.suite "review" cases
+let suite = Oracle.suite "mem cases" cases

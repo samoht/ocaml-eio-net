@@ -1,5 +1,5 @@
-(** Review 1's tests: a request-response server under five clients, and its idle
-    timeout. Each takes the server under test. *)
+(** Tests of a request-response server under five clients, and its idle timeout.
+    Each takes the server under test. *)
 
 val test :
   serve:

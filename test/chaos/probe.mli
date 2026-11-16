@@ -1,4 +1,4 @@
-(** Review 2's probes: the one-sided reset, coalesced reads, and the budget. *)
+(** Probes of the one-sided reset, coalesced reads, and the budget. *)
 
 val one_sided : unit -> unit
 (** [one_sided ()] waits for a server's handlers, which have no idle timeout, to

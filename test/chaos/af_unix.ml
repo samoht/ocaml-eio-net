@@ -1,4 +1,4 @@
-(* Review 4: what Linux promises on AF_UNIX, and a client that reconnects at
+(* What Linux promises on AF_UNIX, and a client that reconnects at
    once. *)
 
 let unix_lines (env : Eio_net_chaos.env) =

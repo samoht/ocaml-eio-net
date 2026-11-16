@@ -14,12 +14,8 @@ dune build @test/oracle/runtest
 [`test_gvisor.ml`](test_gvisor.ml) adapts tests from
 [gVisor](https://github.com/google/gvisor)'s
 [`test/syscalls/linux`](https://github.com/google/gvisor/tree/6782e66bb04ba41de7da417da53406c2525ac9f1/test/syscalls/linux)
-(Apache License 2.0). Each case keeps the file and test name it comes from, as
-`~file` and `~test`. The cases were written in ba4756f (2026-11-09) without
-noting the gVisor revision. The thirteen files they name are the same at every
-gVisor commit from 9533bcc (2026-11-04) to 89cacad (2026-11-15); at 6782e66,
-the last before ba4756f, each of the 52 file and test pairs names a test of
-that file.
+(Apache License 2.0), at revision 6782e66. Each case keeps the file and test
+name it comes from, as `~file` and `~test`.
 
 What a case changes from its gVisor test:
 
@@ -30,8 +26,8 @@ What a case changes from its gVisor test:
 - It adds macOS's outcome, and `eio-net.mem`'s where that differs; the case's
   comment says why.
 
-## Review cases
+## Cases beyond gVisor
 
-[`test_review.ml`](test_review.ml) holds cases a review of `eio-net.mem`
-raised, measured on Linux and macOS when they were written. No kernel version
-is recorded; one comment names Linux 7.2 (76af812, 2026-11-10).
+[`test_mem_cases.ml`](test_mem_cases.ml) holds cases of `eio-net.mem` that no
+gVisor test covers, measured on Linux and macOS. No kernel version is
+recorded; one comment names Linux 7.2 (76af812, 2026-11-10).

@@ -1,4 +1,4 @@
-(* Probes of the design: a run that keeps a timer going, the budget, and a
+(* Long runs: a run that keeps a timer going, the budget, and a
    download that resumes. *)
 
 let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)

@@ -1,4 +1,4 @@
-open Review1
+open Request_response
 
 let serve ?bug ~clock l = Server.serve ?bug ~clock l
 
@@ -6,7 +6,7 @@ let serve ?bug ~clock l = Server.serve ?bug ~clock l
    with [App.Frame.read], which gives up after a second of silence on its
    own, so no fault tells the two apart. *)
 let suite =
-  ( "review1",
+  ( "request_response",
     [
       Alcotest.test_case "server: correct" `Quick
         (Expect.passes (test ~serve:(serve ?bug:None)));

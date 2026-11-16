@@ -1,4 +1,4 @@
-(* Review 1: a request-response server under many clients, and its idle
+(* A request-response server under many clients, and its idle
    timeout. *)
 
 let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)

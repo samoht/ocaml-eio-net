@@ -1,4 +1,4 @@
-(* Review 3: correct programs that real stacks run, and the bugs they hide. *)
+(* Correct programs that real stacks run, and the bugs they hide. *)
 
 let tcp port = `Tcp (Eio.Net.Ipaddr.V4.loopback, port)
 

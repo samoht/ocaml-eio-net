@@ -1,4 +1,4 @@
-(* Review 2: probes of the one-sided reset, coalesced reads and the budget. *)
+(* Probes of the one-sided reset, coalesced reads and the budget. *)
 
 module R = Eio.Buf_read
 

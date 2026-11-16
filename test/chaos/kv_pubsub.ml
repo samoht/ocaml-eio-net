@@ -1,4 +1,4 @@
-(* Review 2: a keep-alive client that reconnects, and a broker that fans
+(* A keep-alive client that reconnects, and a broker that fans
    messages out to subscribers. *)
 
 open Kv

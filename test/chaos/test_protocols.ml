@@ -1,4 +1,4 @@
-open Review3
+open Protocols
 
 let check w () = Eio_net_chaos.check w
 
@@ -12,7 +12,7 @@ let spins () =
         Alcotest.failf "failed with %S" m
 
 let suite =
-  ( "review3",
+  ( "protocols",
     [
       Alcotest.test_case "banner exchange: correct" `Quick
         (Expect.passes (check banner));

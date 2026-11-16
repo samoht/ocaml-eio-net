@@ -1,4 +1,4 @@
-open Review4
+open Af_unix
 
 let check w () = Eio_net_chaos.check w
 
@@ -17,7 +17,7 @@ let bounded_report () =
   Alcotest.(check string) "the replay fails the same way" m again
 
 let suite =
-  ( "review4",
+  ( "af_unix",
     [
       Alcotest.test_case "AF_UNIX lines read before a cut: correct" `Quick
         (Expect.passes (check unix_lines));

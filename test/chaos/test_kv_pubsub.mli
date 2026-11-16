@@ -1,4 +1,4 @@
-(** Tests of eio-net.chaos's design: see the suite. *)
+(** Tests of eio-net.chaos against a keep-alive client and a broker. *)
 
 val suite : string * unit Alcotest.test_case list
 (** [suite] runs each program under test, correct and with its bugs, and says

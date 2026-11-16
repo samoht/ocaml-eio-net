@@ -1,5 +1,5 @@
-(** The design's probes: a run that keeps a timer going, the budget, and a
-    download that resumes. *)
+(** Long runs: a run that keeps a timer going, the budget, and a download that
+    resumes. *)
 
 val addr : Eio.Net.Sockaddr.stream
 (** [addr] is the server's address. *)

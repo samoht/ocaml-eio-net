@@ -1,7 +1,7 @@
-open Review2
+open Kv_pubsub
 
 let suite =
-  ( "review2",
+  ( "kv_pubsub",
     [
       Alcotest.test_case "keep-alive: correct" `Quick
         (Expect.passes (fun () -> test_kv ()));

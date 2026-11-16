@@ -1,7 +1,7 @@
-(** The design's tests: a framed reader, a client that retries, and a UDP
+(** Tests of three clients: a framed reader, a client that retries, and a UDP
     request-response client. Each takes the program under test. *)
 
-val test_d :
+val test_frames :
   ?budget:int ->
   ?replay:string ->
   read:
@@ -10,8 +10,8 @@ val test_d :
     string option) ->
   unit ->
   unit
-(** [test_d ~budget ~replay ~read ()] checks that [read] gets a prefix of the
-    frames a server sends, under {!Eio_net_chaos.check}. *)
+(** [test_frames ~budget ~replay ~read ()] checks that [read] gets a prefix of
+    the frames a server sends, under {!Eio_net_chaos.check}. *)
 
 val test_cut :
   read:
@@ -23,7 +23,7 @@ val test_cut :
 (** [test_cut ~read ()] pins an end of stream inside the third frame's header,
     and checks that [read] raises [App.Frame.Truncated] there. *)
 
-val test_e :
+val test_retries :
   fetch:
     (clock:float Eio.Time.clock_ty Eio.Resource.t ->
     [ `Generic ] Eio.Net.ty Eio.Resource.t ->
@@ -31,10 +31,10 @@ val test_e :
     (string, [ `Unreachable ]) result) ->
   unit ->
   unit
-(** [test_e ~fetch ()] checks that [fetch] gets the server's answer within 10
-    seconds, or gives up in the outage. *)
+(** [test_retries ~fetch ()] checks that [fetch] gets the server's answer within
+    10 seconds, or gives up in the outage. *)
 
-val test_f :
+val test_datagrams :
   call:
     (clock:float Eio.Time.clock_ty Eio.Resource.t ->
     [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t ->
@@ -44,5 +44,5 @@ val test_f :
     (string, [ `Timeout ]) result) ->
   unit ->
   unit
-(** [test_f ~call ()] checks that five calls get their own answers, or time out
-    in the outage. *)
+(** [test_datagrams ~call ()] checks that five calls get their own answers, or
+    time out in the outage. *)

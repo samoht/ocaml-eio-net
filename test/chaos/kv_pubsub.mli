@@ -1,5 +1,5 @@
-(** Review 2's tests: a keep-alive client that reconnects, and a broker that
-    fans messages out to subscribers. *)
+(** Tests of a keep-alive client that reconnects, and a broker that fans
+    messages out to subscribers. *)
 
 val test_kv :
   ?bug:[ `Eof_body | `No_reconnect | `None | `Read_only | `Reset_only ] ->
