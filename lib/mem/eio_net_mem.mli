@@ -326,11 +326,12 @@ val connection : _ Eio.Net.stream_socket -> int option
     went first, sent by a shutdown of its send side or by its close, holds its
     address once closed in TIME_WAIT, for 60 seconds from the peer's FIN, as
     Linux does; the other end lets go when it closes. Closed before the peer's
-    FIN, it waits for that FIN for 60 seconds, Linux's [tcp_fin_timeout], and
-    then lets go. A [listen] or a [connect] bound at an address held this way
-    raises [EADDRINUSE], or the error that {!Address_in_use} marks, unless both
-    have [reuse_addr]: as on Linux, an accepted end has its listener's, a client
-    has none, and a listener's own hold refuses every other socket.
+    FIN, it waits for that FIN for its [TCP_LINGER2] if one is set, or 60
+    seconds, Linux's [tcp_fin_timeout], and then lets go. A [listen] or a
+    [connect] bound at an address held this way raises [EADDRINUSE], or the
+    error that {!Address_in_use} marks, unless both have [reuse_addr]: as on
+    Linux, an accepted end has its listener's, a client has none, and a
+    listener's own hold refuses every other socket.
 
     A [connect] without [bind_to] takes the next port down from the last one
     such a connect took, from the top of the dynamic range, and from its top
@@ -409,6 +410,8 @@ val connection : _ Eio.Net.stream_socket -> int option
     - [SO_KEEPALIVE], [TCP_KEEPIDLE], [TCP_KEEPINTVL], [TCP_KEEPCNT] and
       [TCP_USER_TIMEOUT] say when an end of a silent connection gives up ({!v}).
       No probe crosses a live one.
+    - [TCP_LINGER2] says how long an end closed before its peer's FIN holds its
+      address ({!section-streams}).
     - Every other option is kept and read back, and has no other effect: no
       timeout ends a read, an accept does not wait for data under
       [TCP_DEFER_ACCEPT], and a read does not wait for [SO_RCVLOWAT] bytes.

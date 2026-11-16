@@ -515,4 +515,5 @@ let give_up t ~silenced ~last ~oldest =
       if Mtime.is_earlier k ~than:r then keepalive else retransmit
 
 let linger t = t.linger
+let linger2 t = if t.linger2 = 0 then None else Some t.linger2
 let on_resize t f = t.resized <- f

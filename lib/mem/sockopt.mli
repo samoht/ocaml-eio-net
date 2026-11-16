@@ -60,6 +60,9 @@ val rcvbuf : t -> int
 val linger : t -> int option
 (** [linger t] is the [SO_LINGER] time. *)
 
+val linger2 : t -> int option
+(** [linger2 t] is the [TCP_LINGER2] time set, in seconds, if one is. *)
+
 val on_resize : t -> (unit -> unit) -> unit
 (** [on_resize t f] calls [f] whenever a buffer is set. *)
 

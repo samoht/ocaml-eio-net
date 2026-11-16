@@ -35,7 +35,7 @@ module Flow = struct
       mutable life : Life.t;
       mutable abort : bool;
       mutable release : Eio.Switch.hook;
-      mutable on_close : reset:bool -> abort:bool -> unit;
+      mutable on_close : reset:bool -> abort:bool -> linger2:int option -> unit;
       mutable on_fin : unit -> unit;
       connection : int;
       opts : Sockopt.t;
@@ -107,6 +107,7 @@ module Flow = struct
       if unread || t.abort then Pipe.reset t.to_peer;
       Pipe.shut t.to_peer;
       t.on_close ~reset:(unread || t.abort) ~abort:t.abort
+        ~linger2:(Sockopt.linger2 t.opts)
 
     let leave t =
       let last =
@@ -233,7 +234,7 @@ module Flow = struct
           life = Life.v;
           abort = false;
           release = Eio.Switch.null_hook;
-          on_close = (fun ~reset:_ ~abort:_ -> ());
+          on_close = (fun ~reset:_ ~abort:_ ~linger2:_ -> ());
           on_fin = ignore;
           connection;
           opts;
@@ -1036,8 +1037,9 @@ end
    An end holds it while open. Once closed, the end whose FIN went first, by
    a shutdown of its send side or by its close, holds it in TIME_WAIT for 60
    seconds from the peer's FIN, as Linux does, and the other lets go at once.
-   Closed with no FIN from its peer, it waits for one in FIN_WAIT2 for 60
-   seconds, Linux's tcp_fin_timeout.
+   Closed with no FIN from its peer, it waits for one in FIN_WAIT2 for its
+   TCP_LINGER2, or 60 seconds, Linux's tcp_fin_timeout, as tcp_fin_time
+   has it.
    After a reset, and without a clock, each lets go once both have closed.
    An end its listener dropped unaccepted lets go at once, as Linux destroys
    it. *)
@@ -1049,7 +1051,11 @@ module Ends = struct
 
   (* An end is open, closed at a time, or dropped by its listener. [fin]
      orders the ends' FINs and says when each went. *)
-  type state = Open | Closed of Mtime.t | Dropped
+  type state =
+    | Open
+    | Closed of { at : Mtime.t; fin_timeout : Mtime.Span.t }
+    | Dropped
+
   type end_ = { mutable fin : (int * Mtime.t) option; mutable state : state }
 
   type t = {
@@ -1079,14 +1085,14 @@ module Ends = struct
     match e.state with
     | Open -> `Held
     | Dropped -> `Release
-    | Closed closed -> (
+    | Closed { at = closed; fin_timeout } -> (
         let both =
           match o.state with Open -> false | Closed _ | Dropped -> true
         in
         if Option.is_none t.now || t.reset then if both then `Release else `Held
         else
           let after span t = Option.value ~default:t (Mtime.add_span t span) in
-          let orphan = after Ports.fin_timeout closed in
+          let orphan = after fin_timeout closed in
           match (e.fin, o.fin) with
           | Some (mine, _), Some (theirs, _) when theirs < mine -> `Release
           | _, Some (_, peer) when Mtime.is_later peer ~than:orphan -> `Release
@@ -1110,11 +1116,17 @@ module Ends = struct
 
   let fin t side = update t (fun () -> send_fin t (index side))
 
-  let close t side ~reset ~abort =
+  let close t side ~reset ~abort ~linger2 =
+    let fin_timeout =
+      match linger2 with
+      | Some n -> Mtime.Span.(n * s)
+      | None -> Ports.fin_timeout
+    in
     update t (fun () ->
         let i = index side in
         send_fin t i;
-        t.ends.(i).state <- (if abort then Dropped else Closed (now t));
+        t.ends.(i).state <-
+          (if abort then Dropped else Closed { at = now t; fin_timeout });
         if reset then t.reset <- true)
 
   let reset t = Mutex.protect t.lock (fun () -> t.reset <- true)
@@ -1327,9 +1339,9 @@ module Network = struct
       Flow.self ~os:t.os ~timer:t.timer ~capacity ~bound:t.bounded ~opts
     in
     let ends = Ends.v t.hub.Listening_socket.ports in
-    Flow.on_close flow (fun ~reset ~abort:_ ->
-        ignore (Ends.close ends `Client ~reset ~abort:false);
-        match Ends.close ends `Server ~reset ~abort:false with
+    Flow.on_close flow (fun ~reset ~abort:_ ~linger2 ->
+        ignore (Ends.close ends `Client ~reset ~abort:false ~linger2);
+        match Ends.close ends `Server ~reset ~abort:false ~linger2 with
         | `Time_wait u, _ -> release ~until:u ~time_wait:true ()
         | `Until u, _ -> release ~until:u ()
         | (`Release | `Held), _ -> release ());
@@ -1387,10 +1399,10 @@ module Network = struct
             s)
         child
     in
-    Flow.on_close client (fun ~reset ~abort ->
-        settle (Ends.close ends `Client ~reset ~abort));
-    Flow.on_close server (fun ~reset ~abort ->
-        settle (Ends.close ends `Server ~reset ~abort));
+    Flow.on_close client (fun ~reset ~abort ~linger2 ->
+        settle (Ends.close ends `Client ~reset ~abort ~linger2));
+    Flow.on_close server (fun ~reset ~abort ~linger2 ->
+        settle (Ends.close ends `Server ~reset ~abort ~linger2));
     Flow.on_fin client (fun () -> settle (Ends.fin ends `Client));
     Flow.on_fin server (fun () -> settle (Ends.fin ends `Server));
     ends
