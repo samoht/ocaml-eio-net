@@ -1,0 +1,6 @@
+(test
+ (name test)
+ (package eio-net)
+ (libraries fmt alcotest)
+ (deps
+  (source_tree ../interop)))

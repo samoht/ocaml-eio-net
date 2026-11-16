@@ -61,3 +61,9 @@ exclude = ["E605"]
 [[rules]]
 files = ["test/chaos/plan/dune"]
 exclude = ["E956"]
+
+# The provenance test checks the committed traces and their generators, not a
+# library module.
+[[rules]]
+files = ["test/provenance/*"]
+exclude = ["E610"]
