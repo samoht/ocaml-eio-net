@@ -10,4 +10,5 @@ let () =
       Test_dead_peer.suite;
       Test_keepalive.suite;
       Test_guards.suite;
+      Test_sampling.suite;
     ]
