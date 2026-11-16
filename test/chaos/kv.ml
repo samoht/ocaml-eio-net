@@ -67,14 +67,13 @@ let get ?(bug = `None) t k =
           else R.take len r)
     with
     | body -> Ok body
-    | exception e ->
+    | exception ((Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _) as e)
+      ->
         let retry =
           match (bug, e, !phase) with
           | `Read_only, Eio.Io _, `Write -> false
           | `Reset_only, End_of_file, `Read -> false
-          | _, (Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _), _ ->
-              true
-          | _ -> false
+          | _ -> true
         in
         if not retry then raise e;
         if bug <> `No_reconnect then drop t;

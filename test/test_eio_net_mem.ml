@@ -512,7 +512,6 @@ let test_write_after_shutdown_reports_reset () =
   | (_ : int) -> Alcotest.fail "the write went through");
   match Eio.Flow.single_read client (Cstruct.create 1) with
   | exception End_of_file -> ()
-  | exception e -> Alcotest.failf "the read raised %a" Fmt.exn e
   | (_ : int) -> Alcotest.fail "the read returned bytes"
 
 (* A connection reset before it is read reports the reset to one read, and end
@@ -1501,7 +1500,6 @@ let test_a_closed_listener_resets_its_queue () =
   in
   match Eio.Flow.single_read client (Cstruct.create 1) with
   | exception e when is_reset e -> ()
-  | exception e -> Alcotest.failf "a queued connection raised %a" Fmt.exn e
   | (_ : int) -> Alcotest.fail "a queued connection read a byte"
 
 (* A connect waiting for room in a full queue when the listener closes is
@@ -1583,28 +1581,34 @@ let test_backlog () =
         (backlog + 2) !connected)
     [ 0; 1; 2; 5 ]
 
-(* A listen raises EADDRINUSE raw, as eio_posix does, and a connect as an
-   [Eio.Io] error. *)
-let in_use f =
-  match f () with
-  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> true
-  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) -> true
-  | () -> false
+(* A bind in [listen] or [datagram_socket] raises the raw [Unix.Unix_error]
+   eio_posix raises there, and a connect an [Eio.Io] error marked by the code:
+   [fails error f] is [true] if [f] raises either form of [error], and any
+   other exception, [Failure] included, fails the test. *)
+let fails error f =
+  match f () with exception e when error e -> true | _ -> false
+
+let in_use = function
+  | Unix.Unix_error (Unix.EADDRINUSE, _, _)
+  | Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) ->
+      true
+  | _ -> false
+
+let not_available = function
+  | Unix.Unix_error (Unix.EADDRNOTAVAIL, _, _)
+  | Eio.Io (Eio.Exn.X Eio_net_mem.Address_not_available, _) ->
+      true
+  | _ -> false
+
+let name_too_long = function
+  | Unix.Unix_error (Unix.ENAMETOOLONG, _, _)
+  | Eio.Io (Eio.Exn.X Eio_net_mem.Name_too_long, _) ->
+      true
+  | _ -> false
 
 let listens net ?(reuse_addr = false) addr () =
   Eio.Switch.run @@ fun sw ->
   ignore (Eio.Net.listen ~sw ~reuse_addr ~backlog:1 net addr)
-
-(* A bind in [listen] or [datagram_socket] raises the raw [Unix.Unix_error]
-   eio_posix raises there, and a connect an [Eio.Io] error marked by the code:
-   either form of the pair passes, and any other exception, [Failure] included,
-   fails the test. *)
-let fails (code, errno) f =
-  match f () with
-  | exception Eio.Io (Eio.Exn.X c, _) when c = code -> true
-  | exception Unix.Unix_error (e, _, _) when e = errno -> true
-  | exception e -> Alcotest.failf "raised %a" Fmt.exn e
-  | _ -> false
 
 (* A connection opened and accepted under [sw], at [addr]; the listener is
    closed. *)
@@ -1624,13 +1628,15 @@ let test_accepted_holds_the_port () =
   let net = Eio_net_mem.v ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8110) in
   let client, server = connection ~sw net addr in
-  Alcotest.(check bool) "relisten" true (in_use (listens net addr));
+  Alcotest.(check bool) "relisten" true (fails in_use (listens net addr));
   Alcotest.(check bool)
     "relisten with reuse_addr" true
-    (in_use (listens net ~reuse_addr:true addr));
+    (fails in_use (listens net ~reuse_addr:true addr));
   Eio.Resource.close client;
   Eio.Resource.close server;
-  Alcotest.(check bool) "relisten once closed" false (in_use (listens net addr))
+  Alcotest.(check bool)
+    "relisten once closed" false
+    (fails in_use (listens net addr))
 
 (* The end that closes first holds its address in TIME_WAIT for 60 seconds on
    the network's clock, as Linux does; a bind there is refused unless both
@@ -1654,14 +1660,14 @@ let test_time_wait () =
   Eio.Resource.close client;
   Alcotest.(check bool)
     "server first, relisten" true
-    (in_use (listens net addr));
+    (fails in_use (listens net addr));
   Alcotest.(check bool)
     "server first, relisten with reuse_addr" true
-    (in_use (listens net ~reuse_addr:true addr));
+    (fails in_use (listens net ~reuse_addr:true addr));
   wait 59;
-  Alcotest.(check bool) "after 59 s" true (in_use (listens net addr));
+  Alcotest.(check bool) "after 59 s" true (fails in_use (listens net addr));
   wait 1;
-  Alcotest.(check bool) "after 60 s" false (in_use (listens net addr));
+  Alcotest.(check bool) "after 60 s" false (fails in_use (listens net addr));
   (* The client closes first. *)
   let addr = `Tcp (lo, 8112) in
   let client, server = connection ~sw net addr in
@@ -1669,16 +1675,18 @@ let test_time_wait () =
   Eio.Resource.close server;
   Alcotest.(check bool)
     "client first, relisten" false
-    (in_use (listens net addr));
+    (fails in_use (listens net addr));
   (* A listener with reuse_addr. *)
   let addr = `Tcp (lo, 8113) in
   let client, server = connection ~sw net ~reuse_addr:true addr in
   Eio.Resource.close server;
   Eio.Resource.close client;
-  Alcotest.(check bool) "reused, relisten" true (in_use (listens net addr));
+  Alcotest.(check bool)
+    "reused, relisten" true
+    (fails in_use (listens net addr));
   Alcotest.(check bool)
     "reused, relisten with reuse_addr" false
-    (in_use (listens net ~reuse_addr:true addr));
+    (fails in_use (listens net ~reuse_addr:true addr));
   (* A client bound at a port that closes first. *)
   let addr = `Tcp (lo, 8114) and bound = `Tcp (lo, 8115) in
   let client, server = connection ~sw net ~bind_to:bound addr in
@@ -1686,16 +1694,17 @@ let test_time_wait () =
   Eio.Resource.close server;
   Alcotest.(check bool)
     "bound client first, listen there" true
-    (in_use (listens net ~reuse_addr:true bound));
+    (fails in_use (listens net ~reuse_addr:true bound));
   let listener = Eio.Net.listen ~sw ~backlog:1 net addr in
   Alcotest.(check bool)
     "bound client first, connect from there" true
-    (in_use (fun () -> ignore (Eio.Net.connect ~sw ~bind_to:bound net addr)));
+    (fails in_use (fun () ->
+         ignore (Eio.Net.connect ~sw ~bind_to:bound net addr)));
   Eio.Resource.close listener;
   wait 60;
   Alcotest.(check bool)
     "bound client, after 60 s" false
-    (in_use (listens net bound))
+    (fails in_use (listens net bound))
 
 (* An address no interface has fails to bind with EADDRNOTAVAIL, as on
    Linux: the network has the loopback interface only. A Unix path of 108
@@ -1706,9 +1715,7 @@ let test_unavailable_addresses () =
   let net = Eio_net_mem.v ~sw () in
   let ip = Eio.Net.Ipaddr.of_raw in
   let lo = Eio.Net.Ipaddr.V4.loopback in
-  let unavailable =
-    fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL)
-  in
+  let unavailable = fails not_available in
   List.iter
     (fun raw ->
       let a = ip raw in
@@ -1744,7 +1751,7 @@ let test_unavailable_addresses () =
            (Eio.Net.listen ~sw ~backlog:1 net
               (`Tcp (ip "\127\000\000\002", 8121)))));
   let long = `Unix ("/tmp/" ^ String.make 103 'x') in
-  let too_long = fails (Eio_net_mem.Name_too_long, Unix.ENAMETOOLONG) in
+  let too_long = fails name_too_long in
   Alcotest.(check bool)
     "listen at a long path" true
     (too_long (fun () -> ignore (Eio.Net.listen ~sw ~backlog:1 net long)));
@@ -1769,26 +1776,25 @@ let test_bind_to_another_family () =
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
   let v4 = Eio.Net.Ipaddr.V4.loopback and v6 = Eio.Net.Ipaddr.V6.loopback in
-  let raises code ~bind_to addr =
+  let raises ~bind_to addr =
     match Eio.Net.connect ~sw ~bind_to net addr with
-    | exception Eio.Io (Eio.Exn.X c, _) -> c = code
-    | (_ : _ Eio.Net.stream_socket) -> false
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Invalid_address, _) -> "EINVAL"
+    | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_family, _) ->
+        "EAFNOSUPPORT"
+    | (_ : _ Eio.Net.stream_socket) -> "connected"
   in
-  Alcotest.(check bool)
-    "IPv4 for IPv6" true
-    (raises Eio_net_mem.Invalid_address ~bind_to:(`Tcp (v4, 0)) (`Tcp (v6, 80)));
-  Alcotest.(check bool)
-    "TCP for a path" true
-    (raises Eio_net_mem.Invalid_address
-       ~bind_to:(`Tcp (v4, 0))
-       (`Unix "/tmp/s.sock"));
-  Alcotest.(check bool)
-    "IPv6 for IPv4" true
-    (raises Eio_net_mem.Address_family ~bind_to:(`Tcp (v6, 0)) (`Tcp (v4, 80)));
-  Alcotest.(check bool)
-    "a path for TCP" true
-    (raises Eio_net_mem.Address_family ~bind_to:(`Unix "/tmp/c.sock")
-       (`Tcp (v4, 80)))
+  Alcotest.(check string)
+    "IPv4 for IPv6" "EINVAL"
+    (raises ~bind_to:(`Tcp (v4, 0)) (`Tcp (v6, 80)));
+  Alcotest.(check string)
+    "TCP for a path" "EINVAL"
+    (raises ~bind_to:(`Tcp (v4, 0)) (`Unix "/tmp/s.sock"));
+  Alcotest.(check string)
+    "IPv6 for IPv4" "EAFNOSUPPORT"
+    (raises ~bind_to:(`Tcp (v6, 0)) (`Tcp (v4, 80)));
+  Alcotest.(check string)
+    "a path for TCP" "EAFNOSUPPORT"
+    (raises ~bind_to:(`Unix "/tmp/c.sock") (`Tcp (v4, 80)))
 
 (* A client that binds no address sends from 127.0.0.1 to any address of
    127.0.0.0/8, as Linux picks the loopback interface's own address, for
@@ -1921,7 +1927,7 @@ let test_no_ephemeral_port_for_a_listen () =
   done;
   Alcotest.(check bool)
     "a listen at port 0" true
-    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE) (fun () ->
+    (fails in_use (fun () ->
          ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)))))
 
 (* A datagram socket at port 0 fails the same way, with EADDRINUSE raw and not
@@ -1938,7 +1944,7 @@ let test_no_ephemeral_port_for_a_datagram_socket () =
   done;
   Alcotest.(check bool)
     "a datagram socket at port 0" true
-    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE) (fun () ->
+    (fails in_use (fun () ->
          ignore (Eio.Net.datagram_socket ~sw net (`Udp (lo, 0)))))
 
 (* A [connect] whose socket binds no address takes a port of the range counted
@@ -1959,12 +1965,12 @@ let test_no_ephemeral_port_for_a_connect () =
   done;
   Alcotest.(check bool)
     "a connect that binds no port" true
-    (fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL) (fun () ->
+    (fails not_available (fun () ->
          ignore (Eio.Net.connect ~sw net addr : _ Eio.Net.stream_socket)));
   let bind_to = `Tcp (lo, 0) in
   Alcotest.(check bool)
     "a connect bound at port 0" true
-    (fails (Eio_net_mem.Address_in_use, Unix.EADDRINUSE) (fun () ->
+    (fails in_use (fun () ->
          ignore
            (Eio.Net.connect ~sw ~bind_to net addr : _ Eio.Net.stream_socket)))
 
@@ -2010,7 +2016,7 @@ let test_ports_per_destination () =
     (short_connections ~sw net la a 6384);
   Alcotest.(check bool)
     "one more to it" true
-    (fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL) (fun () ->
+    (fails not_available (fun () ->
          ignore (Eio.Net.connect ~sw net a : _ Eio.Net.stream_socket)));
   Alcotest.(check bool)
     "one more to the other" true
@@ -2045,7 +2051,7 @@ let test_time_wait_reuse () =
     "16383 to one" true
     (short_connections ~sw net la a 16383);
   let unavailable () =
-    fails (Eio_net_mem.Address_not_available, Unix.EADDRNOTAVAIL) (fun () ->
+    fails not_available (fun () ->
         ignore (Eio.Net.connect ~sw net a : _ Eio.Net.stream_socket))
   in
   Alcotest.(check bool) "at once" true (unavailable ());
@@ -2101,7 +2107,7 @@ let test_time_wait_follows_the_first_fin () =
     second client server;
     Eio.Resource.close server;
     Eio.Resource.close client;
-    in_use (listens net addr)
+    fails in_use (listens net addr)
   in
   let shut flow = Eio.Flow.shutdown flow `Send in
   Alcotest.(check bool)
@@ -2138,12 +2144,16 @@ let test_fin_wait2_times_out () =
   at 29;
   Eio.Resource.close client_b;
   at 59;
-  Alcotest.(check bool) "an orphan at 59 s" true (in_use (listens net a));
+  Alcotest.(check bool) "an orphan at 59 s" true (fails in_use (listens net a));
   at 60;
-  Alcotest.(check bool) "an orphan at 60 s" false (in_use (listens net a));
-  Alcotest.(check bool) "the peer's FIN at 29 s" true (in_use (listens net b));
+  Alcotest.(check bool) "an orphan at 60 s" false (fails in_use (listens net a));
+  Alcotest.(check bool)
+    "the peer's FIN at 29 s" true
+    (fails in_use (listens net b));
   at 89;
-  Alcotest.(check bool) "TIME_WAIT from 29 s" false (in_use (listens net b))
+  Alcotest.(check bool)
+    "TIME_WAIT from 29 s" false
+    (fails in_use (listens net b))
 
 (* A Unix-domain datagram socket bound at "" takes an abstract address of its
    own, as Linux autobinds it: "\000" and five hexadecimal digits, which a
@@ -2267,7 +2277,6 @@ let test_datagram_error_order () =
         | Eio_net_mem.Network_unreachable -> "ENETUNREACH"
         | Eio_net_mem.Message_too_long -> "EMSGSIZE"
         | _ -> "other")
-    | exception e -> Printexc.to_string e
   in
   List.iter
     (fun (name, sock, dst, len, expected) ->
@@ -2324,7 +2333,6 @@ let test_edge_addresses () =
         "ENETUNREACH"
     | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) ->
         "REFUSED"
-    | exception e -> Printexc.to_string e
   in
   let listen a () =
     Eio.Switch.run @@ fun sw ->
@@ -2387,7 +2395,9 @@ let test_self_connect () =
   Alcotest.(check string)
     "it reads its own bytes" "hi"
     (Cstruct.to_string ~len:n buf);
-  Alcotest.(check bool) "it holds the address" true (in_use (listens net addr));
+  Alcotest.(check bool)
+    "it holds the address" true
+    (fails in_use (listens net addr));
   Eio.Flow.shutdown flow `Send;
   (match Eio.Flow.single_read flow buf with
   | exception End_of_file -> ()
@@ -2395,7 +2405,9 @@ let test_self_connect () =
   let clock = Eio_mock.Clock.Mono.make () in
   let net = Eio_net_mem.v ~clock ~sw () in
   Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw ~bind_to:addr net addr));
-  Alcotest.(check bool) "TIME_WAIT once closed" true (in_use (listens net addr))
+  Alcotest.(check bool)
+    "TIME_WAIT once closed" true
+    (fails in_use (listens net addr))
 
 (* A connection releases its switch once it is closed: nothing of it stays
    reachable from the switch, however many a long-lived switch opens. *)

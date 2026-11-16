@@ -10,6 +10,8 @@ let spin st =
 
 let lo = Eio.Net.Ipaddr.V4.loopback
 
+(* What an operation's failure stands for. The handlers catch these three
+   exceptions only, so any other fails the test. *)
 let classify = function
   | End_of_file -> "EOF"
   | Invalid_argument _ -> "INVAL"
@@ -37,7 +39,8 @@ let read_race pool how seed =
     let rec loop acc =
       match Eio.Flow.single_read b buf with
       | n -> loop (("r" ^ string_of_int n) :: acc)
-      | exception e -> List.rev (classify e :: acc)
+      | exception ((End_of_file | Invalid_argument _ | Eio.Io _) as e) ->
+          List.rev (classify e :: acc)
     in
     loop []
   in
@@ -81,7 +84,8 @@ let close_vs_write pool seed =
         | _ ->
             Atomic.set first true;
             loop (k - 1)
-        | exception e -> classify e
+        | exception ((End_of_file | Invalid_argument _ | Eio.Io _) as e) ->
+            classify e
     in
     loop 2000
   in
@@ -96,7 +100,8 @@ let close_vs_write pool seed =
   let rec drain () =
     match Eio.Flow.single_read b buf with
     | _ -> drain ()
-    | exception e -> classify e
+    | exception ((End_of_file | Invalid_argument _ | Eio.Io _) as e) ->
+        classify e
   in
   let w, peer =
     Eio.Fiber.pair
@@ -146,10 +151,13 @@ let accept_race pool seed =
             let rec read acc =
               match Eio.Flow.single_read c buf with
               | n -> read (acc ^ Cstruct.to_string ~len:n buf)
-              | exception e -> "ok:" ^ acc ^ classify e
+              | exception ((End_of_file | Invalid_argument _ | Eio.Io _) as e)
+                ->
+                  "ok:" ^ acc ^ classify e
             in
             read ""
-        | exception e -> classify e)
+        | exception ((End_of_file | Invalid_argument _ | Eio.Io _) as e) ->
+            classify e)
   in
   let clients =
     Eio.Fiber.first
