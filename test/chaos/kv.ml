@@ -3,14 +3,13 @@
    and retries, at most three attempts. *)
 module R = Eio.Buf_read
 
-let strict_line = App.strict_line
 let value k = String.concat "" (List.init 3 (fun _ -> k))
 
 (* [lenient] takes an unterminated last line for a whole one. *)
 let serve ?(lenient = false) flow _ =
   let r = R.of_flow ~max_size:4096 flow in
   let rec loop () =
-    match if lenient then R.line r else strict_line r with
+    match if lenient then R.line r else App.strict_line r with
     | line ->
         let k = String.sub line 4 (String.length line - 4) in
         let v = value k in
@@ -61,7 +60,7 @@ let get ?(bug = `None) t k =
           phase := `Write;
           Eio.Flow.copy_string ("GET " ^ k ^ "\n") f;
           phase := `Read;
-          let len = int_of_string (strict_line r) in
+          let len = int_of_string (App.strict_line r) in
           if bug = `Eof_body then
             try R.take len r with End_of_file -> R.take_all r
           else R.take len r)

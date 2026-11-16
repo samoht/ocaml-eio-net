@@ -2,7 +2,6 @@
 
 module R = Eio.Buf_read
 
-let strict_line = App.strict_line
 let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 9100)
 
 (* A client of three requests, each tried three times on a connection it
@@ -22,7 +21,7 @@ let client ~sw env set_done () =
                 c
           in
           Eio.Flow.copy_string "q\n" f;
-          strict_line r)
+          App.strict_line r)
     with
     | (_ : string) -> ()
     | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _) ->
@@ -53,7 +52,7 @@ let one_sided () =
               let r = R.of_flow ~max_size:256 flow in
               try
                 while true do
-                  let _ = strict_line r in
+                  let _ = App.strict_line r in
                   Eio.Flow.copy_string "ok\n" flow
                 done
               with End_of_file | Eio.Io _ | Failure _ ->
@@ -97,8 +96,8 @@ let coalesce ?(bug = true) () =
     Eio.Flow.copy_string "b\n" f;
     let r = R.of_flow ~max_size:256 f in
     Eio.Time.with_timeout_exn env#clock 5. (fun () ->
-        let x = strict_line r in
-        let y = strict_line r in
+        let x = App.strict_line r in
+        let y = App.strict_line r in
         (x, y))
   with
   | "A", "B" -> ()
@@ -122,7 +121,7 @@ let stream n () =
     let f = Eio.Net.connect ~sw env#net addr in
     let r = R.of_flow ~max_size:1_000_000 f in
     Eio.Time.with_timeout_exn env#clock 5. (fun () ->
-        let len = int_of_string (strict_line r) in
+        let len = int_of_string (App.strict_line r) in
         R.take len r)
   with
   | body -> if String.length body <> n * 100 then failwith "short body"
@@ -166,8 +165,8 @@ let coalesce_retry ?(bug = true) () =
     Eio.Flow.copy_string "b\n" f;
     let r = R.of_flow ~max_size:256 f in
     Eio.Time.with_timeout_exn env#clock 5. (fun () ->
-        let x = strict_line r in
-        let y = strict_line r in
+        let x = App.strict_line r in
+        let y = App.strict_line r in
         (x, y))
   in
   let rec go n =
@@ -199,7 +198,7 @@ let one_sided_timeout () =
                 while true do
                   let _ =
                     Eio.Time.with_timeout_exn env#clock 10. (fun () ->
-                        strict_line r)
+                        App.strict_line r)
                   in
                   Eio.Flow.copy_string "ok\n" flow
                 done

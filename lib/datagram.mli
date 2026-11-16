@@ -10,9 +10,9 @@
     {b Errors and ownership.} A receive or a send raises the {!Eio.Io} error of
     the socket, {!Too_long} among them for a datagram longer than the channel
     takes, and never [End_of_file], since a datagram socket has no end. A
-    cancellation passes through. A channel does not own its socket: it never
-    closes it, closing it is the caller's, and a receive or send after that
-    raises what the socket raises. *)
+    cancellation passes through. A channel does not own its socket: closing it
+    is the caller's job, and a receive or send after that raises what the socket
+    raises. *)
 
 type t
 (** The type for addressed datagram channels. *)

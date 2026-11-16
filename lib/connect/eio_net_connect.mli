@@ -6,13 +6,13 @@
     connection library uses the classifier to tell a peer that refused, or that
     no route reaches, from one that did not reply in time.
 
-    Eio names a refusal portably and reports the rest as a backend error, so a
-    connection library reads a failed connect with the classifier its caller
-    hands it: {!classify} by default, which reads Eio's portable errors, and
-    over a platform's network the one the library that provides that network
-    gives, as [Eio_net_unix.connect_failure] reads ENETUNREACH and EHOSTUNREACH.
-    A classifier is handed to the code that connects: no library a program links
-    changes how another's connects are read. *)
+    Eio names a refusal portably and reports every other failed connect as a
+    backend error. A connection library therefore reads a failed connect with
+    the classifier its caller hands it: {!classify} by default, or the
+    classifier of the platform's network, such as [Eio_net_unix.connect_failure]
+    for ENETUNREACH and EHOSTUNREACH. A classifier is passed to the code that
+    connects, so linking a library never changes how another's connects are
+    read. *)
 
 type answer =
   [ `Refused
@@ -26,7 +26,5 @@ type answer =
 val classify : exn -> answer option
 (** [classify exn] is the answer the exception [exn] of a failed connect carries
     as Eio's portable errors name it: [Some `Refused] for
-    [Eio.Net.Connection_failure (Refused _)], and [None] otherwise, as for a
-    timeout, a local error or an error of a backend. It is the default
-    classifier of a connection library; the classifier of a platform's network
-    answers that platform's errors as well. *)
+    [Eio.Net.Connection_failure (Refused _)], and [None] otherwise, for example
+    for a timeout, a local error or an error of a backend. *)

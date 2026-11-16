@@ -1,3 +1,6 @@
+(* The tests of the chaos API's design, and its mutants: each program under
+   test takes a bug, and each test says which tier of the check finds it. *)
+
 let () =
   Alcotest.run "eio-net.chaos"
     [

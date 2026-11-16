@@ -1,6 +1,3 @@
-; The validation of socket options, on copies of eio-net.mem's private
-; modules, against the kernel's traces.
-
 (copy_files#
  (files ../../../../lib/mem/{kernel,posix,validation}.{ml,mli}))
 

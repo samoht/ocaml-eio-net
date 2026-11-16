@@ -15,8 +15,8 @@ module Interface = Interface
 
 val connect_failure : exn -> Eio_net_connect.answer option
 (** [connect_failure exn] is the answer a failed {!Eio.Net.connect} raising
-    [exn] carries from the network, or [None] when it carries none, as a timeout
-    or a local error does:
+    [exn] carries from the network, or [None] when it carries none, such as a
+    timeout or a local error:
 
     - [`Refused] for [Eio.Net.Connection_failure (Refused _)], a reset in answer
       to the SYN (ECONNREFUSED).

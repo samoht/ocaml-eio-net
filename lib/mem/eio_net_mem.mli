@@ -1,8 +1,7 @@
 (** In-memory {!Eio.Net} network.
 
-    This backend is intended for hermetic tests that need client code and server
-    code to talk through the normal {!Eio.Net} APIs without binding OS sockets.
-    It supports stream sockets and datagram sockets.
+    For hermetic tests: client and server code talk through {!Eio.Net} without
+    binding OS sockets, over stream and datagram sockets.
 
     Where Linux and macOS differ, the network follows one kernel, chosen by
     [?os]: [`Linux], the default, or [`Macos]. The choice comes from the
@@ -16,7 +15,8 @@
     [EADDRINUSE], [EADDRNOTAVAIL] or [EINVAL] from ["bind"], and [ENAMETOOLONG]
     with the path for a Unix path [sun_path] cannot hold. A socket option the
     kernel refuses raises the error eio_posix raises ({!section-options}). Every
-    other error is an {!Eio.Io} error, marked by one of these codes. *)
+    other error is an {!Eio.Io} error marked by one of these codes, unclassified
+    unless the code's doc names its class. *)
 
 type Eio.Exn.Backend.t +=
   | Closed
@@ -77,87 +77,81 @@ type Eio.Exn.Backend.t +=
             the [Eio.Fs.Not_found] error a [connect] or a datagram [send] raises
             at a Unix path no socket binds, which has no file. *)
   | Address_in_use
-        (** The backend code of the unclassified {!Eio.Io} error a [connect]
-            bound with [bind_to] raises at an address a socket holds, or at port
-            0 when every port of the dynamic range is held, where bind(2) fails
-            with [EADDRINUSE]. A [connect] that fails holds the address it was
-            bound at until its switch finishes, as eio_posix keeps its socket
-            there and Linux its address; under [`Macos] a TCP one is free at
-            once, as macOS frees it. [listen] and [datagram_socket] raise that
-            one raw ({!section-errors}). *)
+        (** The code of the error a [connect] bound with [bind_to] raises at an
+            address a socket holds, or at port 0 when every port of the dynamic
+            range is held, where bind(2) fails with [EADDRINUSE]. A [connect]
+            that fails holds the address it was bound at until its switch
+            finishes, as eio_posix keeps its socket there and Linux its address;
+            under [`Macos] a TCP one is free at once, as macOS frees it.
+            [listen] and [datagram_socket] raise that one raw
+            ({!section-errors}). *)
   | No_destination
-        (** The backend code of the unclassified {!Eio.Io} error a UDP [send]
-            without a destination raises, as a socket that is not connected
-            fails it with [EDESTADDRREQ]. *)
+        (** The code of the error a UDP [send] without a destination raises, as
+            a socket that is not connected fails it with [EDESTADDRREQ]. *)
   | Message_too_long
-        (** The backend code of the unclassified {!Eio.Io} error a datagram
-            [send] raises for a datagram longer than a socket sends, where a
-            socket fails with [EMSGSIZE]. *)
+        (** The code of the error a datagram [send] raises for a datagram longer
+            than a socket sends, where a socket fails with [EMSGSIZE]. *)
   | Invalid_port
-        (** The backend code of the unclassified {!Eio.Io} error a datagram
-            [send] to UDP port 0 raises, where Linux fails it with [EINVAL]. *)
+        (** The code of the error a datagram [send] to UDP port 0 raises, where
+            Linux fails it with [EINVAL]. *)
   | Network_unreachable
-        (** The backend code of the unclassified {!Eio.Io} error a [connect]
-            bound to an IPv6 address raises at an IPv4-mapped one, and a
-            datagram [send] from such a socket, where Linux fails with
-            [ENETUNREACH]; and of the one a [connect] to a broadcast or
-            multicast address raises, which no route reaches. The network has
-            the loopback interface only, so a [connect] or a datagram [send] to
-            an address off it raises it too, as on a host with loopback only,
-            from any source: any but 127.0.0.0/8, [::1], the wildcard addresses
-            and their IPv4-mapped forms, IPv4 multicast and broadcast aside. An
-            IPv4-compatible address such as [::127.0.0.1] and an IPv6 multicast
-            one are off it. A datagram to an IPv4 broadcast or multicast address
-            from a socket bound at a wildcard address raises it too, as that
-            socket has no route to send it. From an IPv4-mapped address, a
-            [connect] or a datagram to an IPv6 address off loopback raises it
-            before the error that {!Address_family} marks, as Linux finds no
-            route first, and a [connect] to a link-local one the error that
-            {!Invalid_address} marks. *)
+        (** The code of the error a [connect] bound to an IPv6 address raises at
+            an IPv4-mapped one, and a datagram [send] from such a socket, where
+            Linux fails with [ENETUNREACH]; and of the one a [connect] to a
+            broadcast or multicast address raises, which no route reaches. The
+            network has the loopback interface only, so a [connect] or a
+            datagram [send] to an address off it raises it too, as on a host
+            with loopback only, from any source: any but 127.0.0.0/8, [::1], the
+            wildcard addresses and their IPv4-mapped forms, IPv4 multicast and
+            broadcast aside. An IPv4-compatible address such as [::127.0.0.1]
+            and an IPv6 multicast one are off it. A datagram to an IPv4
+            broadcast or multicast address from a socket bound at a wildcard
+            address raises it too, as that socket has no route to send it. From
+            an IPv4-mapped address, a [connect] or a datagram to an IPv6 address
+            off loopback raises it before the error that {!Address_family}
+            marks, as Linux finds no route first, and a [connect] to a
+            link-local one the error that {!Invalid_address} marks. *)
   | Address_family
-        (** The backend code of the unclassified {!Eio.Io} error a [connect]
-            bound to an IPv4-mapped address raises at an IPv6 one, and a
-            datagram [send] from such a socket, where a socket fails with
-            [EAFNOSUPPORT]. *)
+        (** The code of the error a [connect] bound to an IPv4-mapped address
+            raises at an IPv6 one, and a datagram [send] from such a socket,
+            where a socket fails with [EAFNOSUPPORT]. *)
   | Wrong_socket_type
-        (** The backend code of the unclassified {!Eio.Io} error a datagram
-            [send] raises at the path of a stream socket, and a [connect] at the
-            path of a datagram socket, where a socket fails with [EPROTOTYPE].
-        *)
+        (** The code of the error a datagram [send] raises at the path of a
+            stream socket, and a [connect] at the path of a datagram socket,
+            where a socket fails with [EPROTOTYPE]. *)
   | Not_connected
-        (** The backend code of the unclassified {!Eio.Io} error a Unix-domain
-            datagram [send] without a destination raises, as Linux fails it with
-            [ENOTCONN]. Under [`Macos] the send raises the error that
-            {!No_destination} marks, as macOS says [EDESTADDRREQ]. *)
+        (** The code of the error a Unix-domain datagram [send] without a
+            destination raises, as Linux fails it with [ENOTCONN]. Under
+            [`Macos] the send raises the error that {!No_destination} marks, as
+            macOS says [EDESTADDRREQ]. *)
   | Address_not_available
-        (** The backend code of the unclassified {!Eio.Io} error a [connect]
-            with [bind_to] raises at an IP address no interface has, where
-            bind(2) fails with [EADDRNOTAVAIL]; [listen] and [datagram_socket]
-            raise that one raw. A [connect] without [bind_to] raises it when no
-            port of the dynamic range is free toward its destination
-            ({!section-streams}), as connect(2) fails on Linux. The network has
-            the loopback interface only: an IPv4 socket binds an address of
-            127.0.0.0/8, the broadcast address or a multicast one, an IPv6 one
-            [::1], either the wildcard address of its family, and an IPv6 one
-            the IPv4-mapped form of those IPv4 addresses, as on Linux. *)
+        (** The code of the error a [connect] with [bind_to] raises at an IP
+            address no interface has, where bind(2) fails with [EADDRNOTAVAIL];
+            [listen] and [datagram_socket] raise that one raw. A [connect]
+            without [bind_to] raises it when no port of the dynamic range is
+            free toward its destination ({!section-streams}), as connect(2)
+            fails on Linux. The network has the loopback interface only: an IPv4
+            socket binds an address of 127.0.0.0/8, the broadcast address or a
+            multicast one, an IPv6 one [::1], either the wildcard address of its
+            family, and an IPv6 one the IPv4-mapped form of those IPv4
+            addresses, as on Linux. *)
   | Name_too_long
-        (** The backend code of the unclassified {!Eio.Io} error raised for a
-            Unix path of 108 bytes or more, which Linux's [sun_path] cannot hold
-            with its NUL, where OCaml's [Unix] fails with [ENAMETOOLONG]: by
-            [connect], [bind_to] and a datagram [send]. [listen] and
-            [datagram_socket] raise that one raw. *)
+        (** The code of the error raised for a Unix path of 108 bytes or more,
+            which Linux's [sun_path] cannot hold with its NUL, where OCaml's
+            [Unix] fails with [ENAMETOOLONG]: by [connect], [bind_to] and a
+            datagram [send]. [listen] and [datagram_socket] raise that one raw.
+        *)
   | Invalid_address
-        (** The backend code of the unclassified {!Eio.Io} error a [connect]
-            raises when its socket cannot bind the address [bind_to] gives: an
-            IPv4 one for an IPv6 destination, or an IP one for a Unix path,
-            where bind(2) fails with [EINVAL] on Linux, or binds a link-local
-            IPv6 address, or a multicast one of interface or link scope, which
-            needs a scope that Eio's addresses do not carry, or any IPv6
-            multicast one; [listen] and [datagram_socket] raise those raw. It is
-            also the code of the one a [connect] raises at a link-local address
-            or at the empty Unix path; and of the one a datagram [send] raises
-            at an address its socket cannot send to, described in
-            {!section-datagrams}. *)
+        (** The code of the error a [connect] raises when its socket cannot bind
+            the address [bind_to] gives: an IPv4 one for an IPv6 destination, or
+            an IP one for a Unix path, where bind(2) fails with [EINVAL] on
+            Linux, or binds a link-local IPv6 address, or a multicast one of
+            interface or link scope, which needs a scope that Eio's addresses do
+            not carry, or any IPv6 multicast one; [listen] and [datagram_socket]
+            raise those raw. It is also the code of the one a [connect] raises
+            at a link-local address or at the empty Unix path; and of the one a
+            datagram [send] raises at an address its socket cannot send to,
+            described in {!section-datagrams}. *)
   | Broadcast
         (** The backend code of the [Eio.Fs.Permission_denied] error a datagram
             [send] raises at 127.255.255.255, the broadcast address of
@@ -165,10 +159,9 @@ type Eio.Exn.Backend.t +=
             loopback address, where Linux fails it with [EACCES] as the socket
             has no [SO_BROADCAST]. *)
   | Host_unreachable
-        (** The backend code of the unclassified {!Eio.Io} error raised under
-            [`Macos] where macOS finds no route to a host, with [EHOSTUNREACH]:
-            a [connect] to a link-local address, and the datagram [send]s
-            {!section-datagrams} lists. *)
+        (** The code of the error raised under [`Macos] where macOS finds no
+            route to a host, with [EHOSTUNREACH]: a [connect] to a link-local
+            address, and the datagram [send]s {!section-datagrams} lists. *)
 
 (** {1 Networks} *)
 
@@ -182,7 +175,8 @@ val v :
 (** [v ~capacity ~clock ~sw ()] is a network whose [listen] and [connect]
     operations are paired in memory, and whose datagram sockets deliver to each
     other. {!section-streams}, {!section-datagrams} and {!section-paths} say how
-    its sockets behave.
+    its sockets behave. {!section-resolution} says how [getaddrinfo] and
+    [getnameinfo] answer.
 
     Each direction of a connection queues at most [capacity] bytes: a write
     takes what fits and waits while the queue is full, as a socket's send buffer
@@ -212,41 +206,7 @@ val v :
     [TCP_USER_TIMEOUT] later, or 948.6 seconds later, as [tcp_retries2] at 15
     does. The first read or write then raises [ETIMEDOUT]; later reads return
     end-of-file and writes raise [EPIPE]. With no keepalive and nothing
-    unacknowledged, or without a clock, a wait on it lasts for ever.
-
-    Host resolution reads numbers as glibc's getaddrinfo(3) does, on a
-    dual-stack host with no services database and no name server. The service is
-    read first: as strtoul(3) reads it in base 10, the whole string, with
-    leading spaces and a sign, the empty one as 0, kept to its low 32 bits and
-    taken modulo 65536; a negative one, or any other string, raises
-    [Address_lookup_failed SERVICE], service names such as ["http"] included.
-    The host is an IPv4 address as inet_aton(3) reads it (["127.1"],
-    ["0x7f.1"]), an IPv6 one without brackets, which may name a scope after a
-    [%] as glibc takes one, a number of 32 bits or, for a link-local address or
-    a multicast one of interface or link scope, ["lo"], the only interface; or
-    ["localhost"] in any case, or the empty name, the last two standing for
-    [::1] then [127.0.0.1]. Any other name, ["localhost."] included, maps to no
-    address, as [/etc/hosts] does not hold it and there is no name server to
-    ask, and so do an empty host and service; a host with a name server may
-    resolve it. Each address comes once as a stream address and once as a
-    datagram one. On a real system the loopback order, and whether IPv6
-    addresses come at all, depend on the host's addresses and its [/etc/hosts]:
-    glibc leaves them out on a host with no IPv6 address but loopback, and turns
-    ["localhost"]'s [::1] into [127.0.0.1]. The order here is glibc's on a
-    dual-stack host, [::1] before [127.0.0.1] and each address as a stream one
-    before a datagram one, fixed so that a test sees the same addresses
-    everywhere. Under [`Macos] each address comes as a datagram one first, as
-    macOS orders them.
-
-    [getnameinfo] names [127.0.0.1], IPv4-mapped, IPv4-compatible ([::7f00:1])
-    or neither, and [::1] ["localhost"], as [/etc/hosts] does, and gives any
-    other address as a number, as glibc gives one that no name server knows: an
-    IPv4-compatible one in inet_ntop(3)'s dotted form, as [::0.1.0.0]. The
-    service stays a number, ["80"] where glibc says ["http"], as there is no
-    services database. The host of a Unix address is ["localhost"], as there is
-    no host name, where glibc gives the host's, and its service is its path up
-    to the first NUL, as glibc reads a C string: an abstract address has none.
-*)
+    unacknowledged, or without a clock, a wait on it lasts for ever.*)
 
 val pipe :
   ?os:[< `Linux | `Macos ] ->
@@ -530,7 +490,43 @@ val connection : _ Eio.Net.stream_socket -> int option
     backends leave the file: a datagram sent there is refused with the
     connection failure that {!No_listener} marks, and a socket bound there
     raises [EADDRINUSE], with [reuse_addr] or not, as eio_posix does; eio_linux,
-    given [reuse_addr], removes the file and binds. *)
+    given [reuse_addr], removes the file and binds.
+
+    {1:resolution Host resolution}
+
+    Host resolution reads numbers as glibc's getaddrinfo(3) does, on a
+    dual-stack host with no services database and no name server. The service is
+    read first: as strtoul(3) reads it in base 10, the whole string, with
+    leading spaces and a sign, the empty one as 0, kept to its low 32 bits and
+    taken modulo 65536; a negative one, or any other string, raises
+    [Address_lookup_failed SERVICE], service names such as ["http"] included.
+    The host is an IPv4 address as inet_aton(3) reads it (["127.1"],
+    ["0x7f.1"]), an IPv6 one without brackets, which may name a scope after a
+    [%] as glibc takes one, a number of 32 bits or, for a link-local address or
+    a multicast one of interface or link scope, ["lo"], the only interface; or
+    ["localhost"] in any case, or the empty name, the last two standing for
+    [::1] then [127.0.0.1]. Any other name, ["localhost."] included, maps to no
+    address, as [/etc/hosts] does not hold it and there is no name server to
+    ask, and so do an empty host and service; a host with a name server may
+    resolve it. Each address comes once as a stream address and once as a
+    datagram one. On a real system the loopback order, and whether IPv6
+    addresses come at all, depend on the host's addresses and its [/etc/hosts]:
+    glibc leaves them out on a host with no IPv6 address but loopback, and turns
+    ["localhost"]'s [::1] into [127.0.0.1]. The order here is glibc's on a
+    dual-stack host, [::1] before [127.0.0.1] and each address as a stream one
+    before a datagram one, fixed so that a test sees the same addresses
+    everywhere. Under [`Macos] each address comes as a datagram one first, as
+    macOS orders them.
+
+    [getnameinfo] names [127.0.0.1], IPv4-mapped, IPv4-compatible ([::7f00:1])
+    or neither, and [::1] ["localhost"], as [/etc/hosts] does, and gives any
+    other address as a number, as glibc gives one that no name server knows: an
+    IPv4-compatible one in inet_ntop(3)'s dotted form, such as [::0.1.0.0]. The
+    service stays a number, ["80"] where glibc says ["http"], as there is no
+    services database. The host of a Unix address is ["localhost"], as there is
+    no host name, where glibc gives the host's, and its service is its path up
+    to the first NUL, as glibc reads a C string: an abstract address has none.
+*)
 
 (** {1:macos macOS}
 

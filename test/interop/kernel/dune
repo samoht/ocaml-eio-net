@@ -5,9 +5,6 @@
  (deps
   (source_tree traces)))
 
-; Re-record the kernel's traces, on macOS with Docker:
-; REGEN=1 dune build @test/interop/kernel/regen-traces
-
 (rule
  (alias regen-traces)
  (deps

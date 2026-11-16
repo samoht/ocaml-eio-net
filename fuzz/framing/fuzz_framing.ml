@@ -52,13 +52,15 @@ let assert_bound config r =
 let bounded maximum bytes =
   if String.length bytes > maximum then String.sub bytes 0 maximum else bytes
 
+let config sixteen sizes =
+  let maximum = if List.length sizes mod 2 = 0 then 100 else 1000 in
+  ( maximum,
+    Framing.Config.v ~length_field:(field sixteen) ~max_length:maximum () )
+
 (* Batches written one after another, with arbitrary oversized payloads that
    must refuse their whole batch, read back under arbitrary fragmentation. *)
 let round_trip sixteen sizes batches =
-  let maximum = if List.length sizes mod 2 = 0 then 100 else 1000 in
-  let config =
-    Framing.Config.v ~length_field:(field sixteen) ~max_length:maximum ()
-  in
+  let maximum, config = config sixteen sizes in
   let buffer = Buffer.create 1024 in
   let sink = Eio.Flow.buffer_sink buffer in
   let expected =
@@ -104,10 +106,7 @@ let round_trip sixteen sizes batches =
    bounded number of reads and without the reader holding more than the
    bound. *)
 let arbitrary_wire sixteen sizes bytes =
-  let maximum = if List.length sizes mod 2 = 0 then 100 else 1000 in
-  let config =
-    Framing.Config.v ~length_field:(field sixteen) ~max_length:maximum ()
-  in
+  let maximum, config = config sixteen sizes in
   let r = Chunked.reader config sizes bytes in
   let limit = (String.length bytes / Framing.Config.prefix_length config) + 1 in
   let rec go reads =
@@ -136,7 +135,7 @@ module Failing_flow = struct
     if t.budget = 0 then failwith "write failed";
     let data = Cstruct.copyv buffers in
     let length = min t.budget (String.length data) in
-    Buffer.add_string t.buffer (String.sub data 0 length);
+    Buffer.add_substring t.buffer data 0 length;
     t.budget <- t.budget - length;
     length
 

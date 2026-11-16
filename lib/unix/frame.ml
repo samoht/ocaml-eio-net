@@ -40,8 +40,6 @@ let last_received lengths =
   in
   received 1
 
-(* [receiver ~max_frame ~max_batch socket fd] is the [recv] and [recv_batch]
-   of the channel over [socket], whose descriptor is [fd]. *)
 let receiver ~max_frame ~max_batch socket fd =
   let check = check_length ~max_frame in
   (* One byte of headroom tells a datagram longer than [max_frame] from one
@@ -93,8 +91,6 @@ let receiver ~max_frame ~max_batch socket fd =
 let min_backoff = 50
 let max_backoff = 10_000
 
-(* [sender ~max_frame ~max_batch fd] is the [send_batch] of the channel over
-   [fd]. *)
 let sender ~max_frame ~max_batch fd =
   let send_buffers = Array.init max_batch (fun _ -> Cstruct.create max_frame) in
   let send_lengths = Array.make max_batch 0 in
@@ -141,7 +137,7 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
   if max_frame <= 0 then invalid_arg "Eio_net_unix.Frame: max_frame <= 0";
   if max_batch <= 0 then invalid_arg "Eio_net_unix.Frame: max_batch <= 0";
   if max_batch > max_batch_limit then
-    invalid_arg "Eio_net_unix.Frame: max_batch > 64";
+    Fmt.invalid_arg "Eio_net_unix.Frame: max_batch > %d" max_batch_limit;
   (* Eio waits for a descriptor to be ready only when an operation on it would
      block; a blocking one would stall every fiber of the domain instead. *)
   eio Unix.set_nonblock fd;

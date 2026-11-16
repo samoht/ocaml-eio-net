@@ -1,8 +1,3 @@
-; Outside the Hermetic prelude, unlike the other libraries: it makes the
-; host's sockets with Unix.socket and Unix.listen, and wraps them with
-; Eio_unix, all of which the prelude refuses. Local reaches a socket's file
-; only through the Eio.Path it is handed.
-
 (library
  (name eio_net_unix)
  (public_name eio-net.unix)

@@ -27,6 +27,9 @@ val address_in_use : unit -> exn
 val fail : Eio.Exn.Backend.t -> 'a
 (** [fail code] raises the unclassified {!Eio.Io} error marked [code]. *)
 
+val refused : unit -> 'a
+(** [refused ()] raises the connection failure marked {!No_listener}. *)
+
 val no_file : unit -> exn
 (** [no_file ()] is the [Eio.Fs.Not_found] error of a Unix path no socket binds.
 *)

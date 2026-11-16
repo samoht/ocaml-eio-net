@@ -2,20 +2,13 @@ open! Hermetic
 open Kernel
 open Address
 
-(* The holds sockets of one kind have on each port, kept as they bind and
-   close, so a bind checks only the holds on its port. A hold is an address,
-   whether its socket has [SO_REUSEADDR], whether it listens, and, once it
-   lingers in TIME_WAIT, until when on [now]. Holds alike in all but when
-   they end share a group, which counts those that last and keeps when the
-   others end, so a port that many connections held costs a bind the groups
-   on it, not the connections. On Linux, a connect that binds no address
-   holds its port [toward] its destination, and of those in TIME_WAIT,
-   [time_waits] counts by when they end. [lowest] is a port of the dynamic
-   range (RFC 6335, section 6) at or below the lowest one nothing holds:
-   every port below it is held; [highest] is one at or above the highest
-   free one. [next] is where macOS looks for its next TCP port, counting up,
-   and [down] where Linux looks for the next port of a connect that binds no
-   address, counting down. *)
+(* A group counts in [lasting] the holds that last, and keeps in [untils]
+   when the others end, on [now]; of those in TIME_WAIT, [time_waits] counts
+   by when they end. [lowest] is a port of the dynamic range at or below the
+   lowest one nothing holds: every port below it is held; [highest] is one at
+   or above the highest free one. [next] is where macOS looks for its next
+   TCP port, counting up, and [down] where Linux looks for the next port of a
+   connect that binds no address, counting down. *)
 module Untils = Map.Make (Mtime)
 
 type group = {
@@ -73,14 +66,12 @@ let freed t port =
   if port >= 49152 && port < t.lowest then t.lowest <- port;
   if port <= 65535 && port > t.highest then t.highest <- port
 
-let count n = function None -> n | Some m -> m + n
-
-let untils_add u g =
-  g.untils <- Untils.update u (fun c -> Some (count 1 c)) g.untils
+let incr u m = Untils.update u (fun c -> Some (Option.value c ~default:0 + 1)) m
 
 let decr u m =
   Untils.update u (function Some c when c > 1 -> Some (c - 1) | _ -> None) m
 
+let untils_add u g = g.untils <- incr u g.untils
 let untils_remove u g = g.untils <- decr u g.untils
 
 (* Whether a hold of [g] is live, once those whose TIME_WAIT has ended are
@@ -171,9 +162,7 @@ let remove t port h =
 let set_until h ~time_wait until =
   let set () =
     untils_add until h.group;
-    if time_wait then
-      h.group.time_waits <-
-        Untils.update until (fun c -> Some (count 1 c)) h.group.time_waits;
+    if time_wait then h.group.time_waits <- incr until h.group.time_waits;
     h.until <- Some until;
     h.time_wait <- time_wait
   in

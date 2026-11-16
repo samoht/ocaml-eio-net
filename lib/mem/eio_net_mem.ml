@@ -294,9 +294,7 @@ module Flow = struct
     (client, server)
 
   let connection (Eio.Resource.T (t, ops) : _ Eio.Net.stream_socket) =
-    match Eio.Resource.get_opt ops Connection with
-    | Some f -> Some (f t)
-    | None -> None
+    Option.map (fun f -> f t) (Eio.Resource.get_opt ops Connection)
 
   let silence (Eio.Resource.T (t, ops) : _ Eio.Net.stream_socket) =
     match Eio.Resource.get_opt ops Silence with
@@ -573,15 +571,20 @@ module Datagram_socket = struct
     sender : t option;
   }
 
+  let rec pow2 head p = if p >= head then p else pow2 head (2 * p)
+
   (* The memory a UDP datagram of [n] bytes takes in a receive queue over
      loopback, as Linux allocates it: a head of 896 bytes or a power of two
      that holds the payload and its headers, up to 16 KiB, then a small head
      and the payload in pages, and 256 bytes of [sk_buff]. *)
   let udp_size ~v4 n =
     let head = n + if v4 then 444 else 456 in
-    let rec pow2 p = if p >= head then p else pow2 (2 * p) in
-    256
-    + if head <= 896 then 896 else if head <= 16384 then pow2 1024 else 896 + n
+    let size =
+      if head <= 896 then 896
+      else if head <= 16384 then pow2 head 1024
+      else 896 + n
+    in
+    256 + size
 
   (* The memory a Unix-domain datagram of [n] bytes takes from its sender's
      buffer until it is received, as Linux allocates it: up to 16000 bytes in
@@ -594,8 +597,7 @@ module Datagram_socket = struct
       else min ((n - 16000 + 4095) / 4096 * 4096) (17 * 4096)
     in
     let head = ((n - paged + 63) / 64 * 64) + 384 in
-    let rec pow2 p = if p >= head then p else pow2 (2 * p) in
-    256 + pow2 512 + paged
+    256 + pow2 head 512 + paged
 
   (* A Unix-domain socket whose queue holds more than [max_dgram_qlen]
      datagrams makes a send to it wait, but its own send to itself. *)
@@ -681,15 +683,6 @@ module Datagram_socket = struct
     | `Unix _ -> min 212960 (Sockopt.sndbuf t.opts - 32)
     | `Udp (ip, _) -> if is_v4 ip then 65507 else 65527
 
-  (* A send a socket refuses, in the order Linux checks: a Unix-domain socket
-     refuses a UDP address or the empty path with EINVAL, then a datagram too long. An IPv4
-     socket refuses more than 65535 bytes, then a path (EINVAL, or
-     EAFNOSUPPORT for one that fills a [sockaddr_in], 14 bytes or more), an
-     IPv6 address, port 0, an address its loopback address cannot route to,
-     then a datagram too long for IPv4. An IPv6 socket refuses a path, then
-     another family or an unreachable network, port 0, a loopback route, and
-     a datagram too long; it sends to an IPv4 address the IPv4 way, from an
-     IPv6 address other than the wildcard unreachable. *)
   (* macOS checks the length first: net.inet.udp.maxdgram and
      net.local.dgram.maxdgram. A Unix-domain socket refuses an IP address,
      an IPv4 one a path, and an IPv6 one an IPv4 address. A destination at a
@@ -749,6 +742,15 @@ module Datagram_socket = struct
     | `Udp (d, _) when String.length (d :> string) = 16 -> Some Address_family
     | `Udp (d, port) -> routed ~too_long b d port
 
+  (* A send a socket refuses, in the order Linux checks: a Unix-domain
+     socket refuses a UDP address or the empty path with EINVAL, then a
+     datagram too long. An IPv4 socket refuses more than 65535 bytes, then a
+     path (EINVAL, or EAFNOSUPPORT for one that fills a [sockaddr_in], 14
+     bytes or more), an IPv6 address, port 0, an address its loopback address
+     cannot route to, then a datagram too long for IPv4. An IPv6 socket
+     refuses a path, then another family or an unreachable network, port 0, a
+     loopback route, and a datagram too long; it sends to an IPv4 address the
+     IPv4 way, from an IPv6 address other than the wildcard unreachable. *)
   let refusal t dst bufs =
     let len = Cstruct.lenv bufs in
     if t.hub.os = Macos then refusal_macos t dst len
@@ -788,17 +790,8 @@ module Datagram_socket = struct
         `Udp (seen_by own ip, port)
     | addr, _, _ -> addr
 
-  (* A datagram to an address no socket binds is lost, as UDP loses it, and
-     the sender is not told; at a Unix path, the send finds no file, or one
-     that no socket holds any more and refuses it. After a send shutdown a
-     send fails with EPIPE, as does one to a Unix-domain socket that shut its
-     receive side; Linux checks a Unix-domain socket's shutdown before its
-     destination, and a UDP socket's after. *)
-  (* Queues the datagram at [peer], unless [peer] refuses it (a Unix-domain
-     socket that shut its receive side) or has closed. A UDP datagram that
-     finds the receive buffer full is lost, as Linux drops it. A Unix-domain
-     one waits while the sender's buffer is full, or [peer] holds more than
-     [max_dgram_qlen], as on Linux: [`Wait] says to look again. *)
+  (* On macOS a datagram that finds its receiver's buffer full is lost over
+     UDP, and refused with ENOBUFS on a Unix path, where Linux waits. *)
   let deliver_macos t ~local ~dst peer data =
     let size = macos_size ~local (String.length data) in
     let delivered =
@@ -821,8 +814,11 @@ module Datagram_socket = struct
     | `Lost -> `Done
     | `Full -> raise (Posix.no_buffer_space ())
 
-  (* On macOS a datagram that finds its receiver's buffer full is lost over
-     UDP, and refused with ENOBUFS on a Unix path, where Linux waits. *)
+  (* Queues the datagram at [peer], unless [peer] refuses it (a Unix-domain
+     socket that shut its receive side) or has closed. A UDP datagram that
+     finds the receive buffer full is lost, as Linux drops it. A Unix-domain
+     one waits while the sender's buffer is full, or [peer] holds more than
+     [max_dgram_qlen], as on Linux: [`Wait] says to look again. *)
   let deliver t ~local ~dst peer bufs =
     let data = Cstruct.to_string (Cstruct.concat bufs) in
     if t.hub.os = Macos then deliver_macos t ~local ~dst peer data
@@ -901,11 +897,17 @@ module Datagram_socket = struct
           let code =
             if local && t.hub.os = Linux then Not_connected else No_destination
           in
-          raise (Eio.Exn.create (Eio.Exn.X code))
+          fail code
     in
     shut ();
     dst
 
+  (* A datagram to an address no socket binds is lost, as UDP loses it, and
+     the sender is not told; at a Unix path, the send finds no file, or one
+     that no socket holds any more and refuses it. After a send shutdown a
+     send fails with EPIPE, as does one to a Unix-domain socket that shut its
+     receive side; Linux checks a Unix-domain socket's shutdown before its
+     destination, and a UDP socket's after. *)
   let send t ?dst bufs =
     if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
     let os = t.hub.os in
@@ -920,7 +922,7 @@ module Datagram_socket = struct
     Option.iter
       (function
         | Broadcast -> raise (Eio.Fs.err (Permission_denied Broadcast))
-        | code -> raise (Eio.Exn.create (Eio.Exn.X code)))
+        | code -> fail code)
       (refusal t dst bufs);
     match dst with
     | `Udp (d, _) when os = Macos && unanswered d ->
@@ -938,12 +940,8 @@ module Datagram_socket = struct
           | `Unix path -> Files.find t.hub.files ~stream:false path
           | `Udp _ -> None
         in
-        let refused () =
-          raise (Eio.Net.err (Connection_failure (Refused No_listener)))
-        in
         match (file, find t.hub dst) with
-        | Some (Files.Listener | Client), _ ->
-            raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
+        | Some (Files.Listener | Client), _ -> fail Wrong_socket_type
         | Some Stale, _ -> refused ()
         | None, None -> (
             match dst with
@@ -1038,11 +1036,10 @@ end
    a shutdown of its send side or by its close, holds it in TIME_WAIT for 60
    seconds from the peer's FIN, as Linux does, and the other lets go at once.
    Closed with no FIN from its peer, it waits for one in FIN_WAIT2 for its
-   TCP_LINGER2, or 60 seconds, Linux's tcp_fin_timeout, as tcp_fin_time
-   has it.
-   After a reset, and without a clock, each lets go once both have closed.
-   An end its listener dropped unaccepted lets go at once, as Linux destroys
-   it. *)
+   TCP_LINGER2, or 60 seconds, Linux's tcp_fin_timeout, as tcp_fin_time has
+   it. After a reset, and without a clock, each lets go once both have
+   closed. An end its listener dropped unaccepted lets go at once, as Linux
+   destroys it. *)
 module Ends = struct
   type side = [ `Client | `Server ]
 
@@ -1278,9 +1275,6 @@ module Network = struct
   (* Lets go of a client's address, now or at [until]. *)
   type release = ?until:Mtime.t -> ?time_wait:bool -> unit -> unit
 
-  let refused () =
-    raise (Eio.Net.err (Connection_failure (Refused No_listener)))
-
   (* The listener a connect to [addr] reaches, if any. *)
   let find_listener t addr =
     Eio.Mutex.use_ro t.hub.mutex (fun () ->
@@ -1354,7 +1348,7 @@ module Network = struct
     | `Unix "" -> fail Invalid_address
     | `Unix path -> (
         match Files.find t.hub.files ~stream:true path with
-        | Some Datagram -> raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
+        | Some Datagram -> fail Wrong_socket_type
         | Some (Stale | Client | Listener) -> refused ()
         | None when Files.abstract path -> refused ()
         | None -> raise (no_file ()))
@@ -1575,10 +1569,6 @@ module Network = struct
             | Macos -> [ `Udp (ip, port); `Tcp (ip, port) ])
           (Resolve.host ~os:t.os node)
 
-  (* The loopback addresses are "localhost", as /etc/hosts names them, and
-     any other a number, as glibc gives one no name server knows; a service
-     is a number, as there is no services database. There is no host name to
-     give a Unix address. *)
   (* An IPv4-compatible address, ::a.b.c.d past ::1, which glibc's
      getnameinfo names as its IPv4 address, and inet_ntop(3) writes dotted
      unless its first 16 of those bits are zero. *)
@@ -1594,6 +1584,10 @@ module Network = struct
           s.[12] <> '\000' || s.[13] <> '\000' )
     else None
 
+  (* The loopback addresses are "localhost", as /etc/hosts names them, and
+     any other a number, as glibc gives one no name server knows; a service
+     is a number, as there is no services database. There is no host name to
+     give a Unix address. *)
   let getnameinfo t = function
     | `Unix _ when t.os = Macos ->
         (* macOS's getnameinfo(3) names no Unix address, and OCaml's [Unix]

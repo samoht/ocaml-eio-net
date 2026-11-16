@@ -130,8 +130,6 @@ let text s =
   | None, [] -> "none"
   | None, rs -> String.concat "; then " (List.map rule_text rs)
 
-let other = function `Client -> `Server | `Server -> `Client
-
 let ends (trace : trace) =
   List.sort_uniq compare
     (List.filter_map
@@ -171,7 +169,7 @@ let reached ix ((s, side) as e) =
     List.fold_left
       (fun m (op : Op.t) -> max m (op.offset + op.length))
       0
-      (ops ix `Write (s, other side))
+      (ops ix `Write (s, Op.other side))
   in
   let spans b (op : Op.t) = op.offset < b && b < op.offset + op.length in
   fun b -> b >= 0 && (b <= extent || (b < sent && List.exists (spans b) reads))
@@ -214,7 +212,7 @@ let near ix e l = match family ix e with `Inet -> around l | `Unix -> l
 (* Where a reader's bytes may be cut: around the ends of the peer's writes.
    [all] takes every write, not only the structural ones. *)
 let read_positions ~all ix ((s, side) as e) =
-  let w = ops ix `Write (s, other side) in
+  let w = ops ix `Write (s, Op.other side) in
   let w = if all then w else structural w in
   0 :: near ix e (List.map (fun (op : Op.t) -> op.offset + op.length) w)
   |> List.filter (reached ix e)
@@ -295,18 +293,14 @@ let structural_ops (trace : trace) =
       | `Recv -> Hashtbl.mem recvs op.index
       | `Connect | `Accept | `Read | `Write -> Hashtbl.mem kept op.socket )
 
+(* The rule that injects [fault] at [op]. *)
+let rule_at (op : Op.t) fault =
+  { kind = op.kind; socket = op.socket; side = op.side; at = op.offset; fault }
+
 let structural_rules ?(keep = fun _ -> true) (trace : trace) =
   List.concat_map
     (fun ((op : Op.t), _) ->
-      let r fault =
-        {
-          kind = op.kind;
-          socket = op.socket;
-          side = op.side;
-          at = op.offset;
-          fault;
-        }
-      in
+      let r = rule_at op in
       (* A Unix-domain connect has no handshake to lose and no route to
          miss, a Unix-domain client that leaves first closes, and a
          Unix-domain datagram is never lost, duplicated, reordered or
@@ -371,15 +365,7 @@ let seconds r1 ~first ~(after : trace) =
       let benign =
         List.concat_map
           (fun ((op : Op.t), _) ->
-            let r fault =
-              {
-                kind = op.kind;
-                socket = op.socket;
-                side = op.side;
-                at = op.offset;
-                fault;
-              }
-            in
+            let r = rule_at op in
             match (op.kind, op.family) with
             | (`Read | `Write), `Inet -> [ r mild ]
             | (`Read | `Write), `Unix -> []

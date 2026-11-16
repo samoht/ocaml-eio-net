@@ -4,8 +4,6 @@
    8 messages behind is dropped. *)
 module R = Eio.Buf_read
 
-let strict_line = App.strict_line
-
 type sub = {
   topic : string;
   flow : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t;
@@ -28,7 +26,7 @@ let handshake ?(bug = `None) flow =
     let line = String.trim (Cstruct.to_string ~len:n buf) in
     String.sub line 4 (String.length line - 4)
   else
-    let line = strict_line (R.of_flow ~max_size:64 flow) in
+    let line = App.strict_line (R.of_flow ~max_size:64 flow) in
     String.sub line 4 (String.length line - 4)
 
 let serve ?(bug = `None) ~sw ~clock t l =
@@ -100,7 +98,9 @@ let subscriber ~sw ~clock ?(slow = false) net addr =
     let r = R.of_flow ~max_size:65536 flow in
     let rec loop acc last =
       if slow then Eio.Time.sleep clock 60.;
-      match Eio.Time.with_timeout_exn clock 120. (fun () -> strict_line r) with
+      match
+        Eio.Time.with_timeout_exn clock 120. (fun () -> App.strict_line r)
+      with
       | l -> loop ((l ^ "\n") :: acc) (Eio.Time.now clock)
       | exception (End_of_file | Eio.Io _ | Eio.Time.Timeout) ->
           (List.rev acc, last)

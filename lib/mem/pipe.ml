@@ -138,10 +138,9 @@ end
 
    [silent] says nothing crosses any more, as on a partition: the reader
    reads the [n] bytes of [Some n], then waits until it shuts its receive
-   side; the
-   writer fills the queue, then waits until its own [shut]. What the reader
-   reads frees no room, and neither end's close or shutdown reaches the
-   other. A TCP pipe with a [timer] keeps when its writer last sent a byte
+   side; the writer fills the queue, then waits until its own [shut]. What
+   the reader reads frees no room, and neither end's close or shutdown
+   reaches the other. A TCP pipe with a [timer] keeps when its writer last sent a byte
    while the connection was live, [last], when it went silent, [silenced],
    and when the oldest byte sent since then, or lost then, was written,
    [oldest]: when each end gives up follows. *)
@@ -296,9 +295,7 @@ let consume_reset t =
         t.shut <- true
       end)
 
-(* The bytes are copied: the caller owns its buffers again once this returns.
-   A write to a reader that has gone is lost, and resets [back], the other
-   direction of the connection. *)
+(* The bytes are copied: the caller owns its buffers again once this returns. *)
 let rec push t bufs n =
   match bufs with
   | b :: bufs when n > 0 ->
@@ -392,14 +389,10 @@ let rec write_turn ~turn ?until t ~back bufs =
       update back ignore;
       n
   | `Raise e -> raise e
-  | `Shut ->
-      (* EPIPE after our own send shutdown; on TCP it reports a pending
-         reset first, as Linux reports its pending error. *)
-      if not t.local then consume_reset back;
-      raise (reset_exn ())
-  | `Refused ->
-      (* A TCP write reports the pending reset; a Unix-domain one fails
-         with EPIPE and leaves it to the next read. *)
+  | `Shut | `Refused ->
+      (* EPIPE after our own send shutdown or a refused write; on TCP it
+         reports a pending reset first, as Linux reports its pending error,
+         and a Unix-domain one leaves it to the next read. *)
       if not t.local then consume_reset back;
       raise (reset_exn ())
   | `Lost n ->

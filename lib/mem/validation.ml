@@ -78,11 +78,7 @@ let eio_check : type a. a O.t -> a -> string option =
   | O.TCP_KEEPCNT -> non_negative "O.TCP_KEEPCNT" v
   | O.TCP_USER_TIMEOUT -> non_negative "O.TCP_USER_TIMEOUT" v
   | O.TCP_MAXSEG -> non_negative "O.TCP_MAXSEG" v
-  | O.TCP_LINGER2 -> (
-      match v with
-      | Some n when n < 0 ->
-          Fmt.kstr Option.some "O.TCP_LINGER2 must be non-negative, got %d" n
-      | _ -> None)
+  | O.TCP_LINGER2 -> Option.bind v (non_negative "O.TCP_LINGER2")
   | O.TCP_DEFER_ACCEPT -> non_negative "O.TCP_DEFER_ACCEPT" v
   | O.TCP_SYNCNT ->
       if v < 1 || v > 255 then
@@ -129,6 +125,11 @@ let gate_macos ~op s level =
   | Tcp, _ when s.kind = Datagram -> invalid
   | Ipv6, V4 | Ip, V6 -> invalid
   | _ -> None
+
+let gate ~op s level =
+  match s.os with
+  | Linux -> gate_linux ~op s level
+  | Macos -> gate_macos ~op s level
 
 (* Up to the first NUL and 15 bytes, as Linux reads the name. *)
 let congestion name =
@@ -198,7 +199,6 @@ let refusal : type a. socket -> a O.t -> a -> refusal option =
   match eio_check opt v with
   | Some msg -> Some (Eio_check msg)
   | None -> (
-      let gate = match s.os with Linux -> gate_linux | Macos -> gate_macos in
       match gate ~op:`Set s (level opt) with
       | Some r -> Some r
       | None when Posix.extra opt <> None -> errno `No_option
@@ -211,7 +211,6 @@ let set s opt v =
   | Some r -> Error r
 
 let get s opt =
-  let gate = match s.os with Linux -> gate_linux | Macos -> gate_macos in
   match gate ~op:`Get s (level (Posix.canonical opt)) with
   | None -> Ok ()
   | Some r -> Error r

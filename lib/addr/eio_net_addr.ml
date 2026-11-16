@@ -5,7 +5,7 @@ let ip a = Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets a)
 let ipaddr (a : Eio.Net.Ipaddr.v4v6) =
   match Ipaddr.of_octets (a :> string) with
   | Ok a -> a
-  | Error (`Msg msg) -> invalid_arg ("Eio_net_addr.ipaddr: " ^ msg)
+  | Error (`Msg msg) -> Fmt.invalid_arg "Eio_net_addr.ipaddr: %s" msg
 
 let tcp a port = `Tcp (ip a, port)
 let udp a port = `Udp (ip a, port)

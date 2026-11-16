@@ -1,7 +1,3 @@
-; Length-prefixed frames over Eio's buffered reader: the reader does the
-; incremental part, so this library only reads one prefix and one payload, and
-; lays a batch out for one vectored write.
-
 (library
  (name eio_net_framing)
  (public_name eio-net.framing)

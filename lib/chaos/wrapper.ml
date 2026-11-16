@@ -61,10 +61,6 @@ let conn ~os ~paired family =
 
 let ix : Op.side -> int = function `Client -> 0 | `Server -> 1
 
-let other : Op.side -> Op.side = function
-  | `Client -> `Server
-  | `Server -> `Client
-
 let shutdown s cmd =
   try Eio.Flow.shutdown s cmd with Eio.Io _ | Invalid_argument _ -> ()
 
@@ -108,8 +104,8 @@ let crash conn ~at ~crashed =
       if
         conn.os = `Linux
         && Atomic.get conn.broken = `Open
-        && conn.sent.(ix (other crashed)) > conn.taken.(ix crashed)
-      then conn.reset_to <- Some (other crashed));
+        && conn.sent.(ix (Op.other crashed)) > conn.taken.(ix crashed)
+      then conn.reset_to <- Some (Op.other crashed));
   break conn ~at (`Closed crashed)
 
 (* A hang: nothing crosses the connection from now on, either way.
@@ -252,11 +248,10 @@ let locked (ctx : ctx) f = Mutex.protect ctx.lock f
    spins for ever: an outage refuses each connect at once. The clock stands
    still when it moved only by the turns the operations took. After
    [threshold] failures of one operation on one target while the clock stands
-   still, with
-   no success there in between, the operation raises [Failure] instead, and
-   after twice as many it waits for ever, as nothing the program does can get
-   it out. Failures on distinct targets, as a scan of many ports makes, do not
-   add up. *)
+   still, with no success there in between, the operation raises [Failure]
+   instead, and after twice as many it waits for ever, as nothing the program
+   does can get it out. Failures on distinct targets, as a scan of many ports
+   makes, do not add up. *)
 let threshold = 10_000
 
 let livelock_message =
@@ -264,6 +259,10 @@ let livelock_message =
     "the same network operation failed %d times on the same target while its \
      clock stood still"
     threshold
+
+(* A network past its operations stops: each operation then waits for ever. *)
+let stop () =
+  Eio.Cancel.protect (fun () -> Eio.Promise.await (fst (Eio.Promise.create ())))
 
 let failed ctx target =
   let n =
@@ -283,15 +282,9 @@ let failed ctx target =
   in
   if n >= threshold then begin
     Atomic.set ctx.livelocked true;
-    if n >= 2 * threshold then
-      Eio.Cancel.protect (fun () ->
-          Eio.Promise.await (fst (Eio.Promise.create ())));
+    if n >= 2 * threshold then stop ();
     failwith ("Eio_net_chaos: " ^ livelock_message)
   end
-
-(* A network past its operations stops: each operation then waits for ever. *)
-let stop () =
-  Eio.Cancel.protect (fun () -> Eio.Promise.await (fst (Eio.Promise.create ())))
 
 (* The start of each network operation: it takes a turn, as one that waits
    does when it resumes, so a loop of calls that never wait moves the clock
@@ -561,13 +554,13 @@ module Flow = struct
             silence t.conn t.sock;
             deliver t dst ~cap:0
         | Some Reset when local t ->
-            crash t.conn ~at:t.side ~crashed:(other t.side);
+            crash t.conn ~at:t.side ~crashed:(Op.other t.side);
             deliver t dst ~cap:0
         | Some Reset ->
             break t.conn ~at:t.side `Reset;
             if t.family = `Inet then raise_broken t else deliver t dst ~cap:0
         | Some Eof ->
-            break t.conn ~at:t.side (`Closed (other t.side));
+            break t.conn ~at:t.side (`Closed (Op.other t.side));
             deliver t dst ~cap:0
         | Some
             ( Refuse | Timeout | Unreachable | Emfile | Drop | Dup | Reorder
@@ -992,11 +985,9 @@ module Listener = struct
              is reset at both ends. *)
           break conn ~at:`Server `Reset;
           (Flow.resource flow, peer)
-      | Some Reset ->
-          (* A Unix-domain client that left first closed: no reset. *)
-          break conn ~at:`Server (`Closed `Client);
-          (Flow.resource flow, peer)
-      | Some Eof ->
+      | Some (Reset | Eof) ->
+          (* The client closed first, or a Unix-domain client left first:
+             no reset. *)
           break conn ~at:`Server (`Closed `Client);
           (Flow.resource flow, peer)
       | Some Emfile ->

@@ -1,5 +1,3 @@
-; The cost of planning a check, on copies of its private modules.
-
 (copy_files#
  (files ../../../lib/chaos/{op,fault,plan}.{ml,mli}))
 

@@ -23,6 +23,7 @@ let kind_name = function
 
 let equal_kind (a : kind) b = a = b
 let side_name = function `Client -> "c" | `Server -> "s"
+let other : side -> side = function `Client -> `Server | `Server -> `Client
 
 let family_of_stream : Eio.Net.Sockaddr.stream -> family = function
   | `Unix _ -> `Unix

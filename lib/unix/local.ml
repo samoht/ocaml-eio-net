@@ -166,9 +166,7 @@ end
 let listening_handler = Eio_unix.Pi.listening_socket_handler (module Listening)
 
 let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
-  let addr =
-    `Unix (match Eio.Path.native path with Some p -> p | None -> snd path)
-  in
+  let addr = `Unix (Option.value (Eio.Path.native path) ~default:(snd path)) in
   let dir, name = parent ~sw path in
   let sock, id =
     Eio_unix.Fd.use_exn "listen" dir @@ fun dir ->

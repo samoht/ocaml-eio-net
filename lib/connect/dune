@@ -1,8 +1,3 @@
-; The answer of a failed connect and its portable classifier, kept apart from
-; the carriers so a connection library names the answers a platform's
-; classifier gives and links nothing of that platform: a unikernel guest keeps
-; the portable answer.
-
 (library
  (name eio_net_connect)
  (public_name eio-net.connect)

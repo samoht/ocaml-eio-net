@@ -37,6 +37,4 @@ let offload_single_write fd bufs =
   if Array.length iov = 0 then 0 else attempt ()
 
 let offload_writer flow =
-  match Eio_unix.Resource.fd_opt flow with
-  | None -> None
-  | Some fd -> Some (offload_single_write fd)
+  Option.map offload_single_write (Eio_unix.Resource.fd_opt flow)

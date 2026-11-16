@@ -2,8 +2,6 @@ open! Hermetic
 open Kernel
 open Address
 
-(* Host and service resolution as glibc's getaddrinfo(3) reads numbers, on
-   a dual-stack host with no services database and no name server. *)
 let is_space = function
   | ' ' | '\t' | '\n' | '\011' | '\012' | '\r' -> true
   | _ -> false
@@ -11,10 +9,9 @@ let is_space = function
 let is_digit c = c >= '0' && c <= '9'
 let ulong_max = "18446744073709551615"
 
-(* [service] read as strtoul(3) reads it in base 10, the whole string or
-   nothing: leading spaces, a sign, digits, its value modulo 2^64 or
-   ULONG_MAX past it. The empty string reads as 0. *)
-let strtoul service =
+(* The leading spaces of [service], its sign and its digits: whether it is
+   negative, and where the digits start and end. *)
+let scan service =
   let n = String.length service in
   let rec skip i = if i < n && is_space service.[i] then skip (i + 1) else i in
   let i = skip 0 in
@@ -27,6 +24,14 @@ let strtoul service =
     if j < n && is_digit service.[j] then digits (j + 1) else j
   in
   let j = digits i in
+  (neg, i, j)
+
+(* [service] read as strtoul(3) reads it in base 10, the whole string or
+   nothing: leading spaces, a sign, digits, its value modulo 2^64 or
+   ULONG_MAX past it. The empty string reads as 0. *)
+let strtoul service =
+  let n = String.length service in
+  let neg, i, j = scan service in
   if n = 0 then Some (false, false, 0L)
   else if j = i || j <> n then None
   else
@@ -97,17 +102,7 @@ let part s =
    negative one is no port but -0. *)
 let port_macos service =
   let n = String.length service in
-  let rec skip i = if i < n && is_space service.[i] then skip (i + 1) else i in
-  let i = skip 0 in
-  let neg, i =
-    if i < n && (service.[i] = '+' || service.[i] = '-') then
-      (service.[i] = '-', i + 1)
-    else (false, i)
-  in
-  let rec digits j =
-    if j < n && is_digit service.[j] then digits (j + 1) else j
-  in
-  let j = digits i in
+  let neg, i, j = scan service in
   if n = 0 then Some 0
   else if j = i || j <> n then None
   else

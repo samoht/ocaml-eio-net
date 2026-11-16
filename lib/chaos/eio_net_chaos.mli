@@ -276,8 +276,8 @@ end
 (** The faults a wrapper injects. *)
 module Fault : sig
   (** The type for faults. One that does not apply to an operation does nothing,
-      as one that AF_UNIX cannot produce on a Unix-domain socket: [Timeout] and
-      [Unreachable] on a connect, and [Drop], [Dup], [Reorder], [Garble] and
+      such as one that AF_UNIX cannot produce on a Unix-domain socket: [Timeout]
+      and [Unreachable] on a connect, and [Drop], [Dup], [Reorder], [Garble] and
       [Hang] on a datagram. [Reset] on the accept of a Unix-domain connection is
       a client that closed, as [Eof]. *)
   type t =

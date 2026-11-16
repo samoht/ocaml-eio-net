@@ -9,13 +9,12 @@
     descriptor left, leaves it whole. A loop sheds the connections of another
     only when both were handed the same pool.
 
-    Eio names a connection reset portably and reports the rest as a backend
-    error, so {!run} reads a failed accept with the classifier it is handed:
-    {!classify} by default, which reads Eio's portable errors, and over a
-    platform's network the one the library that provides that network gives, as
-    [Eio_net_unix.accept_failure] reads EMFILE and ENFILE. A classifier is
-    handed to one loop, as a pool is: no library a program links changes how
-    another's loop reads its failures. *)
+    Eio names a connection reset portably and reports every other failed accept
+    as a backend error. {!run} therefore reads a failed accept with the
+    classifier it is handed: {!classify} by default, or the classifier of the
+    platform's network, such as [Eio_net_unix.accept_failure] for EMFILE and
+    ENFILE. A classifier belongs to one loop, and so does a pool: linking a
+    library never changes how another loop reads its failures. *)
 
 (** {1:failures Failed accepts} *)
 
@@ -34,16 +33,15 @@ type answer =
 val classify : exn -> answer option
 (** [classify exn] is the answer the exception [exn] of a failed accept carries
     as Eio's portable errors name it: [Some `Aborted] for
-    [Eio.Net.Connection_reset _], and [None] otherwise, as for a closed
-    listener, a cancellation or an error of a backend. It is {!run}'s default;
-    the classifier of a platform's network answers that platform's errors as
-    well. *)
+    [Eio.Net.Connection_reset _], and [None] otherwise, for example for a closed
+    listener, a cancellation or an error of a backend. It is {!run}'s default.
+*)
 
 (** {1:loop The loop} *)
 
 type head
 (** The type for the head of a connection {!run} holds: what its peer sends
-    before it is served, as an HTTP request head or an SSH handshake through
+    before it is served, such as an HTTP request head or an SSH handshake up to
     authentication. A head is incomplete from the accept, with no byte of it
     received, until the connection says it is {!complete}. *)
 
@@ -120,11 +118,11 @@ val run :
     source) receives each exception a connection's [handler] raises but
     [Eio.Cancel.Cancelled], with the peer's address in its context when it is an
     [Eio.Io], and the loop goes on serving the others: a failure on the socket,
-    and an error the peer caused, as a malformed frame ([Eio_net_framing.Error])
-    or a stalled transfer ([Eio_net.Progress.Too_slow]), end that connection
-    alone. A shed connection's is ignored. An exception [on_error] raises ends
-    the loop, which raises it: [~on_error:raise] makes every failed connection
-    end it.
+    and an error the peer caused, such as a malformed frame
+    ([Eio_net_framing.Error]) or a stalled transfer
+    ([Eio_net.Progress.Too_slow]), end that connection alone. A shed
+    connection's is ignored. An exception [on_error] raises ends the loop, which
+    raises it: [~on_error:raise] makes every failed connection end it.
 
     Its connections end with it. Without [stop] it returns only by raising. Once
     [stop] resolves it accepts no more, sheds each connection whose head is

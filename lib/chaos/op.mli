@@ -23,6 +23,9 @@ val equal_kind : kind -> kind -> bool
 val side_name : side -> string
 (** [side_name s] is ["c"] or ["s"]. *)
 
+val other : side -> side
+(** [other s] is the side opposite [s]. *)
+
 val family_of_stream : Eio.Net.Sockaddr.stream -> family
 (** [family_of_stream addr] is the address family of [addr]. *)
 

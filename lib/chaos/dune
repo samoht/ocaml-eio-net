@@ -1,6 +1,3 @@
-; eio-net.chaos: checks that run a workload under network faults chosen from
-; what it does, on eio-net.mem, each run in its own silent event loop.
-
 (library
  (name eio_net_chaos)
  (public_name eio-net.chaos)

@@ -1,9 +1,9 @@
 (** A frame channel: a bidirectional packet link where one {!recv} is one frame
     and one {!send} puts one frame on the wire.
 
-    This is the channel. Over a byte stream it uses the codec of
-    {!Eio_net_framing} ({!of_length_prefixed_flow}), and [Eio_net_unix.Frame]
-    builds one over a Unix datagram descriptor.
+    Over a byte stream it uses the codec of {!Eio_net_framing}
+    ({!of_length_prefixed_flow}), and [Eio_net_unix.Frame] builds one over a
+    Unix datagram descriptor.
 
     Frame-based protocols such as CCSDS transfer frames, AX.25 and Ethernet read
     and write over it, independently of how the bytes move: a network interface,
@@ -12,19 +12,22 @@
     itself is untyped bytes.
 
     {b Errors and ownership.} What a receive raises depends on the transport:
-    over a datagram socket, the {!Eio.Io} error of a failed receive, the
-    {!Datagram.Too_long} one among them, and never [End_of_file], since a
-    datagram socket has no end; over a length-prefixed flow, [End_of_file] at
-    the end of input at a frame boundary, [Eio_net_framing.Error] for a frame
-    the input cuts short or a length out of range, and the {!Eio.Io} error of
-    the flow; over a {!pair}, nothing, since a pair has no end-of-file: a
-    receive waits until a frame arrives, and a fiber waiting on a peer that has
-    gone is cancelled to end it. A send raises the {!Eio.Io} error of the
-    transport, and over a length-prefixed flow [Eio_net_framing.Error] as
-    {!of_length_prefixed_flow} says. A cancellation passes through every
-    transport. A channel does not own its flow or socket: it never closes it,
-    closing it is the caller's, and a receive or send after that raises what the
-    flow or socket raises. *)
+
+    - Over a datagram socket, the {!Eio.Io} error of a failed receive, the
+      {!Datagram.Too_long} one among them, and never [End_of_file], since a
+      datagram socket has no end.
+    - Over a length-prefixed flow, [End_of_file] at the end of input at a frame
+      boundary, [Eio_net_framing.Error] for a frame the input cuts short or a
+      length out of range, and the {!Eio.Io} error of the flow.
+    - Over a {!pair}, nothing, since a pair has no end-of-file: a receive waits
+      until a frame arrives, and a fiber waiting on a peer that has gone is
+      cancelled to end it.
+
+    A send raises the {!Eio.Io} error of the transport, and over a
+    length-prefixed flow [Eio_net_framing.Error] as {!of_length_prefixed_flow}
+    says. A cancellation passes through every transport. A channel does not own
+    its flow or socket: closing it is the caller's job, and a receive or send
+    after that raises what the flow or socket raises. *)
 
 type t
 (** The type for frame channels. *)

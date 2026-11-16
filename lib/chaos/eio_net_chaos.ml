@@ -18,6 +18,7 @@ let outage (env : env) = Wrapper.outage env#net
 
 let name = "Eio_net_chaos.check"
 let fail fmt = Fmt.failwith ("%s: " ^^ fmt) name
+let plural n = if n = 1 then "" else "s"
 
 (* The operations a run may make: a run that makes more spins, or is more
    than a check plans from, and the trace it keeps stays bounded. *)
@@ -62,8 +63,7 @@ let waits_on net ~(root : Eio.Private.Trace.id) tids =
       Fmt.str
         ". The workload's own fiber waits on %d fiber%s still running, as a \
          switch does once its body returned: %s%s"
-        n
-        (if n = 1 then "" else "s")
+        n (plural n)
         (String.concat "; "
            (List.map fiber (List.filteri (fun i _ -> i < named) others)))
         (if n > named then Fmt.str "; and %d more" (n - named) else "")
@@ -209,13 +209,17 @@ let pp_op rules ppf ((op : Op.t), fault) =
     && r.socket = op.socket && r.side = op.side
     && r.at = op.offset + k
   in
-  match fault with
-  | None -> Fmt.pf ppf "    %a@\n" Op.pp op
-  | Some (Fault.Short k as f) when List.exists (cut_by k) rules ->
-      let r = List.find (cut_by k) rules in
+  let cut =
+    match fault with
+    | Some (Fault.Short k) -> List.find_opt (cut_by k) rules
+    | _ -> None
+  in
+  match (fault, cut) with
+  | None, _ -> Fmt.pf ppf "    %a@\n" Op.pp op
+  | Some f, Some r ->
       Fmt.pf ppf "    %a  <- %a, up to where it %a@\n" Op.pp op Fault.pp f
         Fault.pp r.fault
-  | Some f -> Fmt.pf ppf "    %a  <- %a@\n" Op.pp op Fault.pp f
+  | Some f, None -> Fmt.pf ppf "    %a  <- %a@\n" Op.pp op Fault.pp f
 
 (* What a repeated operation keeps: all but its place, socket, offset and
    length. *)
@@ -328,21 +332,15 @@ let pp_trace rules ppf { head; left_out; tail } =
         | Repeated { period; times; first; last } ->
             Fmt.pf ppf
               "    ... the %d operation%s above, %d more time%s, #%d to #%d@\n"
-              period
-              (if period = 1 then "" else "s")
-              times
-              (if times = 1 then "" else "s")
-              first last
+              period (plural period) times (plural times) first last
         | Left_out n ->
-            Fmt.pf ppf "    ... %d more operation%s, not kept@\n" n
-              (if n = 1 then "" else "s"));
+            Fmt.pf ppf "    ... %d more operation%s, not kept@\n" n (plural n));
         pp (i + 1)
       end
       else
         let rec skip j = if j < n && not (shown j) then skip (j + 1) else j in
         let j = skip i in
-        Fmt.pf ppf "    ... %d more line%s@\n" (j - i)
-          (if j - i = 1 then "" else "s");
+        Fmt.pf ppf "    ... %d more line%s@\n" (j - i) (plural (j - i));
         pp j)
   in
   pp 0

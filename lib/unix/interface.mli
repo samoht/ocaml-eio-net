@@ -10,11 +10,11 @@ module Address : sig
       named [interface], a loopback interface iff [loopback] is [true]. *)
 
   val interface : t -> string
-  (** [interface a] is the name of [a]'s interface, as [en0] or [eth0]. *)
+  (** [interface a] is the name of [a]'s interface, such as [en0] or [eth0]. *)
 
   val prefix : t -> Ipaddr.Prefix.t
-  (** [prefix a] is [a] with its on-link prefix length, as [192.0.2.7/24]: the
-      interface's netmask, or the full length where it has none. *)
+  (** [prefix a] is [a] with its on-link prefix length, such as [192.0.2.7/24]:
+      the interface's netmask, or the full length where it has none. *)
 
   val is_loopback : t -> bool
   (** [is_loopback a] is [true] iff [a]'s interface is a loopback interface. *)
@@ -24,8 +24,8 @@ module Address : sig
       and loopback flags. *)
 
   val pp : t Fmt.t
-  (** [pp] formats an address as its interface and prefix, as [lo0 127.0.0.1/8].
-  *)
+  (** [pp] formats an address as its interface and prefix, as in
+      [lo0 127.0.0.1/8]. *)
 end
 
 type address = Address.t

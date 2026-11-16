@@ -1,14 +1,16 @@
-(** A transfer bounded by its progress, as curl's low-speed check bounds one
+(** A transfer bounded by its progress, like curl's low-speed check
     (CURLOPT_LOW_SPEED_LIMIT and CURLOPT_LOW_SPEED_TIME).
 
     The bytes a transfer's reads and writes move are counted over windows of a
-    stated length, each starting where the last ended, the first with the
-    transfer's first move, so the time spent before it (a connection, a
-    handshake, an authentication) counts in none of them: a window that ends
-    with fewer than [limit] bytes a second moved ends the transfer with
-    {!Too_slow}. A move that waits on a peer that sends or takes nothing is cut
-    at its window's end, so a stalled peer costs at most two windows, and a peer
-    that sends a byte now and then costs the same as one that sends nothing. *)
+    stated length. The first window starts with the transfer's first move, so
+    the time spent before it (a connection, a handshake, an authentication) is
+    not counted. Each later window starts where the last one ended. A window
+    that ends with fewer than [limit] bytes a second moved ends the transfer
+    with {!Too_slow}.
+
+    A move that waits on a peer that sends or takes nothing is cut at its
+    window's end. A stalled peer therefore costs at most two windows, whether it
+    sends nothing or a byte now and then. *)
 
 type t
 (** The type for the progress of one transfer. *)

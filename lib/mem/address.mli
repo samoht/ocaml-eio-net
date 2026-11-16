@@ -25,7 +25,7 @@ val reaching : Eio.Net.Ipaddr.v4v6 -> Eio.Net.Ipaddr.v4v6 list
     connection or a datagram sent to [ip]: [ip] itself, in either form if it is
     IPv4, then the wildcard address of its family, and for IPv4 the IPv6
     wildcard address of a dual-stack socket. A wildcard destination stands for
-    the loopback address of its family. *)
+    the loopback address of its family, as both kernels route it. *)
 
 val source_to : Eio.Net.Ipaddr.v4v6 -> Eio.Net.Ipaddr.v4v6
 (** [source_to ip] is the address a socket that binds none sends from to [ip]:
@@ -38,8 +38,8 @@ val toward :
   Eio.Net.Ipaddr.v4v6
 (** [toward ~os ~bound dst] is the destination a socket bound at [bound] reaches
     for [dst], as Linux routes a wildcard one: the IPv4 wildcard address stands
-    for the IPv4 address the socket is bound at, and the IPv6 one from an
-    IPv4-mapped address for ::ffff:127.0.0.1. *)
+    for the IPv4 address the socket is bound at, in [dst]'s form, and the IPv6
+    one from an IPv4-mapped address for ::ffff:127.0.0.1. *)
 
 val seen_by : Eio.Net.Ipaddr.v4v6 -> Eio.Net.Ipaddr.v4v6 -> Eio.Net.Ipaddr.v4v6
 (** [seen_by own ip] is [ip] as a socket bound at [own] sees it: IPv4 to an IPv4
@@ -48,7 +48,8 @@ val seen_by : Eio.Net.Ipaddr.v4v6 -> Eio.Net.Ipaddr.v4v6 -> Eio.Net.Ipaddr.v4v6
 val ip_overlaps : Eio.Net.Ipaddr.v4v6 * int -> Eio.Net.Ipaddr.v4v6 * int -> bool
 (** [ip_overlaps a b] is [true] if [a] and [b] are of one port and their
     addresses are equal, one is the wildcard address of the other's family, or
-    one is the IPv6 wildcard address, as bind(2) has it on Linux. *)
+    one is the IPv6 wildcard address, which a dual-stack socket holds at IPv4
+    addresses too, as bind(2) has it on Linux. *)
 
 val first_byte : Eio.Net.Ipaddr.v4v6 -> int
 (** [first_byte ip] is the first byte of [ip]'s raw form. *)

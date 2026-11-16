@@ -14,9 +14,6 @@
  (deps
   (source_tree traces)))
 
-; Re-measure the connect timeouts, on macOS with Docker:
-; REGEN=1 dune build @test/interop/connect-timeout/regen-traces
-
 (rule
  (alias regen-traces)
  (deps

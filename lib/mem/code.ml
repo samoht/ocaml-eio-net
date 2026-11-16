@@ -17,58 +17,36 @@ type Eio.Exn.Backend.t +=
   | Broadcast
   | Host_unreachable
 
+let label = function
+  | Closed -> Some "Closed"
+  | No_listener -> Some "No listener bound"
+  | Address_in_use -> Some "Address in use"
+  | No_destination -> Some "No destination"
+  | Message_too_long -> Some "Message too long"
+  | Invalid_port -> Some "Invalid port"
+  | Network_unreachable -> Some "Network unreachable"
+  | Address_family -> Some "Address family not supported"
+  | Wrong_socket_type -> Some "Wrong socket type"
+  | Not_connected -> Some "Not connected"
+  | Address_not_available -> Some "Address not available"
+  | Name_too_long -> Some "File name too long"
+  | Invalid_address -> Some "Invalid address"
+  | Broadcast -> Some "Broadcast not allowed"
+  | Host_unreachable -> Some "No route to host"
+  | _ -> None
+
 let () =
-  Eio.Exn.Backend.register_pp (fun ppf -> function
-    | Closed ->
-        Format.pp_print_string ppf "Closed (eio-net.mem)";
-        true
-    | No_listener ->
-        Format.pp_print_string ppf "No listener bound (eio-net.mem)";
-        true
-    | Address_in_use ->
-        Format.pp_print_string ppf "Address in use (eio-net.mem)";
-        true
-    | No_destination ->
-        Format.pp_print_string ppf "No destination (eio-net.mem)";
-        true
-    | Message_too_long ->
-        Format.pp_print_string ppf "Message too long (eio-net.mem)";
-        true
-    | Invalid_port ->
-        Format.pp_print_string ppf "Invalid port (eio-net.mem)";
-        true
-    | Network_unreachable ->
-        Format.pp_print_string ppf "Network unreachable (eio-net.mem)";
-        true
-    | Address_family ->
-        Format.pp_print_string ppf "Address family not supported (eio-net.mem)";
-        true
-    | Wrong_socket_type ->
-        Format.pp_print_string ppf "Wrong socket type (eio-net.mem)";
-        true
-    | Not_connected ->
-        Format.pp_print_string ppf "Not connected (eio-net.mem)";
-        true
-    | Address_not_available ->
-        Format.pp_print_string ppf "Address not available (eio-net.mem)";
-        true
-    | Name_too_long ->
-        Format.pp_print_string ppf "File name too long (eio-net.mem)";
-        true
-    | Invalid_address ->
-        Format.pp_print_string ppf "Invalid address (eio-net.mem)";
-        true
-    | Broadcast ->
-        Format.pp_print_string ppf "Broadcast not allowed (eio-net.mem)";
-        true
-    | Host_unreachable ->
-        Format.pp_print_string ppf "No route to host (eio-net.mem)";
-        true
-    | _ -> false)
+  Eio.Exn.Backend.register_pp (fun ppf code ->
+      match label code with
+      | Some l ->
+          Fmt.pf ppf "%s (eio-net.mem)" l;
+          true
+      | None -> false)
 
 let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
 let fail code = raise (Eio.Exn.create (Eio.Exn.X code))
+let refused () = raise (Eio.Net.err (Connection_failure (Refused No_listener)))
 
 (* A Unix path no socket binds has no file, as Eio's backends remove a
    listener's file when the switch it listened under finishes. *)

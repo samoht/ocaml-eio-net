@@ -2,12 +2,8 @@ open! Hermetic
 open Kernel
 open Address
 
-(* Socket options, as the kernel [os] names answers them on a host with
-   loopback only: what a socket reads back, defaults included, with the
-   kernel's rounding and limits, and the error eio_posix raises where the
-   kernel refuses an option for the socket's family or type. Options whose
-   effect mem has no model of are kept and read back. The send and receive
-   buffers size the queues: [resized] tells the socket's queues. *)
+(* Options whose effect mem has no model of are kept and read back.
+   [resized] tells the socket's queues that a buffer was set. *)
 module O = Eio.Net.Sockopt
 
 type family = Validation.family = V4 | V6 | Local
@@ -372,8 +368,11 @@ let maxseg t =
   match (t.os, t.maxseg) with
   | Linux, Some n when connected t -> n
   | Linux, _ -> if t.user_mss > 0 then t.user_mss else 536
-  | Macos, maxseg ->
-      Option.value maxseg ~default:(Validation.default_maxseg t.family t.kind)
+  | Macos, _ -> (view t).maxseg
+
+let keepidle t = Option.value t.keepidle ~default:7200
+let keepintvl t = Option.value t.keepintvl ~default:75
+let keepcnt t = Option.value t.keepcnt ~default:(if t.os = Linux then 9 else 8)
 
 let get : type a. t -> a Eio.Net.Sockopt.t -> a =
  fun t opt ->
@@ -408,10 +407,9 @@ let get : type a. t -> a Eio.Net.Sockopt.t -> a =
       | O.SO_RCVTIMEO -> t.rcvtimeo
       | O.SO_SNDTIMEO -> t.sndtimeo
       | O.TCP_NODELAY -> t.nodelay
-      | O.TCP_KEEPIDLE -> Option.value t.keepidle ~default:7200
-      | O.TCP_KEEPINTVL -> Option.value t.keepintvl ~default:75
-      | O.TCP_KEEPCNT ->
-          Option.value t.keepcnt ~default:(if linux then 9 else 8)
+      | O.TCP_KEEPIDLE -> keepidle t
+      | O.TCP_KEEPINTVL -> keepintvl t
+      | O.TCP_KEEPCNT -> keepcnt t
       | O.TCP_MAXSEG -> maxseg t
       | O.TCP_CONGESTION -> t.congestion
       | O.TCP_CORK -> t.cork
@@ -481,9 +479,9 @@ let give_up t ~silenced ~last ~oldest =
   let keepalive =
     if not t.keepalive then None
     else
-      let idle = secs (Option.value t.keepidle ~default:7200) in
-      let intvl = secs (Option.value t.keepintvl ~default:75) in
-      let cnt = Option.value t.keepcnt ~default:(if linux then 9 else 8) in
+      let idle = secs (keepidle t) in
+      let intvl = secs (keepintvl t) in
+      let cnt = keepcnt t in
       let ceil a b = if a <= 0L then 0L else Int64.(div (add a (pred b)) b) in
       (* The last probe the live peer answered, or the last segment. *)
       let quiet =

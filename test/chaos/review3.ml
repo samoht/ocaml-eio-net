@@ -1,7 +1,6 @@
 (* Review 3: correct programs that real stacks run, and the bugs they hide. *)
 
 let tcp port = `Tcp (Eio.Net.Ipaddr.V4.loopback, port)
-let strict_line = App.strict_line
 
 (* Retries [f] three times, each bounded by a second. *)
 let attempts (env : Eio_net_chaos.env) f =
@@ -25,7 +24,7 @@ let expect (env : Eio_net_chaos.env) pp want got =
 let banner env =
   let id_s = "SSH-2.0-Server_1.0\r\n" and id_c = "SSH-2.0-Client_1.0\r\n" in
   let read_id flow =
-    strict_line (Eio.Buf_read.of_flow flow ~max_size:255) ^ "\n"
+    App.strict_line (Eio.Buf_read.of_flow flow ~max_size:255) ^ "\n"
   in
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7022) in
@@ -67,7 +66,7 @@ let connfail ?(bug = `None) env =
       | flow -> (
           match
             Eio.Time.with_timeout_exn env#clock 1.0 (fun () ->
-                strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
+                App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
           with
           | s -> Some s
           | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) ->
@@ -102,7 +101,7 @@ let busy_accept () =
     Eio.Switch.run @@ fun sw ->
     let flow = Eio.Net.connect ~sw net (tcp 7060) in
     Eio.Time.with_timeout_exn env#clock 30. (fun () ->
-        strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
+        App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
   in
   ignore (Eio.Fiber.List.map (fun _ -> client ()) [ 1; 2 ])
 
@@ -123,7 +122,7 @@ let accept_loop () =
     (fun () ->
       Eio_net_accept.run ~stop ~classify:Eio_net_unix.accept_failure
         ~max_connections:4 l (fun _ flow _ ->
-          match strict_line (Eio.Buf_read.of_flow flow ~max_size:16) with
+          match App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16) with
           | line -> Eio.Flow.copy_string (line ^ "\n") flow
           | exception End_of_file -> shed := true))
     (fun () ->
@@ -133,7 +132,7 @@ let accept_loop () =
       Eio.Flow.copy_string "hello\n" flow;
       let got =
         Eio.Time.with_timeout_exn env#clock 5. (fun () ->
-            strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
+            App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
       in
       if got <> "hello" then Fmt.failwith "got %S" got;
       if not !shed then failwith "no connection was shed";
@@ -151,7 +150,7 @@ let echo n env =
             while true do
               let line =
                 Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
-                    strict_line r)
+                    App.strict_line r)
               in
               Eio.Flow.copy_string (line ^ "\n") flow
             done
@@ -164,7 +163,7 @@ let echo n env =
         (Eio.Fiber.pair
            (fun () ->
              List.iter (fun l -> Eio.Flow.copy_string (l ^ "\n") flow) lines)
-           (fun () -> List.map (fun _ -> strict_line r) lines)))
+           (fun () -> List.map (fun _ -> App.strict_line r) lines)))
   |> expect env (fun ppf _ -> Fmt.string ppf "a wrong echo") lines
 
 (* A server that sheds load: at most two requests served at once, the others
@@ -178,7 +177,7 @@ let shed ?(bug = `None) env =
   let handle flow =
     let r = Eio.Buf_read.of_flow flow ~max_size:64 in
     let req =
-      Eio.Time.with_timeout_exn env#clock 5.0 (fun () -> strict_line r)
+      Eio.Time.with_timeout_exn env#clock 5.0 (fun () -> App.strict_line r)
     in
     Eio.Time.sleep env#clock 1.0;
     let id = String.sub req 5 (String.length req - 5) in
@@ -210,7 +209,7 @@ let shed ?(bug = `None) env =
               Eio.Switch.run @@ fun sw ->
               let flow = Eio.Net.connect ~sw env#net (tcp 7009) in
               Eio.Flow.copy_string (Fmt.str "WORK %d\n" i) flow;
-              strict_line (Eio.Buf_read.of_flow flow ~max_size:64))
+              App.strict_line (Eio.Buf_read.of_flow flow ~max_size:64))
         with
         | "BUSY" ->
             Eio.Time.sleep env#clock 0.5;
@@ -312,7 +311,8 @@ let unix_stream env =
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let r = Eio.Buf_read.of_flow flow ~max_size:64 in
           match
-            Eio.Time.with_timeout_exn env#clock 5.0 (fun () -> strict_line r)
+            Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+                App.strict_line r)
           with
           | "ping" -> Eio.Flow.copy_string "pong\n" flow
           | _ -> ()));
@@ -469,7 +469,8 @@ let pipelined env =
           let r = Eio.Buf_read.of_flow flow ~max_size:256 in
           let rec loop () =
             match
-              Eio.Time.with_timeout_exn env#clock 5.0 (fun () -> strict_line r)
+              Eio.Time.with_timeout_exn env#clock 5.0 (fun () ->
+                  App.strict_line r)
             with
             | cmd when String.starts_with ~prefix:"GET " cmd ->
                 let k = String.sub cmd 4 (String.length cmd - 4) in
@@ -484,5 +485,5 @@ let pipelined env =
       let flow = Eio.Net.connect ~sw env#net (tcp 7001) in
       let r = Eio.Buf_read.of_flow flow ~max_size:256 in
       List.iter (fun k -> Eio.Flow.copy_string ("GET " ^ k ^ "\n") flow) keys;
-      List.map (fun _ -> strict_line r) keys)
+      List.map (fun _ -> App.strict_line r) keys)
   |> expect env Fmt.Dump.(list string) [ "VAL a"; "VAL b"; "VAL c" ]

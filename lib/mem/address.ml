@@ -4,7 +4,6 @@ open Code
 
 let mapped_prefix = "\000\000\000\000\000\000\000\000\000\000\xff\xff"
 
-(* The IPv4 address an IPv4-mapped IPv6 address stands for, or [ip]. *)
 let unmap (ip : Eio.Net.Ipaddr.v4v6) =
   let raw = (ip :> string) in
   if String.length raw = 16 && String.equal (String.sub raw 0 12) mapped_prefix
@@ -18,18 +17,12 @@ let any ip =
     ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
     ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
 
-(* The IPv4-mapped IPv6 form of an IPv4 address. *)
 let map (ip : Eio.Net.Ipaddr.v4v6) =
   Eio.Net.Ipaddr.of_raw (mapped_prefix ^ (ip :> string))
 
 let same (x : Eio.Net.Ipaddr.v4v6) (y : Eio.Net.Ipaddr.v4v6) =
   String.equal (x :> string) (y :> string)
 
-(* The addresses, best first, at which a socket takes a connection or a
-   datagram sent to [ip]: the address itself, in either form if it is IPv4,
-   then the wildcard address of its family, and for IPv4 the IPv6 wildcard
-   address of a dual-stack socket. A wildcard destination stands for the
-   loopback address of its family, as both kernels route it. *)
 let reaching ip =
   let ip = unmap ip in
   if is_v4 ip then
@@ -47,11 +40,8 @@ let source_to ip : Eio.Net.Ipaddr.v4v6 =
   if is_v4 ip then (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6)
   else (Eio.Net.Ipaddr.V6.loopback :> Eio.Net.Ipaddr.v4v6)
 
-(* The destination a socket bound at [bound] reaches for [dst], as Linux
-   routes a wildcard one: the IPv4 wildcard address stands for the IPv4
-   address the socket is bound at, in [dst]'s form, and the IPv6 one from an
-   IPv4-mapped address for ::ffff:127.0.0.1. Otherwise {!reaching} takes a
-   wildcard address for the loopback address of its family. *)
+(* Otherwise {!reaching} takes a wildcard address for the loopback address
+   of its family. *)
 let toward ~os ~(bound : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
   let b = unmap bound in
   if same dst Eio.Net.Ipaddr.V6.any then
@@ -64,17 +54,12 @@ let toward ~os ~(bound : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
     else dst
   else dst
 
-(* [ip] as a socket bound at [own] sees it: IPv4 to an IPv4 socket, and
-   IPv4-mapped to an IPv6 one. *)
 let seen_by (own : Eio.Net.Ipaddr.v4v6) ip =
   if String.length (own :> string) = 4 then unmap ip
   else if is_v4 ip then map (unmap ip)
   else ip
 
-(* Two IP addresses of one port overlap when they are equal, one is the
-   wildcard address of the other's family, or one is the IPv6 wildcard address,
-   which a dual-stack socket holds at IPv4 addresses too, as bind(2) on Linux
-   has it. An IPv4-mapped address is the IPv4 address it maps. *)
+(* An IPv4-mapped address is the IPv4 address it maps. *)
 let ip_overlaps (ip, port) (ip', port') =
   let dual x = same x Eio.Net.Ipaddr.V6.any in
   let x = unmap ip and y = unmap ip' in
@@ -93,8 +78,6 @@ let broadcast (ip : Eio.Net.Ipaddr.v4v6) =
 let lo_broadcast (ip : Eio.Net.Ipaddr.v4v6) =
   String.equal (ip :> string) "\127\255\255\255"
 
-(* A link-local IPv6 address, or a multicast one of interface or link scope,
-   which needs a scope that Eio's addresses do not carry. *)
 let needs_scope (ip : Eio.Net.Ipaddr.v4v6) =
   let raw = (ip :> string) in
   String.length raw = 16
@@ -115,8 +98,6 @@ let off_loopback ip =
       || multicast_v4 ip || broadcast ip)
   else not (same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip))
 
-(* An address of 127.0.0.0/8 other than 127.0.0.1, which macOS's loopback
-   interface does not take. *)
 let unanswered (ip : Eio.Net.Ipaddr.v4v6) =
   let ip = unmap ip in
   is_v4 ip
@@ -167,20 +148,14 @@ let check_local ~os ?(tcp = false) ?(fail = fail) ip =
   | Linux ->
       if needs_scope ip then fail Invalid_address;
       let local =
-        if is_v4 ip then
-          first_byte ip = 127
-          || same ip (any ip)
-          || multicast_v4 ip || broadcast ip
-        else if (ip :> string).[0] = '\xff' then begin
+        if (not (is_v4 ip)) && (ip :> string).[0] = '\xff' then begin
           if tcp then fail Invalid_address;
           true
         end
-        else same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip)
+        else not (off_loopback ip)
       in
       if not local then fail Address_not_available
 
-(* A path with a NUL past its first byte, which is not an abstract address,
-   or on macOS, which has no abstract addresses, any NUL. *)
 let embedded_nul ~os path =
   match String.index_opt path '\000' with
   | Some i -> i > 0 || os = Macos
@@ -196,13 +171,10 @@ let check_path ~os ?(raw = false) path =
     if raw then raise (Posix.bind_error (`Name_too_long path))
     else fail Name_too_long
   else if embedded_nul ~os path then
-    if raw then raise (Posix.bind_error (`No_file path))
-    else raise (Eio.Fs.err (Not_found No_listener))
+    if raw then raise (Posix.bind_error (`No_file path)) else raise (no_file ())
   else if os = Macos && path = "" then
     if raw then raise (Posix.bind_error `Invalid) else fail Invalid_address
 
-(* The error a socket at [src] meets reaching [dst] across address families,
-   IPv6 against IPv4-mapped, as on Linux. *)
 let cross_family ~os (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
   if String.length (src :> string) <> 16 || String.length (dst :> string) <> 16
   then None
