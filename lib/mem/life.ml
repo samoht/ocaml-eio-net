@@ -1,6 +1,12 @@
 type t = Open of int | Closing of int | Closed
 
 let v = Open 0
+
+let pp ppf = function
+  | Open n -> Fmt.pf ppf "open %d" n
+  | Closing n -> Fmt.pf ppf "closing %d" n
+  | Closed -> Fmt.string ppf "closed"
+
 let is_open = function Open _ -> true | Closing _ | Closed -> false
 let is_closed = function Closed -> true | Open _ | Closing _ -> false
 

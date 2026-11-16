@@ -13,6 +13,10 @@ type t =
 val v : t
 (** [v] is open, with nothing in flight. *)
 
+val pp : t Fmt.t
+(** [pp] formats a life as [open N], [closing N] or [closed], [N] the number of
+    operations in flight. *)
+
 val is_open : t -> bool
 (** [is_open t] is [true] until a close. *)
 
