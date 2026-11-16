@@ -1,1831 +1,24 @@
 open! Hermetic
+open Kernel
+open Code
+open Address
 
 type Eio.Exn.Backend.t +=
-  | Closed
-  | No_listener
-  | Address_in_use
-  | No_destination
-  | Message_too_long
-  | Invalid_port
-  | Network_unreachable
-  | Address_family
-  | Wrong_socket_type
-  | Not_connected
-  | Address_not_available
-  | Name_too_long
-  | Invalid_address
-  | Broadcast
-  | Host_unreachable
-
-let () =
-  Eio.Exn.Backend.register_pp (fun ppf -> function
-    | Closed ->
-        Format.pp_print_string ppf "Closed (eio-net.mem)";
-        true
-    | No_listener ->
-        Format.pp_print_string ppf "No listener bound (eio-net.mem)";
-        true
-    | Address_in_use ->
-        Format.pp_print_string ppf "Address in use (eio-net.mem)";
-        true
-    | No_destination ->
-        Format.pp_print_string ppf "No destination (eio-net.mem)";
-        true
-    | Message_too_long ->
-        Format.pp_print_string ppf "Message too long (eio-net.mem)";
-        true
-    | Invalid_port ->
-        Format.pp_print_string ppf "Invalid port (eio-net.mem)";
-        true
-    | Network_unreachable ->
-        Format.pp_print_string ppf "Network unreachable (eio-net.mem)";
-        true
-    | Address_family ->
-        Format.pp_print_string ppf "Address family not supported (eio-net.mem)";
-        true
-    | Wrong_socket_type ->
-        Format.pp_print_string ppf "Wrong socket type (eio-net.mem)";
-        true
-    | Not_connected ->
-        Format.pp_print_string ppf "Not connected (eio-net.mem)";
-        true
-    | Address_not_available ->
-        Format.pp_print_string ppf "Address not available (eio-net.mem)";
-        true
-    | Name_too_long ->
-        Format.pp_print_string ppf "File name too long (eio-net.mem)";
-        true
-    | Invalid_address ->
-        Format.pp_print_string ppf "Invalid address (eio-net.mem)";
-        true
-    | Broadcast ->
-        Format.pp_print_string ppf "Broadcast not allowed (eio-net.mem)";
-        true
-    | Host_unreachable ->
-        Format.pp_print_string ppf "No route to host (eio-net.mem)";
-        true
-    | _ -> false)
-
-let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
-
-(* The kernel mem follows where Linux and macOS differ. *)
-type os = Linux | Macos
-
-let kernel = function None | Some `Linux -> Linux | Some `Macos -> Macos
-
-(* The clock a network was given: TCP's timers run on it. *)
-type timer = { now : unit -> Mtime.t; sleep_until : Mtime.t -> unit }
-
-let timer clock =
-  {
-    now = (fun () -> Eio.Time.Mono.now clock);
-    sleep_until = (fun t -> Eio.Time.Mono.sleep_until clock t);
-  }
-
-let mapped_prefix = "\000\000\000\000\000\000\000\000\000\000\xff\xff"
-
-(* The IPv4 address an IPv4-mapped IPv6 address stands for, or [ip]. *)
-let unmap (ip : Eio.Net.Ipaddr.v4v6) =
-  let raw = (ip :> string) in
-  if String.length raw = 16 && String.equal (String.sub raw 0 12) mapped_prefix
-  then Eio.Net.Ipaddr.of_raw (String.sub raw 12 4)
-  else ip
-
-let is_v4 ip = String.length (unmap ip :> string) = 4
-
-let any ip =
-  Eio.Net.Ipaddr.fold ip
-    ~v4:(fun _ -> Eio.Net.Ipaddr.V4.any)
-    ~v6:(fun _ -> Eio.Net.Ipaddr.V6.any)
-
-(* The IPv4-mapped IPv6 form of an IPv4 address. *)
-let map (ip : Eio.Net.Ipaddr.v4v6) =
-  Eio.Net.Ipaddr.of_raw (mapped_prefix ^ (ip :> string))
-
-let same (x : Eio.Net.Ipaddr.v4v6) (y : Eio.Net.Ipaddr.v4v6) =
-  String.equal (x :> string) (y :> string)
-
-(* The addresses, best first, at which a socket takes a connection or a
-   datagram sent to [ip]: the address itself, in either form if it is IPv4,
-   then the wildcard address of its family, and for IPv4 the IPv6 wildcard
-   address of a dual-stack socket. A wildcard destination stands for the
-   loopback address of its family, as both kernels route it. *)
-let reaching ip =
-  let ip = unmap ip in
-  if is_v4 ip then
-    let ip = if same ip (any ip) then Eio.Net.Ipaddr.V4.loopback else ip in
-    let v4_any = Eio.Net.Ipaddr.V4.any in
-    [ ip; map ip; v4_any; map v4_any; Eio.Net.Ipaddr.V6.any ]
-  else
-    let ip = if same ip (any ip) then Eio.Net.Ipaddr.V6.loopback else ip in
-    [ ip; Eio.Net.Ipaddr.V6.any ]
-
-(* The address a socket that binds none sends from to [ip]: the loopback
-   interface's own address of its family, as Linux picks it for any address
-   of 127.0.0.0/8. *)
-let source_to ip : Eio.Net.Ipaddr.v4v6 =
-  if is_v4 ip then (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6)
-  else (Eio.Net.Ipaddr.V6.loopback :> Eio.Net.Ipaddr.v4v6)
-
-(* The destination a socket bound at [bound] reaches for [dst], as Linux
-   routes a wildcard one: the IPv4 wildcard address stands for the IPv4
-   address the socket is bound at, in [dst]'s form, and the IPv6 one from an
-   IPv4-mapped address for ::ffff:127.0.0.1. Otherwise {!reaching} takes a
-   wildcard address for the loopback address of its family. *)
-let toward ~os ~(bound : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
-  let b = unmap bound in
-  if same dst Eio.Net.Ipaddr.V6.any then
-    if os = Linux && String.length (bound :> string) = 16 && is_v4 bound then
-      map Eio.Net.Ipaddr.V4.loopback
-    else dst
-  else if is_v4 dst && same (unmap dst) Eio.Net.Ipaddr.V4.any then
-    if is_v4 b && not (same b (any b)) then
-      if String.length (dst :> string) = 16 then map b else b
-    else dst
-  else dst
-
-(* [ip] as a socket bound at [own] sees it: IPv4 to an IPv4 socket, and
-   IPv4-mapped to an IPv6 one. *)
-let seen_by (own : Eio.Net.Ipaddr.v4v6) ip =
-  if String.length (own :> string) = 4 then unmap ip
-  else if is_v4 ip then map (unmap ip)
-  else ip
-
-(* Two IP addresses of one port overlap when they are equal, one is the
-   wildcard address of the other's family, or one is the IPv6 wildcard address,
-   which a dual-stack socket holds at IPv4 addresses too, as bind(2) on Linux
-   has it. An IPv4-mapped address is the IPv4 address it maps. *)
-let ip_overlaps (ip, port) (ip', port') =
-  let dual x = same x Eio.Net.Ipaddr.V6.any in
-  let x = unmap ip and y = unmap ip' in
-  port = port'
-  && (dual ip || dual ip'
-     || (same (any x) (any y) && (same x y || same x (any x) || same y (any y)))
-     )
-
-let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
-let fail code = raise (Eio.Exn.create (Eio.Exn.X code))
-let first_byte (ip : Eio.Net.Ipaddr.v4v6) = Char.code (ip :> string).[0]
-let multicast_v4 ip = first_byte ip >= 224 && first_byte ip <= 239
-
-let broadcast (ip : Eio.Net.Ipaddr.v4v6) =
-  String.equal (ip :> string) "\255\255\255\255"
-
-(* The broadcast address of loopback's network, 127.0.0.0/8. *)
-let lo_broadcast (ip : Eio.Net.Ipaddr.v4v6) =
-  String.equal (ip :> string) "\127\255\255\255"
-
-(* A link-local IPv6 address, or a multicast one of interface or link scope,
-   which needs a scope that Eio's addresses do not carry. *)
-let needs_scope (ip : Eio.Net.Ipaddr.v4v6) =
-  let raw = (ip :> string) in
-  String.length raw = 16
-  && ((raw.[0] = '\xfe' && Char.code raw.[1] land 0xc0 = 0x80)
-     || (raw.[0] = '\xff' && Char.code raw.[1] land 0x0f <= 2))
-
-(* The network has the loopback interface only, which reaches 127.0.0.0/8,
-   ::1 and the wildcard addresses, which stand for loopback, and routes IPv4
-   multicast and broadcast: a host with loopback only has no route to any
-   other address, an IPv4-compatible one such as ::127.0.0.1 and an IPv6
-   multicast one included. *)
-let off_loopback ip =
-  let ip = unmap ip in
-  if is_v4 ip then
-    not
-      (first_byte ip = 127
-      || same ip (any ip)
-      || multicast_v4 ip || broadcast ip)
-  else not (same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip))
-
-(* An address of 127.0.0.0/8 other than 127.0.0.1, which macOS's loopback
-   interface does not take. *)
-let unanswered (ip : Eio.Net.Ipaddr.v4v6) =
-  let ip = unmap ip in
-  is_v4 ip
-  && first_byte ip = 127
-  && (not (same ip (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6)))
-  && not (lo_broadcast ip)
-
-(* eio_posix raises bind(2)'s errors from [listen] and [datagram_socket] as a
-   raw [Unix.Unix_error], and a [connect]'s as an {!Eio.Io} error. *)
-let bind_fail code =
-  raise
-    (Posix.bind_error
-       (match code with
-       | Address_in_use -> `In_use
-       | Address_not_available -> `Not_available
-       | Address_family -> `Family
-       | _ -> `Invalid))
-
-(* macOS's loopback interface has 127.0.0.1 and ::1 only, and needs a scope
-   for its link-local address. A TCP socket binds no multicast or broadcast
-   address, with EAFNOSUPPORT, and a UDP one no broadcast one. *)
-let check_local_macos ~tcp ~fail ip =
-  let group =
-    if is_v4 ip then multicast_v4 ip || broadcast ip
-    else (ip :> string).[0] = '\xff'
-  in
-  if group && tcp then fail Address_family
-  else if is_v4 ip && broadcast ip then fail Address_not_available
-  else if
-    not
-      (group
-      || same ip (any ip)
-      || same ip
-           (if is_v4 ip then (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6)
-            else Eio.Net.Ipaddr.V6.loopback))
-  then fail Address_not_available
-
-(* The network has the loopback interface only: an IPv4 socket binds an
-   address of 127.0.0.0/8, the broadcast address or a multicast one, an IPv6
-   one ::1, either the wildcard address of its family, and an IPv6 one the
-   IPv4-mapped form of an IPv4 address it binds, as on Linux. An IPv6
-   address that needs a scope fails with EINVAL, and so does an IPv6
-   multicast one for TCP. *)
-let check_local ~os ?(tcp = false) ?(fail = fail) ip =
-  let ip = unmap ip in
-  match os with
-  | Macos -> check_local_macos ~tcp ~fail ip
-  | Linux ->
-      if needs_scope ip then fail Invalid_address;
-      let local =
-        if is_v4 ip then
-          first_byte ip = 127
-          || same ip (any ip)
-          || multicast_v4 ip || broadcast ip
-        else if (ip :> string).[0] = '\xff' then begin
-          if tcp then fail Invalid_address;
-          true
-        end
-        else same ip Eio.Net.Ipaddr.V6.loopback || same ip (any ip)
-      in
-      if not local then fail Address_not_available
-
-(* A path with a NUL past its first byte, which is not an abstract address,
-   or on macOS, which has no abstract addresses, any NUL. *)
-let embedded_nul ~os path =
-  match String.index_opt path '\000' with
-  | Some i -> i > 0 || os = Macos
-  | None -> false
-
-(* OCaml's [Unix] refuses a path that [sun_path], 108 bytes on Linux and
-   104 on macOS, cannot hold with its NUL, and one with a NUL past its first
-   byte with ENOENT, as no file has that name: raw from a bind, as
-   [Eio.Fs.Not_found] from a [connect] or a [send]. macOS binds no empty
-   path, with EINVAL. *)
-let check_path ~os ?(raw = false) path =
-  if String.length path >= match os with Linux -> 108 | Macos -> 104 then
-    if raw then raise (Posix.bind_error (`Name_too_long path))
-    else fail Name_too_long
-  else if embedded_nul ~os path then
-    if raw then raise (Posix.bind_error (`No_file path))
-    else raise (Eio.Fs.err (Not_found No_listener))
-  else if os = Macos && path = "" then
-    if raw then raise (Posix.bind_error `Invalid) else fail Invalid_address
-
-(* The error a socket at [src] meets reaching [dst] across address families,
-   IPv6 against IPv4-mapped, as on Linux. *)
-let cross_family ~os (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
-  if String.length (src :> string) <> 16 || String.length (dst :> string) <> 16
-  then None
-  else if os = Macos then
-    if (not (same src Eio.Net.Ipaddr.V6.any)) && is_v4 src <> is_v4 dst then
-      Some Address_family
-    else None
-  else if is_v4 src && not (is_v4 dst) then Some Address_family
-  else if
-    (not (is_v4 src)) && (not (same src Eio.Net.Ipaddr.V6.any)) && is_v4 dst
-  then Some Network_unreachable
-  else None
-
-(* The holds sockets of one kind have on each port, kept as they bind and
-   close, so a bind checks only the holds on its port. A hold is an address,
-   whether its socket has [SO_REUSEADDR], whether it listens, and, once it
-   lingers in TIME_WAIT, until when on [now]. Holds alike in all but when
-   they end share a group, which counts those that last and keeps when the
-   others end, so a port that many connections held costs a bind the groups
-   on it, not the connections. On Linux, a connect that binds no address
-   holds its port [toward] its destination, and of those in TIME_WAIT,
-   [time_waits] counts by when they end. [lowest] is a port of the dynamic
-   range (RFC 6335, section 6) at or below the lowest one nothing holds:
-   every port below it is held; [highest] is one at or above the highest
-   free one. [next] is where macOS looks for its next TCP port, counting up,
-   and [down] where Linux looks for the next port of a connect that binds no
-   address, counting down. *)
-module Ports = struct
-  module Untils = Map.Make (Mtime)
-
-  type group = {
-    ip : Eio.Net.Ipaddr.v4v6;
-    wildcard : bool;
-    reuse : bool;
-    listening : bool;
-    connected : bool;
-    toward : (Eio.Net.Ipaddr.v4v6 * int) option;
-    mutable lasting : int;
-    mutable untils : int Untils.t;
-    mutable time_waits : int Untils.t;
-  }
-
-  type hold = {
-    group : group;
-    mutable until : Mtime.t option;
-    mutable time_wait : bool;
-    mutable released : bool;
-  }
-
-  type t = {
-    os : os;
-    held : (int, group list) Hashtbl.t;
-    mutable lowest : int;
-    mutable highest : int;
-    mutable next : int;
-    mutable down : int;
-    now : (unit -> Mtime.t) option;
-  }
-
-  let v ~os ?now () =
-    {
-      os;
-      held = Hashtbl.create 64;
-      lowest = 49152;
-      highest = 65535;
-      next = 49152;
-      down = 65535;
-      now;
-    }
-
-  (* TCP_TIMEWAIT_LEN on Linux, twice macOS's 15-second MSL, and the
-     default tcp_fin_timeout of both. *)
-  let time_wait t =
-    match t.os with
-    | Linux -> Mtime.Span.(60 * s)
-    | Macos -> Mtime.Span.(30 * s)
-
-  let fin_timeout = Mtime.Span.(60 * s)
-
-  (* Linux's tcp_tw_reuse_delay: a connect may take a 4-tuple held in
-     TIME_WAIT once this has passed since the peer's FIN. *)
-  let tw_reuse_delay = Mtime.Span.(1 * s)
-
-  let freed t port =
-    if port >= 49152 && port < t.lowest then t.lowest <- port;
-    if port <= 65535 && port > t.highest then t.highest <- port
-
-  let count n = function None -> n | Some m -> m + n
-
-  let untils_add u g =
-    g.untils <- Untils.update u (fun c -> Some (count 1 c)) g.untils
-
-  let decr u m =
-    Untils.update u (function Some c when c > 1 -> Some (c - 1) | _ -> None) m
-
-  let untils_remove u g = g.untils <- decr u g.untils
-
-  (* Whether a hold of [g] is live, once those whose TIME_WAIT has ended are
-     dropped. *)
-  let live t g =
-    (match t.now with
-    | None -> ()
-    | Some now ->
-        let now = now () in
-        let rec prune () =
-          match Untils.min_binding_opt g.untils with
-          | Some (u, _) when not (Mtime.is_earlier now ~than:u) ->
-              g.untils <- Untils.remove u g.untils;
-              g.time_waits <- Untils.remove u g.time_waits;
-              prune ()
-          | _ -> ()
-        in
-        prune ());
-    g.lasting > 0 || not (Untils.is_empty g.untils)
-
-  (* The groups on [port] that hold it. *)
-  let at t port =
-    match Hashtbl.find_opt t.held port with
-    | None -> []
-    | Some groups -> (
-        match List.filter (live t) groups with
-        | [] ->
-            Hashtbl.remove t.held port;
-            freed t port;
-            []
-        | live ->
-            if List.compare_lengths live groups <> 0 then
-              Hashtbl.replace t.held port live;
-            live)
-
-  let same_toward a b =
-    match (a, b) with
-    | None, None -> true
-    | Some (ip, port), Some (ip', port') -> same ip ip' && port = port'
-    | _ -> false
-
-  let add t ?(wildcard = false) ?(reuse = false) ?(listening = false)
-      ?(connected = false) ?toward (ip, port) =
-    let groups = at t port in
-    let alike g =
-      same g.ip ip && g.wildcard = wildcard && g.reuse = reuse
-      && g.listening = listening && g.connected = connected
-      && same_toward g.toward toward
-    in
-    let group =
-      match List.find_opt alike groups with
-      | Some g -> g
-      | None ->
-          let g =
-            {
-              ip;
-              wildcard;
-              reuse;
-              listening;
-              connected;
-              toward;
-              lasting = 0;
-              untils = Untils.empty;
-              time_waits = Untils.empty;
-            }
-          in
-          Hashtbl.replace t.held port (g :: groups);
-          g
-    in
-    group.lasting <- group.lasting + 1;
-    { group; until = None; time_wait = false; released = false }
-
-  let forget h u =
-    untils_remove u h.group;
-    if h.time_wait then h.group.time_waits <- decr u h.group.time_waits
-
-  let remove t port h =
-    if not h.released then begin
-      h.released <- true;
-      match h.until with
-      | None -> h.group.lasting <- h.group.lasting - 1
-      | Some u -> forget h u
-    end;
-    ignore (at t port : group list)
-
-  (* [h] lets go at [until], or later if it already would; [time_wait] when
-     it lingers in TIME_WAIT. *)
-  let set_until h ~time_wait until =
-    let set () =
-      untils_add until h.group;
-      if time_wait then
-        h.group.time_waits <-
-          Untils.update until (fun c -> Some (count 1 c)) h.group.time_waits;
-      h.until <- Some until;
-      h.time_wait <- time_wait
-    in
-    match h.until with
-    | _ when h.released -> ()
-    | Some u when Mtime.is_later u ~than:until -> ()
-    | Some u ->
-        forget h u;
-        set ()
-    | None ->
-        h.group.lasting <- h.group.lasting - 1;
-        set ()
-
-  (* A bind at [ip] conflicts with a hold at an overlapping address, unless
-     both sockets have [SO_REUSEADDR] and the held one does not listen, as
-     Linux has it. A client bound at a wildcard address and connected holds
-     its source address, and conflicts with a bind at a wildcard address
-     too. *)
-  let in_use_linux t ~reuse (ip, port) =
-    let wild = same (unmap ip) (any (unmap ip)) in
-    List.exists
-      (fun g ->
-        (ip_overlaps (ip, port) (g.ip, port) || (g.wildcard && wild))
-        && not (reuse && g.reuse && not g.listening))
-      (at t port)
-
-  (* The IPv4 address at which a socket bound at [ip] takes IPv4 traffic:
-     its own, the one an IPv4-mapped address maps, or the wildcard one for
-     the dual-stack IPv6 wildcard address. *)
-  let v4_view (ip : Eio.Net.Ipaddr.v4v6) =
-    if String.length (ip :> string) = 4 then Some ip
-    else if same ip Eio.Net.Ipaddr.V6.any then
-      Some (Eio.Net.Ipaddr.V4.any :> Eio.Net.Ipaddr.v4v6)
-    else if is_v4 ip then Some (unmap ip)
-    else None
-
-  (* macOS looks a bind up as the BSDs do. With [SO_REUSEADDR] only a socket
-     that is not connected, at the same address, conflicts; without, any at
-     an overlapping one, connected or not. An IPv6 socket looks up the IPv4
-     side of the wildcard or an IPv4-mapped address too, where an IPv4
-     socket at the IPv4 wildcard address does not conflict with it. *)
-  let in_use_macos t ~reuse ((ip : Eio.Net.Ipaddr.v4v6), port) =
-    let v6 = String.length (ip :> string) = 16 in
-    let wild x = same x (any x) in
-    let matches g a b =
-      if reuse then (not g.connected) && same a b
-      else same a b || wild a || wild b
-    in
-    let conflict g =
-      let g6 = String.length (g.ip :> string) = 16 in
-      let on_v4 =
-        match (v4_view ip, v4_view g.ip) with
-        | Some a, Some b when (not v6) || wild ip || is_v4 ip ->
-            matches g a b && not (v6 && wild b && not g6)
-        | _ -> false
-      in
-      on_v4 || (v6 && g6 && matches g ip g.ip)
-    in
-    List.exists conflict (at t port)
-
-  let in_use t ?(reuse = false) a =
-    match t.os with
-    | Linux -> in_use_linux t ~reuse a
-    | Macos -> in_use_macos t ~reuse a
-
-  let is_free t port = at t port = []
-
-  (* The lowest port of the dynamic range nothing holds, at any address. *)
-  let free t =
-    let rec find port =
-      if port > 65535 then None
-      else if not (is_free t port) then find (port + 1)
-      else begin
-        t.lowest <- port;
-        Some port
-      end
-    in
-    find t.lowest
-
-  (* The next port of the dynamic range nothing holds, counting up from the
-     last one taken and round, as macOS takes TCP ports. *)
-  let free_next t =
-    let rec find port k =
-      if k > 65535 - 49152 then None
-      else
-        let port = if port > 65535 then 49152 else port in
-        if not (is_free t port) then find (port + 1) (k + 1)
-        else begin
-          t.next <- port + 1;
-          Some port
-        end
-    in
-    find t.next 0
-
-  (* Whether a connect toward [toward] that binds no address may take a port
-     [g] holds, on Linux: one that another such connect holds toward another
-     destination, as Linux keeps those unique per 4-tuple, or toward the same
-     one once each of its holds is in TIME_WAIT from more than
-     [tw_reuse_delay] after the peer's FIN, as Linux's [tcp_tw_reuse] lets
-     it on loopback. *)
-  let shares t ~toward g =
-    match g.toward with
-    | None -> false
-    | Some _ when not (same_toward g.toward (Some toward)) -> true
-    | Some _ -> (
-        g.lasting = 0
-        && Untils.equal Int.equal g.untils g.time_waits
-        &&
-        match (t.now, Untils.max_binding_opt g.untils) with
-        | Some now, Some (u, _) -> (
-            match Mtime.sub_span u (time_wait t) with
-            | Some fin ->
-                let from = Mtime.add_span fin tw_reuse_delay in
-                Option.fold ~none:false
-                  ~some:(fun from -> Mtime.is_later (now ()) ~than:from)
-                  from
-            | None -> false)
-        | _ -> false)
-
-  (* The port a connect toward [toward] that binds no address takes on
-     Linux: the next one down from the last such connect's, round the
-     dynamic range, that only connects toward other destinations hold, as
-     Linux shares an ephemeral port between them. *)
-  let free_toward t toward =
-    let rec find port n =
-      if n = 0 then None
-      else
-        let port = if port < 49152 then 65535 else port in
-        if List.for_all (shares t ~toward) (at t port) then begin
-          t.down <- port - 1;
-          Some port
-        end
-        else find (port - 1) (n - 1)
-    in
-    find t.down (65535 - 49152 + 1)
-
-  (* The highest port of the dynamic range nothing holds. *)
-  let free_down t =
-    let rec find port =
-      if port < 49152 then None
-      else if not (is_free t port) then find (port - 1)
-      else begin
-        t.highest <- port;
-        Some port
-      end
-    in
-    find t.highest
-end
-
-(* A Unix path no socket binds has no file, as Eio's backends remove a
-   listener's file when the switch it listened under finishes. *)
-let no_file () = Eio.Fs.err (Not_found No_listener)
-
-(* The Unix-domain paths that hold a socket file, shared by stream and
-   datagram sockets as a file system shares them. A socket's file stays once
-   it closes, [Stale], as Eio's backends leave a datagram socket's file, until
-   it is removed. *)
-module Files = struct
-  type kind = Listener | Datagram | Client | Stale
-
-  (* A path, and for an abstract address whether its socket is a stream
-     one. *)
-  type t = {
-    mutex : Mutex.t;
-    files : (string * bool option, kind) Hashtbl.t;
-    mutable autobind : int;
-  }
-
-  let v () = { mutex = Mutex.create (); files = Hashtbl.create 8; autobind = 0 }
-
-  (* A path that starts with a NUL is in Linux's abstract namespace, which has
-     no files, and a name space per socket type. *)
-  let abstract path = String.length path > 0 && path.[0] = '\000'
-  let key ~stream path = (path, if abstract path then Some stream else None)
-
-  let is_stream = function
-    | Datagram -> false
-    | Listener | Client | Stale -> true
-
-  (* What is at [path] for a socket of the type [stream] says: at an abstract
-     address, only a socket of that type. *)
-  let find t ~stream path =
-    Mutex.protect t.mutex (fun () ->
-        Hashtbl.find_opt t.files (key ~stream path))
-
-  (* The empty path binds an abstract address no socket holds, as Linux
-     autobinds one: a NUL and five hexadecimal digits. *)
-  let autobind t =
-    Mutex.protect t.mutex @@ fun () ->
-    let rec next () =
-      let name = Fmt.str "\000%05x" t.autobind in
-      t.autobind <- (t.autobind + 1) land 0xfffff;
-      let held stream = Hashtbl.mem t.files (key ~stream name) in
-      if held true || held false then next () else name
-    in
-    next ()
-
-  (* [path], or for the empty path the address it autobinds. *)
-  let bound t path = if path = "" then autobind t else path
-
-  (* Binds [path] unless a file is there; [take_over] binds over a file, and
-     an abstract address has none. *)
-  let bind t ?(take_over = false) path kind =
-    let k = key ~stream:(is_stream kind) path in
-    Mutex.protect t.mutex @@ fun () ->
-    ((take_over && not (abstract path)) || not (Hashtbl.mem t.files k))
-    && begin
-      Hashtbl.replace t.files k kind;
-      true
-    end
-
-  (* The socket of [kind] at [path] closes and leaves its file, or with
-     [remove], or at an abstract address, takes it away. *)
-  let leave ?(remove = false) t path kind =
-    let k = key ~stream:(is_stream kind) path in
-    Mutex.protect t.mutex @@ fun () ->
-    match Hashtbl.find_opt t.files k with
-    | Some k' when k' = kind ->
-        if remove || abstract path then Hashtbl.remove t.files k
-        else Hashtbl.replace t.files k Stale
-    | Some _ | None -> ()
-end
-
-(* Socket options, as the kernel [os] names answers them on a host with
-   loopback only: what a socket reads back, defaults included, with the
-   kernel's rounding and limits, and the error eio_posix raises where the
-   kernel refuses an option for the socket's family or type. Options whose
-   effect mem has no model of are kept and read back. The send and receive
-   buffers size the queues: [resized] tells the socket's queues. *)
-module Sockopt = struct
-  module O = Eio.Net.Sockopt
-
-  type family = V4 | V6 | Local
-  type kind = Unconnected | Listener | Client | Server | Datagram
-
-  type t = {
-    os : os;
-    family : family;
-    mutable kind : kind;
-    mutable v6only : bool;
-    mutable debug : bool;
-    mutable broadcast : bool;
-    mutable reuseaddr : bool;
-    mutable keepalive : bool;
-    mutable dontroute : bool;
-    mutable oobinline : bool;
-    mutable reuseport : bool;
-    mutable nodelay : bool;
-    mutable sndbuf : int option;
-    mutable rcvbuf : int option;
-    mutable rcvlowat : int;
-    mutable sndlowat : int option;
-    mutable linger : int option;
-    mutable rcvtimeo : float;
-    mutable sndtimeo : float;
-    mutable keepidle : int option;
-    mutable keepintvl : int option;
-    mutable keepcnt : int option;
-    mutable congestion : string;
-    mutable cork : bool;
-    mutable user_timeout : int;
-    mutable user_mss : int;
-    mutable maxseg : int option;
-    mutable linger2 : int;
-    mutable defer_accept : int;
-    mutable syncnt : int;
-    mutable window_clamp : int option;
-    mutable quickack : bool;
-    mutable fastopen : int;
-    mutable freebind : bool;
-    mutable bind_no_port : bool;
-    mutable port_range : int * int;
-    mutable ttl : int;
-    mutable mtu_discover : [ `Want | `Dont | `Do | `Probe ];
-    mutable resized : unit -> unit;
-  }
-
-  let v ~os ~family kind =
-    {
-      os;
-      family;
-      kind;
-      v6only = false;
-      debug = false;
-      broadcast = false;
-      reuseaddr = false;
-      keepalive = false;
-      dontroute = false;
-      oobinline = false;
-      reuseport = false;
-      nodelay = false;
-      sndbuf = None;
-      rcvbuf = None;
-      rcvlowat = 1;
-      sndlowat = None;
-      linger = None;
-      rcvtimeo = 0.;
-      sndtimeo = 0.;
-      keepidle = None;
-      keepintvl = None;
-      keepcnt = None;
-      congestion = "cubic";
-      cork = false;
-      user_timeout = 0;
-      user_mss = 0;
-      maxseg = None;
-      linger2 = 0;
-      defer_accept = 0;
-      syncnt = 6;
-      window_clamp = None;
-      quickack = true;
-      fastopen = 0;
-      freebind = false;
-      bind_no_port = false;
-      port_range = (0, 0);
-      ttl = 64;
-      mtu_discover = `Want;
-      resized = ignore;
-    }
-
-  let family_of_ip (ip : Eio.Net.Ipaddr.v4v6) =
-    if String.length (ip :> string) = 4 then V4 else V6
-
-  (* Linux marks an IPv6 socket bound at an address other than the wildcard
-     and the IPv4-mapped ones as IPv6 only. *)
-  let bound t (ip : Eio.Net.Ipaddr.v4v6) =
-    if
-      t.os = Linux && t.family = V6
-      && (not (is_v4 ip))
-      && not (same ip (any ip))
-    then t.v6only <- true
-
-  let tcp t = t.family <> Local && t.kind <> Datagram
-  let connected t = t.kind = Client || t.kind = Server
-
-  (* The send and receive buffers each kernel gives a socket. *)
-  let default_sndbuf t =
-    match (t.os, t.family, t.kind) with
-    | Linux, (V4 | V6), (Unconnected | Listener) -> 16384
-    | Linux, (V4 | V6), (Client | Server) -> 2626560
-    | Linux, _, _ -> 229376
-    | Macos, (V4 | V6), (Unconnected | Listener) -> 131072
-    | Macos, V4, Client -> 146988
-    | Macos, V6, Client -> 146808
-    | Macos, V4, Server -> 132792
-    | Macos, V6, Server -> 132132
-    | Macos, (V4 | V6), Datagram -> 9216
-    | Macos, Local, Datagram -> 2048
-    | Macos, Local, _ -> 8192
-
-  let default_rcvbuf t =
-    match (t.os, t.family, t.kind) with
-    | Linux, (V4 | V6), (Unconnected | Listener | Client | Server) -> 131072
-    | Linux, _, _ -> 229376
-    | Macos, (V4 | V6), (Unconnected | Listener) -> 131072
-    | Macos, V4, Client -> 408300
-    | Macos, V6, Client -> 407800
-    | Macos, V4, Server -> 132792
-    | Macos, V6, Server -> 132132
-    | Macos, (V4 | V6), Datagram -> 786896
-    | Macos, Local, Datagram -> 4096
-    | Macos, Local, _ -> 8192
-
-  let sndbuf t = Option.value t.sndbuf ~default:(default_sndbuf t)
-  let rcvbuf t = Option.value t.rcvbuf ~default:(default_rcvbuf t)
-
-  (* macOS's maximum segment size before a connection, and that of each end
-     of one over loopback, whose MTU is 16384. *)
-  let default_maxseg t =
-    match (t.family, t.kind) with
-    | V4, Client -> 16332
-    | V6, Client -> 16312
-    | V4, Server -> 4024
-    | V6, Server -> 4004
-    | V6, _ -> 1024
-    | _ -> 512
-
-  (* Linux's maximum segment size of a connection over loopback, less the
-     12 bytes of the timestamp option from a size the socket set. *)
-  let linux_mss t =
-    let base =
-      match (t.family, t.kind) with
-      | V4, Client -> 32741
-      | V6, Client -> 32732
-      | _ -> 32768
-    in
-    if t.user_mss > 0 then min base (t.user_mss - 12) else base
-
-  let listener ~os : Eio.Net.Sockaddr.stream -> t = function
-    | `Unix _ -> v ~os ~family:Local Listener
-    | `Tcp (ip, _) ->
-        let t = v ~os ~family:(family_of_ip ip) Listener in
-        bound t ip;
-        t
-
-  let client ~os : Eio.Net.Sockaddr.stream -> t = function
-    | `Unix _ -> v ~os ~family:Local Unconnected
-    | `Tcp (ip, _) -> v ~os ~family:(family_of_ip ip) Unconnected
-
-  let datagram ~os : Eio.Net.Sockaddr.datagram -> t = function
-    | `Unix _ -> v ~os ~family:Local Datagram
-    | `Udp (ip, _) ->
-        let t = v ~os ~family:(family_of_ip ip) Datagram in
-        bound t ip;
-        t
-
-  (* Becomes an end of a connection. *)
-  let connect t kind =
-    t.kind <- kind;
-    match t.os with
-    | Linux -> t.maxseg <- Some (linux_mss t)
-    | Macos -> t.maxseg <- None
-
-  (* What an accepted socket takes of its listener's options: on Linux a TCP
-     one all but [TCP_DEFER_ACCEPT] and [TCP_FASTOPEN], a Unix-domain one
-     none; on macOS all but the low-water marks and the timeouts, and over
-     TCP the keepalive idle time. *)
-  let accepted l =
-    let fresh = v ~os:l.os ~family:l.family Server in
-    let t =
-      match (l.os, l.family) with
-      | Linux, Local -> fresh
-      | Linux, _ -> { l with kind = Server; defer_accept = 0; fastopen = 0 }
-      | Macos, family ->
-          {
-            l with
-            kind = Server;
-            rcvlowat = 1;
-            sndlowat = None;
-            rcvtimeo = 0.;
-            sndtimeo = 0.;
-            keepidle = (if family = Local then l.keepidle else None);
-          }
-    in
-    connect t Server;
-    t.resized <- ignore;
-    t
-
-  let error op code = raise (Posix.sockopt_error op code)
-
-  (* An option of Linux's that eio_posix does not find on macOS. *)
-  let missing () = raise (Eio.Net.err Invalid_option)
-
-  type level = Socket | Tcp | Ip | Ipv6 | Linux_tcp | Linux_ip
-
-  let level : type a. a Eio.Net.Sockopt.t -> level = function
-    | O.TCP_NODELAY | O.TCP_KEEPIDLE | O.TCP_KEEPINTVL | O.TCP_KEEPCNT
-    | O.TCP_MAXSEG ->
-        Tcp
-    | O.TCP_CONGESTION | O.TCP_CORK | O.TCP_USER_TIMEOUT | O.TCP_LINGER2
-    | O.TCP_DEFER_ACCEPT | O.TCP_SYNCNT | O.TCP_WINDOW_CLAMP | O.TCP_QUICKACK
-    | O.TCP_FASTOPEN ->
-        Linux_tcp
-    | O.IP_TTL -> Ip
-    | O.IP_FREEBIND | O.IP_BIND_ADDRESS_NO_PORT | O.IP_LOCAL_PORT_RANGE
-    | O.IP_MTU | O.IP_MTU_DISCOVER ->
-        Linux_ip
-    | O.IPV6_ONLY -> Ipv6
-    | _ -> Socket
-
-  (* The kernel's refusal of an option at a level the socket's family or
-     type lacks. On macOS an IP or TCP option on a Unix-domain socket is read
-     as the local option of the same number, which [get] answers. *)
-  let gate op t level =
-    let fail code = error op code in
-    let set = op = `Set in
-    match (t.os, level, t.family) with
-    | _, Socket, _ -> ()
-    | Macos, (Linux_tcp | Linux_ip), _ -> missing ()
-    | Linux, _, Local -> fail `Not_supported
-    | Linux, (Tcp | Linux_tcp), V4 when t.kind = Datagram ->
-        fail (if set then `No_option else `Not_supported)
-    | Linux, (Tcp | Linux_tcp), V6 when t.kind = Datagram -> fail `No_option
-    | Linux, Ipv6, V4 -> fail (if set then `No_option else `Not_supported)
-    | Linux, _, _ -> ()
-    | Macos, Ipv6, Local -> fail `Not_supported
-    | Macos, _, Local -> if set then fail `Not_supported
-    | Macos, Tcp, _ when t.kind = Datagram -> fail `Invalid
-    | Macos, Ipv6, V4 | Macos, Ip, V6 -> fail `Invalid
-    | Macos, _, _ -> ()
-
-  (* What setsockopt(2) takes of a float: whole seconds and microseconds,
-     cut as OCaml's Unix cuts them. Linux keeps whole milliseconds, rounded
-     up, and a negative time as none; macOS refuses it. *)
-  let timeout t f =
-    if f < 0. then if t.os = Linux then 0. else error `Set `Domain
-    else
-      let sec = Float.to_int f in
-      let usec = Float.to_int (1e6 *. (f -. Float.of_int sec)) in
-      let sec, usec =
-        match t.os with
-        | Linux ->
-            let ms = (usec + 999) / 1000 in
-            if ms = 1000 then (sec + 1, 0) else (sec, ms * 1000)
-        | Macos -> (sec, usec)
-      in
-      Float.of_int sec +. (Float.of_int usec /. 1e6)
-
-  (* Linux's [TCP_DEFER_ACCEPT] is a number of SYN-ACK retransmissions, the
-     first after a second, each after twice as long, at most 120 seconds. *)
-  let secs_to_retrans secs =
-    if secs <= 0 then 0
-    else
-      let rec go res timeout period =
-        if secs > period && res < 255 then
-          let timeout = min (2 * timeout) 120 in
-          go (res + 1) timeout (period + timeout)
-        else res
-      in
-      go 1 1 1
-
-  let retrans_to_secs n =
-    if n <= 0 then 0
-    else
-      let rec go n timeout period =
-        if n <= 1 then period
-        else
-          let timeout = min (2 * timeout) 120 in
-          go (n - 1) timeout (period + timeout)
-      in
-      go n 1 1
-
-  (* Linux takes a buffer size as unsigned, at most [wmem_max] or
-     [rmem_max], doubles it for its bookkeeping and keeps a minimum; macOS
-     keeps it as it is, at most [kern.ipc.maxsockbuf]. *)
-  let buffer t ~min:least n =
-    match t.os with
-    | Linux ->
-        let n = if n < 0 || n > 7500000 then 7500000 else n in
-        max (2 * n) least
-    | Macos -> if n <= 0 then error `Set `Invalid else min n 8388608
-
-  (* Up to the first NUL and 15 bytes, as Linux reads the name. *)
-  let congestion name =
-    let name =
-      match String.index_opt name '\000' with
-      | Some i -> String.sub name 0 i
-      | None -> name
-    in
-    if String.length name > 15 then String.sub name 0 15 else name
-
-  let non_negative name v =
-    if v < 0 then Fmt.invalid_arg "%s must be non-negative, got %d" name v
-
-  (* The checks Eio makes before it calls setsockopt(2). *)
-  let check : type a. a Eio.Net.Sockopt.t -> a -> unit =
-   fun opt v ->
-    match opt with
-    | O.TCP_KEEPIDLE -> non_negative "O.TCP_KEEPIDLE" v
-    | O.TCP_KEEPINTVL -> non_negative "O.TCP_KEEPINTVL" v
-    | O.TCP_KEEPCNT -> non_negative "O.TCP_KEEPCNT" v
-    | O.TCP_USER_TIMEOUT -> non_negative "O.TCP_USER_TIMEOUT" v
-    | O.TCP_MAXSEG -> non_negative "O.TCP_MAXSEG" v
-    | O.TCP_LINGER2 -> (
-        match v with
-        | Some n when n < 0 ->
-            Fmt.invalid_arg "O.TCP_LINGER2 must be non-negative, got %d" n
-        | _ -> ())
-    | O.TCP_DEFER_ACCEPT -> non_negative "O.TCP_DEFER_ACCEPT" v
-    | O.TCP_SYNCNT ->
-        if v < 1 || v > 255 then
-          Fmt.invalid_arg "O.TCP_SYNCNT must be between 1 and 255, got %d" v
-    | O.TCP_WINDOW_CLAMP -> non_negative "O.TCP_WINDOW_CLAMP" v
-    | O.TCP_FASTOPEN ->
-        if v < 0 then
-          Fmt.invalid_arg
-            "O.TCP_FASTOPEN queue length must be non-negative, got %d" v
-    | O.IP_LOCAL_PORT_RANGE ->
-        let lower, upper = v in
-        if lower < 0 || lower > 65535 then
-          Fmt.invalid_arg
-            "O.IP_LOCAL_PORT_RANGE lower bound must be 0-65535, got %d" lower;
-        if upper < 0 || upper > 65535 then
-          Fmt.invalid_arg
-            "O.IP_LOCAL_PORT_RANGE upper bound must be 0-65535, got %d" upper;
-        if lower <> 0 && upper <> 0 && lower > upper then
-          Fmt.invalid_arg
-            "O.IP_LOCAL_PORT_RANGE lower bound (%d) must be <= upper bound (%d)"
-            lower upper
-    | O.IP_TTL ->
-        if v < 1 || v > 255 then
-          Fmt.invalid_arg "O.IP_TTL must be between 1 and 255, got %d" v
-    | O.IP_MTU -> invalid_arg "O.IP_MTU is a read-only socket option"
-    | _ -> ()
-
-  let set : type a. t -> a Eio.Net.Sockopt.t -> a -> unit =
-   fun t opt v ->
-    let opt = Posix.canonical opt in
-    check opt v;
-    gate `Set t (level opt);
-    let invalid () = error `Set `Invalid in
-    let linux = t.os = Linux in
-    match opt with
-    | _ when Posix.extra opt <> None -> error `Set `No_option
-    | O.SO_DEBUG ->
-        (* Only CAP_NET_ADMIN turns it on, on Linux. *)
-        if linux && v then error `Set `Denied else t.debug <- v
-    | O.SO_BROADCAST -> t.broadcast <- v
-    | O.SO_REUSEADDR -> t.reuseaddr <- v
-    | O.SO_KEEPALIVE -> t.keepalive <- v
-    | O.SO_DONTROUTE -> t.dontroute <- v
-    | O.SO_OOBINLINE -> t.oobinline <- v
-    | O.SO_REUSEPORT -> t.reuseport <- v
-    | O.SO_SNDBUF ->
-        t.sndbuf <- Some (buffer t ~min:4608 v);
-        t.resized ()
-    | O.SO_RCVBUF ->
-        t.rcvbuf <- Some (buffer t ~min:2304 v);
-        t.resized ()
-    | O.SO_RCVLOWAT -> (
-        match t.os with
-        | Linux ->
-            let v = if v < 0 then 0x7fffffff else v in
-            let v =
-              if not (tcp t) then v
-              else
-                min v (match t.rcvbuf with Some b -> b / 2 | None -> 16777216)
-            in
-            t.rcvlowat <- (if v = 0 then 1 else v)
-        | Macos -> if v < 1 then invalid () else t.rcvlowat <- min v (rcvbuf t))
-    | O.SO_SNDLOWAT ->
-        if linux then error `Set `No_option
-        else if v < 1 then invalid ()
-        else t.sndlowat <- Some (min v (sndbuf t))
-    | O.SO_LINGER -> (
-        match v with
-        | Some n when (not linux) && (n < 0 || n > 32767) -> error `Set `Domain
-        | v -> t.linger <- v)
-    | O.SO_RCVTIMEO -> t.rcvtimeo <- timeout t v
-    | O.SO_SNDTIMEO -> t.sndtimeo <- timeout t v
-    | O.TCP_NODELAY -> t.nodelay <- v
-    | O.TCP_KEEPIDLE ->
-        if linux then
-          if v < 1 || v > 32767 then invalid () else t.keepidle <- Some v
-        else t.keepidle <- (if v = 0 then None else Some v)
-    | O.TCP_KEEPINTVL ->
-        if linux then
-          if v < 1 || v > 32767 then invalid () else t.keepintvl <- Some v
-        else t.keepintvl <- (if v = 0 then None else Some v)
-    | O.TCP_KEEPCNT ->
-        if linux then
-          if v < 1 || v > 127 then invalid () else t.keepcnt <- Some v
-        else t.keepcnt <- (if v = 0 then None else Some v)
-    | O.TCP_MAXSEG -> (
-        match t.os with
-        | Linux ->
-            if v <> 0 && (v < 88 || v > 32767) then invalid ()
-            else t.user_mss <- v
-        | Macos ->
-            let current = Option.value t.maxseg ~default:(default_maxseg t) in
-            if v <= 0 || v > current || v + 40 < 216 then invalid ()
-            else t.maxseg <- Some v)
-    | O.TCP_CONGESTION -> (
-        match congestion v with
-        | "" -> invalid ()
-        | ("reno" | "cubic") as name -> t.congestion <- name
-        | _ -> error `Set `Unknown)
-    | O.TCP_CORK -> t.cork <- v
-    | O.TCP_USER_TIMEOUT -> t.user_timeout <- v
-    | O.TCP_LINGER2 ->
-        t.linger2 <- (match v with None -> 0 | Some n -> min n 120)
-    | O.TCP_DEFER_ACCEPT -> t.defer_accept <- secs_to_retrans v
-    | O.TCP_SYNCNT -> if v > 127 then invalid () else t.syncnt <- v
-    | O.TCP_WINDOW_CLAMP ->
-        if v = 0 then
-          if t.kind = Unconnected then t.window_clamp <- Some 0 else invalid ()
-        else t.window_clamp <- Some (max v 1152)
-    | O.TCP_QUICKACK -> t.quickack <- v
-    | O.TCP_FASTOPEN ->
-        (* The queue is at most [net.core.somaxconn] long. *)
-        if connected t then invalid () else t.fastopen <- min v 4096
-    | O.IP_FREEBIND -> t.freebind <- v
-    | O.IP_BIND_ADDRESS_NO_PORT -> t.bind_no_port <- v
-    | O.IP_LOCAL_PORT_RANGE -> t.port_range <- v
-    | O.IP_TTL -> t.ttl <- v
-    | O.IP_MTU_DISCOVER -> t.mtu_discover <- v
-    | O.IPV6_ONLY -> if t.kind = Unconnected then t.v6only <- v else invalid ()
-    | _ -> missing ()
-
-  (* macOS's answer to an IP or TCP option on a Unix-domain socket: the local
-     option of the same number, LOCAL_PEERCRED for [TCP_NODELAY] and
-     LOCAL_PEERPID or LOCAL_PEERUUID for [TCP_MAXSEG] and [IP_TTL], read as
-     an integer; mem has no peer process and gives 0. *)
-  let local_macos : type a. t -> a Eio.Net.Sockopt.t -> a =
-   fun t opt ->
-    let fail code = error `Get code in
-    match opt with
-    | O.TCP_NODELAY -> (
-        match t.kind with
-        | Datagram -> fail `Invalid
-        | Client | Server -> false
-        | Unconnected | Listener -> fail `Not_connected)
-    | O.TCP_MAXSEG -> if connected t then 0 else fail `Not_connected
-    | O.IP_TTL -> if connected t then 0 else fail `Not_connected
-    | _ -> fail `Not_supported
-
-  let get : type a. t -> a Eio.Net.Sockopt.t -> a =
-   fun t opt ->
-    let opt = Posix.canonical opt in
-    gate `Get t (level opt);
-    let linux = t.os = Linux in
-    match (Posix.extra opt, opt) with
-    | Some Acceptconn, _ -> if linux then t.kind = Listener else missing ()
-    | Some Error, _ -> 0
-    | Some Type, _ -> if t.kind = Datagram then 2 else 1
-    | None, _ when t.os = Macos && t.family = Local && level opt <> Socket ->
-        local_macos t opt
-    | None, opt -> (
-        match opt with
-        | O.SO_DEBUG -> t.debug
-        | O.SO_BROADCAST -> t.broadcast
-        | O.SO_REUSEADDR -> t.reuseaddr
-        | O.SO_KEEPALIVE -> t.keepalive
-        | O.SO_DONTROUTE -> t.dontroute
-        | O.SO_OOBINLINE -> t.oobinline
-        | O.SO_REUSEPORT -> t.reuseport && not (linux && t.family = Local)
-        | O.SO_SNDBUF -> sndbuf t
-        | O.SO_RCVBUF -> rcvbuf t
-        | O.SO_RCVLOWAT -> t.rcvlowat
-        | O.SO_SNDLOWAT -> (
-            match t.sndlowat with
-            | Some n -> n
-            | None ->
-                if linux || (t.family = Local && t.kind = Datagram) then 1
-                else 2048)
-        | O.SO_LINGER -> t.linger
-        | O.SO_RCVTIMEO -> t.rcvtimeo
-        | O.SO_SNDTIMEO -> t.sndtimeo
-        | O.TCP_NODELAY -> t.nodelay
-        | O.TCP_KEEPIDLE -> Option.value t.keepidle ~default:7200
-        | O.TCP_KEEPINTVL -> Option.value t.keepintvl ~default:75
-        | O.TCP_KEEPCNT ->
-            Option.value t.keepcnt ~default:(if linux then 9 else 8)
-        | O.TCP_MAXSEG -> (
-            match t.os with
-            | Linux -> (
-                match t.maxseg with
-                | Some n when connected t -> n
-                | _ -> if t.user_mss > 0 then t.user_mss else 536)
-            | Macos -> Option.value t.maxseg ~default:(default_maxseg t))
-        | O.TCP_CONGESTION -> t.congestion
-        | O.TCP_CORK -> t.cork
-        | O.TCP_USER_TIMEOUT -> t.user_timeout
-        | O.TCP_LINGER2 -> Some (if t.linger2 = 0 then 60 else t.linger2)
-        | O.TCP_DEFER_ACCEPT -> retrans_to_secs t.defer_accept
-        | O.TCP_SYNCNT -> t.syncnt
-        | O.TCP_WINDOW_CLAMP -> (
-            match t.window_clamp with
-            | Some n -> n
-            | None -> if connected t then 65536 else 0)
-        | O.TCP_QUICKACK -> t.quickack
-        | O.TCP_FASTOPEN -> t.fastopen
-        | O.IP_FREEBIND -> t.freebind
-        | O.IP_BIND_ADDRESS_NO_PORT -> t.bind_no_port
-        | O.IP_LOCAL_PORT_RANGE -> t.port_range
-        | O.IP_TTL -> t.ttl
-        | O.IP_MTU ->
-            if not (connected t) then error `Get `Not_connected
-            else if t.family = V4 then 65535
-            else 65536
-        | O.IP_MTU_DISCOVER -> t.mtu_discover
-        | O.IPV6_ONLY -> t.v6only
-        | _ -> missing ())
-
-  (* What a direction of a connection queues once a buffer is set: on Linux
-     over TCP the writer's send buffer, of which it holds at least 32 KiB in
-     flight, and half the reader's receive buffer, its window; over a Unix
-     path half the writer's send buffer, the rest going to each write's
-     overhead. On macOS over TCP the writer's send buffer and what the
-     reader's receive buffer grows to as data comes, 128 KiB more than one
-     set and 176 KiB when none is, or 16 KiB in flight for a send buffer
-     smaller than that; over a Unix path the writer's send buffer. [None]
-     when the queue keeps its capacity. *)
-  let queue ~local ~writer ~reader =
-    match (writer.sndbuf, reader.rcvbuf) with
-    | None, None -> None
-    | _ when local && writer.sndbuf = None -> None
-    | _ -> (
-        let snd = sndbuf writer in
-        match (writer.os, local) with
-        | Linux, false -> Some (max snd 32768 + (rcvbuf reader / 2))
-        | Linux, true -> Some (snd / 2)
-        | Macos, false ->
-            let window =
-              match reader.rcvbuf with Some r -> r + 131072 | None -> 180224
-            in
-            Some (snd + if snd < 16384 then 16384 else window)
-        | Macos, true -> Some snd)
-
-  (* When a TCP end whose connection went silent at [silenced] gives up, with
-     ETIMEDOUT, if it does: [last] is when it last received a segment, and
-     [oldest] when it sent the oldest byte not acknowledged. Keepalive
-     probes once the idle time has passed since the last segment, a probe the
-     live peer answered included, and gives up after [cnt] more intervals,
-     or with [TCP_USER_TIMEOUT] at the first probe that long past the last
-     segment. Data not acknowledged for [TCP_USER_TIMEOUT], or for 948.6 s on
-     Linux (tcp_retries2 = 15 over loopback) and 18 s on macOS, gives up too.
-     On Linux it stops the probes. Measured over loopback, with a peer whose
-     segments were all dropped. *)
-  let give_up t ~silenced ~last ~oldest =
-    let ns = Mtime.to_uint64_ns
-    and secs n = Int64.(mul (of_int n) 1_000_000_000L) in
-    let at n = Some (Mtime.of_uint64_ns n) in
-    let user = Int64.(mul (of_int t.user_timeout) 1_000_000L) in
-    let linux = t.os = Linux in
-    let keepalive =
-      if not t.keepalive then None
-      else
-        let idle = secs (Option.value t.keepidle ~default:7200) in
-        let intvl = secs (Option.value t.keepintvl ~default:75) in
-        let cnt = Option.value t.keepcnt ~default:(if linux then 9 else 8) in
-        let ceil a b = if a <= 0L then 0L else Int64.(div (add a (pred b)) b) in
-        (* The last probe the live peer answered, or the last segment. *)
-        let quiet =
-          Int64.(
-            mul idle (max 0L (pred (ceil (sub (ns silenced) (ns last)) idle))))
-        in
-        let base = Int64.add (ns last) quiet in
-        let probes =
-          if user > 0L then max 1L (ceil (Int64.sub user idle) intvl)
-          else Int64.of_int cnt
-        in
-        at Int64.(add base (add idle (mul probes intvl)))
-    in
-    let retransmit =
-      match oldest with
-      | None -> None
-      | Some u ->
-          let span =
-            if user > 0L then user
-            else if linux then 948_600_000_000L
-            else secs 18
-          in
-          at (Int64.add (ns u) span)
-    in
-    match (linux, keepalive, retransmit) with
-    | true, _, Some _ -> retransmit
-    | _, None, r | _, r, None -> r
-    | false, Some k, Some r ->
-        if Mtime.is_earlier k ~than:r then keepalive else retransmit
-end
-
-(* Fibers waiting on a pipe, first come first served, in a doubly-linked
-   list as {!Eio.Condition} keeps them, so a cancelled waiter leaves at once.
-   A waiter is taken from the list under the pipe's mutex, at most once, and
-   woken once the mutex is released. The first waiter is woken with the turn:
-   until it has gone again, a newcomer queues behind the waiters rather than
-   take the room or bytes that woke it, and a woken waiter that must wait again
-   goes back to the head. A waiter cancelled after it was taken passes the turn
-   on, so no wake-up is lost. *)
-module Waiters = struct
-  type node = {
-    wake : unit Eio.Promise.u;
-    mutable prev : node option;
-    mutable next : node option;
-    mutable waiting : bool;
-  }
-
-  type t = {
-    mutable first : node option;
-    mutable last : node option;
-    mutable turn : bool;
-  }
-
-  let v () = { first = None; last = None; turn = false }
-
-  let add q =
-    let p, wake = Eio.Promise.create () in
-    let n = { wake; prev = q.last; next = None; waiting = true } in
-    (match q.last with None -> q.first <- Some n | Some l -> l.next <- Some n);
-    q.last <- Some n;
-    (p, n)
-
-  let add_first q =
-    let p, wake = Eio.Promise.create () in
-    let n = { wake; prev = None; next = q.first; waiting = true } in
-    (match q.first with None -> q.last <- Some n | Some f -> f.prev <- Some n);
-    q.first <- Some n;
-    (p, n)
-
-  let unlink q n =
-    (match n.prev with None -> q.first <- n.next | Some p -> p.next <- n.next);
-    (match n.next with None -> q.last <- n.prev | Some x -> x.prev <- n.prev);
-    n.prev <- None;
-    n.next <- None;
-    n.waiting <- false
-
-  let take q =
-    match q.first with
-    | None -> []
-    | Some n ->
-        unlink q n;
-        [ n ]
-
-  let rec take_all q =
-    q.turn <- false;
-    match q.first with
-    | None -> []
-    | Some n ->
-        unlink q n;
-        n :: take_all q
-
-  (* A caller that does not hold the turn waits while others wait or hold
-     it. *)
-  let must_wait q ~turn = (not turn) && (Option.is_some q.first || q.turn)
-
-  (* Wakes the first waiter with the turn, unless a woken one holds it. *)
-  let pass q =
-    if q.turn then []
-    else
-      match take q with
-      | [] -> []
-      | woken ->
-          q.turn <- true;
-          woken
-
-  (* A caller that held the turn and leaves without waiting again passes it
-     on. *)
-  let release q ~turn =
-    if turn then begin
-      q.turn <- false;
-      pass q
-    end
-    else []
-
-  (* Queues a caller, at the head if it held the turn, which it gives up. *)
-  let queue q ~turn =
-    if turn then begin
-      q.turn <- false;
-      add_first q
-    end
-    else add q
-
-  (* Removes a waiter still in the list; [false] if it was taken. *)
-  let remove q n =
-    n.waiting
-    && begin
-      unlink q n;
-      true
-    end
-
-  let wake = List.iter (fun n -> Eio.Promise.resolve n.wake ())
-end
-
-(* One direction of a connection: the bytes written and not yet read. Its two
-   ends may be used from two domains, so its state is guarded by a mutex. A
-   read that finds nothing waits in [readers], and a write that finds the queue
-   holding [capacity] bytes waits in [writers]. A write wakes one reader, and
-   the next writer if room is left; a read wakes one writer, and the next
-   reader if bytes are left. A change of state, a shutdown, a reset or a close,
-   wakes every waiter.
-
-   The ends follow TCP: [shut] is the writer's FIN, after which the reader
-   reads end-of-file, or a reset when [reset] says one came. A reset is
-   reported once, by a read or by a write that [refused] fails, as a socket
-   clears its pending error; reads then return end-of-file. [gone] says the
-   reader has closed: the first write to it is lost and answered with a reset,
-   which [refused] then makes every later write raise; on a Unix-domain
-   connection, [local], the first write raises it, as EPIPE. [rcv_shut] says the reader
-   shut its receive side: it reads what is queued, then end-of-file, and as
-   Linux then sends no window update, what it reads frees no room: [unacked]
-   counts it. Once it
-   has also shut its send side, [fin_sent], data reaching a TCP reader resets
-   the connection, as Linux resets it in FIN-WAIT; a write to a Unix-domain
-   reader that shut its receive side raises the reset, as EPIPE.
-
-   [silent] says nothing crosses any more, as on a partition: the reader
-   reads the [n] bytes of [Some n], then waits until its own [rcv_shut]; the
-   writer fills the queue, then waits until its own [shut]. What the reader
-   reads frees no room, and neither end's close or shutdown reaches the
-   other. A TCP pipe with a [timer] keeps when its writer last sent a byte
-   while the connection was live, [last], when it went silent, [silenced],
-   and when the oldest byte sent since then, or lost then, was written,
-   [oldest]: when each end gives up follows. *)
-module Pipe = struct
-  type t = {
-    mutex : Mutex.t;
-    queued : Cstruct.t Queue.t;
-    mutable head : int; (* Bytes of the first queued buffer already read. *)
-    mutable shut : bool;
-    mutable reset : bool;
-    mutable gone : bool;
-    mutable refused : bool;
-    mutable rcv_shut : bool;
-    mutable fin_sent : bool;
-    mutable silent : int option;
-    timer : timer option;
-    mutable last : Mtime.t;
-    mutable silenced : Mtime.t;
-    mutable oldest : Mtime.t option;
-    os : os;
-    local : bool;
-    mutable capacity : int;
-    mutable size : int; (* Bytes queued and not yet read. *)
-    mutable unacked : int;
-    readers : Waiters.t;
-    writers : Waiters.t;
-  }
-
-  exception Expired
-
-  let now t = match t.timer with Some c -> c.now () | None -> Mtime.min_stamp
-
-  let v ~os ~local ~timer ~capacity =
-    let timer = if local then None else timer in
-    let born =
-      match timer with Some c -> c.now () | None -> Mtime.min_stamp
-    in
-    {
-      os;
-      local;
-      timer;
-      last = born;
-      silenced = born;
-      oldest = None;
-      mutex = Mutex.create ();
-      queued = Queue.create ();
-      head = 0;
-      shut = false;
-      reset = false;
-      gone = false;
-      refused = false;
-      rcv_shut = false;
-      fin_sent = false;
-      silent = None;
-      capacity;
-      size = 0;
-      unacked = 0;
-      readers = Waiters.v ();
-      writers = Waiters.v ();
-    }
-
-  (* Runs [f] under the mutex; it returns its result and the waiters to wake
-     once the mutex is released. *)
-  let locked t f =
-    let result, woken = Mutex.protect t.mutex (fun () -> f t) in
-    Waiters.wake woken;
-    result
-
-  (* Waits for the wake-up of [waiter], registered in [q], and at most until
-     [until ()], which a time already past makes raise [Expired]: [false] if
-     that time came first, and the waiter left without the turn. *)
-  let await ?until t q (p, waiter) =
-    let leave () =
-      locked t (fun _ ->
-          if Waiters.remove q waiter then ((), [])
-          else begin
-            q.turn <- false;
-            ((), Waiters.pass q)
-          end)
-    in
-    let deadline =
-      match (t.timer, until) with
-      | Some c, Some until -> Option.map (fun d -> (c, d)) (until ())
-      | _ -> None
-    in
-    match deadline with
-    | Some (c, d) when not (Mtime.is_later d ~than:(c.now ())) ->
-        leave ();
-        raise Expired
-    | _ -> (
-        let wait () =
-          match deadline with
-          | None ->
-              Eio.Promise.await p;
-              true
-          | Some (c, d) ->
-              Eio.Fiber.first
-                (fun () ->
-                  Eio.Promise.await p;
-                  true)
-                (fun () ->
-                  c.sleep_until d;
-                  false)
-        in
-        match wait () with
-        | true -> true
-        | false ->
-            leave ();
-            false
-        | exception (Eio.Cancel.Cancelled _ as e) ->
-            leave ();
-            raise e)
-
-  (* Changes the state under the mutex and wakes every waiter. *)
-  let update t f =
-    locked t (fun t ->
-        f t;
-        ((), Waiters.take_all t.readers @ Waiters.take_all t.writers))
-
-  (* A socket's buffer changed: the queue holds [capacity] bytes now. *)
-  let resize t capacity = update t (fun t -> t.capacity <- capacity)
-
-  (* On macOS a write that fails on a reset leaves it to the next read, as
-     it raises EPIPE without clearing the socket's pending error. *)
-  let lasting t = t.os = Macos && not t.local
-
-  (* The reset reaches the reader once it has read what is queued. A TCP
-     reader that has the writer's end-of-file keeps reading end-of-file on
-     Linux, which reports the end of a stream before a reset that came after
-     it; macOS reports the reset. A Unix-domain reader reads end-of-file on
-     macOS. *)
-  let reset t =
-    update t (fun t ->
-        if Option.is_some t.silent then ()
-        else if t.local && t.os = Macos then t.shut <- true
-        else if t.local || lasting t || not t.shut then t.reset <- true)
-
-  (* The reset was reported: the stream has ended. *)
-  let consume_reset t =
-    update t (fun t ->
-        if t.reset && not (lasting t) then begin
-          t.reset <- false;
-          t.shut <- true
-        end)
-
-  (* The bytes are copied: the caller owns its buffers again once this returns.
-     A write to a reader that has gone is lost, and resets [back], the other
-     direction of the connection. *)
-  let rec push t bufs n =
-    match bufs with
-    | b :: bufs when n > 0 ->
-        let k = min n (Cstruct.length b) in
-        if k > 0 then
-          Queue.push (Cstruct.of_string (Cstruct.to_string ~len:k b)) t.queued;
-        push t bufs (n - k)
-    | _ -> ()
-
-  (* Under the mutex: queues what room is left of [n] bytes. *)
-  let queue t ~turn bufs n =
-    if turn then t.writers.turn <- false;
-    let k = min n (t.capacity - t.size - t.unacked) in
-    push t bufs k;
-    t.size <- t.size + k;
-    k
-
-  (* Under the mutex: the next writer, if room is left. *)
-  let room t =
-    if t.size + t.unacked < t.capacity then Waiters.pass t.writers else []
-
-  let rec write ?(turn = false) ?until t ~back bufs =
-    let n = Cstruct.lenv bufs in
-    let result =
-      locked t @@ fun t ->
-      let leave outcome = (outcome, Waiters.release t.writers ~turn) in
-      (* An empty write sends nothing, so on Linux it meets no shutdown or
-         closed peer; on macOS it fails where a write would. *)
-      if n = 0 && t.os = Linux then leave (`Done 0)
-      else if t.shut then leave `Shut
-      else if Option.is_some t.silent then
-        if n = 0 then leave (`Done 0)
-        else if
-          Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
-        then (`Wait (Waiters.queue t.writers ~turn), [])
-        else
-          let k = queue t ~turn bufs n in
-          if k > 0 && Option.is_none t.oldest && Option.is_some t.timer then begin
-            t.oldest <- Some (now t);
-            (`Sent k, room t)
-          end
-          else (`Done k, room t)
-      else if t.refused then leave `Refused
-      else if n = 0 then
-        if t.local && t.gone then leave (`Raise (reset_exn ()))
-        else leave (`Done 0)
-      else if t.gone then begin
-        t.refused <- true;
-        if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
-      end
-      else if t.rcv_shut && t.local && t.os = Linux then
-        leave (`Raise (reset_exn ()))
-      else if
-        Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
-      then (`Wait (Waiters.queue t.writers ~turn), [])
-      else if t.rcv_shut && t.os = Macos then begin
-        (* macOS drops what reaches a receive side shut down, still counted
-           in its buffer: a TCP one answers it with a reset. *)
-        let k = min n (t.capacity - t.size - t.unacked) in
-        t.unacked <- t.unacked + k;
-        if t.local then leave (`Done k)
-        else begin
-          t.refused <- true;
-          leave (`Dropped k)
-        end
-      end
-      else if t.rcv_shut && t.fin_sent then begin
-        (* Data a full queue held back resets the connection once it is
-           sent; a write that waited for room reports the reset. *)
-        t.reset <- true;
-        t.refused <- true;
-        if turn then leave (`Raise (reset_exn ())) else leave (`Lost n)
-      end
-      else
-        let k = queue t ~turn bufs n in
-        if k > 0 && Option.is_some t.timer then t.last <- now t;
-        (`Done k, Waiters.pass t.readers @ room t)
-    in
-    match result with
-    | `Wait w ->
-        let turn = await ?until t t.writers w in
-        write ~turn ?until t ~back bufs
-    | `Sent n ->
-        (* The writer's reads now wait for an acknowledgement too. *)
-        update back ignore;
-        n
-    | `Raise e -> raise e
-    | `Shut ->
-        (* EPIPE after our own send shutdown; on TCP it reports a pending
-           reset first, as Linux reports its pending error. *)
-        if not t.local then consume_reset back;
-        raise (reset_exn ())
-    | `Refused ->
-        (* A TCP write reports the pending reset; a Unix-domain one fails
-           with EPIPE and leaves it to the next read. *)
-        if not t.local then consume_reset back;
-        raise (reset_exn ())
-    | `Lost n ->
-        reset back;
-        n
-    | `Dropped n ->
-        (* The reader's reset: the writer's reads raise it, and so do the
-           reader's writes. *)
-        update back (fun b -> b.refused <- true);
-        reset back;
-        n
-    | `Done n -> n
-
-  let rec take t dst got =
-    match Queue.peek_opt t.queued with
-    | Some src when got < Cstruct.length dst ->
-        let avail = Cstruct.length src - t.head in
-        let n = min avail (Cstruct.length dst - got) in
-        Cstruct.blit src t.head dst got n;
-        if n = avail then begin
-          ignore (Queue.pop t.queued : Cstruct.t);
-          t.head <- 0
-        end
-        else t.head <- t.head + n;
-        take t dst (got + n)
-    | _ -> got
-
-  (* What is queued drains before a reset or the end of the stream. *)
-  let rec read ?(turn = false) ?until t dst =
-    let result =
-      locked t @@ fun t ->
-      if Waiters.must_wait t.readers ~turn then
-        (`Wait (Waiters.queue t.readers ~turn), [])
-      else if Option.is_some t.silent then
-        match t.silent with
-        | Some left when left > 0 ->
-            if turn then t.readers.turn <- false;
-            let n =
-              take t (Cstruct.sub dst 0 (min left (Cstruct.length dst))) 0
-            in
-            t.size <- t.size - n;
-            t.unacked <- t.unacked + n;
-            t.silent <- Some (left - n);
-            (`Read n, if left > n then Waiters.pass t.readers else [])
-        | _ when t.rcv_shut ->
-            (`Raise End_of_file, Waiters.release t.readers ~turn)
-        | _ -> (`Wait (Waiters.queue t.readers ~turn), [])
-      else if not (Queue.is_empty t.queued) then begin
-        if turn then t.readers.turn <- false;
-        let n = take t dst 0 in
-        t.size <- t.size - n;
-        if t.rcv_shut then t.unacked <- t.unacked + n;
-        let next =
-          if Queue.is_empty t.queued then [] else Waiters.pass t.readers
-        in
-        (`Read n, (if t.rcv_shut then [] else Waiters.pass t.writers) @ next)
-      end
-      else if t.reset then begin
-        t.reset <- false;
-        t.shut <- true;
-        (`Raise (reset_exn ()), Waiters.release t.readers ~turn)
-      end
-      else if t.shut || t.rcv_shut then
-        (`Raise End_of_file, Waiters.release t.readers ~turn)
-      else (`Wait (Waiters.queue t.readers ~turn), [])
-    in
-    match result with
-    | `Read n -> n
-    | `Raise e -> raise e
-    | `Wait w ->
-        let turn = await ?until t t.readers w in
-        read ~turn ?until t dst
-
-  let shut t = update t (fun t -> t.shut <- true)
-
-  (* The reader shuts its receive side: it still reads what is queued and
-     what arrives, as on Linux, and end-of-file once nothing is; what it
-     reads frees no room for the writer. macOS drops what is queued. *)
-  let shut_receive t =
-    update t (fun t ->
-        t.rcv_shut <- true;
-        if t.os = Macos then begin
-          Queue.clear t.queued;
-          t.head <- 0;
-          t.unacked <- t.unacked + t.size;
-          t.size <- 0;
-          if Option.is_some t.silent then t.silent <- Some 0
-        end)
-
-  (* A TCP reader's FIN advertises the room its dropped bytes took. *)
-  let open_window t =
-    update t (fun t -> if Option.is_none t.silent then t.unacked <- 0)
-
-  (* The reader reads end-of-file once nothing is queued: macOS refuses to
-     shut down its receive side again. *)
-  let receive_ended t = Mutex.protect t.mutex (fun () -> t.rcv_shut || t.shut)
-
-  (* The reader shut its send side. *)
-  let fin_sent t = update t (fun t -> t.fin_sent <- true)
-
-  (* Nothing crosses from now on. Over TCP what is queued is lost, an end of
-     stream or a reset included, as a path that drops every segment loses
-     those in flight. AF_UNIX queues at the reader what a returned write
-     sent, so a Unix-domain reader still reads it, and a direction that has
-     ended keeps its end. *)
-  let silence t =
-    update t (fun t ->
-        if Option.is_none t.silent then
-          if not t.local then begin
-            t.silent <- Some 0;
-            t.silenced <- now t;
-            if t.size > 0 && Option.is_some t.timer then
-              t.oldest <- Some (now t)
-          end
-          else if not (t.shut || t.reset || t.gone || t.refused || t.rcv_shut)
-          then t.silent <- Some t.size)
-
-  (* A silent TCP pipe with a timer: when it went silent, when its writer last
-     sent a byte before, and when it wrote the oldest one not acknowledged. *)
-  let timing t =
-    Mutex.protect t.mutex (fun () ->
-        match (t.silent, t.timer) with
-        | Some _, Some _ -> Some (t.silenced, t.last, t.oldest)
-        | _ -> None)
-
-  (* The reader closes: bytes it left unread answer the writer with a reset,
-     which refuses its writes at once. *)
-  let leave t =
-    locked t @@ fun t ->
-    if Option.is_some t.silent then (false, [])
-    else
-      let unread = not (Queue.is_empty t.queued) in
-      Queue.clear t.queued;
-      t.head <- 0;
-      t.size <- 0;
-      t.gone <- true;
-      if unread then t.refused <- true;
-      (unread, Waiters.take_all t.readers @ Waiters.take_all t.writers)
-end
+  | Closed = Code.Closed
+  | No_listener = Code.No_listener
+  | Address_in_use = Code.Address_in_use
+  | No_destination = Code.No_destination
+  | Message_too_long = Code.Message_too_long
+  | Invalid_port = Code.Invalid_port
+  | Network_unreachable = Code.Network_unreachable
+  | Address_family = Code.Address_family
+  | Wrong_socket_type = Code.Wrong_socket_type
+  | Not_connected = Code.Not_connected
+  | Address_not_available = Code.Address_not_available
+  | Name_too_long = Code.Name_too_long
+  | Invalid_address = Code.Invalid_address
+  | Broadcast = Code.Broadcast
+  | Host_unreachable = Code.Host_unreachable
 
 module Flow = struct
   module Impl = struct
@@ -1880,14 +73,14 @@ module Flow = struct
         let first = t.given_up = `No in
         if first then t.given_up <- `Pending;
         let report =
-          t.given_up = `Pending && (op = `Read || t.from_peer.os = Linux)
+          t.given_up = `Pending && (op = `Read || Pipe.os t.from_peer = Linux)
         in
         if report then t.given_up <- `Reported;
         (first, report)
       in
       if first then begin
-        Pipe.update t.from_peer ignore;
-        Pipe.update t.to_peer ignore
+        Pipe.wake t.from_peer;
+        Pipe.wake t.to_peer
       end;
       if report then Posix.timed_out (op :> [ `Connect | `Read | `Write ])
       else match op with `Read -> End_of_file | `Write -> reset_exn ()
@@ -1895,7 +88,7 @@ module Flow = struct
     (* Runs [f] with the deadline of a silent end, or raises what this end
        meets if it has given up. *)
     let watched t op f =
-      if Option.is_none t.from_peer.timer then f None
+      if not (Pipe.timed t.from_peer) then f None
       else
         let until = until t in
         let expired =
@@ -1914,7 +107,7 @@ module Flow = struct
        bytes unread. *)
     let teardown t =
       let unread = Pipe.leave t.from_peer in
-      if t.abort then Pipe.update t.from_peer (fun p -> p.refused <- true);
+      if t.abort then Pipe.refuse t.from_peer;
       if unread || t.abort then Pipe.reset t.to_peer;
       Pipe.shut t.to_peer;
       t.on_close ~reset:(unread || t.abort) ~abort:t.abort
@@ -1969,7 +162,7 @@ module Flow = struct
       if Mutex.protect t.lock (fun () -> t.given_up = `No) then
         match cmd with
         | (`Receive | `All)
-          when t.from_peer.os = Macos && Pipe.receive_ended t.from_peer ->
+          when Pipe.os t.from_peer = Macos && Pipe.receive_ended t.from_peer ->
             ()
         | `Send ->
             Pipe.shut t.to_peer;
@@ -1980,7 +173,7 @@ module Flow = struct
             Pipe.shut t.to_peer;
             Pipe.fin_sent t.from_peer;
             Pipe.shut_receive t.from_peer;
-            if t.from_peer.os = Macos && not t.from_peer.local then
+            if Pipe.os t.from_peer = Macos && not (Pipe.local t.from_peer) then
               Pipe.open_window t.from_peer;
             t.on_fin ()
 
@@ -2007,7 +200,9 @@ module Flow = struct
     (* A TCP socket that lingers for no time resets its peer as it closes,
        as both kernels abort the connection then. *)
     let close t =
-      let abort = (not t.from_peer.local) && t.opts.linger = Some 0 in
+      let abort =
+        (not (Pipe.local t.from_peer)) && Sockopt.linger t.opts = Some 0
+      in
       close_with ~abort t
 
     let read_methods = []
@@ -2017,8 +212,8 @@ module Flow = struct
       use t "setsockopt" @@ fun () ->
       Sockopt.set t.opts opt v;
       if Option.is_some (Pipe.timing t.from_peer) then begin
-        Pipe.update t.from_peer ignore;
-        Pipe.update t.to_peer ignore
+        Pipe.wake t.from_peer;
+        Pipe.wake t.to_peer
       end
 
     let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
@@ -2089,7 +284,7 @@ module Flow = struct
       queue ~local:false ~capacity ~bound ~writer:opts ~reader:opts
     in
     let pipe = Pipe.v ~os ~local:false ~timer ~capacity:(size ()) in
-    opts.resized <- (fun () -> Pipe.resize pipe (size ()));
+    Sockopt.on_resize opts (fun () -> Pipe.resize pipe (size ()));
     v ~connection ~opts ~from_peer:pipe ~to_peer:pipe
 
   let pair ~os ~local ~timer ~capacity ~bound ~client:(c : Sockopt.t)
@@ -2102,8 +297,8 @@ module Flow = struct
       Pipe.resize to_client (size s c);
       Pipe.resize to_server (size c s)
     in
-    c.resized <- resized;
-    s.resized <- resized;
+    Sockopt.on_resize c resized;
+    Sockopt.on_resize s resized;
     let client =
       v ~connection ~opts:c ~from_peer:to_client ~to_peer:to_server
     in
@@ -2186,7 +381,7 @@ module Listening_socket = struct
       match addr with
       | `Tcp (ip, 0) ->
           let free =
-            match hub.ports.os with
+            match Ports.os hub.ports with
             | Linux -> Ports.free hub.ports
             | Macos -> Ports.free_next hub.ports
           in
@@ -2217,7 +412,7 @@ module Listening_socket = struct
               addr;
               lock = Mutex.create ();
               incoming = Queue.create ();
-              backlog = queue_length ~os:hub.ports.os backlog;
+              backlog = queue_length ~os:(Ports.os hub.ports) backlog;
               acceptable = Eio.Condition.create ();
               room = Eio.Condition.create ();
               users = 0;
@@ -2226,7 +421,7 @@ module Listening_socket = struct
               hooks = [];
               reuse = reuse_addr;
               hold;
-              opts = Sockopt.listener ~os:hub.ports.os addr;
+              opts = Sockopt.listener ~os:(Ports.os hub.ports) addr;
             }
           in
           Hashtbl.replace hub.listeners addr t;
@@ -2236,8 +431,9 @@ module Listening_socket = struct
      inside it would poison. *)
   let v hub ~reuse_addr ~backlog addr =
     (match addr with
-    | `Tcp (ip, _) -> check_local ~os:hub.ports.os ~tcp:true ~fail:bind_fail ip
-    | `Unix path -> check_path ~os:hub.ports.os ~raw:true path);
+    | `Tcp (ip, _) ->
+        check_local ~os:(Ports.os hub.ports) ~tcp:true ~fail:bind_fail ip
+    | `Unix path -> check_path ~os:(Ports.os hub.ports) ~raw:true path);
     match
       Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
           bind hub ~reuse_addr ~backlog addr)
@@ -2313,7 +509,7 @@ module Listening_socket = struct
         Queue.push conn t.incoming;
         Some `Queued
       end
-      else if t.hub.ports.os = Macos then Some `Full
+      else if Ports.os t.hub.ports = Macos then Some `Full
       else None
     in
     if queued = `Queued then Eio.Condition.broadcast t.acceptable;
@@ -2558,49 +754,49 @@ module Datagram_socket = struct
           else if off_loopback d then Some Network_unreachable
           else None
 
+  (* Without SO_BROADCAST a broadcast is refused, and a socket bound at a
+     wildcard address has no route to send one, nor a multicast one. *)
+  let routed ~too_long b d port =
+    let b = unmap b and d4 = unmap d in
+    let wildcard = same b (any b) in
+    if port = 0 then Some Invalid_port
+    else if lo_broadcast d4 || (broadcast d4 && not wildcard) then
+      Some Broadcast
+    else if wildcard && (broadcast d4 || multicast_v4 d4) then
+      Some Network_unreachable
+    else if off_loopback d then Some Network_unreachable
+    else if too_long then Some Message_too_long
+    else None
+
+  (* What an IPv4 socket bound at [b] refuses. *)
+  let refusal_v4 ~too_long ~len b : Eio.Net.Sockaddr.datagram -> _ = function
+    | _ when len > 0xffff -> Some Message_too_long
+    | `Unix path ->
+        Some
+          (if String.length path >= 14 then Address_family else Invalid_address)
+    | `Udp (d, _) when String.length (d :> string) = 16 -> Some Address_family
+    | `Udp (d, port) -> routed ~too_long b d port
+
   let refusal t dst bufs =
     let len = Cstruct.lenv bufs in
     if t.hub.os = Macos then refusal_macos t dst len
     else
       let too_long = len > max_length t dst in
-      (* Without SO_BROADCAST a broadcast is refused, and a socket bound at
-       a wildcard address has no route to send one, nor a multicast one. *)
-      let routed b d port =
-        let b = unmap b and d4 = unmap d in
-        let wildcard = same b (any b) in
-        if port = 0 then Some Invalid_port
-        else if lo_broadcast d4 || (broadcast d4 && not wildcard) then
-          Some Broadcast
-        else if wildcard && (broadcast d4 || multicast_v4 d4) then
-          Some Network_unreachable
-        else if off_loopback d then Some Network_unreachable
-        else if too_long then Some Message_too_long
-        else None
-      in
       match (t.addr, dst) with
       | `Unix _, `Udp _ -> Some Invalid_address
       | `Unix _, `Unix "" -> Some Invalid_address
       | `Unix _, `Unix _ -> if too_long then Some Message_too_long else None
-      | `Udp (b, _), dst when String.length (b :> string) = 4 -> (
-          if len > 0xffff then Some Message_too_long
-          else
-            match dst with
-            | `Unix path ->
-                Some
-                  (if String.length path >= 14 then Address_family
-                   else Invalid_address)
-            | `Udp (d, _) when String.length (d :> string) = 16 ->
-                Some Address_family
-            | `Udp (d, port) -> routed b d port)
+      | `Udp (b, _), dst when String.length (b :> string) = 4 ->
+          refusal_v4 ~too_long ~len b dst
       | `Udp _, `Unix _ -> Some Invalid_address
       | `Udp (b, _), `Udp (d, port) -> (
           let d16 = if String.length (d :> string) = 4 then map d else d in
           match cross_family ~os:Linux b d16 with
           (* No route reaches an IPv6 address off loopback: Linux says so
-           before it finds the families apart. *)
+             before it finds the families apart. *)
           | Some Address_family when off_loopback d -> Some Network_unreachable
           | Some code -> Some code
-          | None -> routed b d port)
+          | None -> routed ~too_long b d port)
 
   (* The address a datagram from [t] to [dst] comes from, as [peer] sees it: a
      wildcard sender sends from the loopback address of the destination's
@@ -2865,228 +1061,6 @@ module Datagram_socket = struct
    fun t opt -> Sockopt.get (open_opts t) opt
 end
 
-(* Host and service resolution as glibc's getaddrinfo(3) reads numbers, on
-   a dual-stack host with no services database and no name server. *)
-module Resolve = struct
-  let is_space = function
-    | ' ' | '\t' | '\n' | '\011' | '\012' | '\r' -> true
-    | _ -> false
-
-  let is_digit c = c >= '0' && c <= '9'
-  let ulong_max = "18446744073709551615"
-
-  (* [service] read as strtoul(3) reads it in base 10, the whole string or
-     nothing: leading spaces, a sign, digits, its value modulo 2^64 or
-     ULONG_MAX past it. The empty string reads as 0. *)
-  let strtoul service =
-    let n = String.length service in
-    let rec skip i =
-      if i < n && is_space service.[i] then skip (i + 1) else i
-    in
-    let i = skip 0 in
-    let neg, i =
-      if i < n && (service.[i] = '+' || service.[i] = '-') then
-        (service.[i] = '-', i + 1)
-      else (false, i)
-    in
-    let rec digits j =
-      if j < n && is_digit service.[j] then digits (j + 1) else j
-    in
-    let j = digits i in
-    if n = 0 then Some (false, false, 0L)
-    else if j = i || j <> n then None
-    else
-      let ds = String.sub service i (j - i) in
-      let rec strip k =
-        if k < String.length ds - 1 && ds.[k] = '0' then strip (k + 1) else k
-      in
-      let ds = String.sub ds (strip 0) (String.length ds - strip 0) in
-      let overflow =
-        String.length ds > 20
-        || (String.length ds = 20 && String.compare ds ulong_max > 0)
-      in
-      (* The low 32 bits are all a port needs. *)
-      let low =
-        String.fold_left
-          (fun acc c ->
-            Int64.(logand (add (mul acc 10L) (of_int (Char.code c - 48))))
-              0xffff_ffffL)
-          0L ds
-      in
-      Some (neg, overflow, low)
-
-  (* glibc keeps strtoul's result in an int: a negative one is no number, and
-     the port is its low 16 bits. *)
-  let port service =
-    match strtoul service with
-    | None -> None
-    | Some (_, true, _) -> None
-    | Some (neg, false, low) ->
-        let v =
-          if neg then Int64.(logand (sub 0x1_0000_0000L low) 0xffff_ffffL)
-          else low
-        in
-        if Int64.compare v 0x8000_0000L >= 0 then None
-        else Some (Int64.to_int v land 0xffff)
-
-  (* A part of an inet_aton(3) address: hexadecimal after 0x, octal after 0,
-     decimal otherwise. A bare 0x is no number. *)
-  let part s =
-    let n = String.length s in
-    let value base digits =
-      if digits = "" then None
-      else
-        String.fold_left
-          (fun acc c ->
-            match acc with
-            | None -> None
-            | Some v ->
-                let d =
-                  match c with
-                  | '0' .. '9' -> Char.code c - 48
-                  | 'a' .. 'f' -> Char.code c - 87
-                  | 'A' .. 'F' -> Char.code c - 55
-                  | _ -> 99
-                in
-                if d >= base then None
-                else
-                  let v = Int64.(add (mul v (of_int base)) (of_int d)) in
-                  if Int64.compare v 0xffff_ffffL > 0 then None else Some v)
-          (Some 0L) digits
-    in
-    if n >= 2 && s.[0] = '0' && (s.[1] = 'x' || s.[1] = 'X') then
-      value 16 (String.sub s 2 (n - 2))
-    else if n >= 1 && s.[0] = '0' then value 8 s
-    else value 10 s
-
-  (* macOS's port: strtoul(3)'s value, which must be at most 65535, so a
-     negative one is no port but -0. *)
-  let port_macos service =
-    let n = String.length service in
-    let rec skip i =
-      if i < n && is_space service.[i] then skip (i + 1) else i
-    in
-    let i = skip 0 in
-    let neg, i =
-      if i < n && (service.[i] = '+' || service.[i] = '-') then
-        (service.[i] = '-', i + 1)
-      else (false, i)
-    in
-    let rec digits j =
-      if j < n && is_digit service.[j] then digits (j + 1) else j
-    in
-    let j = digits i in
-    if n = 0 then Some 0
-    else if j = i || j <> n then None
-    else
-      let rec strip k =
-        if k < j - 1 && service.[k] = '0' then strip (k + 1) else k
-      in
-      let k = strip i in
-      if j - k > 5 then None
-      else
-        let v = int_of_string (String.sub service k (j - k)) in
-        if neg then if v = 0 then Some 0 else None
-        else if v <= 65535 then Some v
-        else None
-
-  (* An IPv4 address as inet_aton(3) reads it: one to four parts, the last
-     filling the bytes left. macOS's reads a bare 0x as 0 but in the last
-     part. *)
-  let inet_aton ~os s =
-    let parts = String.split_on_char '.' s in
-    let last = List.length parts - 1 in
-    let parts =
-      List.mapi
-        (fun i p ->
-          if os = Macos && i < last && String.lowercase_ascii p = "0x" then
-            Some 0L
-          else part p)
-        parts
-    in
-    if List.mem None parts then None
-    else
-      let parts = List.map Option.get parts in
-      let k = List.length parts in
-      let rec fold acc = function
-        | [] -> Some acc
-        | [ last ] ->
-            let bits = 8 * (5 - k) in
-            if k > 4 || Int64.compare last (Int64.shift_left 1L bits) >= 0 then
-              None
-            else Some Int64.(logor (shift_left acc bits) last)
-        | x :: rest ->
-            if Int64.compare x 255L > 0 then None
-            else fold Int64.(logor (shift_left acc 8) x) rest
-      in
-      match fold 0L parts with
-      | None -> None
-      | Some v ->
-          Some
-            (Eio.Net.Ipaddr.of_raw
-               (String.init 4 (fun i ->
-                    Char.chr
-                      (Int64.to_int
-                         Int64.(
-                           logand (shift_right_logical v (8 * (3 - i))) 255L)))))
-
-  (* /etc/hosts names the loopback addresses "localhost", in any case. With
-     no name server, "localhost." is another name. *)
-  let localhost name = String.lowercase_ascii name = "localhost"
-
-  (* An IPv6 address, in glibc's form, with no brackets. *)
-  let ipv6 s =
-    if String.length s > 0 && s.[0] = '[' then None
-    else
-      match Ipaddr.V6.of_string s with
-      | Ok ip -> Some (Eio.Net.Ipaddr.of_raw (Ipaddr.V6.to_octets ip))
-      | Error _ -> None
-
-  (* A scope glibc takes after an IPv6 address: a number of 32 bits, or the
-     name of an interface, which only the loopback one has, for an address
-     that needs a scope. *)
-  let scope ~os ip s =
-    (os = Macos && s <> "")
-    ||
-    let value =
-      String.fold_left
-        (fun v c ->
-          if Int64.compare v 0xffff_ffffL > 0 then v
-          else Int64.(add (mul v 10L) (of_int (Char.code c - 48))))
-        0L s
-    in
-    s <> "" && String.for_all is_digit s
-    && Int64.compare value 0xffff_ffffL <= 0
-    || (s = "lo" && needs_scope ip)
-
-  let number ~os name =
-    match inet_aton ~os name with
-    | Some ip -> Some ip
-    | None -> (
-        match String.index_opt name '%' with
-        | None -> ipv6 name
-        | Some i -> (
-            match ipv6 (String.sub name 0 i) with
-            | Some ip
-              when scope ~os ip
-                     (String.sub name (i + 1) (String.length name - i - 1)) ->
-                Some ip
-            | Some _ | None -> None))
-
-  (* The addresses of a host: a number as it reads, the loopback addresses
-     for "localhost" and the empty name, IPv6 first as glibc and macOS order
-     them on a dual-stack host, and nothing for any other name. *)
-  let host ~os name : Eio.Net.Ipaddr.v4v6 list =
-    let loopback =
-      [
-        (Eio.Net.Ipaddr.V6.loopback :> Eio.Net.Ipaddr.v4v6);
-        (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6);
-      ]
-    in
-    if name = "" || localhost name then loopback
-    else Option.to_list (number ~os name)
-end
-
 (* The two ends of a TCP connection, and when each lets go of its address.
    An end holds it while open. Once closed, the end whose FIN went first, by
    a shutdown of its send side or by its close, holds it in TIME_WAIT for 60
@@ -3116,7 +1090,7 @@ module Ends = struct
   let v (ports : Ports.t) =
     {
       lock = Mutex.create ();
-      now = ports.now;
+      now = Ports.now ports;
       time_wait = Ports.time_wait ports;
       seq = 0;
       fin = [| None; None |];
@@ -3185,7 +1159,7 @@ module Network = struct
     bounded : bool;
         (* The test gave [capacity]: it bounds what buffers set give too. *)
     sleep : (float -> unit) option;
-    timer : timer option;
+    timer : Pipe.timer option;
   }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
@@ -3315,175 +1289,194 @@ module Network = struct
     | `Unix _ -> `Unix ""
     | `Tcp (lip, _) -> `Tcp (seen_by lip ip, port)
 
-  (* A connect for a client that holds [local], if it is a TCP one. *)
-  let connect_held t ~sw ~bind_to ~opts
-      ~(release : ?until:Mtime.t -> ?time_wait:bool -> unit -> unit) addr local
-      =
-    let listener =
-      Eio.Mutex.use_ro t.hub.mutex (fun () ->
-          match addr with
-          | `Tcp (ip, port) ->
-              List.find_map
-                (fun ip -> Hashtbl.find_opt t.hub.listeners (`Tcp (ip, port)))
-                (reaching ip)
-          | `Unix _ -> Hashtbl.find_opt t.hub.listeners addr)
-    in
-    let refused () =
-      raise (Eio.Net.err (Connection_failure (Refused No_listener)))
-    in
-    (* A connect reaches no broadcast or multicast address, nor one off
-       loopback, and a link-local one needs a scope, as on Linux. *)
-    (match addr with
+  (* Lets go of a client's address, now or at [until]. *)
+  type release = ?until:Mtime.t -> ?time_wait:bool -> unit -> unit
+
+  let refused () =
+    raise (Eio.Net.err (Connection_failure (Refused No_listener)))
+
+  (* The listener a connect to [addr] reaches, if any. *)
+  let find_listener t addr =
+    Eio.Mutex.use_ro t.hub.mutex (fun () ->
+        match addr with
+        | `Tcp (ip, port) ->
+            List.find_map
+              (fun ip -> Hashtbl.find_opt t.hub.listeners (`Tcp (ip, port)))
+              (reaching ip)
+        | `Unix _ -> Hashtbl.find_opt t.hub.listeners addr)
+
+  (* A connect reaches no broadcast or multicast address, nor one off
+     loopback, and a link-local one needs a scope, as on Linux. *)
+  let check_destination ~os = function
+    | `Unix _ -> ()
     | `Tcp (d, _) ->
         let d' = unmap d in
-        if
-          (is_v4 d' && (multicast_v4 d' || broadcast d' || lo_broadcast d'))
-          || ((not (is_v4 d')) && first_byte d' = 0xff)
-        then fail (if t.os = Macos then Address_family else Network_unreachable);
+        let group =
+          if is_v4 d' then multicast_v4 d' || broadcast d' || lo_broadcast d'
+          else first_byte d' = 0xff
+        in
+        if group then
+          fail (if os = Macos then Address_family else Network_unreachable);
         if needs_scope d' then
-          fail (if t.os = Macos then Host_unreachable else Invalid_address);
+          fail (if os = Macos then Host_unreachable else Invalid_address);
         if off_loopback d then fail Network_unreachable
-    | `Unix _ -> ());
-    (* A connect bound at its own destination opens to itself, as Linux's
-       simultaneous open does. *)
-    let to_itself =
-      match (addr, bind_to, local) with
-      | `Tcp (d, port), Some (`Tcp _), Some (ip, port') ->
-          port = port' && same (unmap ip) (unmap (List.hd (reaching d)))
-      | _ -> false
-    in
-    match (listener, addr) with
-    | _, `Tcp _ when to_itself && t.os = Macos -> fail Invalid_address
-    | _, `Tcp (d, _) when t.os = Macos && unanswered d -> (
-        (* macOS's loopback interface takes 127.0.0.1 only: a connect to
-           another address of 127.0.0.0/8 waits for a handshake that never
-           comes, and times out after net.inet.tcp.keepinit. *)
+
+  (* A connect bound at its own destination opens to itself, as Linux's
+     simultaneous open does. *)
+  let to_itself ~bind_to local = function
+    | `Unix _ -> false
+    | `Tcp (d, port) -> (
+        match (bind_to, local) with
+        | Some (`Tcp _), Some (ip, port') ->
+            port = port' && same (unmap ip) (unmap (List.hd (reaching d)))
+        | _ -> false)
+
+  (* macOS refuses a connect to itself, and its loopback interface takes
+     127.0.0.1 only: a connect to another address of 127.0.0.0/8 waits for a
+     handshake that never comes, and times out after net.inet.tcp.keepinit. *)
+  let check_macos t ~to_itself = function
+    | `Unix _ -> ()
+    | `Tcp _ when to_itself -> fail Invalid_address
+    | `Tcp (d, _) when unanswered d -> (
         match t.sleep with
         | Some sleep ->
             sleep 75.;
             raise (Posix.timed_out `Connect)
         | None -> Eio.Fiber.await_cancel ())
-    | None, `Tcp _ when to_itself ->
-        let capacity =
-          t.capacity (Flow.default_capacity ~os:t.os ~local:false)
-        in
-        Sockopt.connect opts Client;
-        let flow =
-          Flow.self ~os:t.os ~timer:t.timer ~capacity ~bound:t.bounded ~opts
-        in
-        let ends = Ends.v t.hub.Listening_socket.ports in
-        (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
-        Flow.on_close flow (fun ~reset ~abort:_ ->
-            ignore (Ends.close ends `Client ~reset ~abort:false);
-            match Ends.close ends `Server ~reset ~abort:false with
-            | `Time_wait u, _ -> release ~until:u ~time_wait:true ()
-            | `Until u, _ -> release ~until:u ()
-            | (`Release | `Held), _ -> release ());
-        Flow.close_with sw flow
-    | None, `Unix "" -> fail Invalid_address
-    | None, `Unix path -> (
+    | `Tcp _ -> ()
+
+  (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
+  let connect_self t ~sw ~opts ~(release : release) =
+    let capacity = t.capacity (Flow.default_capacity ~os:t.os ~local:false) in
+    Sockopt.connect opts Client;
+    let flow =
+      Flow.self ~os:t.os ~timer:t.timer ~capacity ~bound:t.bounded ~opts
+    in
+    let ends = Ends.v t.hub.Listening_socket.ports in
+    Flow.on_close flow (fun ~reset ~abort:_ ->
+        ignore (Ends.close ends `Client ~reset ~abort:false);
+        match Ends.close ends `Server ~reset ~abort:false with
+        | `Time_wait u, _ -> release ~until:u ~time_wait:true ()
+        | `Until u, _ -> release ~until:u ()
+        | (`Release | `Held), _ -> release ());
+    Flow.close_with sw flow
+
+  (* A connect no listener takes. *)
+  let unheard t ~sw ~opts ~release ~to_itself = function
+    | `Tcp _ when to_itself -> connect_self t ~sw ~opts ~release
+    | `Tcp _ -> refused ()
+    | `Unix "" -> fail Invalid_address
+    | `Unix path -> (
         match Files.find t.hub.files ~stream:true path with
         | Some Datagram -> raise (Eio.Exn.create (Eio.Exn.X Wrong_socket_type))
         | Some (Stale | Client | Listener) -> refused ()
         | None when Files.abstract path -> refused ()
         | None -> raise (no_file ()))
-    | None, `Tcp _ -> refused ()
-    | Some listener, _ when Listening_socket.is_closed listener -> refused ()
-    | Some listener, _ -> (
-        let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
-        let capacity =
-          t.capacity (Flow.default_capacity ~os:t.os ~local:unix)
-        in
-        Sockopt.connect opts Client;
-        let client, server =
-          Flow.pair ~os:t.os ~local:unix ~timer:t.timer ~capacity
-            ~bound:t.bounded ~client:opts
-            ~server:(Sockopt.accepted listener.opts)
-        in
-        (* The accepted socket holds the listener's port at the address the
-           client reached, with the listener's [SO_REUSEADDR], and as one
-           bound at a wildcard address if the listener is, as Linux's
-           does. *)
-        let child =
-          match addr with
-          | `Unix _ -> None
-          | `Tcp (ip, port) ->
-              let reached = List.hd (reaching ip) in
-              (* macOS's accepted socket has its listener's family. *)
-              let reached =
-                match (t.os, listener.addr) with
-                | Macos, `Tcp (lip, _) -> seen_by lip reached
-                | _ -> reached
-              in
-              Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
-                  Some
-                    ( port,
-                      Ports.add t.hub.Listening_socket.ports
-                        ~reuse:listener.reuse ~connected:true
-                        ~wildcard:
-                          (match listener.addr with
-                          | `Tcp (l, _) -> same (unmap l) (any (unmap l))
-                          | `Unix _ -> false)
-                        (reached, port) ))
-        in
-        let ends = Ends.v t.hub.Listening_socket.ports in
-        let settle (client, server) =
-          let apply f = function
-            | `Held -> ()
-            | `Release -> f None false
-            | `Until u -> f (Some u) false
-            | `Time_wait u -> f (Some u) true
-          in
-          apply (fun until time_wait -> release ?until ~time_wait ()) client;
-          Option.iter
-            (fun (port, h) ->
-              apply
-                (fun until time_wait -> release_port t ?until ~time_wait port h)
-                server)
-            child
-        in
-        Flow.on_close client (fun ~reset ~abort ->
-            settle (Ends.close ends `Client ~reset ~abort));
-        Flow.on_close server (fun ~reset ~abort ->
-            settle (Ends.close ends `Server ~reset ~abort));
-        Flow.on_fin client (fun () -> settle (Ends.fin ends `Client));
-        Flow.on_fin server (fun () -> settle (Ends.fin ends `Server));
-        let fail () =
-          Ends.reset ends;
-          Flow.close server;
-          Flow.close client
-        in
-        let peer =
-          match (local, bind_to) with
-          | Some a, _ -> peer_addr listener.addr a
-          | None, Some (`Unix path) -> `Unix path
-          | None, _ -> `Unix ""
-        in
-        (* The switch takes the client before the listener sees it, so a
-           finished switch queues nothing. *)
-        let flow = Flow.close_with sw client in
-        match Listening_socket.offer listener (server, peer) with
-        | `Queued -> flow
-        | `Closed ->
-            (* The listener closed while the connection waited for room. *)
-            fail ();
-            refused ()
-        | `Full ->
-            fail ();
-            raise (Eio.Net.err (Connection_reset No_listener))
-        | exception e ->
-            fail ();
-            raise e)
 
-  (* A connection is a pair of queues. A TCP client holds its address until
-     its flow closes; one bound at an address a socket holds finds it in
-     use. *)
-  let connect t ~bind_to ~options ~sw addr =
+  (* The accepted socket holds the listener's port at the address the client
+     reached, with the listener's [SO_REUSEADDR], and as one bound at a
+     wildcard address if the listener is, as Linux's does. macOS's accepted
+     socket has its listener's family. *)
+  let child_hold t (listener : Listening_socket.t) = function
+    | `Unix _ -> None
+    | `Tcp (ip, port) ->
+        let reached = List.hd (reaching ip) in
+        let reached, wildcard =
+          match listener.addr with
+          | `Tcp (l, _) ->
+              ( (if t.os = Macos then seen_by l reached else reached),
+                same (unmap l) (any (unmap l)) )
+          | `Unix _ -> (reached, false)
+        in
+        Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
+            Some
+              ( port,
+                Ports.add t.hub.Listening_socket.ports ~reuse:listener.reuse
+                  ~connected:true ~wildcard (reached, port) ))
+
+  (* Lets go of the client's address, and of the accepted end's, as the
+     connection's ends say. *)
+  let watch t ~(release : release) ~child client server =
+    let ends = Ends.v t.hub.Listening_socket.ports in
+    let settle (c, s) =
+      let apply f = function
+        | `Held -> ()
+        | `Release -> f None false
+        | `Until u -> f (Some u) false
+        | `Time_wait u -> f (Some u) true
+      in
+      apply (fun until time_wait -> release ?until ~time_wait ()) c;
+      Option.iter
+        (fun (port, h) ->
+          apply
+            (fun until time_wait -> release_port t ?until ~time_wait port h)
+            s)
+        child
+    in
+    Flow.on_close client (fun ~reset ~abort ->
+        settle (Ends.close ends `Client ~reset ~abort));
+    Flow.on_close server (fun ~reset ~abort ->
+        settle (Ends.close ends `Server ~reset ~abort));
+    Flow.on_fin client (fun () -> settle (Ends.fin ends `Client));
+    Flow.on_fin server (fun () -> settle (Ends.fin ends `Server));
+    ends
+
+  (* A connection the listener queues. The switch takes the client before
+     the listener sees it, so a finished switch queues nothing. *)
+  let connect_listener t ~sw ~bind_to ~opts ~release addr local
+      (listener : Listening_socket.t) =
+    let unix = match addr with `Unix _ -> true | `Tcp _ -> false in
+    let capacity = t.capacity (Flow.default_capacity ~os:t.os ~local:unix) in
+    Sockopt.connect opts Client;
+    let client, server =
+      Flow.pair ~os:t.os ~local:unix ~timer:t.timer ~capacity ~bound:t.bounded
+        ~client:opts
+        ~server:(Sockopt.accepted listener.opts)
+    in
+    let child = child_hold t listener addr in
+    let ends = watch t ~release ~child client server in
+    let fail () =
+      Ends.reset ends;
+      Flow.close server;
+      Flow.close client
+    in
+    let peer =
+      match (local, bind_to) with
+      | Some a, _ -> peer_addr listener.addr a
+      | None, Some (`Unix path) -> `Unix path
+      | None, _ -> `Unix ""
+    in
+    let flow = Flow.close_with sw client in
+    match Listening_socket.offer listener (server, peer) with
+    | `Queued -> flow
+    | `Closed ->
+        (* The listener closed while the connection waited for room. *)
+        fail ();
+        refused ()
+    | `Full ->
+        fail ();
+        raise (Eio.Net.err (Connection_reset No_listener))
+    | exception e ->
+        fail ();
+        raise e
+
+  (* A connect for a client that holds [local], if it is a TCP one. *)
+  let connect_held t ~sw ~bind_to ~opts ~(release : release) addr local =
+    let listener = find_listener t addr in
+    check_destination ~os:t.os addr;
+    let to_itself = to_itself ~bind_to local addr in
+    if t.os = Macos then check_macos t ~to_itself addr;
+    match listener with
+    | None -> unheard t ~sw ~opts ~release ~to_itself addr
+    | Some listener when Listening_socket.is_closed listener -> refused ()
+    | Some listener ->
+        connect_listener t ~sw ~bind_to ~opts ~release addr local listener
+
+  (* The checks a connect's addresses meet before it binds, in Linux's
+     order, or macOS's, and the destination it then has. macOS binds before
+     it looks at the destination. *)
+  let check_connect t ~bind_to ~opts addr =
     let os = t.os in
-    let opts = Sockopt.client ~os addr in
-    set_options opts options;
-    Eio.Switch.check sw;
-    (* macOS binds before it looks at the destination. *)
     (match (os, bind_to) with
     | Macos, Some (`Unix path) -> check_path ~os path
     | _ -> ());
@@ -3501,27 +1494,49 @@ module Network = struct
         Sockopt.bound opts ip
     | Some (`Unix path) -> check_path ~os path
     | None -> ());
+    addr
+
+  (* What a client holds: a port, a path, or nothing. *)
+  let hold_local t ~bind_to addr =
+    match (addr, bind_to) with
+    | `Unix _, Some (`Unix path) ->
+        if Files.bind t.hub.files path Client then `Path path
+        else raise (address_in_use ())
+    | `Unix _, _ -> `Nothing
+    | `Tcp (ip, dport), bind -> (
+        let bind = match bind with Some (`Tcp b) -> Some b | _ -> None in
+        match hold t ?bind (ip, dport) with
+        | Ok (local, h) -> `Port (local, h)
+        (* With no port left, connect(2) fails with EADDRNOTAVAIL, and a
+           bind(2) at port 0 before it with EADDRINUSE. *)
+        | Error `No_port when Option.is_none bind -> fail Address_not_available
+        | Error (`In_use | `No_port) -> raise (address_in_use ()))
+
+  (* eio_posix and eio_linux keep a failed connect's socket on [sw], so the
+     address it was bound at stays bound until [sw] finishes, as on Linux;
+     macOS frees a TCP one at once. *)
+  let release_failed t ~sw ~bind_to release =
+    match bind_to with
+    | None -> release ()
+    | Some (`Tcp _) when t.os = Macos -> release ()
+    | Some _ -> (
+        try Eio.Switch.on_release sw (fun () -> release ())
+        with Invalid_argument _ -> ())
+
+  (* A connection is a pair of queues. A TCP client holds its address until
+     its flow closes; one bound at an address a socket holds finds it in
+     use. *)
+  let connect t ~bind_to ~options ~sw addr =
+    let opts = Sockopt.client ~os:t.os addr in
+    set_options opts options;
+    Eio.Switch.check sw;
+    let addr = check_connect t ~bind_to ~opts addr in
     let bind_to =
       match bind_to with
       | Some (`Unix path) -> Some (`Unix (Files.bound t.hub.files path))
       | bind_to -> bind_to
     in
-    let held =
-      match (addr, bind_to) with
-      | `Unix _, Some (`Unix path) ->
-          if Files.bind t.hub.files path Client then `Path path
-          else raise (address_in_use ())
-      | `Unix _, _ -> `Nothing
-      | `Tcp (ip, dport), bind -> (
-          let bind = match bind with Some (`Tcp b) -> Some b | _ -> None in
-          match hold t ?bind (ip, dport) with
-          | Ok (local, h) -> `Port (local, h)
-          (* With no port left, connect(2) fails with EADDRNOTAVAIL, and a
-             bind(2) at port 0 before it with EADDRINUSE. *)
-          | Error `No_port when Option.is_none bind ->
-              fail Address_not_available
-          | Error (`In_use | `No_port) -> raise (address_in_use ()))
-    in
+    let held = hold_local t ~bind_to addr in
     let local =
       match held with `Port (a, _) -> Some a | `Path _ | `Nothing -> None
     in
@@ -3535,15 +1550,7 @@ module Network = struct
     match connect_held t ~sw ~bind_to ~opts ~release addr local with
     | flow -> flow
     | exception e ->
-        (* eio_posix and eio_linux keep a failed connect's socket on [sw], so
-           the address it was bound at stays bound until [sw] finishes, as on
-           Linux; macOS frees a TCP one at once. *)
-        (match bind_to with
-        | None -> release ()
-        | Some (`Tcp _) when os = Macos -> release ()
-        | Some _ -> (
-            try Eio.Switch.on_release sw (fun () -> release ())
-            with Invalid_argument _ -> ()));
+        release_failed t ~sw ~bind_to release;
         raise e
 
   let datagram_handler = Eio.Net.Pi.datagram_socket (module Datagram_socket)
@@ -3637,7 +1644,7 @@ let capacity_rule = function
 let connection = Flow.connection
 
 let pipe ?os ?capacity () =
-  let os = kernel os in
+  let os = Kernel.of_arg os in
   let end_ kind =
     let opts = Sockopt.v ~os ~family:V4 Unconnected in
     Sockopt.connect opts kind;
@@ -3653,11 +1660,11 @@ let pipe ?os ?capacity () =
   (client, server)
 
 let network ?os ~capacity ~bounded ?clock ~sw () =
-  let os = kernel os in
+  let os = Kernel.of_arg os in
   let files = Files.v () in
   let now = Option.map (fun clock () -> Eio.Time.Mono.now clock) clock in
   let sleep = Option.map (fun clock d -> Eio.Time.Mono.sleep clock d) clock in
-  let timer = Option.map timer clock in
+  let timer = Option.map Pipe.timer clock in
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;

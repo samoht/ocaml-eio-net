@@ -1,5 +1,5 @@
 (library
  (name eio_net_mem)
  (public_name eio-net.mem)
- (private_modules posix)
+ (private_modules posix kernel code address ports files sockopt pipe resolve)
  (libraries hermetic eio eio.unix cstruct fmt mtime ipaddr unix))
