@@ -1,0 +1,17 @@
+(copy_files#
+ (files ../../lib/chaos/{op,fault,posix,law,wrapper}.{ml,mli}))
+
+(test
+ (name test)
+ (package eio-net)
+ (libraries
+  hermetic
+  eio-net.mem
+  eio
+  eio.mock
+  eio.unix
+  eio.utils
+  cstruct
+  fmt
+  unix
+  alcotest))

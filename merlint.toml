@@ -80,3 +80,9 @@ exclude = ["E610"]
 [[rules]]
 files = ["test/interop/kernel/validation/*"]
 exclude = ["E606"]
+
+# The law's test compiles copies of the chaos wrapper's private modules, to
+# check each row against what the wrapper does: it links no chaos library.
+[[rules]]
+files = ["test/law/*"]
+exclude = ["E606"]
