@@ -223,10 +223,10 @@ A datagram longer than a channel's `max_length` (64 KiB by default) raises the
 
 ## Accept loop
 
-`Eio_net_accept.run` holds at most `max_connections` connections. A
-connection's head is what its peer sends before it is served. When the loop is
-full and another peer connects, it drops the connection whose head is
-incomplete and has made the least progress. An exception one connection raises
+`Eio_net_accept.run` serves at most `max_connections` connections, and one
+more accepted connection waits unserved. A connection's head is what its peer
+sends before it is served. When the loop is full and another peer connects, it
+drops the connection whose head is incomplete and has made the least progress. An exception one connection raises
 ends that connection alone and goes to `?on_error`.
 
 Some protocols read the head through a layer of their own, such as TLS during

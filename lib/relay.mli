@@ -49,13 +49,14 @@ val forward :
     with no descriptor left wait for a relayed connection to end rather than end
     the relay.
 
-    The loop runs in [pool] (defaults to a new pool of this relay alone), as
-    {!Eio_net_accept.run} does. Handed the pool of the process's other loops, an
-    accept with no descriptor left sheds an incomplete head one of them holds,
-    rather than end the relay when it relays nothing; their accepts shed none of
-    its connections, which are complete from the accept.
+    [pool] (defaults to a new pool of this relay alone) is the loop's pool. When
+    an accept finds no descriptor left and the relay relays nothing, a relay
+    alone in its pool ends. Handed the pool of the process's other loops, it
+    sheds an incomplete head that one of them holds instead. Their accepts never
+    shed a relayed connection, which is complete from its accept.
 
-    Raises [Invalid_argument] if [max_connections] is less than [1]. A failure
-    to listen, such as an address in use, propagates from {!Eio.Net.listen}: a
-    Unix path is in use while a file is there, a live listener's socket or not.
-*)
+    An error of {!Eio.Net.listen}, such as an address in use, propagates. A Unix
+    path is in use while a file is there, whether or not a listener still serves
+    it.
+
+    @raise Invalid_argument if [max_connections] is less than [1]. *)

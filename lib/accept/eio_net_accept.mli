@@ -1,13 +1,13 @@
 (** The accept loop a listener serves its connections with, and the answer a
     failed {!Eio.Net.accept} carries from the system.
 
-    {!run} accepts and serves connections within a declared bound and bounds by
-    its state what peers can make it hold: under pressure it sheds the held
-    connection whose head is incomplete and has made the least progress, among
-    its own when its bound is reached and among every loop of its {!type-pool}
-    when descriptors run out. An accept its peer aborted, or one with no
-    descriptor left, leaves it whole. A loop sheds the connections of another
-    only when both were handed the same pool.
+    {!run} serves at most [max_connections] connections. When it is full, it
+    sheds the connection whose head is incomplete and has made the least
+    progress: it shuts that connection's socket down, with no answer. When the
+    process runs out of descriptors, it sheds the same way among the connections
+    of every loop of its {!type-pool}. An accept its peer aborted, or one with
+    no descriptor left, does not end the loop. A loop sheds the connections of
+    another only when both were handed the same pool.
 
     Eio names a connection reset portably and reports every other failed accept
     as a backend error. {!run} therefore reads a failed accept with the
@@ -92,14 +92,14 @@ val run :
     its socket and [addr] its peer's address. [flow] is closed when [handler]
     returns.
 
-    What peers can make it hold is bounded by its state. Each connection holds
-    one descriptor, one fiber and what [handler] holds, and at most
-    [max_connections] connections are held at once. The loop is under pressure
-    when every one of them is held and another peer connects: it sheds its held
-    connection whose head is incomplete and has made the least progress, the
-    older of two that made the same, and waits for one of its connections to end
-    before it serves the next; with no incomplete head held, it waits for one
-    that is being served.
+    [run] serves at most [max_connections] connections, and one more accepted
+    connection waits unserved, so it holds at most [max_connections + 1]
+    descriptors. Each connection holds one descriptor, one fiber and what
+    [handler] holds. When [max_connections] connections are served and another
+    peer connects, [run] accepts it, sheds the served connection whose head is
+    incomplete and has made the least progress (the older of two that made the
+    same), and serves the new one once a connection has ended. With no
+    incomplete head among them, it waits for a connection to end.
 
     [classify] (defaults to {!val-classify}) reads the {!Eio.Io} exception of
     each failed accept. An accept it reads as [`Aborted] is followed by the
@@ -129,4 +129,4 @@ val run :
     incomplete, at once or when it next says {!reading}, and returns [stop]'s
     value once the others have ended.
 
-    Raises [Invalid_argument] if [max_connections] is less than [1]. *)
+    @raise Invalid_argument if [max_connections] is less than [1]. *)
