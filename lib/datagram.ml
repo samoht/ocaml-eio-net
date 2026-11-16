@@ -11,12 +11,18 @@ let () =
     | _ -> false)
 
 type t = {
+  max_length : int;
+  dst : Eio.Net.Sockaddr.datagram option;
   recv : unit -> Eio.Net.Sockaddr.datagram * string;
   send : Eio.Net.Sockaddr.datagram option -> Cstruct.t list -> unit;
 }
 
 let too_long ~max_length = Eio.Exn.create (Eio.Exn.X (Too_long { max_length }))
-let pp ppf _ = Fmt.string ppf "<datagram channel>"
+
+let pp ppf t =
+  Fmt.pf ppf "<datagram channel, max_length %d%a>" t.max_length
+    (Fmt.option (fun ppf -> Fmt.pf ppf ", dst %a" Eio.Net.Sockaddr.pp))
+    t.dst
 
 let of_socket ?(max_length = 65536) ?dst socket =
   if max_length <= 0 then
@@ -39,7 +45,7 @@ let of_socket ?(max_length = 65536) ?dst socket =
     | Some dst, _ | None, Some dst -> Eio.Net.send socket ~dst bufs
     | None, None -> Eio.Net.send socket bufs
   in
-  { recv; send }
+  { max_length; dst; recv; send }
 
 let recv t = t.recv ()
 let send ?dst t bufs = t.send dst bufs

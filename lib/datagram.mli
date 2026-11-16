@@ -61,5 +61,5 @@ val send : ?dst:Eio.Net.Sockaddr.datagram -> t -> Cstruct.t list -> unit
     change until [send] returns. *)
 
 val pp : t Fmt.t
-(** [pp] prints an opaque placeholder: a datagram channel is an I/O handle with
-    no inspectable state. *)
+(** [pp] prints a channel's [max_length] and its default destination, if it has
+    one. *)
