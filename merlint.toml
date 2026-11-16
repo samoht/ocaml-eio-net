@@ -39,6 +39,13 @@ exclude = ["E825", "E105", "E610"]
 files = ["test/interop/connect-timeout/*"]
 exclude = ["E825"]
 
+# The recorder keeps whatever a connect raises as its outcome, as the kernel's
+# does. It is a pinned input of the traces (traces/provenance), so it moves
+# from Printf to Fmt only with their next recording.
+[[rules]]
+files = ["test/interop/connect-timeout/scripts/measure.ml"]
+exclude = ["E105", "E205"]
+
 # A copy of Eio_mock's scheduler, kept as close to it as the changes allow.
 [[rules]]
 files = ["lib/chaos/quiet_mock.ml"]
