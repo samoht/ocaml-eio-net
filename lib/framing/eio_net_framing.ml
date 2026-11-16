@@ -56,8 +56,9 @@ module Config = struct
       || Int64.of_int max_length > capacity
     then
       Fmt.invalid_arg
-        "Eio_net_framing.Config.v: length range %d-%d outside 0-%Ld" min_length
-        max_length capacity;
+        "Eio_net_framing.Config.v: min_length is %d and max_length is %d, not \
+         a range within 0-%Ld"
+        min_length max_length capacity;
     let prefix_length =
       match length_field with Uint16_be -> 2 | Uint32_be -> 4
     in

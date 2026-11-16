@@ -25,9 +25,19 @@ let plural n = if n = 1 then "" else "s"
 let max_ops = 100_000
 let too_large = "a busy loop, or a workload too large for a check"
 
+(* [count] formats [n] in groups of three digits, as prose writes it. *)
+let count ppf n =
+  let s = string_of_int n in
+  let len = String.length s in
+  String.iteri
+    (fun i c ->
+      if i > 0 && (len - i) mod 3 = 0 then Fmt.char ppf ',';
+      Fmt.char ppf c)
+    s
+
 let ops_message =
-  "the run made 100,000 network operations, more than a check plans from: "
-  ^ too_large
+  Fmt.str "the run made %a network operations, more than a check plans from: %s"
+    count max_ops too_large
 
 let in_kind = function
   | `Connect -> "a connect"
@@ -147,14 +157,14 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
         Some "the run hangs: it is still running after an hour of its clock"
     | exception Quiet_mock.Busy ->
         stopped := true;
-        Some
-          "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
-           loop"
+        Fmt.kstr Option.some
+          "the run woke %a times without waiting 1 ms or more: a busy loop"
+          count Quiet_mock.max_turns
     | exception Quiet_mock.Too_long ->
         stopped := true;
-        Some
-          ("the run took 10,000,000 turns, more than a check can repeat: "
-         ^ too_large)
+        Fmt.kstr Option.some
+          "the run took %a turns, more than a check can repeat: %s" count
+          Quiet_mock.max_turns too_large
     | exception x -> Some (Printexc.to_string x)
   in
   explain s ~wrapped:!wrapped ~root:!root ~waiting:!waiting ~stopped:!stopped

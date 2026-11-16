@@ -432,7 +432,7 @@ module Flow = struct
   let check_cut t = if t.family = `Inet && cut t then ended t
 
   let check_read t =
-    if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
+    if t.closed then invalid_arg "Eio_net_chaos.single_read: the flow is closed";
     check_cut t
 
   (* Under [t.lock]. A write that raises a reset reports it over IP; on
@@ -444,7 +444,8 @@ module Flow = struct
      lost, and the next ones raise the reset the peer answers with, as on
      Linux. AF_UNIX raises EPIPE on each, a reset to Eio. *)
   let check_write t =
-    if t.closed then invalid_arg "Eio_net_chaos: write on a closed flow";
+    if t.closed then
+      invalid_arg "Eio_net_chaos.single_write: the flow is closed";
     let reset () =
       reported t;
       raise (reset_exn ())
@@ -732,7 +733,7 @@ module Datagram = struct
 
   let check t =
     if t.closed then
-      invalid_arg "Eio_net_chaos: recv on a closed datagram socket"
+      invalid_arg "Eio_net_chaos.recv: the datagram socket is closed"
 
   (* The whole datagram, up to 64 KiB or the caller's buffer if longer, so a
      copy kept for a later receive is cut only to the buffer of the receive

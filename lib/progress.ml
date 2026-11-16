@@ -24,7 +24,7 @@ let v ~mono ~min_rate ~window =
   if min_rate <= 0 then
     Fmt.invalid_arg "Eio_net.Progress.v: min_rate is %d, not positive" min_rate;
   if Mtime.Span.equal window Mtime.Span.zero then
-    invalid_arg "Eio_net.Progress.v: window is zero";
+    invalid_arg "Eio_net.Progress.v: window is 0, not positive";
   {
     now = (fun () -> Eio.Time.Mono.now mono);
     sleep = Eio.Time.Mono.sleep_span mono;

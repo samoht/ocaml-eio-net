@@ -47,8 +47,8 @@ let receive ~sw ~max_fds ~max_length flow =
 (* The directory that holds [path], opened through [path]'s own capability, so
    that a confined directory confines its resolution, and [path]'s base name.
    Opening it for reading gives the descriptor the system calls below resolve
-   the name from. *)
-let parent ~sw path =
+   the name from. [fn] names the caller in a message. *)
+let parent ~fn ~sw path =
   match Eio.Path.split path with
   | Some (dir, name) when name <> "." && name <> ".." -> (
       let flow = Eio.Path.open_in ~sw dir in
@@ -56,9 +56,10 @@ let parent ~sw path =
       | Some fd -> (fd, name)
       | None ->
           Fmt.invalid_arg
-            "Eio_net_unix.Local: %a is not a directory of the host" Eio.Path.pp
-            dir)
-  | _ -> Fmt.invalid_arg "Eio_net_unix.Local: %a names no file" Eio.Path.pp path
+            "%s: path is in %a, which is not a directory of the host" fn
+            Eio.Path.pp dir)
+  | _ ->
+      Fmt.invalid_arg "%s: path is %a, which names no file" fn Eio.Path.pp path
 
 (* unix-socket.c, unix_sockaddr_init reaches a long path from its directory
    (local_stubs.c). The socket is non-blocking, so each attempt returns at
@@ -72,7 +73,7 @@ let connect_at ~sw ~net:_ path =
   match
     Unix.set_nonblock sock;
     Eio.Switch.run ~name:"Eio_net_unix.Local.connect_at" @@ fun dsw ->
-    let dir, name = parent ~sw:dsw path in
+    let dir, name = parent ~fn:"Eio_net_unix.Local.connect_at" ~sw:dsw path in
     Eio_unix.Fd.use_exn "Eio_net_unix.Local.connect_at" dir @@ fun dir ->
     let rec attempt pause =
       match connect_at_dir dir sock name with
@@ -167,7 +168,7 @@ let listening_handler = Eio_unix.Pi.listening_socket_handler (module Listening)
 
 let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
   let addr = `Unix (Option.value (Eio.Path.native path) ~default:(snd path)) in
-  let dir, name = parent ~sw path in
+  let dir, name = parent ~fn:"Eio_net_unix.Local.listen" ~sw path in
   let sock, id =
     Eio_unix.Fd.use_exn "Eio_net_unix.Local.listen" dir @@ fun dir ->
     eio @@ fun () ->
