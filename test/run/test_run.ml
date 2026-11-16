@@ -5,7 +5,7 @@ let refused_by_firewall () = Eio_unix.Err.v Unix.EPERM "accept" ""
 
 (* The classifier of a Unix network, which reads no descriptor left (EMFILE)
    as one of its answers. *)
-let classify = Eio_net_unix.accept_failure
+let classify = Eio_net_unix.classify_accept
 
 (* A listener over [inner] whose accept fails with each scripted exception in
    turn, once its cue resolves, and otherwise accepts from [inner]. A cue

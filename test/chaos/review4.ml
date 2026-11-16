@@ -68,7 +68,7 @@ let echo ?(bug = `None) (env : Eio_net_chaos.env) =
     | exception (Eio.Io _ | End_of_file | Failure _ | Eio.Time.Timeout) ->
         n < 3 && go (n + 1)
   in
-  if (not (go 1)) && not (Eio_net_chaos.outage env) then failwith "gave up"
+  if (not (go 1)) && not (Eio_net_chaos.is_outage env) then failwith "gave up"
 
 (* An upload of 300,000 bytes on a Unix-domain connection, which the server
    counts and acknowledges. With [`Ignore_short] the client sends it with one
@@ -101,7 +101,7 @@ let unix_upload ?(bug = `None) (env : Eio_net_chaos.env) =
         if ack <> string_of_int size then Fmt.failwith "acknowledged %s" ack
     | exception (Eio.Io _ | End_of_file | Failure _ | Eio.Time.Timeout) ->
         if n < 3 then go (n + 1)
-        else if not (Eio_net_chaos.outage env) then failwith "gave up"
+        else if not (Eio_net_chaos.is_outage env) then failwith "gave up"
   in
   go 1
 

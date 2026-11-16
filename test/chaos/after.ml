@@ -70,7 +70,7 @@ let test_e ~fetch () =
   let t0 = Eio.Time.now env#clock in
   let r = fetch ~clock:env#clock env#net addr in
   if Eio.Time.now env#clock -. t0 > 10. then failwith "slower than 10 seconds";
-  match (r, Eio_net_chaos.outage env) with
+  match (r, Eio_net_chaos.is_outage env) with
   | Ok "pong", false | Error `Unreachable, true -> ()
   | Ok v, _ -> Fmt.failwith "got %S" v
   | Error `Unreachable, false -> failwith "gave up"
@@ -86,7 +86,7 @@ let test_f ~call () =
     let id = string_of_int i and body = Fmt.str "msg%d" i in
     match
       ( call ~clock:env#clock client (addr 9000) ~id body,
-        Eio_net_chaos.outage env )
+        Eio_net_chaos.is_outage env )
     with
     | Ok r, false when r = String.uppercase_ascii body -> ()
     | Error `Timeout, true -> ()

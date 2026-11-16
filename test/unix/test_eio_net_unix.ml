@@ -733,7 +733,7 @@ let test_tcp_listen_in_use () =
    the accept, and a process or system out of descriptors, as failures that
    leave the listener whole. Linking eio-net.unix leaves the portable
    classifier, a loop's default, as it is. *)
-let test_accept_failure () =
+let test_classify_accept () =
   let answer = function
     | Some `Aborted -> "aborted"
     | Some `Descriptors -> "descriptors"
@@ -744,7 +744,7 @@ let test_accept_failure () =
       let exn = Eio_unix.Err.v e "accept" "" in
       Alcotest.(check string)
         (Unix.error_message e) want
-        (answer (Eio_net_unix.accept_failure exn));
+        (answer (Eio_net_unix.classify_accept exn));
       Alcotest.(check string)
         (Unix.error_message e ^ ", portably")
         portable
@@ -786,7 +786,9 @@ let test_accept_pending_errors () =
   in
   let check name e want =
     let exn = Eio_unix.Err.v e "accept" "" in
-    Alcotest.(check string) name want (answer (Eio_net_unix.accept_failure exn))
+    Alcotest.(check string)
+      name want
+      (answer (Eio_net_unix.classify_accept exn))
   in
   List.iter
     (fun e -> check (Unix.error_message e) e "aborted")
@@ -800,7 +802,7 @@ let test_accept_pending_errors () =
 
 (* The Unix connect classifier reads a refused peer and an unreachable
    network; linking eio-net.unix leaves the portable classifier as it is. *)
-let test_connect_failure () =
+let test_classify_connect () =
   let answer = function
     | Some `Refused -> "refused"
     | Some `Unreachable -> "unreachable"
@@ -811,7 +813,7 @@ let test_connect_failure () =
       let exn = Eio_unix.Err.v e "connect" "" in
       Alcotest.(check string)
         (Unix.error_message e) want
-        (answer (Eio_net_unix.connect_failure exn));
+        (answer (Eio_net_unix.classify_connect exn));
       Alcotest.(check string)
         (Unix.error_message e ^ ", portably")
         portable
@@ -922,11 +924,12 @@ let test_local_connect_at_full_backlog () =
 let suite =
   ( "eio_net_unix",
     [
-      Alcotest.test_case "the Unix accept classifier" `Quick test_accept_failure;
+      Alcotest.test_case "the Unix accept classifier" `Quick
+        test_classify_accept;
       Alcotest.test_case "pending network errors of an accept" `Quick
         test_accept_pending_errors;
       Alcotest.test_case "the Unix connect classifier" `Quick
-        test_connect_failure;
+        test_classify_connect;
       Alcotest.test_case "a local listener's mode, from its creation" `Quick
         test_local_listen_perm;
       Alcotest.test_case "a local listener reports its path" `Quick

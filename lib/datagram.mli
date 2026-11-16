@@ -53,8 +53,8 @@ val recv : t -> Eio.Net.Sockaddr.datagram * string
 (** [recv c] is the next whole datagram received on [c], as a fresh string,
     together with the address it came from. *)
 
-val send : t -> ?dst:Eio.Net.Sockaddr.datagram -> Cstruct.t list -> unit
-(** [send c ~dst bufs] sends the concatenation of [bufs] as one datagram on [c]
+val send : ?dst:Eio.Net.Sockaddr.datagram -> t -> Cstruct.t list -> unit
+(** [send ~dst c bufs] sends the concatenation of [bufs] as one datagram on [c]
     to [dst] (defaults to the channel's configured destination, or the connected
     peer). The buffers go to the socket as they are, one vector each, so a
     datagram held in several buffers is not copied into one. They must not

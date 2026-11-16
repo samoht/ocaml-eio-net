@@ -33,7 +33,7 @@ let constructor : Fault.t -> int = function
   | Refuse -> 5
   | Timeout -> 6
   | Unreachable -> 7
-  | Emfile -> 8
+  | No_descriptor -> 8
   | Drop -> 9
   | Dup -> 10
   | Reorder -> 11
@@ -123,7 +123,7 @@ let drive : type c. c Law.t -> fixture -> unit -> string =
   | Getnameinfo ->
       fun () ->
         fst (Eio.Net.getnameinfo fx.net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)))
-  | Outage -> fun () -> string_of_bool (Wrapper.outage fx.net)
+  | Outage -> fun () -> string_of_bool (Wrapper.is_outage fx.net)
   | Livelocked -> fun () -> string_of_bool (Wrapper.livelocked fx.net)
   | Overrun -> fun () -> string_of_bool (Wrapper.overrun fx.net)
   | Splits -> fun () -> string_of_int (Wrapper.splits fx.net)
@@ -160,7 +160,8 @@ let drive : type c. c Law.t -> fixture -> unit -> string =
   | Fd ->
       refused (fun () -> Option.is_none (Eio_unix.Resource.fd_opt fx.client))
   | Connection ->
-      refused (fun () -> Option.is_none (Eio_net_mem.connection fx.client))
+      refused (fun () ->
+          Option.is_none (Eio_net_mem.Private.connection_id fx.client))
   | Silence ->
       refused (fun () ->
           match Eio_net_mem.Private.silence fx.client with

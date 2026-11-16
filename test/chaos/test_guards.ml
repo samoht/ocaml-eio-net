@@ -412,7 +412,7 @@ let poll ?patience () =
     Eio.Net.send client ~dst:(udp 5001) [ Cstruct.of_string "ping" ];
     Eio.Fiber.yield ()
   done;
-  if (not !got) && not (Eio_net_chaos.outage env) then failwith "no reply"
+  if (not !got) && not (Eio_net_chaos.is_outage env) then failwith "no reply"
 
 (* A server that yields 200000 times while it computes its answer, and a
    client that waits 30 s for it. A real server takes a few milliseconds
@@ -449,7 +449,7 @@ let compute () =
   match ask 1 with
   | Some "20000100000" -> ()
   | Some answer -> Fmt.failwith "got %S" answer
-  | None -> if not (Eio_net_chaos.outage env) then failwith "no answer"
+  | None -> if not (Eio_net_chaos.is_outage env) then failwith "no answer"
 
 (* A server that streams to each client until a write fails, and a client
    that reads 1 MiB and leaves. The server's writes wait while its socket's
@@ -634,7 +634,7 @@ let handshake () =
   match attempt 1 with
   | Some "key" -> ()
   | Some key -> Fmt.failwith "got %S" key
-  | None -> if not (Eio_net_chaos.outage env) then failwith "no key"
+  | None -> if not (Eio_net_chaos.is_outage env) then failwith "no key"
 
 (* Two ends that ping-pong one byte over a connection until a 10 ms timer
    says stop: a few thousand round trips on eio_posix. *)
@@ -843,7 +843,7 @@ let test_malformed_scenario () =
       "read1c@0.garble12";
       "connect1c@0.hang";
       "accept1s@0.timeout";
-      "accept1s@0.emfile";
+      "accept1s@0.no_descriptor";
       "read0c@0.reset";
       "read1c@0.reset+read1c@0.eof";
       "read1c@99999999999999999999999.reset";
@@ -1004,7 +1004,7 @@ let queries () =
     in
     ask 1
   done;
-  if !answered < 398 && not (Eio_net_chaos.outage env) then
+  if !answered < 398 && not (Eio_net_chaos.is_outage env) then
     Fmt.failwith "only %d queries answered" !answered
 
 (* A client that reads a reply of 4 KiB, and polls with yields for ever if

@@ -15,7 +15,7 @@ let test_kv ?bug ?lenient () =
   let c = v ~sw ~clock:env#clock env#net addr in
   List.iter
     (fun k ->
-      match (get ?bug c k, Eio_net_chaos.outage env) with
+      match (get ?bug c k, Eio_net_chaos.is_outage env) with
       | Ok v, false when v = value k -> ()
       | Error _, true -> ()
       | Ok v, _ -> Fmt.failwith "GET %s returned %S" k v
@@ -57,7 +57,7 @@ let scenario ?bug env =
         Fmt.failwith "got %a" Fmt.Dump.(list string) got)
     fast;
   (* At most two faults hit a run, so one of three fast subscribers is untouched. *)
-  if not (Eio_net_chaos.outage env) then
+  if not (Eio_net_chaos.is_outage env) then
     match List.filter (fun (got, _) -> got = msgs) fast with
     | [] -> failwith "no fast subscriber got every message"
     | full ->

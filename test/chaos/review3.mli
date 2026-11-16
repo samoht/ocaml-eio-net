@@ -11,12 +11,13 @@ val connfail : ?bug:[ `None | `Connection_failure ] -> Eio_net_chaos.env -> unit
 
 val busy_accept : unit -> unit
 (** [busy_accept ()] runs a server whose accept loop retries a failed accept at
-    once, on a network wrapped to fail its second accept with [Fault.Emfile]. *)
+    once, on a network wrapped to fail its second accept with
+    [Fault.No_descriptor]. *)
 
 val accept_loop : unit -> unit
 (** [accept_loop ()] runs [Eio_net_accept.run] on a network wrapped to fail its
-    second accept with [Fault.Emfile], with an idle client to shed and a client
-    to serve. *)
+    second accept with [Fault.No_descriptor], with an idle client to shed and a
+    client to serve. *)
 
 val echo : int -> Eio_net_chaos.env -> unit
 (** [echo n env] echoes [n] lines of varying length. *)

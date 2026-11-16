@@ -75,7 +75,7 @@ val get : timeout:bool -> Eio_net_chaos.env -> string option = <fun>
     let t0 = Eio.Time.now env#clock in
     let got = get ~timeout env in
     if Eio.Time.now env#clock -. t0 > 5. then failwith "too slow";
-    match (got, Eio_net_chaos.outage env) with
+    match (got, Eio_net_chaos.is_outage env) with
     | Some "hello", false | None, true -> ()
     | Some line, _ -> Fmt.failwith "got %S" line
     | None, false -> failwith "gave up";;
@@ -124,7 +124,7 @@ The failure also lists the operations of the failing run, and gives a
   end of a connection that closes first holds its port for 60 seconds. A
   server that listens again on its port within a run needs the option.
 - **Check the outage run.** In that run every connect is refused and every
-  datagram lost. `Eio_net_chaos.outage env` is then `true`, and the test
+  datagram lost. `Eio_net_chaos.is_outage env` is then `true`, and the test
   checks what its program does when it gives up.
 
 ### Runs
@@ -170,7 +170,7 @@ A check can still miss a bug:
   pass. Fuzz the parser on its own.
 - A datagram is delayed alone, and for 50 ms. `EMFILE` on accept is never
   tried, as `Eio.Net.run_server` stops on it. Ask for longer or grouped
-  delays, or for `Eio_net_chaos.Fault.Emfile`, with `Eio_net_chaos.wrap`.
+  delays, or for `Eio_net_chaos.Fault.No_descriptor`, with `Eio_net_chaos.wrap`.
 - After an AF_UNIX crash, the crashed end's code still runs and reads what was
   queued to it. Check what the other end sees.
 
@@ -234,7 +234,7 @@ its handshake. Wrap the socket with `Eio_net_accept.reading_flow` so that the
 bytes the layer reads count as progress.
 
 The loop reads a failed accept with the classifier given as `?classify`. Over
-a Unix network, pass `Eio_net_unix.accept_failure`: when the process runs out
+a Unix network, pass `Eio_net_unix.classify_accept`: when the process runs out
 of descriptors, the loop then waits for one to be free. With the default
 classifier, that error ends the loop.
 

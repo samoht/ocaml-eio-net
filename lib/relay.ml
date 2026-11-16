@@ -6,7 +6,7 @@ let one_way src dst =
 
 let splice a b = Eio.Fiber.both (fun () -> one_way a b) (fun () -> one_way b a)
 
-let forward ~sw ~net ?on_error ?pool ?classify ~max_connections ~listen ~connect
+let forward ?on_error ?pool ?classify ~sw ~net ~max_connections ~listen ~connect
     () =
   (* Checked here as well as by the loop, which runs in a daemon fiber where
      the error would fail [sw] rather than reach the caller. *)

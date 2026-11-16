@@ -1621,9 +1621,7 @@ let capacity_rule = function
   | Some c when c >= 1 -> Fun.const c
   | Some c -> Fmt.invalid_arg "Eio_net_mem.v: capacity is %d, not positive" c
 
-let connection = Flow.connection
-
-let pipe ?os ?capacity () =
+let pair ?os ?capacity () =
   let os = Kernel.of_arg os in
   let end_ role =
     let opts = Sockopt.v ~os ~family:V4 (Stream Unconnected) in
@@ -1676,4 +1674,5 @@ module Private = struct
     network ?os ~capacity ~bounded:true ?clock ~sw ()
 
   let silence = Flow.silence
+  let connection_id = Flow.connection
 end

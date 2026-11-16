@@ -115,7 +115,7 @@ let name : type c. c t -> string = function
   | Datagram_socket -> "Eio.Net.datagram_socket"
   | Getaddrinfo -> "Eio.Net.getaddrinfo"
   | Getnameinfo -> "Eio.Net.getnameinfo"
-  | Outage -> "Wrapper.outage"
+  | Outage -> "Wrapper.is_outage"
   | Livelocked -> "Wrapper.livelocked"
   | Overrun -> "Wrapper.overrun"
   | Splits -> "Wrapper.splits"
@@ -133,7 +133,7 @@ let name : type c. c t -> string = function
   | Single_write -> "Eio.Flow.single_write"
   | Copy -> "Eio.Flow.copy"
   | Shutdown | Datagram_shutdown -> "Eio.Flow.shutdown"
-  | Connection -> "Eio_net_mem.connection"
+  | Connection -> "Eio_net_mem.Private.connection_id"
   | Silence -> "Eio_net_mem.Private.silence"
   | Send -> "Eio.Net.send"
   | Recv -> "Eio.Net.recv"
@@ -157,7 +157,7 @@ let class_ : type c. c t -> c class_ = function
           unix = Fault.[ Refuse; Reset; Hang; Stall 1. ];
         }
   | Accept ->
-      let faults = Fault.[ Reset; Eof; Emfile; Hang; Stall 1. ] in
+      let faults = Fault.[ Reset; Eof; No_descriptor; Hang; Stall 1. ] in
       Intercepted { kind = `Accept; inet = faults; unix = faults }
   | Single_read ->
       Intercepted { kind = `Read; inet = stream_faults; unix = stream_faults }
@@ -214,10 +214,10 @@ let doc : type c. c t -> string = function
        no route to miss."
   | Accept ->
       "Reset hands up a connection reset at both ends, or over AF_UNIX one its \
-       client closed, Eof one its client closed, Emfile fails it and keeps the \
-       connection queued until a descriptor is freed, Hang waits for a cancel \
-       and keeps it queued, and Stall delays it. A listener's close, or its \
-       switch's end, closes the connections it kept."
+       client closed, Eof one its client closed, No_descriptor fails it and \
+       keeps the connection queued until a descriptor is freed, Hang waits for \
+       a cancel and keeps it queued, and Stall delays it. A listener's close, \
+       or its switch's end, closes the connections it kept."
   | Single_read ->
       "Short cuts it, Stall delays it, Hang silences the connection, Reset \
        resets it and Eof ends it. A read takes from the socket no more than it \
@@ -235,7 +235,7 @@ let doc : type c. c t -> string = function
        keeps for it."
   | Close | Listener_close | Datagram_close ->
       "The close drops what the wrapper keeps for the socket and frees a \
-       descriptor for an accept that Emfile failed."
+       descriptor for an accept that No_descriptor failed."
   | Shutdown ->
       "After a fault broke the connection, a shutdown raises nothing: the \
        wrapper already shut the socket down."

@@ -5,7 +5,7 @@
     stated length. The first window starts with the transfer's first move, so
     the time spent before it (a connection, a handshake, an authentication) is
     not counted. Each later window starts where the last one ended. A window
-    that ends with fewer than [limit] bytes a second moved ends the transfer
+    that ends with fewer than [min_rate] bytes a second moved ends the transfer
     with {!Too_slow}.
 
     A move that waits on a peer that sends or takes nothing is cut at its
@@ -17,19 +17,20 @@ type t
 
 exception
   Too_slow of {
-    limit : int;  (** The transfer's limit, in bytes a second. *)
+    min_rate : int;  (** The transfer's minimum rate, in bytes a second. *)
     window : Mtime.Span.t;  (** The length of its windows. *)
     moved : int;  (** The bytes the window moved. *)
   }
-(** The exception for a window that ended with fewer than [limit] bytes a second
-    moved over [window]. [moved] is the bytes it moved. Its registered printer
-    names them. *)
+(** The exception for a window that ended with fewer than [min_rate] bytes a
+    second moved over [window]. [moved] is the bytes it moved. Its registered
+    printer names them. *)
 
-val v : mono:_ Eio.Time.Mono.t -> limit:int -> window:Mtime.Span.t -> t
-(** [v ~mono ~limit ~window] is a transfer timed on [mono] whose windows last
-    [window] and each move at least [limit] bytes a second.
+val v : mono:_ Eio.Time.Mono.t -> min_rate:int -> window:Mtime.Span.t -> t
+(** [v ~mono ~min_rate ~window] is a transfer timed on [mono] whose windows last
+    [window] and each move at least [min_rate] bytes a second.
 
-    Raises [Invalid_argument] if [limit] is not positive or [window] is zero. *)
+    Raises [Invalid_argument] if [min_rate] is not positive or [window] is zero.
+*)
 
 val move : t -> (unit -> int) -> int
 (** [move t f] is [f ()], which moves bytes and returns how many, counted in
@@ -47,3 +48,6 @@ val reader : t -> Bytesrw.Bytes.Reader.t -> Bytesrw.Bytes.Reader.t
 val flow : t -> _ Eio.Flow.two_way -> Eio.Flow.two_way_ty Eio.Resource.t
 (** [flow t f] is [f], each read and each write a {!move} in [t]. A shutdown
     passes through to [f]. *)
+
+val pp : t Fmt.t
+(** [pp] prints the minimum rate and the window of a transfer. *)

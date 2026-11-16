@@ -2,12 +2,12 @@
     datagrams sent or received in one system call where the system allows. *)
 
 val of_connected_datagram_fd :
-  sw:Eio.Switch.t ->
   ?max_length:int ->
   ?max_batch:int ->
+  sw:Eio.Switch.t ->
   Unix.file_descr ->
   Eio_net.Frame.t
-(** [of_connected_datagram_fd ~sw ~max_length ~max_batch fd] is a frame channel
+(** [of_connected_datagram_fd ~max_length ~max_batch ~sw fd] is a frame channel
     over the connected Unix datagram descriptor [fd], with one datagram per
     frame, of at most [max_length] bytes (defaults to [65536]). The caller owns
     [fd], which is put in non-blocking mode and stays open when [sw] finishes;

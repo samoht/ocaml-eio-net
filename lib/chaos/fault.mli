@@ -9,7 +9,7 @@ type t =
   | Refuse
   | Timeout
   | Unreachable
-  | Emfile
+  | No_descriptor
   | Drop
   | Dup
   | Reorder

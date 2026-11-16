@@ -361,7 +361,7 @@ let read_all flow =
    on Linux. *)
 let test_write_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.close server;
   Alcotest.(check int)
     "the first write returns" 4
@@ -484,7 +484,7 @@ let test_connect_bound () =
    the next read returns end of file. *)
 let test_empty_write_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.close server;
   Alcotest.(check int)
     "an empty write" 0
@@ -519,7 +519,7 @@ let test_write_after_shutdown_reports_reset () =
    reports it. *)
 let test_reset_read_once () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.copy_string "unread" client;
   Eio.Flow.close server;
   let read () =
@@ -538,7 +538,7 @@ let test_reset_read_once () =
    Linux, then end-of-file once nothing is queued. *)
 let test_write_after_peer_shutdown_receive () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.shutdown server `Receive;
   let write () = Eio.Flow.single_write client [ Cstruct.of_string "ping" ] in
   Alcotest.(check (list int))
@@ -557,7 +557,7 @@ let test_write_after_peer_shutdown_receive () =
    before arrives, then the reset, and writes raise it at once. *)
 let test_close_with_unread_bytes () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.copy_string "unread request" client;
   Eio.Flow.copy_string "bye" server;
   Eio.Flow.close server;
@@ -572,7 +572,7 @@ let test_close_with_unread_bytes () =
    sockets do, rather than read what was queued. *)
 let test_use_after_own_close () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.copy_string "queued" server;
   Eio.Flow.close client;
   (match Eio.Flow.single_read client (Cstruct.create 8) with
@@ -603,7 +603,7 @@ let test_unix_path_not_found () =
    full, so a writer that ignores flow control shows. *)
 let test_capacity () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe ~capacity:4 () in
+  let client, server = Eio_net_mem.pair ~capacity:4 () in
   Alcotest.(check int)
     "a write takes what fits" 4
     (Eio.Flow.single_write client [ Cstruct.of_string "abcdef" ]);
@@ -625,7 +625,7 @@ let test_capacity () =
       Eio.Flow.read_exact server buf;
       got := Cstruct.to_string buf);
   Alcotest.(check string) "every byte arrives once" "abcdefgh" !got;
-  match Eio_net_mem.pipe ~capacity:0 () with
+  match Eio_net_mem.pair ~capacity:0 () with
   | exception Invalid_argument _ -> ()
   | _ -> Alcotest.fail "a capacity of 0 was accepted"
 
@@ -677,7 +677,7 @@ let test_large_capacity () =
       queued os (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0));
       queued os (`Unix "/tmp/large.sock"))
     [ `Linux; `Macos ];
-  let client, _server = Eio_net_mem.pipe ~os:`Macos ~capacity () in
+  let client, _server = Eio_net_mem.pair ~os:`Macos ~capacity () in
   let n = Eio.Flow.single_write client [ Cstruct.create (capacity + 1) ] in
   Alcotest.(check int) "a pipe queues its capacity" capacity n
 
@@ -708,7 +708,7 @@ let test_macos_capacity () =
   in
   queued (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) (1024 * 1024);
   queued (`Unix "/tmp/queued-macos.sock") 8192;
-  let client, _server = Eio_net_mem.pipe ~os:`Macos () in
+  let client, _server = Eio_net_mem.pair ~os:`Macos () in
   let n = Eio.Flow.single_write client [ Cstruct.create (2 * 1024 * 1024) ] in
   Alcotest.(check int) "a pipe queues as TCP" (1024 * 1024) n
 
@@ -932,7 +932,7 @@ let test_capacity_wakes_one () =
     Gc.minor_words () -. before
   in
   let writers () =
-    let client, server = Eio_net_mem.pipe ~capacity:1 () in
+    let client, server = Eio_net_mem.pair ~capacity:1 () in
     let one = Cstruct.of_string "x" in
     Eio.Fiber.both
       (fun () ->
@@ -947,7 +947,7 @@ let test_capacity_wakes_one () =
         with End_of_file -> ())
   in
   let readers () =
-    let client, server = Eio_net_mem.pipe ~capacity:1 () in
+    let client, server = Eio_net_mem.pair ~capacity:1 () in
     let one = Cstruct.of_string "x" in
     Eio.Fiber.both
       (fun () ->
@@ -1032,8 +1032,8 @@ let test_cancelled_waits_free () =
     Gc.full_major ();
     (Gc.stat ()).live_words
   in
-  let reader, _ = Eio_net_mem.pipe () in
-  let writer, _ = Eio_net_mem.pipe ~capacity:1 () in
+  let reader, _ = Eio_net_mem.pair () in
+  let writer, _ = Eio_net_mem.pair ~capacity:1 () in
   Eio.Flow.write writer [ Cstruct.of_string "x" ];
   let buf = Cstruct.create 1 in
   let cancelled f = Eio.Fiber.first (fun () -> ignore (f ())) Eio.Fiber.yield in
@@ -1057,7 +1057,7 @@ let test_cancelled_waits_free () =
    waiter's. *)
 let test_capacity_first_come () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe ~capacity:1 () in
+  let client, server = Eio_net_mem.pair ~capacity:1 () in
   Eio.Flow.write client [ Cstruct.of_string "x" ];
   let got = Buffer.create 3 in
   let read () =
@@ -1163,7 +1163,7 @@ let test_cancelled_close_frees_its_port () =
    the 0 that read(2) returns then, since Eio's flows never return 0. *)
 let test_empty_read () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.copy_string "queued" server;
   match Eio.Flow.single_read client (Cstruct.create 0) with
   | exception End_of_file -> ()
@@ -1175,7 +1175,7 @@ let test_empty_read () =
    [Invalid_argument]. The socket then closes and the peer reads end-of-file. *)
 let test_close_defers_to_a_read () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   let buf = Cstruct.create 4 in
   Eio.Fiber.both
     (fun () ->
@@ -1198,7 +1198,7 @@ let test_close_defers_to_a_read () =
    open socket, as a write in flight does under Eio's deferred close. *)
 let test_close_defers_to_a_write () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe ~capacity:1 () in
+  let client, server = Eio_net_mem.pair ~capacity:1 () in
   Eio.Flow.copy_string "a" client;
   Eio.Fiber.both
     (fun () ->
@@ -1217,7 +1217,7 @@ let test_close_defers_to_a_write () =
 
 let test_write_after_own_shutdown () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, _server = Eio_net_mem.pipe () in
+  let client, _server = Eio_net_mem.pair () in
   Eio.Flow.shutdown client `Send;
   match Eio.Flow.single_write client [ Cstruct.of_string "ping" ] with
   | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
@@ -1231,7 +1231,7 @@ let test_write_after_own_shutdown () =
    it. *)
 let test_full_write_after_peer_shutdown_all () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe ~capacity:1 () in
+  let client, server = Eio_net_mem.pair ~capacity:1 () in
   Eio.Flow.copy_string "a" client;
   Eio.Flow.shutdown server `All;
   let blocked = ref true in
@@ -1253,7 +1253,7 @@ let test_full_write_after_peer_shutdown_all () =
 
 let test_read_after_peer_close () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Flow.copy_string "hi" client;
   Eio.Flow.close client;
   let buf = Cstruct.create 16 in
@@ -1317,7 +1317,7 @@ let test_sockopt_read_back () =
   Eio.Switch.run @@ fun sw ->
   let open Eio.Net.Sockopt in
   let net = Eio_net_mem.v ~sw () in
-  let flow, _ = Eio_net_mem.pipe () in
+  let flow, _ = Eio_net_mem.pair () in
   Alcotest.(check bool)
     "SO_KEEPALIVE default" false
     (Eio.Net.getsockopt flow SO_KEEPALIVE);
@@ -1332,7 +1332,7 @@ let test_sockopt_read_back () =
   Alcotest.(check int)
     "SO_SNDBUF on Linux" 20000
     (Eio.Net.getsockopt flow SO_SNDBUF);
-  let macos, _ = Eio_net_mem.pipe ~os:`Macos () in
+  let macos, _ = Eio_net_mem.pair ~os:`Macos () in
   Eio.Net.setsockopt macos SO_SNDBUF 10000;
   Alcotest.(check int)
     "SO_SNDBUF on macOS" 10000
@@ -1352,7 +1352,7 @@ let test_sockopt_read_back () =
    a peer that does not read waits sooner. *)
 let test_buffers_bound_the_queue () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Net.setsockopt client Eio.Net.Sockopt.SO_SNDBUF 2000;
   Eio.Net.setsockopt server Eio.Net.Sockopt.SO_RCVBUF 2000;
   let queued = ref 0 in
@@ -1371,7 +1371,7 @@ let test_buffers_bound_the_queue () =
 (* A TCP socket that lingers for no time resets its peer as it closes. *)
 let test_linger_zero_resets () =
   Eio_mock.Backend.run @@ fun () ->
-  let client, server = Eio_net_mem.pipe () in
+  let client, server = Eio_net_mem.pair () in
   Eio.Net.setsockopt client Eio.Net.Sockopt.SO_LINGER (Some 0);
   Eio.Resource.close client;
   match Eio.Flow.single_read server (Cstruct.create 1) with
@@ -1413,7 +1413,7 @@ let test_connect_closes_at_switch_end () =
 let test_a_write_in_another_domain_wakes_the_read () =
   Eio_main.run @@ fun env ->
   let domain_mgr = Eio.Stdenv.domain_mgr env in
-  let near, far = Eio_net_mem.pipe () in
+  let near, far = Eio_net_mem.pair () in
   let rounds = if long then 4096 else 256 in
   let turn = Atomic.make (-1) in
   let over = Atomic.make false in
@@ -1621,8 +1621,8 @@ let test_connection () =
   let c2 = Eio.Net.connect ~sw net addr in
   let s1, _ = Eio.Net.accept ~sw listener in
   let s2, _ = Eio.Net.accept ~sw listener in
-  let a, b = Eio_net_mem.pipe () in
-  let id s = Option.get (Eio_net_mem.connection s) in
+  let a, b = Eio_net_mem.pair () in
+  let id s = Option.get (Eio_net_mem.Private.connection_id s) in
   Alcotest.(check bool) "first connection" true (id c1 = id s1);
   Alcotest.(check bool) "second connection" true (id c2 = id s2);
   Alcotest.(check bool) "a pipe" true (id a = id b);
@@ -1632,7 +1632,7 @@ let test_connection () =
   let mock = Eio_mock.Flow.make "mock" in
   Alcotest.(check bool)
     "another socket" true
-    (Eio_net_mem.connection (mock :> _ Eio.Net.stream_socket) = None)
+    (Eio_net_mem.Private.connection_id (mock :> _ Eio.Net.stream_socket) = None)
 
 let suite =
   ( "eio_net_mem",

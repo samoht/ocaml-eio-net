@@ -4,7 +4,7 @@ module Local = Local
 module Tcp = Tcp
 module Interface = Interface
 
-let connect_failure = function
+let classify_connect = function
   | Eio.Io
       (Eio.Exn.X (Eio_unix.Unix_error ((ENETUNREACH | EHOSTUNREACH), _, _)), _)
     ->
@@ -18,7 +18,7 @@ let pending = pending_accept_errors ()
 
 (* Eio reads ENOPROTOOPT as Invalid_option, which in an accept, that sets no
    option, is the error pending on the new connection. *)
-let accept_failure = function
+let classify_accept = function
   | Eio.Io (Eio.Net.E Invalid_option, _) -> Some `Aborted
   | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error ((EMFILE | ENFILE), _, _)), _) ->
       Some `Descriptors

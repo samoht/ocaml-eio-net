@@ -334,7 +334,7 @@ let guard ?eof ctx law target f =
       Printexc.raise_with_backtrace e bt
 
 (* A close frees a descriptor, as does the end of the switch that closes a
-   socket, so the accepts that [Fault.Emfile] fails go through again. *)
+   socket, so the accepts that [Fault.No_descriptor] fails go through again. *)
 let free ctx = locked ctx (fun () -> ctx.exhausted <- false)
 
 let ask ctx law ~socket ~side ~family ~offset ~length =
@@ -361,7 +361,7 @@ let pending ctx ~family id =
 
 (* The connection a connect made, numbered [socket]. *)
 let client_conn ctx ~socket ~family sock =
-  match Eio_net_mem.connection sock with
+  match Eio_net_mem.Private.connection_id sock with
   | None -> conn ~os:ctx.os ~paired:false family
   | Some id ->
       let p = locked ctx (fun () -> pending ctx ~family id) in
@@ -370,7 +370,7 @@ let client_conn ctx ~socket ~family sock =
 
 (* The number and the connection of an accepted socket. *)
 let server_conn ctx ~family sock =
-  match Eio_net_mem.connection sock with
+  match Eio_net_mem.Private.connection_id sock with
   | None ->
       ( locked ctx (fun () -> next_socket ctx),
         conn ~os:ctx.os ~paired:false family )
@@ -563,8 +563,8 @@ module Flow = struct
             break t.conn ~at:t.side (`Closed (Op.other t.side));
             deliver t dst ~cap:0
         | Some
-            ( Refuse | Timeout | Unreachable | Emfile | Drop | Dup | Reorder
-            | Garble _ )
+            ( Refuse | Timeout | Unreachable | No_descriptor | Drop | Dup
+            | Reorder | Garble _ )
         | None ->
             deliver t dst ~cap:0
 
@@ -597,8 +597,8 @@ module Flow = struct
               | Some (Fault.Short k) -> max 1 (min k total)
               | Some (Reset | Eof) -> 0
               | Some
-                  ( Hang | Stall _ | Refuse | Timeout | Unreachable | Emfile
-                  | Drop | Dup | Reorder | Garble _ )
+                  ( Hang | Stall _ | Refuse | Timeout | Unreachable
+                  | No_descriptor | Drop | Dup | Reorder | Garble _ )
               | None ->
                   total
             in
@@ -637,8 +637,8 @@ module Flow = struct
             Eio.Time.sleep t.ctx.clock d;
             write ()
         | Some
-            ( Short _ | Refuse | Timeout | Unreachable | Emfile | Drop | Dup
-            | Reorder | Garble _ )
+            ( Short _ | Refuse | Timeout | Unreachable | No_descriptor | Drop
+            | Dup | Reorder | Garble _ )
         | None ->
             write ()
 
@@ -840,7 +840,7 @@ module Datagram = struct
                     `Wait None
                 | Some
                     ( Short _ | Reset | Eof | Refuse | Timeout | Unreachable
-                    | Emfile )
+                    | No_descriptor )
                 | None ->
                     `Pass)
           in
@@ -990,7 +990,7 @@ module Listener = struct
              no reset. *)
           break conn ~at:`Server (`Closed `Client);
           (Flow.resource flow, peer)
-      | Some Emfile ->
+      | Some No_descriptor ->
           locked ctx (fun () ->
               ctx.exhausted <- true;
               t.held <- (flow, peer) :: t.held);
@@ -1089,8 +1089,8 @@ module Network = struct
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;
           go ()
-      | Some (Short _ | Eof | Emfile | Drop | Dup | Reorder | Garble _) | None
-        ->
+      | Some (Short _ | Eof | No_descriptor | Drop | Dup | Reorder | Garble _)
+      | None ->
           go ()
 
     let connect t ~bind_to ~options ~sw addr =
@@ -1162,7 +1162,7 @@ let v ?max_ops ?os ?split ?charge ~clock ~outage f (net : _ Eio.Net.t) :
 
 let pair ?os ~clock f =
   let ctx = ctx ?os ~clock ~outage:false f in
-  let c, s = Eio_net_mem.pipe ?os () in
+  let c, s = Eio_net_mem.pair ?os () in
   let socket = locked ctx (fun () -> next_socket ctx) in
   let conn = conn ~os:ctx.os ~paired:true `Inet in
   ( Flow.resource
@@ -1170,7 +1170,7 @@ let pair ?os ~clock f =
     Flow.resource
       (Flow.v ctx ~socket ~side:`Server ~family:`Inet ~conn (s :> stream)) )
 
-let outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
+let is_outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
   match Eio.Resource.get_opt ops Outage with Some f -> f t | None -> false
 

@@ -64,7 +64,7 @@ let run ~using ~within (env : Eio_net_chaos.env) =
   let answered = client ~using env in
   let took = Eio.Time.now env#clock -. start in
   if took > within then Fmt.failwith "the client took %gs" took;
-  match (List.for_all Fun.id answered, Eio_net_chaos.outage env) with
+  match (List.for_all Fun.id answered, Eio_net_chaos.is_outage env) with
   | true, false | false, true -> ()
   | true, true -> failwith "a request was answered in the outage"
   | false, false -> failwith "a request failed three times"

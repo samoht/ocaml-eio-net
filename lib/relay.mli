@@ -16,17 +16,17 @@ val splice : _ Eio.Flow.two_way -> _ Eio.Flow.two_way -> unit
     propagates. *)
 
 val forward :
-  sw:Eio.Switch.t ->
-  net:_ Eio.Net.t ->
   ?on_error:(exn -> unit) ->
   ?pool:Eio_net_accept.pool ->
   ?classify:(exn -> Eio_net_accept.answer option) ->
+  sw:Eio.Switch.t ->
+  net:_ Eio.Net.t ->
   max_connections:int ->
   listen:Eio.Net.Sockaddr.stream ->
   connect:Eio.Net.Sockaddr.stream ->
   unit ->
   Eio.Net.Sockaddr.stream
-(** [forward ~sw ~net ~on_error ~pool ~classify ~max_connections ~listen
+(** [forward ~on_error ~pool ~classify ~sw ~net ~max_connections ~listen
      ~connect ()] listens on [listen] (with a backlog of [16], and
     [SO_REUSEADDR] for a TCP address) and, for every accepted connection, dials
     [connect] and {!splice}s the two, in an {!Eio_net_accept.run} loop on [sw].
@@ -45,9 +45,9 @@ val forward :
     {!Eio_net_accept.run} does); the listener itself keeps accepting. A failed
     accept is read by [classify] (defaults to {!Eio_net_accept.classify}) as
     {!Eio_net_accept.run} reads it, and one that ends the loop fails [sw]: over
-    a Unix network, [~classify:Eio_net_unix.accept_failure] makes an accept with
-    no descriptor left wait for a relayed connection to end rather than end the
-    relay.
+    a Unix network, [~classify:Eio_net_unix.classify_accept] makes an accept
+    with no descriptor left wait for a relayed connection to end rather than end
+    the relay.
 
     The loop runs in [pool] (defaults to a new pool of this relay alone), as
     {!Eio_net_accept.run} does. Handed the pool of the process's other loops, an

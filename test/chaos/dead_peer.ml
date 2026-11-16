@@ -139,7 +139,7 @@ let broadcast ?(bug = `None) (env : Eio_net_chaos.env) =
       (List.init subscribers (fun _ -> ()))
   in
   Eio.Promise.await finished;
-  match (List.mem frames got, Eio_net_chaos.outage env) with
+  match (List.mem frames got, Eio_net_chaos.is_outage env) with
   | true, false | false, true -> ()
   | true, true -> failwith "a subscriber got every frame in the outage"
   | false, false ->

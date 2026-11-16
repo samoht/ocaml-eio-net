@@ -13,7 +13,7 @@ let attempts (env : Eio_net_chaos.env) f =
   go 1
 
 let expect (env : Eio_net_chaos.env) pp want got =
-  match (got, Eio_net_chaos.outage env) with
+  match (got, Eio_net_chaos.is_outage env) with
   | Some x, false when x = want -> ()
   | None, true -> ()
   | Some x, _ -> Fmt.failwith "got %a" pp x
@@ -74,13 +74,14 @@ let connfail ?(bug = `None) env =
   in
   expect env Fmt.Dump.string "hi" (attempt 1)
 
-(* A server whose accept loop, under [Fault.Emfile], retries the accept at
+(* A server whose accept loop, under [Fault.No_descriptor], retries the accept at
    once: with no descriptor left it spins. *)
 let busy_accept () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let emfile (op : Eio_net_chaos.Op.t) =
-    if op.kind = `Accept && op.offset = 1 then Some Eio_net_chaos.Fault.Emfile
+    if op.kind = `Accept && op.offset = 1 then
+      Some Eio_net_chaos.Fault.No_descriptor
     else None
   in
   let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
@@ -105,13 +106,14 @@ let busy_accept () =
   in
   ignore (Eio.Fiber.List.map (fun _ -> client ()) [ 1; 2 ])
 
-(* [Eio_net_accept.run] under [Fault.Emfile]: it sheds an idle connection,
+(* [Eio_net_accept.run] under [Fault.No_descriptor]: it sheds an idle connection,
    whose close frees a descriptor, and takes the queued one. *)
 let accept_loop () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let emfile (op : Eio_net_chaos.Op.t) =
-    if op.kind = `Accept && op.offset = 1 then Some Eio_net_chaos.Fault.Emfile
+    if op.kind = `Accept && op.offset = 1 then
+      Some Eio_net_chaos.Fault.No_descriptor
     else None
   in
   let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
@@ -120,7 +122,7 @@ let accept_loop () =
   let shed = ref false in
   Eio.Fiber.both
     (fun () ->
-      Eio_net_accept.run ~stop ~classify:Eio_net_unix.accept_failure
+      Eio_net_accept.run ~stop ~classify:Eio_net_unix.classify_accept
         ~max_connections:4 l (fun _ flow _ ->
           match App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16) with
           | line -> Eio.Flow.copy_string (line ^ "\n") flow
@@ -223,7 +225,7 @@ let shed ?(bug = `None) env =
     attempt ()
   in
   let results = Eio.Fiber.List.map client [ 1; 2; 3; 4; 5 ] in
-  if Eio_net_chaos.outage env then
+  if Eio_net_chaos.is_outage env then
     begin if List.exists Fun.id results then failwith "served during the outage"
     end
   else if not (List.for_all Fun.id results) then failwith "a client gave up"
@@ -456,7 +458,7 @@ let lease ?(bug = `None) env =
             Fmt.failwith "overlap: A [%.3f,%.3f] B [%.3f,%.3f]" sa ea sb eb)
         (of_id "B"))
     (of_id "A");
-  if of_id "B" = [] && not (Eio_net_chaos.outage env) then
+  if of_id "B" = [] && not (Eio_net_chaos.is_outage env) then
     failwith "B never led"
 
 (* A client that writes its whole batch, 18 bytes, before it reads a reply. *)

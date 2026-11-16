@@ -65,7 +65,8 @@ let resume ?replay ?bug () =
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Resume.serve ~clock:env#clock flow));
   match
-    (Resume.fetch ?bug ~clock:env#clock env#net addr, Eio_net_chaos.outage env)
+    ( Resume.fetch ?bug ~clock:env#clock env#net addr,
+      Eio_net_chaos.is_outage env )
   with
   | Ok d, false when d = Resume.data -> ()
   | Error `Gave_up, true -> ()

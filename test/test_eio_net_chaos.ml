@@ -240,7 +240,7 @@ let test_accept_emfile () =
   Eio.Switch.run @@ fun sw ->
   let net =
     Chaos.wrap ~clock:env#clock
-      (nth `Accept 2 Fault.Emfile)
+      (nth `Accept 2 Fault.No_descriptor)
       (Eio_net_mem.v ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
@@ -344,7 +344,7 @@ let test_flow_buffer_follows_read_side () =
     | exception End_of_file -> "End_of_file"
   in
   let wrapped () = Chaos.pair ~clock:env#clock (nth `Read 1 (Fault.Short 1)) in
-  let bare () = Eio_net_mem.pipe () in
+  let bare () = Eio_net_mem.pair () in
   List.iter
     (fun (name, shut) ->
       Alcotest.(check string)
@@ -1203,7 +1203,7 @@ let test_emfile_freed_by_switch () =
   Eio.Switch.run @@ fun sw ->
   let net =
     Chaos.wrap ~clock:env#clock
-      (nth `Accept 2 Fault.Emfile)
+      (nth `Accept 2 Fault.No_descriptor)
       (Eio_net_mem.v ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
@@ -1230,7 +1230,7 @@ let test_listener_released_with_switch () =
   Eio.Switch.run @@ fun sw ->
   let net =
     Chaos.wrap ~clock:env#clock
-      (nth `Accept 1 Fault.Emfile)
+      (nth `Accept 1 Fault.No_descriptor)
       (Eio_net_mem.v ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in

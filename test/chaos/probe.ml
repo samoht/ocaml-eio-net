@@ -175,7 +175,7 @@ let coalesce_retry ?(bug = true) () =
     | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _) ->
         if n < 3 then go (n + 1) else None
   in
-  match (go 1, Eio_net_chaos.outage env) with
+  match (go 1, Eio_net_chaos.is_outage env) with
   | Some ("A", "B"), false | None, true -> ()
   | Some (x, y), _ -> Fmt.failwith "got %S %S" x y
   | None, false -> failwith "gave up"

@@ -14,8 +14,8 @@ val v :
   [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~max_ops ~os ~charge ~clock ~outage f net] is [net] with [f] asked about
     each operation, as {!Eio_net_chaos.wrap} documents. [outage] is what
-    {!outage} says of it. Each network operation, a listen, a send, a lookup or
-    a close included, first calls [charge] (defaults to none). Once [max_ops]
+    {!is_outage} says of it. Each network operation, a listen, a send, a lookup
+    or a close included, first calls [charge] (defaults to none). Once [max_ops]
     (defaults to none) operations [f] was asked about were made, every operation
     waits for ever, and {!overrun} holds. Those of which [split] (defaults to
     none) holds do not count: {!splits} does. *)
@@ -28,8 +28,8 @@ val pair :
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 (** [pair ~os ~clock f] is {!Eio_net_chaos.pair}. *)
 
-val outage : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
-(** [outage net] is the [outage] [net] was made with by {!v}, and [false] for
+val is_outage : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
+(** [is_outage net] is the [outage] [net] was made with by {!v}, and [false] for
     any other network. *)
 
 val livelocked : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool

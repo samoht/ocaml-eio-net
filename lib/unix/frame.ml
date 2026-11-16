@@ -131,7 +131,7 @@ let sender ~max_length ~max_batch fd =
   in
   send_batch
 
-let of_connected_datagram_fd ~sw ?(max_length = 65536) ?(max_batch = 32) fd =
+let of_connected_datagram_fd ?(max_length = 65536) ?(max_batch = 32) ~sw fd =
   let fail fmt =
     Fmt.invalid_arg ("Eio_net_unix.Frame.of_connected_datagram_fd: " ^^ fmt)
   in

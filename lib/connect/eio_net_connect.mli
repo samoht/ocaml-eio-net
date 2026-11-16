@@ -9,10 +9,10 @@
     Eio names a refusal portably and reports every other failed connect as a
     backend error. A connection library therefore reads a failed connect with
     the classifier its caller hands it: {!classify} by default, or the
-    classifier of the platform's network, such as [Eio_net_unix.connect_failure]
-    for ENETUNREACH and EHOSTUNREACH. A classifier is passed to the code that
-    connects, so linking a library never changes how another's connects are
-    read. *)
+    classifier of the platform's network, such as
+    [Eio_net_unix.classify_connect] for ENETUNREACH and EHOSTUNREACH. A
+    classifier is passed to the code that connects, so linking a library never
+    changes how another's connects are read. *)
 
 type answer =
   [ `Refused

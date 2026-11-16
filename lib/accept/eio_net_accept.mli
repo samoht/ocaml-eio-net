@@ -12,7 +12,7 @@
     Eio names a connection reset portably and reports every other failed accept
     as a backend error. {!run} therefore reads a failed accept with the
     classifier it is handed: {!classify} by default, or the classifier of the
-    platform's network, such as [Eio_net_unix.accept_failure] for EMFILE and
+    platform's network, such as [Eio_net_unix.classify_accept] for EMFILE and
     ENFILE. A classifier belongs to one loop, and so does a pool: linking a
     library never changes how another loop reads its failures. *)
 
@@ -112,7 +112,7 @@ val run :
     shed by shutting its socket down, with no answer, so its reads end on
     whichever domain it runs. Any other failed accept raises its error, as one
     with no descriptor left does over a Unix network unless [classify] is
-    [Eio_net_unix.accept_failure].
+    [Eio_net_unix.classify_accept].
 
     [on_error] (defaults to logging a warning on the [eio-net.accept] log
     source) receives each exception a connection's [handler] raises but

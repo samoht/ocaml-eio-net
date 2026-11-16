@@ -192,11 +192,11 @@ val check :
       their minimum, Linux holds as little as about 4 KiB each way over TCP and
       2 KiB over AF_UNIX, so 32 KiB blocks no writer it could not;
     - the outage: every connect is refused and every datagram lost, for the
-      whole run. {!outage} is then [true], so [run] checks what its program does
-      when it gives up.
+      whole run. {!is_outage} is then [true], so [run] checks what its program
+      does when it gives up.
 
-    {!Fault.Emfile} is not among them: {!Eio.Net.run_server} stops on it, so a
-    test that wants it asks for it with {!wrap}.
+    {!Fault.No_descriptor} is not among them: {!Eio.Net.run_server} stops on it,
+    so a test that wants it asks for it with {!wrap}.
 
     A Unix-domain socket meets only what AF_UNIX can do, as it is reliable and
     ordered (unix(7)). A connect may be refused, but neither times out nor finds
@@ -227,8 +227,9 @@ val check :
     @raise Failure with a report of the first failing run.
     @raise Invalid_argument if [budget] is less than [1]. *)
 
-val outage : env -> bool
-(** [outage env] is [true] iff [env] is that of the outage run of {!check}. *)
+val is_outage : env -> bool
+(** [is_outage env] is [true] iff [env] is that of the outage run of {!check}.
+*)
 
 (** {1:blocks Building blocks} *)
 
@@ -360,11 +361,11 @@ module Fault : sig
             the error eio_posix raises then:
             [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (ENETUNREACH, "connect",
              "")), _)]. *)
-    | Emfile
+    | No_descriptor
         (** An accept fails with the error eio_posix raises when the process has
             no descriptor left:
             [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (EMFILE, "accept", "")), _)],
-            which [Eio_net_unix.accept_failure] reads as [`Descriptors]. As on
+            which [Eio_net_unix.classify_accept] reads as [`Descriptors]. As on
             Linux, the connection stays queued and its client sees nothing, and
             every accept on the network fails the same way until the program
             frees a descriptor, by closing a connection, socket or listener of
@@ -436,4 +437,4 @@ val pair :
 (** [pair ~os ~clock f] is a connected pair of in-memory streams, the client end
     first, with [f] asked about each read and write of either end, as {!wrap}
     asks: [socket] is [1]. Its streams follow [os] (defaults to [`Linux]), as
-    {!Eio_net_mem.pipe} takes it. A fuzzer drives it from its input. *)
+    {!Eio_net_mem.pair} takes it. A fuzzer drives it from its input. *)

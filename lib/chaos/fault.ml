@@ -9,7 +9,7 @@ type t =
   | Refuse
   | Timeout
   | Unreachable
-  | Emfile
+  | No_descriptor
   | Drop
   | Dup
   | Reorder
@@ -24,7 +24,7 @@ let pp ppf = function
   | Refuse -> Fmt.string ppf "is refused"
   | Timeout -> Fmt.string ppf "times out"
   | Unreachable -> Fmt.string ppf "finds its host unreachable"
-  | Emfile -> Fmt.string ppf "fails with EMFILE"
+  | No_descriptor -> Fmt.string ppf "finds no descriptor left"
   | Drop -> Fmt.string ppf "is lost"
   | Dup -> Fmt.string ppf "is duplicated"
   | Reorder -> Fmt.string ppf "is reordered"
@@ -39,7 +39,7 @@ let key = function
   | Refuse -> "refuse"
   | Timeout -> "timeout"
   | Unreachable -> "unreachable"
-  | Emfile -> "emfile"
+  | No_descriptor -> "no_descriptor"
   | Drop -> "drop"
   | Dup -> "dup"
   | Reorder -> "reorder"

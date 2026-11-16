@@ -42,4 +42,4 @@ let of_socket ?(max_length = 65536) ?dst socket =
   { recv; send }
 
 let recv t = t.recv ()
-let send t ?dst bufs = t.send dst bufs
+let send ?dst t bufs = t.send dst bufs

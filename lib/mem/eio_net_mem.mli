@@ -163,7 +163,7 @@ type Eio.Exn.Backend.t +=
             route to a host, with [EHOSTUNREACH]: a [connect] to a link-local
             address, and the datagram [send]s {!section-datagrams} lists. *)
 
-(** {1 Networks} *)
+(** {1:networks Networks} *)
 
 val v :
   ?os:[< `Linux | `Macos ] ->
@@ -172,10 +172,11 @@ val v :
   sw:Eio.Switch.t ->
   unit ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~capacity ~clock ~sw ()] is a network whose [listen] and [connect]
-    operations are paired in memory, and whose datagram sockets deliver to each
-    other. {!section-streams}, {!section-datagrams} and {!section-paths} say how
-    its sockets behave. {!section-resolution} says how [getaddrinfo] and
+(** [v ~os ~capacity ~clock ~sw ()] is a network following the kernel [os]
+    (defaults to [`Linux]) whose [listen] and [connect] operations are paired in
+    memory, and whose datagram sockets deliver to each other.
+    {!section-streams}, {!section-datagrams} and {!section-paths} say how its
+    sockets behave. {!section-resolution} says how [getaddrinfo] and
     [getnameinfo] answer.
 
     Each direction of a connection queues at most [capacity] bytes: a write
@@ -208,28 +209,22 @@ val v :
     end-of-file and writes raise [EPIPE]. With no keepalive and nothing
     unacknowledged, or without a clock, a wait on it lasts for ever.*)
 
-val pipe :
+val pair :
   ?os:[< `Linux | `Macos ] ->
   ?capacity:int ->
   unit ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-(** [pipe ~capacity ()] is a connected pair of in-memory stream sockets: bytes
-    written on one are read on the other, and vice versa, preserving order. Each
-    direction queues at most [capacity] bytes (defaults to 4 MiB), as for {!v}.
-    Unlike {!v} it binds no address and needs no [listen] and [connect]
-    handshake: it is the bare transport for a test, or a wrapper such as an
-    adversarial flow, that needs two ends of a pipe. Its ends take socket
-    options as a connection of {!v} does. Blocking reads suspend the calling
-    fiber until data arrives, so both ends must run under an Eio event loop; the
-    two ends may be in different domains. No switch closes them: the caller
-    does. *)
-
-val connection : _ Eio.Net.stream_socket -> int option
-(** [connection s] is [Some n] if [s] is an end of a connection of this library,
-    made by {!v} or {!pipe}, and [None] otherwise. The two ends of a connection
-    have the same [n], and no other connection has it. A wrapper that sees both
-    ends, such as a fault injector, pairs them with it. *)
+(** [pair ~os ~capacity ()] is a connected pair of in-memory stream sockets,
+    following the kernel [os] (defaults to [`Linux]): bytes written on one are
+    read on the other, and vice versa, preserving order. Each direction queues
+    at most [capacity] bytes (defaults to 4 MiB), as for {!v}. Unlike {!v} it
+    binds no address and needs no [listen] and [connect] handshake: it is the
+    bare transport for a test, or a wrapper such as an adversarial flow, that
+    needs two connected ends. Its ends take socket options as a connection of
+    {!v} does. Blocking reads suspend the calling fiber until data arrives, so
+    both ends must run under an Eio event loop; the two ends may be in different
+    domains. No switch closes them: the caller does. *)
 
 (** {1:streams Streams}
 
@@ -356,7 +351,7 @@ val connection : _ Eio.Net.stream_socket -> int option
       low-water marks, the timeouts and, over TCP, [TCP_KEEPIDLE].
     - [SO_SNDBUF] and [SO_RCVBUF] size the queue of each direction of a
       connection, in place of the default capacity and within one {!v} or
-      {!pipe} is given. On Linux over TCP it is the writer's send buffer, at
+      {!pair} is given. On Linux over TCP it is the writer's send buffer, at
       least 32 KiB, and half the reader's receive buffer, its window; over a
       Unix path, half the writer's send buffer. On macOS over TCP it is the
       writer's send buffer and what the reader's receive buffer grows to as data
@@ -622,4 +617,11 @@ module Private : sig
       any release.
 
       @raise Invalid_argument if [s] is not a connection of this library. *)
+
+  val connection_id : _ Eio.Net.stream_socket -> int option
+  (** [connection_id s] is [Some n] if [s] is an end of a connection of this
+      library, made by {!v} or {!pair}, and [None] otherwise. The two ends of a
+      connection have the same [n], and no other connection has it. A wrapper
+      that sees both ends, such as a fault injector, pairs them with it. For
+      eio-net.chaos; it may change at any release. *)
 end

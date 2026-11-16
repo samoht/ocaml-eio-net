@@ -13,8 +13,8 @@ module Local = Local
 module Tcp = Tcp
 module Interface = Interface
 
-val connect_failure : exn -> Eio_net_connect.answer option
-(** [connect_failure exn] is the answer a failed {!Eio.Net.connect} raising
+val classify_connect : exn -> Eio_net_connect.answer option
+(** [classify_connect exn] is the answer a failed {!Eio.Net.connect} raising
     [exn] carries from the network, or [None] when it carries none, such as a
     timeout or a local error:
 
@@ -28,8 +28,8 @@ val connect_failure : exn -> Eio_net_connect.answer option
     It is the classifier to hand a connection library that connects over a Unix
     network, in place of the portable {!Eio_net_connect.classify}. *)
 
-val accept_failure : exn -> Eio_net_accept.answer option
-(** [accept_failure exn] is the answer a failed {!Eio.Net.accept} raising [exn]
+val classify_accept : exn -> Eio_net_accept.answer option
+(** [classify_accept exn] is the answer a failed {!Eio.Net.accept} raising [exn]
     carries from the system, or [None] when it carries none:
 
     - [`Aborted] for [Eio.Net.Connection_reset _], as Eio reports ECONNABORTED:
@@ -47,6 +47,6 @@ val accept_failure : exn -> Eio_net_accept.answer option
       descriptor left for the connection.
 
     It is the classifier to hand {!Eio_net_accept.run} over a Unix network, as
-    [~classify:Eio_net_unix.accept_failure]: the portable
+    [~classify:Eio_net_unix.classify_accept]: the portable
     {!Eio_net_accept.classify} reads no descriptor left as no answer, and a loop
     handed it raises that accept's error. *)

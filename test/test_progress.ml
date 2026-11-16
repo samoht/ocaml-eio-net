@@ -16,12 +16,12 @@ let quarter w =
 let too_slow ~window f =
   Eio_mock.Backend.run_full @@ fun env ->
   let mono = env#mono_clock in
-  let p = Progress.v ~mono ~limit:100 ~window in
+  let p = Progress.v ~mono ~min_rate:100 ~window in
   let t0 = Eio.Time.Mono.now mono in
   match f ~mono p with
   | () -> Alcotest.fail "a transfer under the limit went on"
   | exception Progress.Too_slow e ->
-      Alcotest.(check int) "the limit it names" 100 e.limit;
+      Alcotest.(check int) "the rate it names" 100 e.min_rate;
       Alcotest.(check span) "the window it names" window e.window;
       Mtime.span t0 (Eio.Time.Mono.now mono)
 
@@ -69,7 +69,7 @@ let test_steady n () =
   let window = seconds n in
   Eio_mock.Backend.run_full @@ fun env ->
   let mono = env#mono_clock in
-  let p = Progress.v ~mono ~limit:100 ~window in
+  let p = Progress.v ~mono ~min_rate:100 ~window in
   let each = 100 * n in
   let moved = ref 0 in
   for _ = 1 to 16 do
@@ -87,7 +87,7 @@ let test_first_move n () =
   let window = seconds n in
   Eio_mock.Backend.run_full @@ fun env ->
   let mono = env#mono_clock in
-  let p = Progress.v ~mono ~limit:100 ~window in
+  let p = Progress.v ~mono ~min_rate:100 ~window in
   Eio.Time.Mono.sleep_span mono Mtime.Span.(2 * window);
   let moved =
     Progress.move p (fun () ->
@@ -104,7 +104,7 @@ let test_shared n () =
   let window = seconds n in
   Eio_mock.Backend.run_full @@ fun env ->
   let mono = env#mono_clock in
-  let p = Progress.v ~mono ~limit:100 ~window in
+  let p = Progress.v ~mono ~min_rate:100 ~window in
   let step =
     Mtime.Span.of_uint64_ns
       (Int64.div (Mtime.Span.to_uint64_ns window) 10L |> Int64.mul 6L)
@@ -132,7 +132,7 @@ let test_move_runs_once n () =
   let window = seconds n in
   Eio_mock.Backend.run_full @@ fun env ->
   let mono = env#mono_clock in
-  let p = Progress.v ~mono ~limit:100 ~window in
+  let p = Progress.v ~mono ~min_rate:100 ~window in
   let step =
     Mtime.Span.of_uint64_ns
       (Int64.div (Mtime.Span.to_uint64_ns window) 10L |> Int64.mul 6L)
@@ -165,7 +165,7 @@ let test_printer () =
     "the printer"
     "Eio_net.Progress: transfer too slow: 12 bytes in 10s, under 100 B/s"
     (Printexc.to_string
-       (Progress.Too_slow { limit = 100; window = seconds 10; moved = 12 }))
+       (Progress.Too_slow { min_rate = 100; window = seconds 10; moved = 12 }))
 
 let cases name f =
   List.map

@@ -27,7 +27,7 @@ let test ~serve () =
     List.fold_left ( + ) 0 (Eio.Fiber.List.map client (List.init n Fun.id))
   in
   (* A run loses at most two things; the outage loses them all. *)
-  if served < n - 2 && not (Eio_net_chaos.outage env) then
+  if served < n - 2 && not (Eio_net_chaos.is_outage env) then
     Fmt.failwith "%d of %d clients served" served n
 
 (* The idle timeout needs a client that stalls, so it pins one: it sends

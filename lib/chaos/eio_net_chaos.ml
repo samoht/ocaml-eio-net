@@ -12,7 +12,7 @@ module Fault = Fault
 
 let wrap ?os ~clock f net = Wrapper.v ?os ~clock ~outage:false f net
 let pair = Wrapper.pair
-let outage (env : env) = Wrapper.outage env#net
+let is_outage (env : env) = Wrapper.is_outage env#net
 
 (* {1 Runner} *)
 

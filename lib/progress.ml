@@ -1,41 +1,41 @@
 open! Hermetic
 
-exception Too_slow of { limit : int; window : Mtime.Span.t; moved : int }
+exception Too_slow of { min_rate : int; window : Mtime.Span.t; moved : int }
 
 let () =
   Printexc.register_printer @@ function
-  | Too_slow { limit; window; moved } ->
+  | Too_slow { min_rate; window; moved } ->
       Fmt.kstr Option.some
         "Eio_net.Progress: transfer too slow: %d bytes in %a, under %d B/s"
-        moved Mtime.Span.pp window limit
+        moved Mtime.Span.pp window min_rate
   | _ -> None
 
 type t = {
   now : unit -> Mtime.t;
   sleep : Mtime.Span.t -> unit;
-  limit : int;
+  min_rate : int;
   window : Mtime.Span.t;
   mutable start : Mtime.t option;
       (* the current window's start, from the transfer's first move *)
   mutable moved : int;
 }
 
-let v ~mono ~limit ~window =
-  if limit <= 0 then
-    Fmt.invalid_arg "Eio_net.Progress.v: min_rate is %d, not positive" limit;
+let v ~mono ~min_rate ~window =
+  if min_rate <= 0 then
+    Fmt.invalid_arg "Eio_net.Progress.v: min_rate is %d, not positive" min_rate;
   if Mtime.Span.equal window Mtime.Span.zero then
     invalid_arg "Eio_net.Progress.v: window is zero";
   {
     now = (fun () -> Eio.Time.Mono.now mono);
     sleep = Eio.Time.Mono.sleep_span mono;
-    limit;
+    min_rate;
     window;
     start = None;
     moved = 0;
   }
 
-(* The bytes a window must move: [limit] a second over [window]. *)
-let needed t = Mtime.Span.to_float_ns t.window /. 1e9 *. float_of_int t.limit
+(* The bytes a window must move: [min_rate] a second over [window]. *)
+let needed t = Mtime.Span.to_float_ns t.window /. 1e9 *. float_of_int t.min_rate
 
 (* What is left of the current window, zero once it has ended. *)
 let left t start =
@@ -53,7 +53,9 @@ let judge t start =
     when Mtime.equal current start
          && Mtime.Span.equal (left t start) Mtime.Span.zero ->
       if float_of_int t.moved < needed t then
-        raise (Too_slow { limit = t.limit; window = t.window; moved = t.moved });
+        raise
+          (Too_slow
+             { min_rate = t.min_rate; window = t.window; moved = t.moved });
       t.start <- Some (t.now ());
       t.moved <- 0
   | Some _ | None -> ()
@@ -91,6 +93,9 @@ let move t f =
         go ()
   in
   go ()
+
+let pp ppf t =
+  Fmt.pf ppf "<progress: %d B/s over %a>" t.min_rate Mtime.Span.pp t.window
 
 let reader t r =
   let open Bytesrw in
