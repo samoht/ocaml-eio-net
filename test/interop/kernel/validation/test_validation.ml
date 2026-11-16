@@ -193,9 +193,9 @@ let socket ~os ?state kind : Validation.socket =
   let kind : Validation.kind =
     match (state, which) with
     | Some k, _ -> k
-    | None, "listener" -> Listener
-    | None, "client" -> Client
-    | None, "server" -> Server
+    | None, "listener" -> Stream Listening
+    | None, "client" -> Stream (Connected Client)
+    | None, "server" -> Stream (Connected Server)
     | None, ("dgram" | "") -> Datagram
     | None, w -> Fmt.failwith "bad socket %S" w
   in
@@ -235,11 +235,11 @@ let case ~os name =
           Some (socket ~os kind, with_value o, "set=", false)
       | "sockopt inherit" as p ->
           let kind, o = parts p in
-          let s = socket ~os ~state:Listener (family kind) in
+          let s = socket ~os ~state:(Stream Listening) (family kind) in
           Some (s, option_named o, "set=", false)
       | "sockopt connect" as p ->
           let kind, o = parts p in
-          let s = socket ~os ~state:Unconnected (family kind) in
+          let s = socket ~os ~state:(Stream Unconnected) (family kind) in
           Some (s, option_named o, "connect=", false)
       | _ -> None)
 

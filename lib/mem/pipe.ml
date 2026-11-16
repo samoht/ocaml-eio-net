@@ -124,35 +124,38 @@ end
    The ends follow TCP: [shut] is the writer's FIN, after which the reader
    reads end-of-file, or a reset when [reset] says one came. A reset is
    reported once, by a read or by a write that [refused] fails, as a socket
-   clears its pending error; reads then return end-of-file. [gone] says the
-   reader has closed: the first write to it is lost and answered with a reset,
-   which [refused] then makes every later write raise; on a Unix-domain
-   connection, [local], the first write raises it, as EPIPE. [rcv_shut] says the reader
-   shut its receive side: it reads what is queued, then end-of-file, and as
-   Linux then sends no window update, what it reads frees no room: [unacked]
-   counts it. Once it
-   has also shut its send side, [fin_sent], data reaching a TCP reader resets
-   the connection, as Linux resets it in FIN-WAIT; a write to a Unix-domain
-   reader that shut its receive side raises the reset, as EPIPE.
+   clears its pending error; reads then return end-of-file.
+
+   [reader] is the reader's end. [Gone] once it has closed: the first write
+   to it is lost and answered with a reset, which [refused] then makes every
+   later write raise; on a Unix-domain connection, [local], the first write
+   raises it, as EPIPE. Once it shut its receive side it reads what is
+   queued, then end-of-file, and as Linux then sends no window update, what
+   it reads frees no room: [unacked] counts it. Once it has also shut its
+   send side, data reaching a TCP reader resets the connection, as Linux
+   resets it in FIN-WAIT; a write to a Unix-domain reader that shut its
+   receive side raises the reset, as EPIPE.
 
    [silent] says nothing crosses any more, as on a partition: the reader
-   reads the [n] bytes of [Some n], then waits until its own [rcv_shut]; the
+   reads the [n] bytes of [Some n], then waits until it shuts its receive
+   side; the
    writer fills the queue, then waits until its own [shut]. What the reader
    reads frees no room, and neither end's close or shutdown reaches the
    other. A TCP pipe with a [timer] keeps when its writer last sent a byte
    while the connection was live, [last], when it went silent, [silenced],
    and when the oldest byte sent since then, or lost then, was written,
    [oldest]: when each end gives up follows. *)
+type side = Open | Shut
+type reader = Live of { receive : side; send : side } | Gone
+
 type t = {
   mutex : Mutex.t;
   queued : Cstruct.t Queue.t;
   mutable head : int; (* Bytes of the first queued buffer already read. *)
   mutable shut : bool;
   mutable reset : bool;
-  mutable gone : bool;
   mutable refused : bool;
-  mutable rcv_shut : bool;
-  mutable fin_sent : bool;
+  mutable reader : reader;
   mutable silent : int option;
   timer : timer option;
   mutable last : Mtime.t;
@@ -168,6 +171,19 @@ type t = {
 }
 
 exception Expired
+
+(* The reader's end changes here only: a shutdown of either side of a live
+   reader, and its close ([leave]). *)
+let shut_reader side t =
+  match (t.reader, side) with
+  | Live r, `Receive -> t.reader <- Live { r with receive = Shut }
+  | Live r, `Send -> t.reader <- Live { r with send = Shut }
+  | Gone, _ -> ()
+
+let receive_shut t =
+  match t.reader with
+  | Live { receive = Shut; _ } -> true
+  | Live _ | Gone -> false
 
 let now t = match t.timer with Some c -> c.now () | None -> Mtime.min_stamp
 
@@ -186,10 +202,8 @@ let v ~os ~local ~timer ~capacity =
     head = 0;
     shut = false;
     reset = false;
-    gone = false;
     refused = false;
-    rcv_shut = false;
-    fin_sent = false;
+    reader = Live { receive = Open; send = Open };
     silent = None;
     capacity;
     size = 0;
@@ -329,18 +343,18 @@ let rec write_turn ~turn ?until t ~back bufs =
         else (`Done k, room t)
     else if t.refused then leave `Refused
     else if n = 0 then
-      if t.local && t.gone then leave (`Raise (reset_exn ()))
+      if t.local && t.reader = Gone then leave (`Raise (reset_exn ()))
       else leave (`Done 0)
-    else if t.gone then begin
+    else if t.reader = Gone then begin
       t.refused <- true;
       if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
     end
-    else if t.rcv_shut && t.local && t.os = Linux then
+    else if receive_shut t && t.local && t.os = Linux then
       leave (`Raise (reset_exn ()))
     else if
       Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
     then (`Wait (Waiters.queue t.writers ~turn), [])
-    else if t.rcv_shut && t.os = Macos then begin
+    else if receive_shut t && t.os = Macos then begin
       (* macOS drops what reaches a receive side shut down, still counted
          in its buffer: a TCP one answers it with a reset. *)
       let k = min n (t.capacity - t.size - t.unacked) in
@@ -351,7 +365,7 @@ let rec write_turn ~turn ?until t ~back bufs =
         leave (`Dropped k)
       end
     end
-    else if t.rcv_shut && t.fin_sent then begin
+    else if t.reader = Live { receive = Shut; send = Shut } then begin
       (* Data a full queue held back resets the connection once it is
          sent; a write that waited for room reports the reset. *)
       t.reset <- true;
@@ -426,25 +440,25 @@ let rec read_turn ~turn ?until t dst =
           t.unacked <- t.unacked + n;
           t.silent <- Some (left - n);
           (`Read n, if left > n then Waiters.pass t.readers else [])
-      | _ when t.rcv_shut ->
+      | _ when receive_shut t ->
           (`Raise End_of_file, Waiters.release t.readers ~turn)
       | _ -> (`Wait (Waiters.queue t.readers ~turn), [])
     else if not (Queue.is_empty t.queued) then begin
       if turn then t.readers.turn <- false;
       let n = take t dst 0 in
       t.size <- t.size - n;
-      if t.rcv_shut then t.unacked <- t.unacked + n;
+      if receive_shut t then t.unacked <- t.unacked + n;
       let next =
         if Queue.is_empty t.queued then [] else Waiters.pass t.readers
       in
-      (`Read n, (if t.rcv_shut then [] else Waiters.pass t.writers) @ next)
+      (`Read n, (if receive_shut t then [] else Waiters.pass t.writers) @ next)
     end
     else if t.reset then begin
       t.reset <- false;
       t.shut <- true;
       (`Raise (reset_exn ()), Waiters.release t.readers ~turn)
     end
-    else if t.shut || t.rcv_shut then
+    else if t.shut || receive_shut t then
       (`Raise End_of_file, Waiters.release t.readers ~turn)
     else (`Wait (Waiters.queue t.readers ~turn), [])
   in
@@ -463,7 +477,7 @@ let shut t = update t (fun t -> t.shut <- true)
    reads frees no room for the writer. macOS drops what is queued. *)
 let shut_receive t =
   update t (fun t ->
-      t.rcv_shut <- true;
+      shut_reader `Receive t;
       if t.os = Macos then begin
         Queue.clear t.queued;
         t.head <- 0;
@@ -478,10 +492,10 @@ let open_window t =
 
 (* The reader reads end-of-file once nothing is queued: macOS refuses to
    shut down its receive side again. *)
-let receive_ended t = Mutex.protect t.mutex (fun () -> t.rcv_shut || t.shut)
+let receive_ended t = Mutex.protect t.mutex (fun () -> receive_shut t || t.shut)
 
 (* The reader shut its send side. *)
-let fin_sent t = update t (fun t -> t.fin_sent <- true)
+let fin_sent t = update t (shut_reader `Send)
 
 (* Nothing crosses from now on. Over TCP what is queued is lost, an end of
    stream or a reset included, as a path that drops every segment loses
@@ -496,7 +510,12 @@ let silence t =
           t.silenced <- now t;
           if t.size > 0 && Option.is_some t.timer then t.oldest <- Some (now t)
         end
-        else if not (t.shut || t.reset || t.gone || t.refused || t.rcv_shut)
+        else if
+          (not (t.shut || t.reset || t.refused))
+          &&
+          match t.reader with
+          | Live { receive = Open; _ } -> true
+          | _ -> false
         then t.silent <- Some t.size)
 
 (* A silent TCP pipe with a timer: when it went silent, when its writer last
@@ -517,7 +536,7 @@ let leave t =
     Queue.clear t.queued;
     t.head <- 0;
     t.size <- 0;
-    t.gone <- true;
+    t.reader <- Gone;
     if unread then t.refused <- true;
     (unread, Waiters.take_all t.readers @ Waiters.take_all t.writers)
 

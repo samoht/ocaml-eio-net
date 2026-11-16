@@ -7,13 +7,21 @@
 (** A socket's address family. *)
 type family = V4 | V6 | Local
 
-(** What a socket is. *)
-type kind =
-  | Unconnected  (** A stream socket that neither listens nor is connected. *)
-  | Listener  (** A listener. *)
-  | Client  (** The end of a connection that connected. *)
-  | Server  (** The end of a connection a listener accepted. *)
-  | Datagram  (** A datagram socket. *)
+(** Which end of a connection a socket is. *)
+type role =
+  | Client  (** The end that connected. *)
+  | Server  (** The end a listener accepted. *)
+
+(** Where a stream socket is in its life: it listens or connects once, and stays
+    so. *)
+type stream =
+  | Unconnected  (** Neither listening nor connected. *)
+  | Listening  (** A listener. *)
+  | Connected of role  (** An end of a connection. *)
+
+(** What a socket is: a stream socket, in its life, or a datagram one, which is
+    never connected. *)
+type kind = Stream of stream | Datagram
 
 type socket = {
   os : Kernel.os;

@@ -11,13 +11,9 @@ open Address
 module O = Eio.Net.Sockopt
 
 type family = Validation.family = V4 | V6 | Local
-
-type kind = Validation.kind =
-  | Unconnected
-  | Listener
-  | Client
-  | Server
-  | Datagram
+type role = Validation.role = Client | Server
+type stream = Validation.stream = Unconnected | Listening | Connected of role
+type kind = Validation.kind = Stream of stream | Datagram
 
 type t = {
   os : os;
@@ -119,27 +115,27 @@ let connected t = Validation.connected t.kind
 (* The send and receive buffers each kernel gives a socket. *)
 let default_sndbuf t =
   match (t.os, t.family, t.kind) with
-  | Linux, (V4 | V6), (Unconnected | Listener) -> 16384
-  | Linux, (V4 | V6), (Client | Server) -> 2626560
+  | Linux, (V4 | V6), Stream (Unconnected | Listening) -> 16384
+  | Linux, (V4 | V6), Stream (Connected _) -> 2626560
   | Linux, _, _ -> 229376
-  | Macos, (V4 | V6), (Unconnected | Listener) -> 131072
-  | Macos, V4, Client -> 146988
-  | Macos, V6, Client -> 146808
-  | Macos, V4, Server -> 132792
-  | Macos, V6, Server -> 132132
+  | Macos, (V4 | V6), Stream (Unconnected | Listening) -> 131072
+  | Macos, V4, Stream (Connected Client) -> 146988
+  | Macos, V6, Stream (Connected Client) -> 146808
+  | Macos, V4, Stream (Connected Server) -> 132792
+  | Macos, V6, Stream (Connected Server) -> 132132
   | Macos, (V4 | V6), Datagram -> 9216
   | Macos, Local, Datagram -> 2048
   | Macos, Local, _ -> 8192
 
 let default_rcvbuf t =
   match (t.os, t.family, t.kind) with
-  | Linux, (V4 | V6), (Unconnected | Listener | Client | Server) -> 131072
+  | Linux, (V4 | V6), Stream _ -> 131072
   | Linux, _, _ -> 229376
-  | Macos, (V4 | V6), (Unconnected | Listener) -> 131072
-  | Macos, V4, Client -> 408300
-  | Macos, V6, Client -> 407800
-  | Macos, V4, Server -> 132792
-  | Macos, V6, Server -> 132132
+  | Macos, (V4 | V6), Stream (Unconnected | Listening) -> 131072
+  | Macos, V4, Stream (Connected Client) -> 408300
+  | Macos, V6, Stream (Connected Client) -> 407800
+  | Macos, V4, Stream (Connected Server) -> 132792
+  | Macos, V6, Stream (Connected Server) -> 132132
   | Macos, (V4 | V6), Datagram -> 786896
   | Macos, Local, Datagram -> 4096
   | Macos, Local, _ -> 8192
@@ -152,22 +148,22 @@ let rcvbuf t = Option.value t.rcvbuf ~default:(default_rcvbuf t)
 let linux_mss t =
   let base =
     match (t.family, t.kind) with
-    | V4, Client -> 32741
-    | V6, Client -> 32732
+    | V4, Stream (Connected Client) -> 32741
+    | V6, Stream (Connected Client) -> 32732
     | _ -> 32768
   in
   if t.user_mss > 0 then min base (t.user_mss - 12) else base
 
 let listener ~os : Eio.Net.Sockaddr.stream -> t = function
-  | `Unix _ -> v ~os ~family:Local Listener
+  | `Unix _ -> v ~os ~family:Local (Stream Listening)
   | `Tcp (ip, _) ->
-      let t = v ~os ~family:(family_of_ip ip) Listener in
+      let t = v ~os ~family:(family_of_ip ip) (Stream Listening) in
       bound t ip;
       t
 
 let client ~os : Eio.Net.Sockaddr.stream -> t = function
-  | `Unix _ -> v ~os ~family:Local Unconnected
-  | `Tcp (ip, _) -> v ~os ~family:(family_of_ip ip) Unconnected
+  | `Unix _ -> v ~os ~family:Local (Stream Unconnected)
+  | `Tcp (ip, _) -> v ~os ~family:(family_of_ip ip) (Stream Unconnected)
 
 let datagram ~os : Eio.Net.Sockaddr.datagram -> t = function
   | `Unix _ -> v ~os ~family:Local Datagram
@@ -176,9 +172,9 @@ let datagram ~os : Eio.Net.Sockaddr.datagram -> t = function
       bound t ip;
       t
 
-(* Becomes an end of a connection. *)
-let connect t kind =
-  t.kind <- kind;
+(* Becomes the end [role] of a connection. *)
+let connect t role =
+  t.kind <- Stream (Connected role);
   match t.os with
   | Linux -> t.maxseg <- Some (linux_mss t)
   | Macos -> t.maxseg <- None
@@ -188,15 +184,21 @@ let connect t kind =
    none; on macOS all but the low-water marks and the timeouts, and over
    TCP the keepalive idle time. *)
 let accepted l =
-  let fresh = v ~os:l.os ~family:l.family Server in
+  let fresh = v ~os:l.os ~family:l.family (Stream (Connected Server)) in
   let t =
     match (l.os, l.family) with
     | Linux, Local -> fresh
-    | Linux, _ -> { l with kind = Server; defer_accept = 0; fastopen = 0 }
+    | Linux, _ ->
+        {
+          l with
+          kind = Stream (Connected Server);
+          defer_accept = 0;
+          fastopen = 0;
+        }
     | Macos, family ->
         {
           l with
-          kind = Server;
+          kind = Stream (Connected Server);
           rcvlowat = 1;
           sndlowat = None;
           rcvtimeo = 0.;
@@ -351,8 +353,8 @@ let local_macos : type a. t -> a Eio.Net.Sockopt.t -> a =
   | O.TCP_NODELAY -> (
       match t.kind with
       | Datagram -> fail `Invalid
-      | Client | Server -> false
-      | Unconnected | Listener -> fail `Not_connected)
+      | Stream (Connected _) -> false
+      | Stream (Unconnected | Listening) -> fail `Not_connected)
   | O.TCP_MAXSEG -> if connected t then 0 else fail `Not_connected
   | O.IP_TTL -> if connected t then 0 else fail `Not_connected
   | _ -> fail `Not_supported
@@ -381,7 +383,8 @@ let get : type a. t -> a Eio.Net.Sockopt.t -> a =
     (Validation.get (view t) opt);
   let linux = t.os = Linux in
   match (Posix.extra opt, opt) with
-  | Some Acceptconn, _ -> if linux then t.kind = Listener else missing ()
+  | Some Acceptconn, _ ->
+      if linux then t.kind = Stream Listening else missing ()
   | Some Error, _ -> 0
   | Some Type, _ -> if t.kind = Datagram then 2 else 1
   | None, _

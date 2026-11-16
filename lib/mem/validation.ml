@@ -3,7 +3,9 @@ open Kernel
 module O = Eio.Net.Sockopt
 
 type family = V4 | V6 | Local
-type kind = Unconnected | Listener | Client | Server | Datagram
+type role = Client | Server
+type stream = Unconnected | Listening | Connected of role
+type kind = Stream of stream | Datagram
 type socket = { os : os; family : family; kind : kind; maxseg : int }
 
 type errno =
@@ -17,14 +19,16 @@ type errno =
 
 type refusal = Eio_check of string | Missing | Errno of errno
 
-let connected kind = kind = Client || kind = Server
+let connected = function
+  | Stream (Connected _) -> true
+  | Stream (Unconnected | Listening) | Datagram -> false
 
 let default_maxseg family kind =
   match (family, kind) with
-  | V4, Client -> 16332
-  | V6, Client -> 16312
-  | V4, Server -> 4024
-  | V6, Server -> 4004
+  | V4, Stream (Connected Client) -> 16332
+  | V6, Stream (Connected Client) -> 16312
+  | V4, Stream (Connected Server) -> 4024
+  | V6, Stream (Connected Server) -> 4004
   | V6, _ -> 1024
   | _ -> 512
 
@@ -153,9 +157,9 @@ let linux : type a. socket -> a O.t -> a -> refusal option =
       | _ -> errno `Unknown)
   | O.TCP_SYNCNT -> if v > 127 then invalid else None
   | O.TCP_WINDOW_CLAMP ->
-      if v = 0 && s.kind <> Unconnected then invalid else None
+      if v = 0 && s.kind <> Stream Unconnected then invalid else None
   | O.TCP_FASTOPEN -> if connected s.kind then invalid else None
-  | O.IPV6_ONLY -> if s.kind <> Unconnected then invalid else None
+  | O.IPV6_ONLY -> if s.kind <> Stream Unconnected then invalid else None
   | O.SO_BROADCAST | O.SO_REUSEADDR | O.SO_KEEPALIVE | O.SO_DONTROUTE
   | O.SO_OOBINLINE | O.SO_REUSEPORT | O.TCP_NODELAY | O.TCP_CORK
   | O.TCP_QUICKACK | O.IP_FREEBIND | O.IP_BIND_ADDRESS_NO_PORT ->
@@ -183,7 +187,7 @@ let macos : type a. socket -> a O.t -> a -> refusal option =
   | O.SO_SNDTIMEO -> if v < 0. then errno `Domain else None
   | O.TCP_MAXSEG ->
       if v <= 0 || v > s.maxseg || v + 40 < 216 then invalid else None
-  | O.IPV6_ONLY -> if s.kind <> Unconnected then invalid else None
+  | O.IPV6_ONLY -> if s.kind <> Stream Unconnected then invalid else None
   | O.SO_DEBUG | O.SO_BROADCAST | O.SO_REUSEADDR | O.SO_KEEPALIVE
   | O.SO_DONTROUTE | O.SO_OOBINLINE | O.SO_REUSEPORT | O.TCP_NODELAY ->
       None

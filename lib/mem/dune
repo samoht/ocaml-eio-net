@@ -9,6 +9,7 @@
   ports
   files
   validation
+  life
   sockopt
   pipe
   resolve)

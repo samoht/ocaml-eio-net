@@ -25,18 +25,14 @@ module Flow = struct
     type tag = [ `Generic ]
 
     (* [release] is the hook that closes the flow when the switch it was
-       opened under finishes, removed once the flow is closed. A close defers
-       to the operations in flight, [users], as Eio's [Rcfd] defers a
-       descriptor's: [closing] refuses new ones at once, and the last user
-       closes the socket, [closed]. [given_up] says the end gave up on its
-       silent peer, and whether it reported ETIMEDOUT yet. *)
+       opened under finishes, removed once the flow is closed. Its close
+       defers to the operations in flight ([Life]). [given_up] says the end
+       gave up on its silent peer, and whether it reported ETIMEDOUT yet. *)
     type t = {
       to_peer : Pipe.t;
       from_peer : Pipe.t;
       lock : Mutex.t;
-      mutable users : int;
-      mutable closing : bool;
-      mutable closed : bool;
+      mutable life : Life.t;
       mutable abort : bool;
       mutable release : Eio.Switch.hook;
       mutable on_close : reset:bool -> abort:bool -> unit;
@@ -115,12 +111,9 @@ module Flow = struct
     let leave t =
       let last =
         Mutex.protect t.lock @@ fun () ->
-        t.users <- t.users - 1;
-        t.users = 0 && t.closing && (not t.closed)
-        && begin
-          t.closed <- true;
-          true
-        end
+        let life, last = Life.leave t.life in
+        t.life <- life;
+        last
       in
       if last then teardown t
 
@@ -128,9 +121,9 @@ module Flow = struct
        descriptor used after close. *)
     let use t op f =
       Mutex.protect t.lock (fun () ->
-          if t.closing then
-            Fmt.invalid_arg "eio-net.mem: %s on a closed flow" op;
-          t.users <- t.users + 1);
+          match Life.enter t.life with
+          | Some life -> t.life <- life
+          | None -> Fmt.invalid_arg "eio-net.mem: %s on a closed flow" op);
       match f () with
       | v ->
           leave t;
@@ -180,16 +173,10 @@ module Flow = struct
     let close_with ~abort t =
       let now =
         Mutex.protect t.lock @@ fun () ->
-        if t.closing then `Again
-        else begin
-          t.closing <- true;
-          t.abort <- abort;
-          if t.users = 0 then begin
-            t.closed <- true;
-            `Now
-          end
-          else `Deferred
-        end
+        let life, now = Life.close t.life in
+        t.life <- life;
+        if now <> `Again then t.abort <- abort;
+        now
       in
       if now <> `Again then begin
         Eio.Switch.remove_hook t.release;
@@ -243,9 +230,7 @@ module Flow = struct
           from_peer;
           to_peer;
           lock = Mutex.create ();
-          users = 0;
-          closing = false;
-          closed = false;
+          life = Life.v;
           abort = false;
           release = Eio.Switch.null_hook;
           on_close = (fun ~reset:_ ~abort:_ -> ());
@@ -341,11 +326,9 @@ module Listening_socket = struct
   }
 
   (* The connections waiting to be accepted, at most [backlog] of them, and
-     [closed], guarded by [lock] so a connect queues one only while the
-     listener is open, and a close resets every one it queued. A close
-     defers to the accepts in flight, [users], as Eio's [Rcfd] defers a
-     descriptor's: [closing] refuses new ones at once, and the last one
-     closes the listener. *)
+     the listener's life, guarded by [lock] so a connect queues one only
+     while the listener is open, and a close resets every one it queued. A
+     close defers to the accepts in flight ([Life]). *)
   and t = {
     hub : hub;
     addr : Eio.Net.Sockaddr.stream;
@@ -354,9 +337,7 @@ module Listening_socket = struct
     backlog : int;
     acceptable : Eio.Condition.t;
     room : Eio.Condition.t;
-    mutable users : int;
-    mutable closing : bool;
-    mutable closed : bool;
+    mutable life : Life.t;
     mutable hooks : Eio.Switch.hook list;
     reuse : bool;
     hold : Ports.hold option;
@@ -371,7 +352,7 @@ module Listening_socket = struct
     | Linux -> if backlog < 0 || backlog > 4096 then 4097 else backlog + 1
     | Macos -> if backlog <= 0 || backlog > 128 then 128 else backlog
 
-  let is_closed t = Mutex.protect t.lock (fun () -> t.closed)
+  let is_closed t = Mutex.protect t.lock (fun () -> Life.is_closed t.life)
 
   (* A Unix-domain path is taken over with [reuse_addr], as Eio's POSIX backend
      removes the socket file there before it binds; the listener that held it
@@ -415,9 +396,7 @@ module Listening_socket = struct
               backlog = queue_length ~os:(Ports.os hub.ports) backlog;
               acceptable = Eio.Condition.create ();
               room = Eio.Condition.create ();
-              users = 0;
-              closing = false;
-              closed = false;
+              life = Life.v;
               hooks = [];
               reuse = reuse_addr;
               hold;
@@ -472,19 +451,17 @@ module Listening_socket = struct
   let leave t =
     let last =
       Mutex.protect t.lock @@ fun () ->
-      t.users <- t.users - 1;
-      t.users = 0 && t.closing && (not t.closed)
-      && begin
-        t.closed <- true;
-        true
-      end
+      let life, last = Life.leave t.life in
+      t.life <- life;
+      last
     in
     if last then shut t
 
   let accept t ~sw =
     Mutex.protect t.lock (fun () ->
-        if t.closing then invalid_arg "accept on closed in-memory listener";
-        t.users <- t.users + 1);
+        match Life.enter t.life with
+        | Some life -> t.life <- life
+        | None -> invalid_arg "accept on closed in-memory listener");
     match
       Eio.Condition.loop_no_mutex t.acceptable @@ fun () ->
       Mutex.protect t.lock (fun () -> Queue.take_opt t.incoming)
@@ -504,7 +481,7 @@ module Listening_socket = struct
     let queued =
       Eio.Condition.loop_no_mutex t.room @@ fun () ->
       Mutex.protect t.lock @@ fun () ->
-      if t.closed then Some `Closed
+      if Life.is_closed t.life then Some `Closed
       else if Queue.length t.incoming < t.backlog then begin
         Queue.push conn t.incoming;
         Some `Queued
@@ -518,15 +495,9 @@ module Listening_socket = struct
   let close t =
     let now =
       Mutex.protect t.lock @@ fun () ->
-      if t.closing then `Again
-      else begin
-        t.closing <- true;
-        if t.users = 0 then begin
-          t.closed <- true;
-          `Now
-        end
-        else `Deferred
-      end
+      let life, now = Life.close t.life in
+      t.life <- life;
+      now
     in
     if now <> `Again then begin
       List.iter Eio.Switch.remove_hook t.hooks;
@@ -536,12 +507,12 @@ module Listening_socket = struct
 
   (* As Eio's own sockets refuse a descriptor used after close. *)
   let listening_addr t =
-    if Mutex.protect t.lock (fun () -> t.closing) then
+    if Mutex.protect t.lock (fun () -> not (Life.is_open t.life)) then
       invalid_arg "eio-net.mem: listening_addr on a closed listener";
     t.addr
 
   let open_opts t =
-    if Mutex.protect t.lock (fun () -> t.closing) then
+    if Mutex.protect t.lock (fun () -> not (Life.is_open t.life)) then
       invalid_arg "eio-net.mem: socket option on a closed listener";
     t.opts
 
@@ -1076,14 +1047,17 @@ module Ends = struct
   type decision =
     [ `Held | `Release | `Until of Mtime.t | `Time_wait of Mtime.t ]
 
+  (* An end is open, closed at a time, or dropped by its listener. [fin]
+     orders the ends' FINs and says when each went. *)
+  type state = Open | Closed of Mtime.t | Dropped
+  type end_ = { mutable fin : (int * Mtime.t) option; mutable state : state }
+
   type t = {
     lock : Mutex.t;
     now : (unit -> Mtime.t) option;
     time_wait : Mtime.Span.t;
     mutable seq : int;
-    fin : (int * Mtime.t) option array;
-    closed : Mtime.t option array;
-    dropped : bool array;
+    ends : end_ array;
     mutable reset : bool;
   }
 
@@ -1093,9 +1067,7 @@ module Ends = struct
       now = Ports.now ports;
       time_wait = Ports.time_wait ports;
       seq = 0;
-      fin = [| None; None |];
-      closed = [| None; None |];
-      dropped = [| false; false |];
+      ends = Array.init 2 (fun _ -> { fin = None; state = Open });
       reset = false;
     }
 
@@ -1103,17 +1075,19 @@ module Ends = struct
   let now t = match t.now with Some now -> now () | None -> Mtime.min_stamp
 
   let decide t i : decision =
-    let o = 1 - i in
-    match t.closed.(i) with
-    | None -> `Held
-    | Some _ when t.dropped.(i) -> `Release
-    | Some closed -> (
-        let both = Option.is_some t.closed.(o) in
+    let e = t.ends.(i) and o = t.ends.(1 - i) in
+    match e.state with
+    | Open -> `Held
+    | Dropped -> `Release
+    | Closed closed -> (
+        let both =
+          match o.state with Open -> false | Closed _ | Dropped -> true
+        in
         if Option.is_none t.now || t.reset then if both then `Release else `Held
         else
           let after span t = Option.value ~default:t (Mtime.add_span t span) in
           let orphan = after Ports.fin_timeout closed in
-          match (t.fin.(i), t.fin.(o)) with
+          match (e.fin, o.fin) with
           | Some (mine, _), Some (theirs, _) when theirs < mine -> `Release
           | _, Some (_, peer) when Mtime.is_later peer ~than:orphan -> `Release
           | _, Some (_, peer) ->
@@ -1128,9 +1102,10 @@ module Ends = struct
     (decide t 0, decide t 1)
 
   let send_fin t i =
-    if Option.is_none t.fin.(i) then begin
+    let e = t.ends.(i) in
+    if Option.is_none e.fin then begin
       t.seq <- t.seq + 1;
-      t.fin.(i) <- Some (t.seq, now t)
+      e.fin <- Some (t.seq, now t)
     end
 
   let fin t side = update t (fun () -> send_fin t (index side))
@@ -1139,8 +1114,7 @@ module Ends = struct
     update t (fun () ->
         let i = index side in
         send_fin t i;
-        t.closed.(i) <- Some (now t);
-        if abort then t.dropped.(i) <- true;
+        t.ends.(i).state <- (if abort then Dropped else Closed (now t));
         if reset then t.reset <- true)
 
   let reset t = Mutex.protect t.lock (fun () -> t.reset <- true)
@@ -1645,9 +1619,9 @@ let connection = Flow.connection
 
 let pipe ?os ?capacity () =
   let os = Kernel.of_arg os in
-  let end_ kind =
-    let opts = Sockopt.v ~os ~family:V4 Unconnected in
-    Sockopt.connect opts kind;
+  let end_ role =
+    let opts = Sockopt.v ~os ~family:V4 (Stream Unconnected) in
+    Sockopt.connect opts role;
     opts
   in
   let (_, client), (_, server) =

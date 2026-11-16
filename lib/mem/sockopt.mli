@@ -6,15 +6,16 @@
     connection gives up. *)
 
 (** A socket's address family. *)
-type family = V4 | V6 | Local
+type family = Validation.family = V4 | V6 | Local
+
+(** Which end of a connection a socket is. *)
+type role = Validation.role = Client | Server
+
+(** Where a stream socket is in its life. *)
+type stream = Validation.stream = Unconnected | Listening | Connected of role
 
 (** What a socket is. *)
-type kind =
-  | Unconnected  (** A stream socket that neither listens nor is connected. *)
-  | Listener  (** A listener. *)
-  | Client  (** The end of a connection that connected. *)
-  | Server  (** The end of a connection a listener accepted. *)
-  | Datagram  (** A datagram socket. *)
+type kind = Validation.kind = Stream of stream | Datagram
 
 type t
 (** A socket's options. *)
@@ -35,8 +36,8 @@ val bound : t -> Eio.Net.Ipaddr.v4v6 -> unit
 (** [bound t ip] says the socket binds [ip]: Linux makes an IPv6 socket bound at
     an address other than the wildcard and the IPv4-mapped ones IPv6 only. *)
 
-val connect : t -> kind -> unit
-(** [connect t kind] makes the socket the end [kind] of a connection. *)
+val connect : t -> role -> unit
+(** [connect t role] makes the socket the end [role] of a connection. *)
 
 val accepted : t -> t
 (** [accepted l] is those of a socket the listener of options [l] accepts: those
