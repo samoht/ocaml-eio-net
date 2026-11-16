@@ -320,64 +320,70 @@ let queue t ~turn bufs n =
 let room t =
   if t.size + t.unacked < t.capacity then Waiters.pass t.writers else []
 
+(* Under the mutex: [outcome], with the writers' turn handed on. *)
+let leave t ~turn outcome = (outcome, Waiters.release t.writers ~turn)
+
+(* Under the mutex: a write of [n] bytes to a connection gone silent queues
+   what fits, and starts its timer at the first bytes it holds. *)
+let write_silent t ~turn bufs n =
+  if n = 0 then leave t ~turn (`Done 0)
+  else if Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
+  then (`Wait (Waiters.queue t.writers ~turn), [])
+  else
+    let k = queue t ~turn bufs n in
+    if k > 0 && Option.is_none t.oldest && Option.is_some t.timer then begin
+      t.oldest <- Some (now t);
+      (`Sent k, room t)
+    end
+    else (`Done k, room t)
+
+(* Under the mutex: what a write of [n] bytes of [bufs] does now, and the
+   waiters it wakes. *)
+let write_step t ~turn bufs n =
+  let leave = leave t ~turn in
+  (* An empty write sends nothing, so on Linux it meets no shutdown or
+     closed peer; on macOS it fails where a write would. *)
+  if n = 0 && t.os = Linux then leave (`Done 0)
+  else if t.shut then leave `Shut
+  else if Option.is_some t.silent then write_silent t ~turn bufs n
+  else if t.refused then leave `Refused
+  else if n = 0 then
+    if t.local && t.reader = Gone then leave (`Raise (reset_exn ()))
+    else leave (`Done 0)
+  else if t.reader = Gone then begin
+    t.refused <- true;
+    if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
+  end
+  else if receive_shut t && t.local && t.os = Linux then
+    leave (`Raise (reset_exn ()))
+  else if Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
+  then (`Wait (Waiters.queue t.writers ~turn), [])
+  else if receive_shut t && t.os = Macos then begin
+    (* macOS drops what reaches a receive side shut down, still counted
+       in its buffer: a TCP one answers it with a reset. *)
+    let k = min n (t.capacity - t.size - t.unacked) in
+    t.unacked <- t.unacked + k;
+    if t.local then leave (`Done k)
+    else begin
+      t.refused <- true;
+      leave (`Dropped k)
+    end
+  end
+  else if t.reader = Live { receive = Shut; send = Shut } then begin
+    (* Data a full queue held back resets the connection once it is
+       sent; a write that waited for room reports the reset. *)
+    t.reset <- true;
+    t.refused <- true;
+    if turn then leave (`Raise (reset_exn ())) else leave (`Lost n)
+  end
+  else
+    let k = queue t ~turn bufs n in
+    if k > 0 && Option.is_some t.timer then t.last <- now t;
+    (`Done k, Waiters.pass t.readers @ room t)
+
 let rec write_turn ~turn ?until t ~back bufs =
   let n = Cstruct.lenv bufs in
-  let result =
-    locked t @@ fun t ->
-    let leave outcome = (outcome, Waiters.release t.writers ~turn) in
-    (* An empty write sends nothing, so on Linux it meets no shutdown or
-       closed peer; on macOS it fails where a write would. *)
-    if n = 0 && t.os = Linux then leave (`Done 0)
-    else if t.shut then leave `Shut
-    else if Option.is_some t.silent then
-      if n = 0 then leave (`Done 0)
-      else if
-        Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
-      then (`Wait (Waiters.queue t.writers ~turn), [])
-      else
-        let k = queue t ~turn bufs n in
-        if k > 0 && Option.is_none t.oldest && Option.is_some t.timer then begin
-          t.oldest <- Some (now t);
-          (`Sent k, room t)
-        end
-        else (`Done k, room t)
-    else if t.refused then leave `Refused
-    else if n = 0 then
-      if t.local && t.reader = Gone then leave (`Raise (reset_exn ()))
-      else leave (`Done 0)
-    else if t.reader = Gone then begin
-      t.refused <- true;
-      if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
-    end
-    else if receive_shut t && t.local && t.os = Linux then
-      leave (`Raise (reset_exn ()))
-    else if
-      Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
-    then (`Wait (Waiters.queue t.writers ~turn), [])
-    else if receive_shut t && t.os = Macos then begin
-      (* macOS drops what reaches a receive side shut down, still counted
-         in its buffer: a TCP one answers it with a reset. *)
-      let k = min n (t.capacity - t.size - t.unacked) in
-      t.unacked <- t.unacked + k;
-      if t.local then leave (`Done k)
-      else begin
-        t.refused <- true;
-        leave (`Dropped k)
-      end
-    end
-    else if t.reader = Live { receive = Shut; send = Shut } then begin
-      (* Data a full queue held back resets the connection once it is
-         sent; a write that waited for room reports the reset. *)
-      t.reset <- true;
-      t.refused <- true;
-      if turn then leave (`Raise (reset_exn ())) else leave (`Lost n)
-    end
-    else
-      let k = queue t ~turn bufs n in
-      if k > 0 && Option.is_some t.timer then t.last <- now t;
-      (`Done k, Waiters.pass t.readers @ room t)
-  in
-  match result with
+  match locked t (fun t -> write_step t ~turn bufs n) with
   | `Wait w ->
       let turn = await ?until t t.writers w in
       write_turn ~turn ?until t ~back bufs
