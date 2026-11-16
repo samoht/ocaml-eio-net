@@ -218,7 +218,7 @@ longer payload, before it reads any payload byte. A reader made with
 `~max_size:(Eio_net_framing.Config.buffer_size framing)` therefore never holds
 more than the longest frame.
 
-A datagram longer than a channel's `max_frame` (64 KiB by default) raises the
+A datagram longer than a channel's `max_length` (64 KiB by default) raises the
 `Eio.Io` error `Too_long` instead of arriving truncated.
 
 ## Accept loop

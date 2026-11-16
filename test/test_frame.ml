@@ -356,7 +356,8 @@ module Scripted_flow = struct
 end
 
 let invalid_length length =
-  Eio_net_framing.Invalid_length { length; minimum = 0; maximum = 1_048_576 }
+  Eio_net_framing.Invalid_length
+    { length; min_length = 0; max_length = 1_048_576 }
 
 let test_sticky_read_error () =
   Eio_mock.Backend.run @@ fun () ->
@@ -404,7 +405,7 @@ let test_refused_batch_usable () =
   let channel = Eio_net.Frame.of_length_prefixed_flow ~framing flow in
   Alcotest.check_raises "oversized batch refused"
     (Eio_net_framing.Error
-       (Invalid_length { length = 5L; minimum = 0; maximum = 4 }))
+       (Invalid_length { length = 5L; min_length = 0; max_length = 4 }))
     (fun () ->
       Eio_net.Frame.send_batch channel
         [ [ Cstruct.of_string "ok" ]; [ Cstruct.of_string "large" ] ]);

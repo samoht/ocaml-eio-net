@@ -28,14 +28,14 @@ let connect ~sw ~net path =
     raise (Eio_unix.Err.v ENAMETOOLONG "connect" s);
   (Eio.Net.connect ~sw net (`Unix s) :> stream)
 
-let receive ~sw ~max_fds ~max flow =
+let receive ~sw ~max_fds ~max_length flow =
   let b = Buffer.create 4096 and buf = Cstruct.create 65536 in
   let rec go fds =
     let room = max_fds - List.length fds in
     match Eio_unix.Net.recv_msg_with_fds flow ~sw ~max_fds:room [ buf ] with
     | exception End_of_file -> Ok (Buffer.contents b, fds)
     | 0, got -> Ok (Buffer.contents b, fds @ got)
-    | n, got when Buffer.length b + n > max ->
+    | n, got when Buffer.length b + n > max_length ->
         List.iter Eio_unix.Fd.close (fds @ got);
         Error `Too_long
     | n, got ->

@@ -23,10 +23,10 @@ let widen_datagram_buffers fd =
   (try Unix.setsockopt_int fd Unix.SO_SNDBUF send with Unix.Unix_error _ -> ());
   try Unix.setsockopt_int fd Unix.SO_RCVBUF recv with Unix.Unix_error _ -> ()
 
-(* [check_length ~max_frame len] raises the {!Eio_net.Datagram.Too_long} error
-   if a datagram of [len] bytes is longer than [max_frame]. *)
-let check_length ~max_frame len =
-  if len > max_frame then raise (Eio_net.Datagram.too_long ~max:max_frame)
+(* [check_length ~max_length len] raises the {!Eio_net.Datagram.Too_long} error
+   if a datagram of [len] bytes is longer than [max_length]. *)
+let check_length ~max_length len =
+  if len > max_length then raise (Eio_net.Datagram.too_long ~max_length)
 
 (* [last_received lengths] is the index of the last datagram a batch filled
    before it failed: the ones it did not reach have a length of -1. *)
@@ -37,13 +37,13 @@ let last_received lengths =
   in
   received 1
 
-let receiver ~max_frame ~max_batch socket fd =
-  let check = check_length ~max_frame in
-  (* One byte of headroom tells a datagram longer than [max_frame] from one
-     exactly [max_frame] long. *)
-  let recv_buf = Cstruct.create (max_frame + 1) in
+let receiver ~max_length ~max_batch socket fd =
+  let check = check_length ~max_length in
+  (* One byte of headroom tells a datagram longer than [max_length] from one
+     exactly [max_length] long. *)
+  let recv_buf = Cstruct.create (max_length + 1) in
   let recv_buffers =
-    Array.init max_batch (fun _ -> Cstruct.create (max_frame + 1))
+    Array.init max_batch (fun _ -> Cstruct.create (max_length + 1))
   in
   let recv_lengths = Array.make max_batch 0 in
   (* The failure a batch met after its first datagram, which the system
@@ -88,8 +88,10 @@ let receiver ~max_frame ~max_batch socket fd =
 let min_backoff = 50
 let max_backoff = 10_000
 
-let sender ~max_frame ~max_batch fd =
-  let send_buffers = Array.init max_batch (fun _ -> Cstruct.create max_frame) in
+let sender ~max_length ~max_batch fd =
+  let send_buffers =
+    Array.init max_batch (fun _ -> Cstruct.create max_length)
+  in
   let send_lengths = Array.make max_batch 0 in
   let rec copy_frames frames index =
     match frames with
@@ -97,7 +99,7 @@ let sender ~max_frame ~max_batch fd =
     | _ when index = max_batch -> (index, frames)
     | frame :: rest ->
         let len = Cstruct.lenv frame in
-        check_length ~max_frame len;
+        check_length ~max_length len;
         ignore (Cstruct.fillv ~src:frame ~dst:send_buffers.(index));
         send_lengths.(index) <- len;
         copy_frames rest (index + 1)
@@ -129,11 +131,11 @@ let sender ~max_frame ~max_batch fd =
   in
   send_batch
 
-let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
+let of_connected_datagram_fd ~sw ?(max_length = 65536) ?(max_batch = 32) fd =
   let fail fmt =
     Fmt.invalid_arg ("Eio_net_unix.Frame.of_connected_datagram_fd: " ^^ fmt)
   in
-  if max_frame <= 0 then fail "max_length is %d, not positive" max_frame;
+  if max_length <= 0 then fail "max_length is %d, not positive" max_length;
   if max_batch <= 0 then fail "max_batch is %d, not positive" max_batch;
   if max_batch > max_batch_limit then
     fail "max_batch is %d, more than %d" max_batch max_batch_limit;
@@ -144,8 +146,8 @@ let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
   let fd = Eio_unix.Resource.fd socket in
   (* Receiving and sending have their own buffers: a frame waiting to go out
      is not overwritten by one coming in. *)
-  let recv, recv_batch = receiver ~max_frame ~max_batch socket fd in
-  let send_batch = sender ~max_frame ~max_batch fd in
+  let recv, recv_batch = receiver ~max_length ~max_batch socket fd in
+  let send_batch = sender ~max_length ~max_batch fd in
   (* Receives share their buffers, and so do sends, which wait for the socket
      with a batch half sent: each direction runs one call at a time. *)
   let recv_lock = Eio.Mutex.create () and send_lock = Eio.Mutex.create () in

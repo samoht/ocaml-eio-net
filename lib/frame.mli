@@ -58,25 +58,25 @@ val v :
     receive, and the slice of an empty frame is {!Bytesrw.Bytes.Slice.eod}. *)
 
 val of_datagram_socket :
-  ?max_frame:int ->
+  ?max_length:int ->
   ?dst:Eio.Net.Sockaddr.datagram ->
   _ Eio.Net.datagram_socket ->
   t
-(** [of_datagram_socket ~max_frame ~dst socket] presents [socket] as a frame
+(** [of_datagram_socket ~max_length ~dst socket] presents [socket] as a frame
     channel: each datagram is one frame. Frames are sent to [dst] (omit it for a
-    connected socket) and received from any source, up to [max_frame] bytes
+    connected socket) and received from any source, up to [max_length] bytes
     (defaults to [65536]). {!send_batch} sends its frames one datagram at a
     time.
 
     {!recv}, {!recv_batch} and {!recv_slice} raise the {!Eio.Io} error
-    {!Datagram.Too_long} on a datagram longer than [max_frame] rather than
+    {!Datagram.Too_long} on a datagram longer than [max_length] rather than
     silently truncating it; the oversized datagram is consumed and the channel
     stays usable. Concurrent receives run one at a time, as
     {!Datagram.of_socket} runs them; sends run at once. A protocol that needs
     the source address of each datagram uses the addressed {!Datagram} channel
     instead.
 
-    Raises [Invalid_argument] if [max_frame] is not positive. *)
+    Raises [Invalid_argument] if [max_length] is not positive. *)
 
 val of_length_prefixed_flow :
   ?framing:Eio_net_framing.Config.t -> _ Eio.Flow.two_way -> t

@@ -109,12 +109,12 @@ val listen :
 val receive :
   sw:Eio.Switch.t ->
   max_fds:int ->
-  max:int ->
+  max_length:int ->
   [> `Platform of [> `Unix ] | `Socket | `Stream ] Eio.Resource.t ->
   (string * Eio_unix.Fd.t list, [ `Too_long ]) result
-(** [receive ~sw ~max_fds ~max flow] is the message its peer wrote on [flow] up
-    to its end of sending, and the descriptors sent with it, at most [max_fds]
-    of them, attached to [sw]; the system closes any more. A peer that writes
-    more than [max] bytes is [Error `Too_long], read no further, and the
-    descriptors it sent are closed. A failure of the socket is the {!Eio.Io}
-    error its read raises. *)
+(** [receive ~sw ~max_fds ~max_length flow] is the message its peer wrote on
+    [flow] up to its end of sending, and the descriptors sent with it, at most
+    [max_fds] of them, attached to [sw]; the system closes any more. A peer that
+    writes more than [max_length] bytes is [Error `Too_long], read no further,
+    and the descriptors it sent are closed. A failure of the socket is the
+    {!Eio.Io} error its read raises. *)

@@ -78,23 +78,23 @@ let test_default_destination () =
   let _, payload = Eio_net.Datagram.recv b in
   Alcotest.(check string) "datagram reaches configured dst" "to-default" payload
 
-(* A datagram longer than [max_frame] is the peer's doing, not the caller's:
+(* A datagram longer than [max_length] is the peer's doing, not the caller's:
    it is refused with an [Eio.Io] error, as a failed receive is. *)
-let too_long ?(max = 8) f =
+let too_long ?(max_length = 8) f =
   match f () with
   | _ -> false
   | exception Eio.Io (Eio.Exn.X (Eio_net.Datagram.Too_long e), _) ->
-      Alcotest.(check int) "the bound it names" max e.max;
+      Alcotest.(check int) "the bound it names" max_length e.max_length;
       true
 
 let test_oversized_refused () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
-  let b = Eio_net.Datagram.of_socket ~max_frame:8 sock_b in
+  let b = Eio_net.Datagram.of_socket ~max_length:8 sock_b in
   send a ~dst:addr_b "exactly-9";
   send a ~dst:addr_b "8-bytes!";
   Alcotest.(check bool)
-    "9-byte datagram refused at max_frame 8" true
+    "9-byte datagram refused at max_length 8" true
     (too_long (fun () -> Eio_net.Datagram.recv b));
   let _, payload = Eio_net.Datagram.recv b in
   Alcotest.(check string) "channel survives the refusal" "8-bytes!" payload
@@ -102,19 +102,19 @@ let test_oversized_refused () =
 let test_frame_carrier_refuses_oversize () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
-  let b = Eio_net.Frame.of_datagram_socket ~max_frame:4 sock_b in
+  let b = Eio_net.Frame.of_datagram_socket ~max_length:4 sock_b in
   send a ~dst:addr_b "five!";
   Alcotest.(check bool)
     "recv refuses an oversized datagram" true
-    (too_long ~max:4 (fun () -> Eio_net.Frame.recv b));
+    (too_long ~max_length:4 (fun () -> Eio_net.Frame.recv b));
   send a ~dst:addr_b "five!";
   Alcotest.(check bool)
     "recv_batch refuses it" true
-    (too_long ~max:4 (fun () -> Eio_net.Frame.recv_batch b));
+    (too_long ~max_length:4 (fun () -> Eio_net.Frame.recv_batch b));
   send a ~dst:addr_b "five!";
   Alcotest.(check bool)
     "recv_slice refuses it" true
-    (too_long ~max:4 (fun () -> Eio_net.Frame.recv_slice b))
+    (too_long ~max_length:4 (fun () -> Eio_net.Frame.recv_slice b))
 
 (* A socket whose receive writes a datagram into the buffer and yields before
    it returns, as a completion-based backend (eio_linux's io_uring) does: the
@@ -169,7 +169,8 @@ let test_too_long_prints () =
     "the printed error"
     "Eio.Io Too_long (a datagram longer than 8 bytes, eio-net)"
     (Printexc.to_string
-       (Eio.Exn.create (Eio.Exn.X (Eio_net.Datagram.Too_long { max = 8 }))))
+       (Eio.Exn.create
+          (Eio.Exn.X (Eio_net.Datagram.Too_long { max_length = 8 }))))
 
 let suite =
   ( "datagram",

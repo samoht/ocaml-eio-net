@@ -190,7 +190,7 @@ let test_hostile_lengths () =
     (fun (prefix, length) ->
       let r = Chunked.reader config [ prefix; String.make 16 'p' ] in
       Alcotest.check error "exact unsigned refusal"
-        (Invalid_length { length; minimum = 0; maximum = 8 })
+        (Invalid_length { length; min_length = 0; max_length = 8 })
         (read_error config r);
       Alcotest.(check int)
         "only the prefix is consumed" 4
@@ -206,18 +206,18 @@ let test_hostile_lengths () =
   let config = Framing.Config.v ~length_field:Uint16_be ~max_length:8 () in
   let r = Chunked.reader config [ "\255\255"; "p" ] in
   Alcotest.check error "uint16 refusal"
-    (Invalid_length { length = 65535L; minimum = 0; maximum = 8 })
+    (Invalid_length { length = 65535L; min_length = 0; max_length = 8 })
     (read_error config r);
   Alcotest.(check int)
     "uint16 prefix consumed" 2
     (Eio.Buf_read.consumed_bytes r);
   let config = Framing.Config.v ~min_length:2 ~max_length:8 () in
   Alcotest.check error "below the minimum"
-    (Invalid_length { length = 1L; minimum = 2; maximum = 8 })
+    (Invalid_length { length = 1L; min_length = 2; max_length = 8 })
     (read_error config (Eio.Buf_read.of_string "\000\000\000\001x"));
   Alcotest.(check (result unit error))
     "encoding below the minimum"
-    (Error (Invalid_length { length = 1L; minimum = 2; maximum = 8 }))
+    (Error (Invalid_length { length = 1L; min_length = 2; max_length = 8 }))
     (Result.map ignore (Framing.encode config (payloads [ "x" ])))
 
 let test_uint16_boundaries () =
@@ -233,7 +233,8 @@ let test_uint16_boundaries () =
     (read_all config (Chunked.reader config (split [ 4096 ] wire)));
   Alcotest.(check (result unit error))
     "uint16 does not wrap"
-    (Error (Invalid_length { length = 65536L; minimum = 0; maximum = 65535 }))
+    (Error
+       (Invalid_length { length = 65536L; min_length = 0; max_length = 65535 }))
     (Result.map ignore (Framing.encode config (payloads [ payload ^ "x" ])));
   Alcotest.check_raises "uint16 capacity is enforced"
     (Invalid_argument
@@ -262,14 +263,22 @@ let test_oversized_in_batch () =
     "an oversized frame refuses the batch"
     (Error
        (Invalid_length
-          { length = Int64.of_int (maximum + 1); minimum = 0; maximum }))
+          {
+            length = Int64.of_int (maximum + 1);
+            min_length = 0;
+            max_length = maximum;
+          }))
     (Result.map ignore (Framing.encode config batch));
   let buffer = Buffer.create 64 in
   let sink = Eio.Flow.buffer_sink buffer in
   Alcotest.check_raises "write refuses the batch"
     (Framing.Error
        (Invalid_length
-          { length = Int64.of_int (maximum + 1); minimum = 0; maximum }))
+          {
+            length = Int64.of_int (maximum + 1);
+            min_length = 0;
+            max_length = maximum;
+          }))
     (fun () -> Framing.write config sink batch);
   Alcotest.(check string) "nothing is written" "" (Buffer.contents buffer);
   Framing.write config sink (payloads [ "next" ]);

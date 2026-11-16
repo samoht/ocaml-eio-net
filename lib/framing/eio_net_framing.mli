@@ -35,8 +35,8 @@ type error =
       length : int64;
           (** The length: declared by a prefix, unsigned and exact, or of a
               payload to encode. *)
-      minimum : int;  (** The configuration's {!Config.min_length}. *)
-      maximum : int;  (** The configuration's {!Config.max_length}. *)
+      min_length : int;  (** The configuration's {!Config.min_length}. *)
+      max_length : int;  (** The configuration's {!Config.max_length}. *)
     }  (** A length outside the configured range. *)
   | Truncated of {
       part : part;  (** The part the input ends in. *)

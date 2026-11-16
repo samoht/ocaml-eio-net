@@ -3,13 +3,13 @@
 
 val of_connected_datagram_fd :
   sw:Eio.Switch.t ->
-  ?max_frame:int ->
+  ?max_length:int ->
   ?max_batch:int ->
   Unix.file_descr ->
   Eio_net.Frame.t
-(** [of_connected_datagram_fd ~sw ~max_frame ~max_batch fd] is a frame channel
+(** [of_connected_datagram_fd ~sw ~max_length ~max_batch fd] is a frame channel
     over the connected Unix datagram descriptor [fd], with one datagram per
-    frame, of at most [max_frame] bytes (defaults to [65536]). The caller owns
+    frame, of at most [max_length] bytes (defaults to [65536]). The caller owns
     [fd], which is put in non-blocking mode and stays open when [sw] finishes;
     the channel is usable until then, and a send or a receive raises
     [Invalid_argument] once it has.
@@ -18,9 +18,9 @@ val of_connected_datagram_fd :
     {!Eio_net.Frame.recv_batch} uses [recvmsg_x] to transfer up to [max_batch]
     datagrams (defaults to [32]) in one system call; other systems send and
     receive them one at a time, in order. A received datagram longer than
-    [max_frame] raises the {!Eio.Io} error {!Eio_net.Datagram.Too_long} and
+    [max_length] raises the {!Eio.Io} error {!Eio_net.Datagram.Too_long} and
     drops the datagrams received in the same batch; the channel stays usable.
-    Sends copy each frame into a buffer of [max_frame] bytes. A longer one
+    Sends copy each frame into a buffer of [max_length] bytes. A longer one
     raises {!Eio_net.Datagram.too_long} before it is sent, and the channel stays
     usable; a send the system refuses raises the {!Eio.Io} error
     {!Eio_unix.Err.v} makes of it. Either way, frames before it in the batch may
@@ -35,7 +35,7 @@ val of_connected_datagram_fd :
     and so do concurrent sends, a batch to its end, while a send and a receive
     run at the same time.
 
-    Raises [Invalid_argument] if [max_frame] or [max_batch] is not positive, or
+    Raises [Invalid_argument] if [max_length] or [max_batch] is not positive, or
     if [max_batch] exceeds [64]. *)
 
 val widen_datagram_buffers : Unix.file_descr -> unit

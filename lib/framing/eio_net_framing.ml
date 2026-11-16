@@ -4,7 +4,7 @@ type length_field = Uint16_be | Uint32_be
 type part = Prefix | Payload
 
 type error =
-  | Invalid_length of { length : int64; minimum : int; maximum : int }
+  | Invalid_length of { length : int64; min_length : int; max_length : int }
   | Truncated of { part : part; expected : int; received : int }
   | Aborted
 
@@ -12,8 +12,8 @@ let equal_error a b =
   match (a, b) with
   | Invalid_length a, Invalid_length b ->
       Int64.equal a.length b.length
-      && Int.equal a.minimum b.minimum
-      && Int.equal a.maximum b.maximum
+      && Int.equal a.min_length b.min_length
+      && Int.equal a.max_length b.max_length
   | Truncated a, Truncated b ->
       a.part = b.part
       && Int.equal a.expected b.expected
@@ -22,8 +22,8 @@ let equal_error a b =
   | (Invalid_length _ | Truncated _ | Aborted), _ -> false
 
 let pp_error ppf = function
-  | Invalid_length { length; minimum; maximum } ->
-      Fmt.pf ppf "frame length %Ld outside %d-%d" length minimum maximum
+  | Invalid_length { length; min_length; max_length } ->
+      Fmt.pf ppf "frame length %Ld outside %d-%d" length min_length max_length
   | Truncated { part; expected; received } ->
       Fmt.pf ppf "truncated %s: received %d of %d bytes"
         (match part with Prefix -> "length prefix" | Payload -> "payload")
@@ -40,8 +40,8 @@ let () =
 module Config = struct
   type t = {
     length_field : length_field;
-    minimum : int;
-    maximum : int;
+    min_length : int;
+    max_length : int;
     prefix_length : int;
   }
 
@@ -51,40 +51,43 @@ module Config = struct
     let capacity =
       min (capacity length_field) (Int64.of_int Sys.max_string_length)
     in
-    let maximum =
+    let max_length =
       Option.value ~default:(Int64.to_int (min capacity 1_048_576L)) max_length
     in
-    if min_length < 0 || maximum < min_length || Int64.of_int maximum > capacity
+    if
+      min_length < 0 || max_length < min_length
+      || Int64.of_int max_length > capacity
     then
       Fmt.invalid_arg
         "Eio_net_framing.Config.v: length range %d-%d outside 0-%Ld" min_length
-        maximum capacity;
+        max_length capacity;
     let prefix_length =
       match length_field with Uint16_be -> 2 | Uint32_be -> 4
     in
-    { length_field; minimum = min_length; maximum; prefix_length }
+    { length_field; min_length; max_length; prefix_length }
 
   let length_field t = t.length_field
-  let min_length t = t.minimum
-  let max_length t = t.maximum
+  let min_length t = t.min_length
+  let max_length t = t.max_length
   let prefix_length t = t.prefix_length
-  let buffer_size t = t.maximum + t.prefix_length
+  let buffer_size t = t.max_length + t.prefix_length
 
   let equal a b =
     a.length_field = b.length_field
-    && Int.equal a.minimum b.minimum
-    && Int.equal a.maximum b.maximum
+    && Int.equal a.min_length b.min_length
+    && Int.equal a.max_length b.max_length
 
   let pp ppf t =
     Fmt.pf ppf "%s length:%d-%d"
       (match t.length_field with
       | Uint16_be -> "uint16be"
       | Uint32_be -> "uint32be")
-      t.minimum t.maximum
+      t.min_length t.max_length
 end
 
 let invalid (config : Config.t) length =
-  Invalid_length { length; minimum = config.minimum; maximum = config.maximum }
+  Invalid_length
+    { length; min_length = config.min_length; max_length = config.max_length }
 
 (* Truncation consumes what the reader holds of the frame, so that it retains
    nothing past the refusal. *)
@@ -100,7 +103,7 @@ let read_length (config : Config.t) r =
   match config.length_field with
   | Uint16_be ->
       let length = Eio.Buf_read.BE.uint16 r in
-      if length < config.minimum || length > config.maximum then
+      if length < config.min_length || length > config.max_length then
         raise (Error (invalid config (Int64.of_int length)));
       length
   | Uint32_be ->
@@ -110,8 +113,8 @@ let read_length (config : Config.t) r =
         Int64.logor (Int64.shift_left (Int64.of_int high) 16) (Int64.of_int low)
       in
       if
-        Int64.compare length (Int64.of_int config.minimum) < 0
-        || Int64.compare length (Int64.of_int config.maximum) > 0
+        Int64.compare length (Int64.of_int config.min_length) < 0
+        || Int64.compare length (Int64.of_int config.max_length) > 0
       then raise (Error (invalid config length));
       Int64.to_int length
 
@@ -132,7 +135,7 @@ let rec check (config : Config.t) frames = function
   | [] -> Ok frames
   | payload :: batch ->
       let length = Cstruct.lenv payload in
-      if length < config.minimum || length > config.maximum then
+      if length < config.min_length || length > config.max_length then
         Result.Error (invalid config (Int64.of_int length))
       else check config (frames + 1) batch
 

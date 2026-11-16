@@ -42,14 +42,14 @@ let recv_slice t = t.recv_slice ()
 let send t bufs = t.send bufs
 let send_batch t frames = t.send_batch frames
 
-let of_datagram_socket ?max_frame ?dst socket =
+let of_datagram_socket ?max_length ?dst socket =
   Option.iter
     (fun n ->
       if n <= 0 then
         Fmt.invalid_arg
           "Eio_net.Frame.of_datagram_socket: max_length is %d, not positive" n)
-    max_frame;
-  let datagrams = Datagram.of_socket ?max_frame ?dst socket in
+    max_length;
+  let datagrams = Datagram.of_socket ?max_length ?dst socket in
   channel ~slice:view
     ~recv:(fun () -> snd (Datagram.recv datagrams))
     ~send:(fun bufs -> Datagram.send datagrams bufs)
