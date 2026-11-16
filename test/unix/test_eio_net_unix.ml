@@ -285,6 +285,24 @@ let test_connected_datagram_oversized () =
   Unix.close fa;
   Unix.close fb
 
+(* A frame longer than [max_frame] is refused before it is sent, with the
+   error a receive raises for one, and the channel stays usable. *)
+let test_connected_datagram_oversized_send () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_frame:8 fa in
+  let b = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fb in
+  (match Eio_net.Frame.send a [ Cstruct.of_string "123456789" ] with
+  | () -> Alcotest.fail "sent a 9-byte frame at max_frame 8"
+  | exception Eio.Io (Eio.Exn.X (Eio_net.Datagram.Too_long { max = 8 }), _) ->
+      ());
+  Eio_net.Frame.send a [ Cstruct.of_string "12345678" ];
+  Alcotest.(check string)
+    "the channel stays usable" "12345678" (Eio_net.Frame.recv b);
+  Unix.close fa;
+  Unix.close fb
+
 let test_connected_datagram_rejects_excessive_batch () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -949,6 +967,8 @@ let suite =
         test_connected_datagram_error_after_a_datagram;
       Alcotest.test_case "connected datagram longer than max_frame" `Quick
         test_connected_datagram_oversized;
+      Alcotest.test_case "connected datagram too long to send" `Quick
+        test_connected_datagram_oversized_send;
       Alcotest.test_case "connected datagram backpressure" `Quick
         test_connected_datagram_backpressure;
       Alcotest.test_case "reject excessive datagram batch" `Quick
