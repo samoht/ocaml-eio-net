@@ -33,6 +33,12 @@ exclude = ["E105", "E610"]
 files = ["test/interop/kernel/*", "test/interop/kernel/*/*"]
 exclude = ["E825", "E105", "E610"]
 
+# The connect timeouts are an unquoted table the generator writes, read with
+# String.split_on_char, as for the kernel's traces.
+[[rules]]
+files = ["test/interop/connect-timeout/*"]
+exclude = ["E825"]
+
 # A copy of Eio_mock's scheduler, kept as close to it as the changes allow.
 [[rules]]
 files = ["lib/chaos/quiet_mock.ml"]

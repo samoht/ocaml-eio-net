@@ -38,14 +38,13 @@ for a re-recording; an edit to how one runs does not.
 `eio-net.mem` and `eio-net.chaos` also use kernel timings that no trace here
 records:
 
-- A connect that times out fails after 133 s on Linux
-  ([`lib/chaos/wrapper.ml`](../../../lib/chaos/wrapper.ml), from 7c3cfb1),
-  and after 75 s on macOS (`net.inet.tcp.keepinit`, e673835). The commit
-  message of 7c3cfb1 says eio_posix raises `ETIMEDOUT` "after about 133 s";
-  nothing records that measurement, its kernel or its settings. The traces
-  back only the six SYN retries: `TCP_SYNCNT` reads 6 on a new socket of the
-  recorder's Linux. Linux's `ip-sysctl.rst`, in 6.12 and 7.2, gives 131 s for
-  six retries.
+- A connect that times out fails after 133 s on Linux and after 75 s on
+  macOS ([`lib/chaos/wrapper.ml`](../../../lib/chaos/wrapper.ml)). These
+  traces back only the six SYN retries: `TCP_SYNCNT` reads 6 on a new socket
+  of the recorder's Linux. The [connect-timeout traces](../connect-timeout)
+  record the timeout itself, on both kernels: Linux's `ip-sysctl.rst`, in
+  6.12 and 7.2, gives 131 s for six retries after four linear timeouts, and
+  its connects fail after 133.0 to 136.5 s.
 - A connection whose bytes go unacknowledged fails after 948.6 s on Linux
   (`tcp_retries2` = 15) and 18 s on macOS, "measured over loopback" (5408fac);
   nothing records those measurements either.
