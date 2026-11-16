@@ -72,7 +72,7 @@ let mem_macos () =
   check "macos" ~model:"eio-net.mem's connect to 127.0.0.2" seconds
 
 let suite =
-  ( "connect-timeout",
+  ( "connect_timeout",
     [
       Alcotest.test_case "chaos, Linux" `Quick (chaos `Linux);
       Alcotest.test_case "chaos, macOS" `Quick (chaos `Macos);

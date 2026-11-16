@@ -226,7 +226,7 @@ let with_pool f () =
   done
 
 let suite =
-  ( "concurrency",
+  ( "conc",
     List.map
       (fun (name, how) ->
         Alcotest.test_case ("a read racing " ^ name) `Quick

@@ -4,7 +4,7 @@ open Dead_peer
 let check w () = Eio_net_chaos.check ~os:`Macos w
 
 let suite =
-  ( "dead peer",
+  ( "dead_peer",
     [
       Alcotest.test_case "broadcast: correct" `Quick
         (Expect.passes (check broadcast));
