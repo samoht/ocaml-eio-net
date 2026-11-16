@@ -1,15 +1,13 @@
 open! Hermetic
 
-exception Too_slow of { limit : int; window : Mtime.Span.t }
+exception Too_slow of { limit : int; window : Mtime.Span.t; moved : int }
 
 let () =
   Printexc.register_printer @@ function
-  | Too_slow { limit; window } ->
+  | Too_slow { limit; window; moved } ->
       Fmt.kstr Option.some
-        "Operation too slow. Less than %d bytes/sec transferred the last %g \
-         seconds"
-        limit
-        (Int64.to_float (Mtime.Span.to_uint64_ns window) /. 1e9)
+        "Eio_net.Progress: transfer too slow: %d bytes in %a, under %d B/s"
+        moved Mtime.Span.pp window limit
   | _ -> None
 
 type t = {
@@ -23,9 +21,10 @@ type t = {
 }
 
 let v ~mono ~limit ~window =
-  if limit <= 0 then invalid_arg "Progress.v: the limit is not positive";
+  if limit <= 0 then
+    Fmt.invalid_arg "Eio_net.Progress.v: min_rate is %d, not positive" limit;
   if Mtime.Span.equal window Mtime.Span.zero then
-    invalid_arg "Progress.v: the window is zero";
+    invalid_arg "Eio_net.Progress.v: window is zero";
   {
     now = (fun () -> Eio.Time.Mono.now mono);
     sleep = Eio.Time.Mono.sleep_span mono;
@@ -36,9 +35,7 @@ let v ~mono ~limit ~window =
   }
 
 (* The bytes a window must move: [limit] a second over [window]. *)
-let needed t =
-  Int64.to_float (Mtime.Span.to_uint64_ns t.window)
-  /. 1e9 *. float_of_int t.limit
+let needed t = Mtime.Span.to_float_ns t.window /. 1e9 *. float_of_int t.limit
 
 (* What is left of the current window, zero once it has ended. *)
 let left t start =
@@ -56,7 +53,7 @@ let judge t start =
     when Mtime.equal current start
          && Mtime.Span.equal (left t start) Mtime.Span.zero ->
       if float_of_int t.moved < needed t then
-        raise (Too_slow { limit = t.limit; window = t.window });
+        raise (Too_slow { limit = t.limit; window = t.window; moved = t.moved });
       t.start <- Some (t.now ());
       t.moved <- 0
   | Some _ | None -> ()

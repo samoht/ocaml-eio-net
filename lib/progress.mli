@@ -19,11 +19,11 @@ exception
   Too_slow of {
     limit : int;  (** The transfer's limit, in bytes a second. *)
     window : Mtime.Span.t;  (** The length of its windows. *)
+    moved : int;  (** The bytes the window moved. *)
   }
-(** Raised when a window ended with fewer than [limit] bytes a second moved over
-    [window]. Its registered printer words it as curl does:
-    ["Operation too slow. Less than LIMIT bytes/sec transferred the last SECONDS
-     seconds"]. *)
+(** The exception for a window that ended with fewer than [limit] bytes a second
+    moved over [window]. [moved] is the bytes it moved. Its registered printer
+    names them. *)
 
 val v : mono:_ Eio.Time.Mono.t -> limit:int -> window:Mtime.Span.t -> t
 (** [v ~mono ~limit ~window] is a transfer timed on [mono] whose windows last

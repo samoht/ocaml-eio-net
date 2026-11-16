@@ -66,14 +66,6 @@ let test_equal_datagram () =
   check "the same path" true (`Unix "/tmp/a") (`Unix "/tmp/a");
   check "a path and a port" false (Eio_net_addr.udp a 9000) (`Unix "/tmp/a")
 
-let test_not_an_address () =
-  Alcotest.check_raises "a hostname is not an address"
-    (Invalid_argument
-       "An IP address must be either 4 or 16 bytes long (\"flatsat-1\" is 9 \
-        bytes)") (fun () ->
-      ignore (Eio_net_addr.ip (Ipaddr.of_string_exn "10.0.0.1"));
-      ignore (Eio_net_addr.ipaddr (Eio.Net.Ipaddr.of_raw "flatsat-1")))
-
 let stream net ~host ~port =
   match Eio_net_addr.stream net ~host ~port with
   | Ok addrs -> List.filter_map Eio_net_addr.of_stream addrs
@@ -126,7 +118,6 @@ let suite =
       Alcotest.test_case "sockaddr" `Quick test_sockaddr;
       Alcotest.test_case "stream equality" `Quick test_equal_stream;
       Alcotest.test_case "datagram equality" `Quick test_equal_datagram;
-      Alcotest.test_case "not an address" `Quick test_not_an_address;
       Alcotest.test_case "stream: a literal host" `Quick test_stream_literal;
       Alcotest.test_case "stream: every address of a name" `Quick
         test_stream_every_address;

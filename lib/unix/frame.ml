@@ -130,10 +130,13 @@ let sender ~max_frame ~max_batch fd =
   send_batch
 
 let of_connected_datagram_fd ~sw ?(max_frame = 65536) ?(max_batch = 32) fd =
-  if max_frame <= 0 then invalid_arg "Eio_net_unix.Frame: max_frame <= 0";
-  if max_batch <= 0 then invalid_arg "Eio_net_unix.Frame: max_batch <= 0";
+  let fail fmt =
+    Fmt.invalid_arg ("Eio_net_unix.Frame.of_connected_datagram_fd: " ^^ fmt)
+  in
+  if max_frame <= 0 then fail "max_length is %d, not positive" max_frame;
+  if max_batch <= 0 then fail "max_batch is %d, not positive" max_batch;
   if max_batch > max_batch_limit then
-    Fmt.invalid_arg "Eio_net_unix.Frame: max_batch > %d" max_batch_limit;
+    fail "max_batch is %d, more than %d" max_batch max_batch_limit;
   (* Eio waits for a descriptor to be ready only when an operation on it would
      block; a blocking one would stall every fiber of the domain instead. *)
   eio Unix.set_nonblock fd;

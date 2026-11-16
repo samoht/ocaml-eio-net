@@ -19,7 +19,8 @@ let pp ppf _ = Fmt.string ppf "<datagram channel>"
 
 let of_socket ?(max_frame = 65536) ?dst socket =
   if max_frame <= 0 then
-    Fmt.invalid_arg "Eio_net.Datagram: max_frame %d must be positive" max_frame;
+    Fmt.invalid_arg "Eio_net.Datagram.of_socket: max_length is %d, not positive"
+      max_frame;
   (* One byte of headroom tells a datagram longer than [max_frame] from one
      exactly [max_frame] long. *)
   let buf = Cstruct.create (max_frame + 1) in

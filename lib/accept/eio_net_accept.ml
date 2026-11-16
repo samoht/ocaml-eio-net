@@ -194,7 +194,8 @@ let log_error exn = Log.warn (fun m -> m "connection failed: %a" Fmt.exn exn)
 let run ?stop ?(on_error = log_error) ?(pool = pool ()) ?(classify = classify)
     ~max_connections listening handler =
   if max_connections < 1 then
-    Fmt.invalid_arg "Eio_net_accept.run: max_connections is %d" max_connections;
+    Fmt.invalid_arg "Eio_net_accept.run: max_connections is %d, less than 1"
+      max_connections;
   let loop =
     {
       pool;

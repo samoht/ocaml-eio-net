@@ -124,7 +124,7 @@ module Flow = struct
       Mutex.protect t.lock (fun () ->
           match Life.enter t.life with
           | Some life -> t.life <- life
-          | None -> Fmt.invalid_arg "eio-net.mem: %s on a closed flow" op);
+          | None -> Fmt.invalid_arg "Eio_net_mem: %s on a closed flow" op);
       match f () with
       | v ->
           leave t;
@@ -300,7 +300,7 @@ module Flow = struct
     match Eio.Resource.get_opt ops Silence with
     | Some f -> f t
     | None ->
-        invalid_arg "eio-net.mem: silence: not a connection of eio-net.mem"
+        invalid_arg "Eio_net_mem.Private.silence: not an in-memory connection"
 
   (* Closes [flow] when [sw] finishes, unless it is closed first. *)
   let close_with sw ((impl, flow) : t) =
@@ -460,7 +460,7 @@ module Listening_socket = struct
     Mutex.protect t.lock (fun () ->
         match Life.enter t.life with
         | Some life -> t.life <- life
-        | None -> invalid_arg "accept on closed in-memory listener");
+        | None -> invalid_arg "Eio_net_mem: accept on a closed listener");
     match
       Eio.Condition.loop_no_mutex t.acceptable @@ fun () ->
       Mutex.protect t.lock (fun () -> Queue.take_opt t.incoming)
@@ -507,12 +507,12 @@ module Listening_socket = struct
   (* As Eio's own sockets refuse a descriptor used after close. *)
   let listening_addr t =
     if Mutex.protect t.lock (fun () -> not (Life.is_open t.life)) then
-      invalid_arg "eio-net.mem: listening_addr on a closed listener";
+      invalid_arg "Eio_net_mem: listening_addr on a closed listener";
     t.addr
 
   let open_opts t =
     if Mutex.protect t.lock (fun () -> not (Life.is_open t.life)) then
-      invalid_arg "eio-net.mem: socket option on a closed listener";
+      invalid_arg "Eio_net_mem: socket option on a closed listener";
     t.opts
 
   let setsockopt t opt v = Sockopt.set (open_opts t) opt v
@@ -909,7 +909,7 @@ module Datagram_socket = struct
      receive side; Linux checks a Unix-domain socket's shutdown before its
      destination, and a UDP socket's after. *)
   let send t ?dst bufs =
-    if t.closed then invalid_arg "eio-net.mem: send on a closed datagram socket";
+    if t.closed then invalid_arg "Eio_net_mem: send on a closed datagram socket";
     let os = t.hub.os in
     (match dst with Some (`Unix path) -> check_path ~os path | _ -> ());
     let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
@@ -960,7 +960,7 @@ module Datagram_socket = struct
       Eio.Condition.loop_no_mutex t.readable @@ fun () ->
       Mutex.protect t.lock @@ fun () ->
       if t.closed then
-        invalid_arg "eio-net.mem: recv on a closed datagram socket"
+        invalid_arg "Eio_net_mem: recv on a closed datagram socket"
       else if t.batch = 0 then t.batch <- Queue.length t.queued;
       match Queue.take_opt t.queued with
       | None -> None
@@ -1010,7 +1010,7 @@ module Datagram_socket = struct
   let shutdown t cmd =
     ( Mutex.protect t.lock @@ fun () ->
       if t.closed then
-        invalid_arg "eio-net.mem: shutdown on a closed datagram socket";
+        invalid_arg "Eio_net_mem: shutdown on a closed datagram socket";
       match cmd with
       | (`Send | `Receive | `All) when t.hub.os = Macos -> ()
       | `Send -> t.send_shut <- true
@@ -1022,7 +1022,7 @@ module Datagram_socket = struct
 
   let open_opts t =
     if Mutex.protect t.lock (fun () -> t.closed) then
-      invalid_arg "eio-net.mem: socket option on a closed datagram socket";
+      invalid_arg "Eio_net_mem: socket option on a closed datagram socket";
     t.opts
 
   let setsockopt t opt v = Sockopt.set (open_opts t) opt v
@@ -1152,7 +1152,7 @@ module Network = struct
      whichever of [sw] and the network's switch finishes first. *)
   let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
     if reuse_port then
-      invalid_arg "eio-net.mem does not support SO_REUSEPORT listeners";
+      invalid_arg "Eio_net_mem.listen: reuse_port is not supported";
     Eio.Switch.check sw;
     (* eio_posix removes a listener's file when [sw] finishes, and fails to
        for a path with a NUL, as there is none. *)
@@ -1539,7 +1539,7 @@ module Network = struct
      several, so [reuse_port] is refused. *)
   let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
     if reuse_port then
-      invalid_arg "eio-net.mem does not support SO_REUSEPORT datagram sockets";
+      invalid_arg "Eio_net_mem.datagram_socket: reuse_port is not supported";
     let datagram = Datagram_socket.v t.datagrams ~reuse:reuse_addr addr in
     let socket = Eio.Resource.T (datagram, datagram_handler) in
     datagram.release <-
@@ -1619,7 +1619,7 @@ let handler = Eio.Net.Pi.network (module Network)
 let capacity_rule = function
   | None -> Fun.id
   | Some c when c >= 1 -> Fun.const c
-  | Some c -> Fmt.invalid_arg "eio-net.mem: the capacity is %d" c
+  | Some c -> Fmt.invalid_arg "Eio_net_mem.v: capacity is %d, not positive" c
 
 let connection = Flow.connection
 

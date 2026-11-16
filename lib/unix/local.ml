@@ -71,9 +71,9 @@ let connect_at ~sw ~net:_ path =
   let sock = eio (fun () -> Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0) in
   match
     Unix.set_nonblock sock;
-    Eio.Switch.run ~name:"Local.connect_at" @@ fun dsw ->
+    Eio.Switch.run ~name:"Eio_net_unix.Local.connect_at" @@ fun dsw ->
     let dir, name = parent ~sw:dsw path in
-    Eio_unix.Fd.use_exn "connect_at" dir @@ fun dir ->
+    Eio_unix.Fd.use_exn "Eio_net_unix.Local.connect_at" dir @@ fun dir ->
     let rec attempt pause =
       match connect_at_dir dir sock name with
       | () -> ()
@@ -169,7 +169,7 @@ let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
   let addr = `Unix (Option.value (Eio.Path.native path) ~default:(snd path)) in
   let dir, name = parent ~sw path in
   let sock, id =
-    Eio_unix.Fd.use_exn "listen" dir @@ fun dir ->
+    Eio_unix.Fd.use_exn "Eio_net_unix.Local.listen" dir @@ fun dir ->
     eio @@ fun () ->
     Eio_unix.run_in_systhread ~label:"local-listen" (fun () ->
         bind_and_place dir ~replace ~backlog ~perm name)
@@ -178,7 +178,7 @@ let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
   (* Release runs its hooks last registered first, so [dir], opened on [sw]
      before this hook, is still open. *)
   Eio.Switch.on_release sw (fun () ->
-      Eio_unix.Fd.use_exn "listen" dir @@ fun dir ->
+      Eio_unix.Fd.use_exn "Eio_net_unix.Local.listen" dir @@ fun dir ->
       ignore_unix_error (fun () ->
           let _, dev, ino = id_at dir name in
           if (dev, ino) = id then unlink_at dir name false));

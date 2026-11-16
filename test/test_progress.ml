@@ -160,11 +160,12 @@ let test_move_runs_once n () =
       done);
   Alcotest.(check string) "the slow move ran once" "ab" (Buffer.contents sent)
 
-let test_words () =
+let test_printer () =
   Alcotest.(check string)
-    "curl's words"
-    "Operation too slow. Less than 1 bytes/sec transferred the last 60 seconds"
-    (Printexc.to_string (Progress.Too_slow { limit = 1; window = seconds 60 }))
+    "the printer"
+    "Eio_net.Progress: transfer too slow: 12 bytes in 10s, under 100 B/s"
+    (Printexc.to_string
+       (Progress.Too_slow { limit = 100; window = seconds 10; moved = 12 }))
 
 let cases name f =
   List.map
@@ -182,4 +183,4 @@ let suite =
     @ cases "the time before the first move counts in no window" test_first_move
     @ cases "two fibers sharing a transfer judge each window once" test_shared
     @ cases "a move that outlasts a window runs once" test_move_runs_once
-    @ [ Alcotest.test_case "Too_slow in curl's words" `Quick test_words ] )
+    @ [ Alcotest.test_case "Too_slow printer" `Quick test_printer ] )

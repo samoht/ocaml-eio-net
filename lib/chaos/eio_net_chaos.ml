@@ -495,7 +495,7 @@ let check ?os ?(budget = 2_000) ?(seed = 0) ?replay run =
   let os =
     match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux
   in
-  if budget < 1 then Fmt.invalid_arg "%s: the budget is %d" name budget;
+  if budget < 1 then Fmt.invalid_arg "%s: budget is %d, less than 1" name budget;
   let replay = Option.map parse_replay replay in
   let first, failed = exec ~os run Plan.none in
   Option.iter (first_failed ~hash:(digest first) first) failed;
