@@ -436,9 +436,11 @@ module Flow = struct
      byte whose write returned is in the reader's queue, so the reader reads
      it first, then meets the cut (unix(7)). The peer of an end that closed
      reads on, to the end its socket now reaches. *)
+  let check_cut t = if t.family = `Inet && cut t then ended t
+
   let check_read t =
     if t.closed then invalid_arg "Eio_net_chaos: read on a closed flow";
-    if t.family = `Inet && cut t then ended t
+    check_cut t
 
   (* Under [t.lock]. A write that raises a reset reports it over IP; on
      AF_UNIX it raises EPIPE, which leaves the reset to the next read. *)
@@ -471,7 +473,9 @@ module Flow = struct
 
   (* One base read of at most [cap] bytes into [dst], or as many as [dst]
      takes if [cap <= 0]. A base error after a break is the break's. A
-     silence over a network that pairs no ends holds the reads. *)
+     silence over a network that pairs no ends holds the reads. A read under
+     way as the flow closes hands up what its base returns, as eio_posix
+     keeps the descriptor open until the reads in progress end. *)
   let deliver t dst ~cap =
     Mutex.protect t.lock (fun () -> check_read t);
     if silent t && not t.conn.paired then Eio.Fiber.await_cancel ();
@@ -484,7 +488,7 @@ module Flow = struct
       | exception End_of_file when t.conn.reset_to = Some t.side -> 0
     in
     Mutex.protect t.lock @@ fun () ->
-    check_read t;
+    check_cut t;
     if got = 0 then ended t;
     t.delivered <- t.delivered + got;
     if t.family = `Unix && t.conn.paired then
