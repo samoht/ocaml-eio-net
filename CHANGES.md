@@ -49,7 +49,8 @@ Initial release.
   how long a closed end waits for its peer's FIN.
 - Each behaviour and socket option is classified once, under Linux and under
   macOS, as modelled, approximated, stored only or unsupported, and a test
-  checks each option's class against what a connection does.
+  checks each option's class against what a connection does. The README's
+  table of what mem models of each kernel is made from it.
 - On a given clock, keepalive, `TCP_USER_TIMEOUT` and the retransmission
   timeout end a connection gone silent, at the times measured on each kernel.
 

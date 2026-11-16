@@ -7,6 +7,11 @@
  (modules scope)
  (libraries eio))
 
+(executable
+ (name readme)
+ (modules readme)
+ (libraries mem_scope fmt))
+
 (test
  (name test)
  (package eio-net)
@@ -21,3 +26,14 @@
   unix
   alcotest
   fmt))
+
+(rule
+ (with-stdout-to
+  README.md.scope
+  (run ./readme.exe %{dep:../../README.md})))
+
+(rule
+ (alias runtest)
+ (package eio-net)
+ (action
+  (diff ../../README.md README.md.scope)))

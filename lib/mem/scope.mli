@@ -1,6 +1,7 @@
 (** What eio-net.mem models of each kernel. Every behaviour and socket option it
-    knows of is classified once, under Linux and under macOS, and a test checks
-    each option's class against what a connection does. *)
+    knows of is classified once, under Linux and under macOS. The README's
+    section of the same name is made from this table, and a test checks each
+    option's class against what a connection does. *)
 
 (** How the network follows the kernel for a feature. Each text is whole
     sentences, said of that kernel. *)
