@@ -52,21 +52,20 @@ let level : type a. a O.t -> level = function
 let socket_level opt = level opt = Socket
 
 let non_negative name v =
-  if v < 0 then Some (Fmt.str "%s must be non-negative, got %d" name v)
+  if v < 0 then Fmt.kstr Option.some "%s must be non-negative, got %d" name v
   else None
 
 let port_range (lower, upper) =
   if lower < 0 || lower > 65535 then
-    Some
-      (Fmt.str "O.IP_LOCAL_PORT_RANGE lower bound must be 0-65535, got %d" lower)
+    Fmt.kstr Option.some
+      "O.IP_LOCAL_PORT_RANGE lower bound must be 0-65535, got %d" lower
   else if upper < 0 || upper > 65535 then
-    Some
-      (Fmt.str "O.IP_LOCAL_PORT_RANGE upper bound must be 0-65535, got %d" upper)
+    Fmt.kstr Option.some
+      "O.IP_LOCAL_PORT_RANGE upper bound must be 0-65535, got %d" upper
   else if lower <> 0 && upper <> 0 && lower > upper then
-    Some
-      (Fmt.str
-         "O.IP_LOCAL_PORT_RANGE lower bound (%d) must be <= upper bound (%d)"
-         lower upper)
+    Fmt.kstr Option.some
+      "O.IP_LOCAL_PORT_RANGE lower bound (%d) must be <= upper bound (%d)" lower
+      upper
   else None
 
 (* The checks Eio makes before it calls setsockopt(2), whatever the
@@ -82,23 +81,23 @@ let eio_check : type a. a O.t -> a -> string option =
   | O.TCP_LINGER2 -> (
       match v with
       | Some n when n < 0 ->
-          Some (Fmt.str "O.TCP_LINGER2 must be non-negative, got %d" n)
+          Fmt.kstr Option.some "O.TCP_LINGER2 must be non-negative, got %d" n
       | _ -> None)
   | O.TCP_DEFER_ACCEPT -> non_negative "O.TCP_DEFER_ACCEPT" v
   | O.TCP_SYNCNT ->
       if v < 1 || v > 255 then
-        Some (Fmt.str "O.TCP_SYNCNT must be between 1 and 255, got %d" v)
+        Fmt.kstr Option.some "O.TCP_SYNCNT must be between 1 and 255, got %d" v
       else None
   | O.TCP_WINDOW_CLAMP -> non_negative "O.TCP_WINDOW_CLAMP" v
   | O.TCP_FASTOPEN ->
       if v < 0 then
-        Some
-          (Fmt.str "O.TCP_FASTOPEN queue length must be non-negative, got %d" v)
+        Fmt.kstr Option.some
+          "O.TCP_FASTOPEN queue length must be non-negative, got %d" v
       else None
   | O.IP_LOCAL_PORT_RANGE -> port_range v
   | O.IP_TTL ->
       if v < 1 || v > 255 then
-        Some (Fmt.str "O.IP_TTL must be between 1 and 255, got %d" v)
+        Fmt.kstr Option.some "O.IP_TTL must be between 1 and 255, got %d" v
       else None
   | O.IP_MTU -> Some "O.IP_MTU is a read-only socket option"
   | _ -> None
