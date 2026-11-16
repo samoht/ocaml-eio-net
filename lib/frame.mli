@@ -23,11 +23,13 @@
       until a frame arrives, and a fiber waiting on a peer that has gone is
       cancelled to end it.
 
-    A send raises the {!Eio.Io} error of the transport, and over a
-    length-prefixed flow [Eio_net_framing.Error] as {!of_length_prefixed_flow}
-    says. A cancellation passes through every transport. A channel does not own
-    its flow or socket: closing it is the caller's job, and a receive or send
-    after that raises what the flow or socket raises. *)
+    A send raises the {!Eio.Io} error of the transport, the {!Datagram.Too_long}
+    one among them over [Eio_net_unix.Frame] for a frame longer than its bound,
+    and over a length-prefixed flow [Eio_net_framing.Error] as
+    {!of_length_prefixed_flow} says. A cancellation passes through every
+    transport. A channel does not own its flow or socket: closing it is the
+    caller's job, and a receive or send after that raises what the flow or
+    socket raises. *)
 
 type t
 (** The type for frame channels. *)

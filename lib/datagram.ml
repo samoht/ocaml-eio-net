@@ -14,6 +14,7 @@ type t = {
   send : Eio.Net.Sockaddr.datagram option -> Cstruct.t list -> unit;
 }
 
+let too_long ~max = Eio.Exn.create (Eio.Exn.X (Too_long { max }))
 let pp ppf _ = Fmt.string ppf "<datagram channel>"
 
 let of_socket ?(max_frame = 65536) ?dst socket =
@@ -28,8 +29,7 @@ let of_socket ?(max_frame = 65536) ?dst socket =
   let recv () =
     Eio.Mutex.use_ro lock @@ fun () ->
     let source, len = Eio.Net.recv socket buf in
-    if len > max_frame then
-      raise (Eio.Exn.create (Eio.Exn.X (Too_long { max = max_frame })));
+    if len > max_frame then raise (too_long ~max:max_frame);
     (source, Cstruct.to_string (Cstruct.sub buf 0 len))
   in
   let send destination bufs =

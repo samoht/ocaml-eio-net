@@ -20,15 +20,16 @@ val of_connected_datagram_fd :
     receive them one at a time, in order. A received datagram longer than
     [max_frame] raises the {!Eio.Io} error {!Eio_net.Datagram.Too_long} and
     drops the datagrams received in the same batch; the channel stays usable.
-    Sends copy each frame into a buffer of [max_frame] bytes and raise
-    [Invalid_argument] on a longer one, and on a send the system refuses the
-    {!Eio.Io} error {!Eio_unix.Err.v} makes of it; either way, frames before it
-    in the batch may have been sent. A send waits while the socket is full: for
-    writability, or on macOS, where a full socket answers [ENOBUFS] and still
-    polls writable, for a sleep that doubles from 50 us to 10 ms. A receive the
-    system refuses raises that {!Eio.Io} error too; one a batch meets after its
-    first datagram is raised by the next receive, and the batch returns the
-    datagrams before it.
+    Sends copy each frame into a buffer of [max_frame] bytes. A longer one
+    raises {!Eio_net.Datagram.too_long} before it is sent, and the channel stays
+    usable; a send the system refuses raises the {!Eio.Io} error
+    {!Eio_unix.Err.v} makes of it. Either way, frames before it in the batch may
+    have been sent. A send waits while the socket is full: for writability, or
+    on macOS, where a full socket answers [ENOBUFS] and still polls writable,
+    for a sleep that doubles from 50 us to 10 ms. A receive the system refuses
+    raises that {!Eio.Io} error too; one a batch meets after its first datagram
+    is raised by the next receive, and the batch returns the datagrams before
+    it.
 
     Fibers may send and receive at once: concurrent receives run one at a time,
     and so do concurrent sends, a batch to its end, while a send and a receive

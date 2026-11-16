@@ -26,10 +26,7 @@ let widen_datagram_buffers fd =
 (* [check_length ~max_frame len] raises the {!Eio_net.Datagram.Too_long} error
    if a datagram of [len] bytes is longer than [max_frame]. *)
 let check_length ~max_frame len =
-  if len > max_frame then
-    raise
-      (Eio.Exn.create
-         (Eio.Exn.X (Eio_net.Datagram.Too_long { max = max_frame })))
+  if len > max_frame then raise (Eio_net.Datagram.too_long ~max:max_frame)
 
 (* [last_received lengths] is the index of the last datagram a batch filled
    before it failed: the ones it did not reach have a length of -1. *)
@@ -100,8 +97,7 @@ let sender ~max_frame ~max_batch fd =
     | _ when index = max_batch -> (index, frames)
     | frame :: rest ->
         let len = Cstruct.lenv frame in
-        if len > max_frame then
-          invalid_arg "Eio_net_unix.Frame: frame exceeds max_frame";
+        check_length ~max_frame len;
         ignore (Cstruct.fillv ~src:frame ~dst:send_buffers.(index));
         send_lengths.(index) <- len;
         copy_frames rest (index + 1)

@@ -19,10 +19,16 @@ type t
 
 type Eio.Exn.Backend.t +=
   | Too_long of { max : int }
-        (** The backend error of the unclassified {!Eio.Io} error a receive
-            raises on a datagram longer than [max] bytes, the channel's
-            [max_frame]: a peer sent it, so it is an I/O failure, not a
-            programming error. *)
+        (** The backend error of the unclassified {!Eio.Io} error for a datagram
+            longer than [max] bytes, received or to send. A receive raises it
+            because a peer sent the datagram, so it is an I/O failure, not a
+            programming error; a transport that bounds the datagrams it sends
+            raises it too. *)
+
+val too_long : max:int -> exn
+(** [too_long ~max] is the {!Eio.Io} error with backend code [Too_long { max }],
+    as {!recv} raises it. A transport that bounds its own datagrams raises it.
+*)
 
 val of_socket :
   ?max_frame:int ->
