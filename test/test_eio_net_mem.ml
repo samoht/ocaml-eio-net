@@ -625,9 +625,9 @@ let test_capacity () =
       Eio.Flow.read_exact server buf;
       got := Cstruct.to_string buf);
   Alcotest.(check string) "every byte arrives once" "abcdefgh" !got;
-  match Eio_net_mem.pair ~capacity:0 () with
-  | exception Invalid_argument _ -> ()
-  | _ -> Alcotest.fail "a capacity of 0 was accepted"
+  Alcotest.check_raises "a capacity of 0 is refused by pair"
+    (Invalid_argument "Eio_net_mem.pair: capacity is 0, not positive")
+    (fun () -> ignore (Eio_net_mem.pair ~capacity:0 ()))
 
 (* By default a connection queues at most 4 MiB each way over TCP and
    256 KiB over a Unix path, as Linux's default buffers hold no more: a
