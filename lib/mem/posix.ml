@@ -47,15 +47,16 @@ let sockopt_error op code =
 
 type 'a extra = Acceptconn : bool extra | Error : int extra | Type : int extra
 
-[@@@alert "-deprecated"]
+(* Unix deprecates SO_ERROR, but a caller can still pass it through
+   Eio_unix.Net.Sockopt_int, and a socket answers it. *)
+let is_so_error (o : Unix.socket_int_option) =
+  (match o with SO_ERROR -> true | _ -> false) [@alert "-deprecated"]
 
 let extra : type a. a Eio.Net.Sockopt.t -> a extra option = function
   | Eio_unix.Net.Sockopt_bool Unix.SO_ACCEPTCONN -> Some Acceptconn
-  | Eio_unix.Net.Sockopt_int Unix.SO_ERROR -> Some Error
+  | Eio_unix.Net.Sockopt_int o when is_so_error o -> Some Error
   | Eio_unix.Net.Sockopt_int Unix.SO_TYPE -> Some Type
   | _ -> None
-
-[@@@alert "+deprecated"]
 
 let canonical : type a. a Eio.Net.Sockopt.t -> a Eio.Net.Sockopt.t =
   let open Eio.Net.Sockopt in
