@@ -189,6 +189,13 @@ let shape (a : Eio.Net.Sockaddr.t) =
 
 let unlink path = try Unix.unlink path with Unix.Unix_error _ -> ()
 
+let same_addr (a : Eio.Net.Sockaddr.t) (b : Eio.Net.Sockaddr.t) =
+  match (a, b) with
+  | `Unix a, `Unix b -> String.equal a b
+  | `Tcp (a, p), `Tcp (b, q) | `Udp (a, p), `Udp (b, q) ->
+      String.equal (a :> string) (b :> string) && Int.equal p q
+  | _ -> false
+
 let int_arg op =
   match List.rev (words op) with n :: _ -> int_of_string n | [] -> 0
 
@@ -717,7 +724,14 @@ let autobind net =
   in
   let r =
     String.concat " "
-      [ form fa; form fb; (if fa = fb then "same" else "distinct"); reply ]
+      [
+        form fa;
+        form fb;
+        (if same_addr (fa :> Eio.Net.Sockaddr.t) (fb :> Eio.Net.Sockaddr.t) then
+           "same"
+         else "distinct");
+        reply;
+      ]
   in
   if Sys.file_exists "ab.sock" then Unix.unlink "ab.sock";
   r
@@ -949,7 +963,11 @@ let empty_path_cases =
             Eio.Flow.copy_string "x" c;
             let s, _ = now (fun () -> Eio.Net.accept ~sw l1) in
             let got = read_s s 4 in
-            let same = if a1 = a2 then "same" else "distinct" in
+            let same =
+              if same_addr (a1 :> Eio.Net.Sockaddr.t) (a2 :> Eio.Net.Sockaddr.t)
+              then "same"
+              else "distinct"
+            in
             String.concat " "
               [
                 unix_form (a1 :> Eio.Net.Sockaddr.t);
@@ -1802,6 +1820,13 @@ let sock s =
     get = (fun o -> Eio.Net.getsockopt s o);
   }
 
+let backend = function
+  | Eio_unix.Unix_error (e, _, _) -> errno e
+  | b -> (
+      match mem_errno b with
+      | Some e -> e
+      | None -> Fmt.str "%a" Eio.Exn.Backend.pp b)
+
 let rec sockopt_error = function
   | Eio.Io (Eio.Net.E Invalid_option, _) -> "Invalid_option"
   | Eio.Io (Eio.Exn.Not_available b, _) -> "Not_available " ^ backend b
@@ -1811,13 +1836,6 @@ let rec sockopt_error = function
   | Eio.Io (Eio.Exn.X b, _) -> backend b
   | Eio.Exn.Multiple ((e, _) :: _) -> sockopt_error e
   | e -> classify e
-
-and backend = function
-  | Eio_unix.Unix_error (e, _, _) -> errno e
-  | b -> (
-      match mem_errno b with
-      | Some e -> e
-      | None -> Fmt.str "%a" Eio.Exn.Backend.pp b)
 
 let sockopt_outcome f =
   try f () with Eio.Cancel.Cancelled _ as e -> raise e | e -> sockopt_error e
