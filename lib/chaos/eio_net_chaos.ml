@@ -38,12 +38,15 @@ let in_kind = function
 (* What a hang adds when the workload's own fiber, [root], waits in no
    network operation on other fibers that still run, as a switch whose body
    returned waits on the fibers it forked: those fibers, by what they do. *)
-let waits_on net ~root tids =
-  let others = List.filter (( <> ) root) tids in
+let waits_on net ~(root : Eio.Private.Trace.id) tids =
+  let is_root (tid : Eio.Private.Trace.id) =
+    Int.equal (tid :> int) (root :> int)
+  in
+  let others = List.filter (fun tid -> not (is_root tid)) tids in
   let named = 5 in
   match others with
   | [] -> ""
-  | _ when not (List.mem root tids) -> ""
+  | _ when not (List.exists is_root tids) -> ""
   | _ when Option.is_some (fst (Wrapper.activity net root)) -> ""
   | _ ->
       let fiber tid =
@@ -65,6 +68,55 @@ let waits_on net ~root tids =
            (List.map fiber (List.filteri (fun i _ -> i < named) others)))
         (if n > named then Fmt.str "; and %d more" (n - named) else "")
 
+(* The world a run of [s] gives its workload, on the clocks of its loop:
+   eio-net.mem under the wrapper that injects [faults], which [wrapped] is set
+   to. *)
+let world ~os ~faults ~wrapped (s : Plan.scenario) clock mono_clock charge ~sw =
+  (* Tiny buffers lower each connection's queue to 32 KiB, or keep the
+     kernel's default for its family if that is smaller. *)
+  let capacity =
+    match s.lasting with
+    | Some Tiny_buffers -> Int.min Plan.tiny_buffer
+    | _ -> Fun.id
+  in
+  let base = Eio_net_mem.Private.v ~os ~capacity ~clock:mono_clock ~sw () in
+  let net =
+    Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
+      ~outage:(s.lasting = Some Outage) faults base
+  in
+  wrapped := Some net;
+  object
+    method net = net
+    method clock = clock
+    method mono_clock = mono_clock
+  end
+
+(* The failure a run reports, from [failed] and its network [wrapped]: a
+   limit of the wrapper's first, then, when [waiting] says the run hung, the
+   fibers the workload's [root] waits on. *)
+let explain (s : Plan.scenario) ~wrapped ~root ~waiting ~stopped failed =
+  (* A run stopped at a limit says how many of its operations a one-byte
+     condition split. *)
+  let multiplied net msg =
+    match (s.lasting, Wrapper.splits net) with
+    | Some ((Short_reads | Short_writes) as l), n when n > 0 ->
+        Fmt.str "%s; one-byte %s multiplied its operations, %d of them" msg
+          (if l = Short_reads then "reads" else "writes")
+          n
+    | _ -> msg
+  in
+  match wrapped with
+  | Some net when Wrapper.overrun net -> Some (multiplied net ops_message)
+  | Some net when Option.is_some waiting ->
+      Option.map
+        (fun msg ->
+          msg ^ waits_on net ~root:(Option.get root) (Option.get waiting))
+        failed
+  | Some net when Wrapper.livelocked net ->
+      Some ("the run hangs: " ^ Wrapper.livelock_message)
+  | Some net when stopped -> Option.map (multiplied net) failed
+  | _ -> failed
+
 (* A run of [s]: why it failed if it did. [observe] sees each operation and
    the fault it met. *)
 let exec_with ~os ~observe run (s : Plan.scenario) =
@@ -85,25 +137,7 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
           (Eio.Private.Fiber_context.tid
              (Effect.perform Eio.Private.Effects.Get_context));
       Eio.Switch.run @@ fun sw ->
-      (* Tiny buffers lower each connection's queue to 32 KiB, or keep the
-         kernel's default for its family if that is smaller. *)
-      let capacity =
-        match s.lasting with
-        | Some Tiny_buffers -> Int.min Plan.tiny_buffer
-        | _ -> Fun.id
-      in
-      let base = Eio_net_mem.Private.v ~os ~capacity ~clock:mono_clock ~sw () in
-      let net =
-        Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
-          ~outage:(s.lasting = Some Outage) f base
-      in
-      wrapped := Some net;
-      run
-        object
-          method net = net
-          method clock = clock
-          method mono_clock = mono_clock
-        end
+      run (world ~os ~faults:f ~wrapped s clock mono_clock charge ~sw)
     with
     | () -> None
     | exception Quiet_mock.Deadlock_detected tids ->
@@ -123,27 +157,8 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
          ^ too_large)
     | exception x -> Some (Printexc.to_string x)
   in
-  (* A run stopped at a limit says how many of its operations a one-byte
-     condition split. *)
-  let multiplied net msg =
-    match (s.lasting, Wrapper.splits net) with
-    | Some ((Short_reads | Short_writes) as l), n when n > 0 ->
-        Fmt.str "%s; one-byte %s multiplied its operations, %d of them" msg
-          (if l = Short_reads then "reads" else "writes")
-          n
-    | _ -> msg
-  in
-  match !wrapped with
-  | Some net when Wrapper.overrun net -> Some (multiplied net ops_message)
-  | Some net when Option.is_some !waiting ->
-      Option.map
-        (fun msg ->
-          msg ^ waits_on net ~root:(Option.get !root) (Option.get !waiting))
-        failed
-  | Some net when Wrapper.livelocked net ->
-      Some ("the run hangs: " ^ Wrapper.livelock_message)
-  | Some net when !stopped -> Option.map (multiplied net) failed
-  | _ -> failed
+  explain s ~wrapped:!wrapped ~root:!root ~waiting:!waiting ~stopped:!stopped
+    failed
 
 (* The operations of a run a report shows: all of them, or, for a lasting
    condition, which a one-byte one may multiply up to the limit on turns, the
@@ -190,7 +205,8 @@ let exec ~os run s =
    which fault that is. *)
 let pp_op rules ppf ((op : Op.t), fault) =
   let cut_by k (r : Plan.rule) =
-    r.kind = op.kind && r.socket = op.socket && r.side = op.side
+    Op.equal_kind r.kind op.kind
+    && r.socket = op.socket && r.side = op.side
     && r.at = op.offset + k
   in
   match fault with
@@ -417,6 +433,66 @@ let first_failed ~hash trace error =
     { head = trace; left_out = 0; tail = [] }
     hash (Plan.key Plan.none)
 
+(* The run a replay names: [(h, k)], the first run's hash and the
+   scenario's key, against the check's first run, of hash [hash]. *)
+let replay_one ~os run ~first ~linear ~hash ~attempt (h, k) =
+  (* After a fix the first run may differ: the scenario is found by its
+     position and fault, which the key names. *)
+  let matched =
+    if h = hash then None
+    else
+      Fmt.kstr Option.some
+        "the replay named first run %s, and the workload's is now %s" h hash
+  in
+  match scenario ~os run ~first ~linear k with
+  | Some (s, tier) -> ignore (attempt ?matched tier s : Plan.trace)
+  | None when h = hash ->
+      fail "the replay names %s, a scenario this check no longer has" k
+  | None ->
+      fail
+        "the replay names %s, a scenario this check no longer has: its first \
+         run was %s and is now %s. Run the check without ~replay."
+        k h hash
+
+(* The linear tier, then the sampled one, within [budget] runs. *)
+let explore ~budget ~seed ~first ~linear ~attempt =
+  let n = List.length linear in
+  if n > budget then
+    fail
+      "the linear tier needs %d runs, more than the budget of %d, and a check \
+       never passes on a partial one. Shrink the workload, or raise ~budget."
+      n budget;
+  let others = Plan.others first in
+  let rng = Random.State.make [| seed |] in
+  let share classes = Plan.sampled_share ~budget ~linear:n ~classes in
+  (* The second faults each run allows, drawn as it ends, so no run's
+     operations outlive it: an even share of the tier's. *)
+  let singles =
+    List.length
+      (List.filter (fun (s : Plan.scenario) -> List.length s.rules = 1) linear)
+  in
+  let quota =
+    let sh = share (if others = [] then 1 else 2) in
+    (sh + singles - 1) / max 1 singles
+  in
+  let pairs =
+    List.concat_map
+      (fun (s : Plan.scenario) ->
+        let after = attempt `Linear s in
+        match s.rules with
+        | [ r ] -> Plan.sample rng quota (Plan.seconds r ~first ~after)
+        | _ -> [])
+      linear
+  in
+  let classes = List.filter (( <> ) []) [ others; pairs ] in
+  let share = share (List.length classes) in
+  List.iter
+    (fun c ->
+      List.iter
+        (fun s -> ignore (attempt `Sampled s : Plan.trace))
+        (Plan.sample rng share c))
+    classes
+
 let check ?os ?(budget = 2_000) ?(seed = 0) ?replay run =
   let os =
     match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux
@@ -440,63 +516,5 @@ let check ?os ?(budget = 2_000) ?(seed = 0) ?replay run =
     shown.head
   in
   match replay with
-  | Some (h, k) -> (
-      (* After a fix the first run may differ: the scenario is found by its
-         position and fault, which the key names. *)
-      let matched =
-        if h = hash then None
-        else
-          Some
-            (Fmt.str
-               "the replay named first run %s, and the workload's is now %s" h
-               hash)
-      in
-      match scenario ~os run ~first ~linear k with
-      | Some (s, tier) -> ignore (attempt ?matched tier s : Plan.trace)
-      | None when h = hash ->
-          fail "the replay names %s, a scenario this check no longer has" k
-      | None ->
-          fail
-            "the replay names %s, a scenario this check no longer has: its \
-             first run was %s and is now %s. Run the check without ~replay."
-            k h hash)
-  | None ->
-      let n = List.length linear in
-      if n > budget then
-        fail
-          "the linear tier needs %d runs, more than the budget of %d, and a \
-           check never passes on a partial one. Shrink the workload, or raise \
-           ~budget."
-          n budget;
-      let others = Plan.others first in
-      let rng = Random.State.make [| seed |] in
-      let share classes = Plan.sampled_share ~budget ~linear:n ~classes in
-      (* The second faults each run allows, drawn as it ends, so no run's
-         operations outlive it: an even share of the tier's. *)
-      let singles =
-        List.length
-          (List.filter
-             (fun (s : Plan.scenario) -> List.length s.rules = 1)
-             linear)
-      in
-      let quota =
-        let sh = share (if others = [] then 1 else 2) in
-        (sh + singles - 1) / max 1 singles
-      in
-      let pairs =
-        List.concat_map
-          (fun (s : Plan.scenario) ->
-            let after = attempt `Linear s in
-            match s.rules with
-            | [ r ] -> Plan.sample rng quota (Plan.seconds r ~first ~after)
-            | _ -> [])
-          linear
-      in
-      let classes = List.filter (( <> ) []) [ others; pairs ] in
-      let share = share (List.length classes) in
-      List.iter
-        (fun c ->
-          List.iter
-            (fun s -> ignore (attempt `Sampled s : Plan.trace))
-            (Plan.sample rng share c))
-        classes
+  | Some r -> replay_one ~os run ~first ~linear ~hash ~attempt r
+  | None -> explore ~budget ~seed ~first ~linear ~attempt
