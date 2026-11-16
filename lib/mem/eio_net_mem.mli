@@ -16,7 +16,9 @@
     with the path for a Unix path [sun_path] cannot hold. A socket option the
     kernel refuses raises the error eio_posix raises ({!section-options}). Every
     other error is an {!Eio.Io} error marked by one of these codes, unclassified
-    unless the code's doc names its class. *)
+    unless the code's doc names its class. Below, "raises {!Closed}" means
+    raises the {!Eio.Io} error marked by {!Closed}, and likewise for each code.
+*)
 
 type Eio.Exn.Backend.t +=
   | Closed
@@ -108,9 +110,9 @@ type Eio.Exn.Backend.t +=
             broadcast or multicast address from a socket bound at a wildcard
             address raises it too, as that socket has no route to send it. From
             an IPv4-mapped address, a [connect] or a datagram to an IPv6 address
-            off loopback raises it before the error that {!Address_family}
-            marks, as Linux finds no route first, and a [connect] to a
-            link-local one the error that {!Invalid_address} marks. *)
+            off loopback raises it before {!Address_family}, as Linux finds no
+            route first, and a [connect] to a link-local one raises
+            {!Invalid_address}. *)
   | Address_family
         (** The code of the error a [connect] bound to an IPv4-mapped address
             raises at an IPv6 one, and a datagram [send] from such a socket,
@@ -122,8 +124,8 @@ type Eio.Exn.Backend.t +=
   | Not_connected
         (** The code of the error a Unix-domain datagram [send] without a
             destination raises, as Linux fails it with [ENOTCONN]. Under
-            [`Macos] the send raises the error that {!No_destination} marks, as
-            macOS says [EDESTADDRREQ]. *)
+            [`Macos] the send raises {!No_destination}, as macOS says
+            [EDESTADDRREQ]. *)
   | Address_not_available
         (** The code of the error a [connect] with [bind_to] raises at an IP
             address no interface has, where bind(2) fails with [EADDRNOTAVAIL];
@@ -189,8 +191,7 @@ val v :
     what macOS's buffers grow to on loopback from about 330 KiB, and 8 KiB over
     AF_UNIX, as macOS holds. A [capacity] is what every connection queues, over
     TCP and over a Unix path, above the default too, and it bounds what a
-    socket's send and receive buffers give ({!section-options}). Raises
-    [Invalid_argument] if [capacity] is not positive.
+    socket's send and receive buffers give ({!section-options}).
 
     On [clock], the end of a TCP connection whose FIN went first holds its
     address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
@@ -207,7 +208,9 @@ val v :
     [TCP_USER_TIMEOUT] later, or 948.6 seconds later, as [tcp_retries2] at 15
     does. The first read or write then raises [ETIMEDOUT]; later reads return
     end-of-file and writes raise [EPIPE]. With no keepalive and nothing
-    unacknowledged, or without a clock, a wait on it lasts for ever.*)
+    unacknowledged, or without a clock, a wait on it lasts for ever.
+
+    @raise Invalid_argument if [capacity] is not positive. *)
 
 val pair :
   ?os:[< `Linux | `Macos ] ->
@@ -224,103 +227,127 @@ val pair :
     needs two connected ends. Its ends take socket options as a connection of
     {!v} does. Blocking reads suspend the calling fiber until data arrives, so
     both ends must run under an Eio event loop; the two ends may be in different
-    domains. No switch closes them: the caller does. *)
+    domains. No switch closes them: the caller does.
+
+    @raise Invalid_argument if [capacity] is not positive. *)
 
 (** {1:streams Streams}
 
-    A [listen] binds the TCP or Unix stream address it is given. One on TCP port
-    [0] binds the lowest port of the dynamic range, 49152-65535 (RFC 6335,
-    section 6), that no listener holds, as a socket's bind does, and
-    [listening_addr] reports it. A [listen] at an address a listener holds, or
-    at port [0] when every port of the range is held, raises [EADDRINUSE]
-    ({!section-errors}), as bind(2) fails on Linux; a TCP address overlaps an
-    address of the same port that is equal to it or is the wildcard address of
-    its family, and the IPv6 wildcard address overlaps every address of its
-    port, as bind(2) has it on Linux for a dual-stack socket. A [listen] with
-    [reuse_port] raises [Invalid_argument]. A listener is closed, and frees its
-    own hold on its address, when it is closed or when the switch passed to
-    [listen] or to {!v} finishes; the connections waiting to be accepted are
-    reset with it, as a kernel resets them. An [accept] or a [listening_addr]
-    begun after its listener closed, whoever closed it, raises
-    [Invalid_argument], as Eio's own sockets do; one already waiting when it
-    closes keeps waiting, as on eio_posix, and the listener stays open, taking
-    connections, until that accept returns, as Eio defers a descriptor's close
-    to its users.
+    Stream sockets follow Linux, and Eio's own sockets where Eio decides: a use
+    after close raises [Invalid_argument], and a close waits for the calls
+    already in flight. {!section-macos} lists what [`Macos] changes.
 
-    A [connect] reaches the listener at its address, or at the wildcard address
-    of its family and port, or, for an IPv4 address, at the IPv6 wildcard
-    address of its port, as a dual-stack listener takes it. An IPv4-mapped IPv6
-    address stands for the IPv4 address it maps, and a wildcard destination for
-    the loopback address of its family, as both kernels route them; from a
-    socket bound at an IPv4 address other than the wildcard, 0.0.0.0 stands for
-    that address, and from an IPv4-mapped one [::] stands for ::ffff:127.0.0.1,
-    as Linux routes them. It waits while [backlog + 1] connections wait to be
-    accepted there, as Linux's accept queue takes one more than the backlog,
-    which it caps at 4096 ([net.core.somaxconn]); with no listener, or one that
-    closes while it waits, it raises the connection failure that {!No_listener}
-    marks, as a connect to a closed port is refused.
+    {2:listening Listening}
 
-    A connection is closed when the switch passed to [connect] finishes, so the
-    accepting end then reads EOF, and an accepted connection when it is closed
-    or when the switch passed to [accept] finishes. The two ends of a connection
-    may be used from different domains: a write in one wakes a read waiting in
-    the other. An accepted connection's peer address is the client's: the
-    loopback address of its destination's family, 127.0.0.1 for any address of
-    127.0.0.0/8 as Linux picks it, IPv4-mapped for an IPv4 client of an IPv6
-    listener, at a port of the dynamic range, or [`Unix ""] for a Unix-domain
-    client, which binds no path.
+    - [listen] binds the TCP or Unix stream address it is given.
+    - [listen] at TCP port [0] binds the lowest port of the dynamic range,
+      49152-65535 (RFC 6335, section 6), that no listener holds.
+      [listening_addr] reports it.
+    - [listen] at an address a listener holds, or at port [0] with every port of
+      the range held, raises [EADDRINUSE].
+    - Two TCP addresses of one port overlap when they are equal or one is the
+      wildcard address of the other's family. The IPv6 wildcard address overlaps
+      every address of its port, as on a dual-stack socket.
+    - [listen] with [reuse_port] raises [Invalid_argument].
+    - Closing a listener, or finishing the switch passed to [listen] or to {!v},
+      closes it and frees its own hold on its address. The connections waiting
+      to be accepted are reset.
+    - [accept] or [listening_addr] begun after the listener closed, whoever
+      closed it, raises [Invalid_argument].
+    - An [accept] already waiting when the listener closes keeps waiting, as on
+      eio_posix. The listener stays open, and takes connections, until that
+      [accept] returns.
 
-    Each end of a TCP connection holds an address while it is open: the client
-    its own, and the accepted end, queued or accepted, the listener's port at
-    the address the client reached, as Linux's accepted socket does, even once
-    the listener closed; that of a listener at a wildcard address holds it as a
-    client bound there does, so a later bind at a wildcard address of its port
-    finds it in use. A queued end that its listener's close resets lets go at
-    once, as Linux destroys it. Without a clock, or after a reset, each other
-    end lets go once both ends have closed. Given a clock, the end whose FIN
-    went first, sent by a shutdown of its send side or by its close, holds its
-    address once closed in TIME_WAIT, for 60 seconds from the peer's FIN, as
-    Linux does; the other end lets go when it closes. Closed before the peer's
-    FIN, it waits for that FIN for its [TCP_LINGER2] if one is set, or 60
-    seconds, Linux's [tcp_fin_timeout], and then lets go. A [listen] or a
-    [connect] bound at an address held this way raises [EADDRINUSE], or the
-    error that {!Address_in_use} marks, unless both have [reuse_addr]: as on
-    Linux, an accepted end has its listener's, a client has none, and a
-    listener's own hold refuses every other socket.
+    {2:connecting Connecting}
 
-    A [connect] without [bind_to] takes the next port down from the last one
-    such a connect took, from the top of the dynamic range, and from its top
-    again once past its bottom. As Linux's connect(2) does, it skips a port that
-    a listener or a [connect] bound with [bind_to] holds, open or in TIME_WAIT,
-    and one that another connection holds toward the same destination address
-    and port. Connections to different destinations thus share a port: the range
-    bounds the connections to each destination, not their sum. Given a clock, a
-    port in TIME_WAIT toward the same destination is free again for it once more
-    than a second has passed since the peer's FIN, as Linux reuses it on
-    loopback with [net.ipv4.tcp_tw_reuse] at its default; one in FIN_WAIT2 is
-    not. With no port left, the [connect] raises the error that
-    {!Address_not_available} marks.
+    - [connect] reaches the listener at its address, at the wildcard address of
+      its family and port, or, for an IPv4 address, at the IPv6 wildcard address
+      of its port, as a dual-stack listener takes it.
+    - An IPv4-mapped IPv6 destination stands for the IPv4 address it maps, and a
+      wildcard destination for the loopback address of its family, on both
+      kernels.
+    - From a socket bound at an IPv4 address other than the wildcard, the
+      destination 0.0.0.0 stands for that address. From an IPv4-mapped one, [::]
+      stands for ::ffff:127.0.0.1.
+    - While [backlog + 1] connections wait to be accepted, [connect] waits. The
+      backlog is capped at 4096 ([net.core.somaxconn]).
+    - With no listener, or with one that closes while [connect] waits, [connect]
+      raises {!No_listener}.
 
-    A [connect] bound with [bind_to] at its own destination, where no listener
-    is, connects to itself, as Linux's simultaneous open does: it reads what it
-    writes, and once closed holds its address in TIME_WAIT.
+    {2:connections Connections}
 
-    A [connect] bound with [bind_to] holds that address, which the listener sees
-    as its peer's, for port 0 at the highest port of the dynamic range that
-    nothing holds, as a bind(2) before its connect(2) takes a port of its own
-    there. One at an address a listener or another client holds raises the error
-    that {!Address_in_use} marks, a wildcard one by the rule [listen] follows:
-    the IPv6 wildcard address finds every hold on its port. Once connected from
-    a wildcard address, a client holds the address it sends from, and a later
-    bind at a wildcard address of its port finds it in use, as on Linux; one
-    bound to an IPv6 address connecting to an IPv4-mapped one, or the reverse,
-    raises the error that {!Network_unreachable} or {!Address_family} marks; one
-    bound to an address of another family raises, as Linux's bind(2) fails, the
-    error that {!Address_family} marks from an IPv4 socket, IPv6 or a path for
-    IPv4, and the one that {!Invalid_address} marks from an IPv6 or a
-    Unix-domain socket, IPv4 for IPv6 or TCP for a path. Under [`Macos] each of
-    these raises the error that {!Address_family} marks, as macOS's bind(2)
-    fails with EAFNOSUPPORT for both.
+    - Finishing the switch passed to [connect] closes the client end, and the
+      accepted end then reads end of file.
+    - Closing an accepted connection, or finishing the switch passed to
+      [accept], closes it.
+    - The two ends may be used from different domains: a write in one wakes a
+      read waiting in the other.
+    - An accepted connection's peer address is the client's. It is the loopback
+      address of its destination's family (127.0.0.1 for any address of
+      127.0.0.0/8), IPv4-mapped for an IPv4 client of an IPv6 listener, at a
+      port of the dynamic range. A Unix-domain client binds no path and is
+      [`Unix ""].
+
+    {2:held Held addresses}
+
+    - While it is open, each end of a TCP connection holds an address. The
+      client holds its own. The accepted end, queued or accepted, holds the
+      listener's port at the address the client reached, even once the listener
+      closed.
+    - The accepted end of a listener at a wildcard address holds that address as
+      a client bound there does, so a later bind at a wildcard address of its
+      port finds it in use.
+    - A queued end that its listener's close resets lets go at once.
+    - Without a clock, or after a reset, any other end lets go once both ends
+      have closed.
+    - With a clock, the end whose FIN went first, by a shutdown of its send side
+      or by its close, holds its address in TIME_WAIT once closed, for 60
+      seconds from the peer's FIN. The other end lets go when it closes.
+    - With a clock, an end closed before the peer's FIN waits for that FIN for
+      its [TCP_LINGER2] if one is set, or else 60 seconds ([tcp_fin_timeout]),
+      and then lets go.
+    - [listen] at an address held this way raises [EADDRINUSE], and [connect]
+      bound there raises {!Address_in_use}, unless both sockets have
+      [reuse_addr]. An accepted end has its listener's [reuse_addr], a client
+      has none, and a listener's own hold refuses every other socket.
+
+    {2:ports Ports of a connect}
+
+    - [connect] without [bind_to] takes the next port down from the last one
+      such a [connect] took. It starts at the top of the dynamic range and
+      starts there again once past the bottom.
+    - It skips a port that a listener or a [connect] with [bind_to] holds, open
+      or in TIME_WAIT, and a port that another connection holds toward the same
+      destination address and port. Connections to different destinations thus
+      share ports: the range bounds the connections to each destination, not
+      their sum.
+    - With a clock, a port in TIME_WAIT toward the same destination is free for
+      it again once more than a second has passed since the peer's FIN, as
+      [net.ipv4.tcp_tw_reuse] has it by default on loopback. A port in FIN_WAIT2
+      is not.
+    - With no port left, [connect] raises {!Address_not_available}.
+
+    {2:bind_to Connecting from a bound address}
+
+    - [connect] with [bind_to] at its own destination, where no listener is,
+      connects to itself (a simultaneous open). It reads what it writes, and
+      once closed holds its address in TIME_WAIT.
+    - [connect] with [bind_to] holds that address, which the listener sees as
+      its peer's. Port 0 takes the highest port of the dynamic range that
+      nothing holds, as a bind(2) before a connect(2) does.
+    - [bind_to] at an address a listener or another client holds raises
+      {!Address_in_use}. A wildcard address overlaps as for [listen], so the
+      IPv6 wildcard address finds every hold on its port.
+    - A client connected from a wildcard address holds the address it sends
+      from, so a later bind at a wildcard address of its port finds it in use.
+    - [bind_to] at an IPv6 address with an IPv4-mapped destination raises
+      {!Network_unreachable}. [bind_to] at an IPv4-mapped address with an IPv6
+      destination raises {!Address_family}.
+    - [bind_to] of another family than the destination raises {!Address_family}
+      for an IPv4 destination, with an IPv6 address or a path. It raises
+      {!Invalid_address} for an IPv6 destination with an IPv4 address, and for a
+      Unix path with an IP address. Under [`Macos] each of these raises
+      {!Address_family}.
 
     {1:options Socket options}
 
@@ -373,83 +400,97 @@ val pair :
 
     {1:datagrams Datagrams}
 
-    A [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
-    bind the wildcard address of their family, as a kernel binds an unbound
-    socket on its first send, and an address with port [0] binds its IP address,
-    each at the lowest port of the dynamic range that no datagram socket holds.
-    With every port of the range held, they raise [EADDRINUSE], where Linux
-    fails an unbound socket's first send with [EAGAIN]. An address that overlaps
-    one a datagram socket holds, by the rule [listen] follows, raises
-    [EADDRINUSE] ({!section-errors}), unless both UDP sockets have [reuse_addr].
-    Those then share it, as on Linux: a datagram reaches the one bound at the
-    most specific address, the address itself, then the IPv4 wildcard, then the
-    IPv6 one, and of those bound at the same address the latest, and once it
-    closes the one before. [reuse_port] raises [Invalid_argument]. The socket is
-    closed, and its address free again, when the switch passed to
-    [datagram_socket] finishes; a send, a receive or a shutdown on it then
-    raises [Invalid_argument].
+    Datagram sockets follow Linux. {!section-macos} lists what [`Macos] changes.
 
-    A datagram reaches a socket by the rule a [connect] reaches a listener, and
-    arrives whole, after every datagram sent to it before: the network never
-    cuts or reorders one. A socket queues what its receive buffer holds, by
-    default 229376 bytes as on the kernel the tests record, each datagram
-    counted with the memory Linux gives it: 199 datagrams of up to about 450
-    bytes, 99 of 1000, 3 of 60000. Over UDP a datagram past that is lost, and
-    the send returns as on Linux, which frees the memory of the datagrams a
-    receiver takes only once they reach a quarter of the buffer, or the receiver
-    took every datagram queued when it found none taken. On a Unix path the send
-    waits until the receiver takes one, as it does while the receiver holds more
-    than 10 datagrams, Linux's [max_dgram_qlen], or while the sender's own
-    datagrams not yet received fill its send buffer of the same size: 299 of a
-    byte, 100 of 1000 bytes, 12 of 20000, as Linux counts them. It comes with
-    the sender's address as the receiver sees it: the loopback address of the
-    destination's family for a wildcard sender, 127.0.0.1 for any address of
-    127.0.0.0/8, and IPv4-mapped for an IPv4 sender to an IPv6 socket. One sent
-    to an address no socket binds is lost, as UDP loses it. A [recv] into a
-    buffer shorter than the datagram gets its first bytes, as a socket does.
+    {2:datagram_binding Binding}
 
-    After a socket shut its send side, a send raises the connection reset that
-    {!Closed} marks, as EPIPE, and so does one to a Unix-domain socket that shut
-    its receive side, a send that waits for room included. A socket that shut
-    its receive side still receives what is queued and, over UDP, what arrives
-    after, as on Linux.
+    - [datagram_socket] binds the address it is given. [`UdpV4] and [`UdpV6]
+      bind the wildcard address of their family, which a kernel binds on an
+      unbound socket's first send.
+    - An address with port [0], [`UdpV4] or [`UdpV6] takes the lowest port of
+      the dynamic range that no datagram socket holds. With every port of the
+      range held, it raises [EADDRINUSE], where Linux fails an unbound socket's
+      first send with [EAGAIN].
+    - An address that overlaps one a datagram socket holds, by the rule of
+      [listen], raises [EADDRINUSE], unless both UDP sockets have [reuse_addr].
+    - UDP sockets that share an address this way receive by specificity: a
+      datagram reaches the one bound at the address itself, then the IPv4
+      wildcard, then the IPv6 one. Of those bound at the same address it reaches
+      the latest, and once that one closes the one before.
+    - [datagram_socket] with [reuse_port] raises [Invalid_argument].
+    - Finishing the switch passed to [datagram_socket] closes the socket and
+      frees its address. A send, a receive or a shutdown on it then raises
+      [Invalid_argument].
 
-    A send without a destination raises the error that {!No_destination} marks
-    over UDP, and {!Not_connected} on a Unix path, as Linux says, since no
-    socket is connected. A datagram longer than 65507 bytes to an IPv4 address,
-    65527 to an IPv6 one, or 212960 to a Unix path, as Linux's default send
-    buffer allows, or its send buffer less 32 bytes for a smaller one, raises
-    the error that {!Message_too_long} marks. These are Linux's limits: under
-    [`Macos] the limit is the socket's send buffer, by default 9216 bytes over
-    UDP and 2048 on a Unix path. One sent to UDP port 0 raises the error that
-    {!Invalid_port} marks, as on Linux; under [`Macos] it is sent, and lost.
+    {2:delivery Delivery}
 
-    A datagram sent from an IPv6 address to an IPv4-mapped one, or the reverse,
-    raises the error that {!Network_unreachable} or {!Address_family} marks. One
-    from an IPv4 socket to an IPv6 address raises the error that
-    {!Address_family} marks, and so does one to a Unix path of 14 bytes or more;
-    a shorter path, too short to fill a [sockaddr_in], raises the one that
-    {!Invalid_address} marks, and so does a Unix path from an IPv6 socket and a
-    UDP address or the empty path from a Unix-domain one, as on Linux. One from
-    an IPv6 socket to an IPv4 address goes the IPv4 way, as on Linux: it is
-    refused, with the error that {!Network_unreachable} marks, from an IPv6
-    address other than the wildcard or an IPv4-mapped one. One from a loopback
-    address to an IPv4 address outside 127.0.0.0/8, other than a multicast one,
-    raises the error that {!Invalid_address} marks, as Linux cannot route it.
+    - A datagram reaches a socket by the rule a [connect] reaches a listener. It
+      arrives whole, after every datagram sent to it before: the network never
+      cuts or reorders one.
+    - It comes with the sender's address as the receiver sees it: the loopback
+      address of the destination's family for a wildcard sender, 127.0.0.1 for
+      any address of 127.0.0.0/8, and IPv4-mapped for an IPv4 sender to an IPv6
+      socket.
+    - A datagram sent to an address that no socket binds is lost.
+    - A [recv] into a buffer shorter than the datagram gets its first bytes.
+    - A socket queues what its receive buffer holds, by default 229376 bytes,
+      each datagram counted with the memory Linux gives it: 199 datagrams of up
+      to about 450 bytes, 99 of 1000 bytes, or 3 of 60000.
+    - Over UDP, a datagram past that is lost and its send returns. A receiver
+      frees the memory of the datagrams it takes only once they reach a quarter
+      of the buffer, or once it has taken every datagram that was queued when it
+      found none taken.
+    - On a Unix path, a send past that waits until the receiver takes a
+      datagram. It also waits while the receiver holds more than 10 datagrams
+      ([max_dgram_qlen]), or while the sender's own datagrams not yet received
+      fill its send buffer, of the same size: 299 datagrams of a byte, 100 of
+      1000 bytes, or 12 of 20000.
 
-    A datagram that is both too long and refused for its address meets the
-    errors in Linux's order. A Unix-domain socket checks the address family
-    first. An IPv4 socket refuses a datagram of more than 65535 bytes first, and
-    its address before the 65507-byte limit. An IPv6 socket checks the address
-    first.
+    {2:datagram_shutdown Shutdown}
+
+    - After a socket shut its send side, a send raises {!Closed}, as EPIPE.
+    - A send to a Unix-domain socket that shut its receive side raises {!Closed}
+      too, a send already waiting for room included.
+    - A socket that shut its receive side still receives what is queued and,
+      over UDP, what arrives after.
+
+    {2:send_errors Errors of a send}
+
+    - A send without a destination raises {!No_destination} over UDP and
+      {!Not_connected} on a Unix path, since no socket is connected.
+    - A datagram longer than 65507 bytes to an IPv4 address, 65527 to an IPv6
+      one, or 212960 to a Unix path raises {!Message_too_long}. The last is what
+      Linux's default send buffer allows; with a smaller send buffer the limit
+      is that buffer less 32 bytes. Under [`Macos] the limit is the socket's
+      send buffer, by default 9216 bytes over UDP and 2048 on a Unix path.
+    - A datagram to UDP port 0 raises {!Invalid_port}. Under [`Macos] it is
+      sent, and lost.
+    - A datagram from an IPv6 address to an IPv4-mapped one raises
+      {!Network_unreachable}, and one from an IPv4-mapped address to an IPv6 one
+      raises {!Address_family}.
+    - A datagram from an IPv4 socket to an IPv6 address, or to a Unix path of 14
+      bytes or more, raises {!Address_family}. To a shorter path, too short to
+      fill a [sockaddr_in], it raises {!Invalid_address}.
+    - A datagram from an IPv6 socket to a Unix path, or from a Unix-domain
+      socket to a UDP address or the empty path, raises {!Invalid_address}.
+    - A datagram from an IPv6 socket to an IPv4 address goes as from an IPv4
+      socket. From an IPv6 address other than the wildcard or an IPv4-mapped
+      one, it raises {!Network_unreachable}.
+    - A datagram from a loopback address to an IPv4 address outside 127.0.0.0/8,
+      other than a multicast one, raises {!Invalid_address}.
+    - A datagram that is both too long and refused for its address meets the
+      checks in Linux's order. A Unix-domain socket checks the address family
+      first. An IPv4 socket refuses a datagram of more than 65535 bytes first,
+      then its address, then the 65507-byte limit. An IPv6 socket checks the
+      address first.
 
     {1:paths Unix paths}
 
     Listeners, datagram sockets and clients bound with [bind_to] share one
     namespace of Unix paths, as they share a file system: a path one holds is in
-    use to the others. A [connect] at a datagram socket's path raises the error
-    that {!Wrong_socket_type} marks, and so does a datagram sent to a listener's
-    or a client's path. A [connect] or a datagram sent at a path no socket holds
+    use to the others. A [connect] at a datagram socket's path raises
+    {!Wrong_socket_type}, and so does a datagram sent to a listener's or a
+    client's path. A [connect] or a datagram sent at a path no socket holds
     raises [Eio.Fs.Not_found].
 
     The namespace is not a file system: a socket binds a path whose directory
@@ -460,7 +501,7 @@ val pair :
     raw, a [connect], a [bind_to] or a datagram [send] [Eio.Fs.Not_found]. As on
     eio_posix, the switch passed to such a [listen] then fails to remove its
     file, with [ENOENT] too. A path of 108 bytes or more raises [ENAMETOOLONG],
-    or the error that {!Name_too_long} marks ({!section-errors}).
+    or {!Name_too_long} ({!section-errors}).
 
     With [reuse_addr], a [listen] at a Unix-domain path, not at an abstract
     address, takes the path over, as Eio's backends remove the socket file there
@@ -478,14 +519,12 @@ val pair :
     a socket there leaves nothing behind when it closes. The namespace is one
     per socket type, as on Linux: a stream socket and a datagram one may bind
     the same abstract address, and a [connect] or a datagram sent where no
-    socket of its type binds is refused with the connection failure that
-    {!No_listener} marks.
+    socket of its type binds raises {!No_listener}.
 
     A closed Unix-domain datagram socket leaves its path behind, as Eio's
-    backends leave the file: a datagram sent there is refused with the
-    connection failure that {!No_listener} marks, and a socket bound there
-    raises [EADDRINUSE], with [reuse_addr] or not, as eio_posix does; eio_linux,
-    given [reuse_addr], removes the file and binds.
+    backends leave the file: a datagram sent there raises {!No_listener}, and a
+    socket bound there raises [EADDRINUSE], with [reuse_addr] or not, as
+    eio_posix does; eio_linux, given [reuse_addr], removes the file and binds.
 
     {1:resolution Host resolution}
 
@@ -533,10 +572,10 @@ val pair :
       never answered and fails after 75 seconds on [clock], with the [ETIMEDOUT]
       error eio_posix raises (it waits for ever without one), and a datagram
       sent there is lost. A TCP socket binds no multicast or broadcast address,
-      and a [connect] reaches none, with the error that {!Address_family} marks;
-      a link-local address raises [EADDRNOTAVAIL] from a bind and the error that
-      {!Host_unreachable} marks from a [connect]. A [connect] bound at its own
-      destination raises the error that {!Invalid_address} marks.
+      and a [connect] reaches none: it raises {!Address_family}; a link-local
+      address raises [EADDRNOTAVAIL] from a bind and {!Host_unreachable} from a
+      [connect]. A [connect] bound at its own destination raises
+      {!Invalid_address}.
     - Ports. A TCP port of [0] takes the next free port of the range, counting
       up from the last one taken, for listeners and clients alike. A [connect]
       without [bind_to] takes one too: macOS shares no port between
@@ -564,11 +603,11 @@ val pair :
       [ETIMEDOUT] to the next read.
     - Datagrams. A shutdown does nothing, as the socket is not connected. A send
       checks the length first. Then a Unix-domain socket refuses an IP address
-      with the error that {!Address_family} marks; an IPv4 one a path with
-      {!Address_not_available}'s, and an IPv6 address with {!Invalid_address}'s
-      from a wildcard address and {!Host_unreachable}'s otherwise; an IPv6 one
-      an IPv4 address with {!Invalid_address}'s. A wildcard destination has no
-      route ({!Host_unreachable}). From [::1] an IPv4-mapped destination is not
+      with {!Address_family}; an IPv4 one a path with {!Address_not_available},
+      and an IPv6 address with {!Invalid_address} from a wildcard address and
+      {!Host_unreachable} otherwise; an IPv6 one an IPv4 address with
+      {!Invalid_address}. A wildcard destination has no route
+      ({!Host_unreachable}). From [::1] an IPv4-mapped destination is not
       available, and from an IPv4-mapped address other than the wildcard an IPv6
       one has no route. A socket bound at an IPv4-mapped address sees IPv4
       senders as IPv4. A receiver holds its receive buffer, by default 786896
