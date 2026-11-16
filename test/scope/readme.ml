@@ -72,9 +72,9 @@ let intro =
   "eio-net.mem follows the chosen kernel in most of what a test can see. The \
    tables below give, for each behaviour and each socket option, how closely \
    it follows Linux and macOS. A modelled entry matches the kernel. An \
-   approximated one stays within the bound its note gives. A socket option \
-   that is stored only can be set and read back, and has no other effect. An \
-   unsupported one is refused. The tables are made from \
+   approximated one differs as its note says. A socket option that is stored \
+   only can be set and read back, and has no other effect. An unsupported one \
+   is refused. The tables are made from \
    [`lib/mem/scope.ml`](lib/mem/scope.ml), and a test checks the class of each \
    option against what a connection does."
 

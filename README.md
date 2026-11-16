@@ -5,8 +5,8 @@ Network channels and test networks for
 
 - `Eio_net_chaos.check` runs a workload on an in-memory network under the
   faults of a real one.
-- A frame channel makes one receive one frame, over a datagram socket, a
-  length-prefixed byte stream or an in-memory pair.
+- On a frame channel, each receive returns one frame, over a datagram socket,
+  a length-prefixed byte stream or an in-memory pair.
 - An accept loop bounds the connections it holds.
 
 ## Installation
@@ -88,17 +88,31 @@ Without its timeout, the client waits 133 seconds for a connect whose
 handshake is lost, and the workload's bound on latency fails:
 
 ```ocaml
-# let faults f =
-    match f () with
-    | () -> "passed"
-    | exception Failure m -> List.nth (String.split_on_char '\n' m) 1;;
-val faults : (unit -> unit) -> string = <fun>
-# faults (fun () -> Eio_net_chaos.check (workload ~timeout:false));;
-- : string = "  faults:   connect of 1c at 0 times out"
+# match Eio_net_chaos.check (workload ~timeout:false) with
+  | () -> print_endline "passed"
+  | exception Failure report -> print_endline report;;
+Eio_net_chaos.check: the workload failed under a fault.
+  faults:   connect of 1c at 0 times out
+  tier:     linear
+  error:    Failure("too slow")
+  trace:
+    #1 connect 1c @0  <- times out
+    #2 connect 2c @1
+    #3 write 2c @0+4
+    #4 read 2c @0+64
+    #5 accept 2s @0
+    #6 read 2s @0+64
+    #7 write 2s @0+6
+  replay:   ~replay:"net/85d85f49/connect1c@0.timeout"
+- : unit = ()
 ```
 
-The failure also lists the operations of the failing run, and gives a
-`~replay:"..."` argument that runs that scenario alone.
+A report names each connection by its number, in the order the network made
+them, and its end: `c` for the end that connected and `s` for the end that
+accepted. Here `1c` is the first connect, which the injected fault holds for
+133 seconds, and `2c` and `2s` are the two ends of the retry. In `@0+4`, `0`
+is what that end had moved before and `4` the bytes the operation asks for or
+offers. The `replay` argument runs that scenario alone.
 
 ### Writing a workload
 
@@ -208,8 +222,7 @@ Exception: Eio_net_framing.Error: truncated payload: received 1 of 3 bytes
 ```
 
 `write` sends the whole batch with one `Eio.Flow.write` and does not copy the
-payloads. `Eio_net.Frame.of_length_prefixed_flow ~framing flow` turns a byte
-stream into a frame channel with the same format.
+payloads.
 
 A framing configuration accepts payloads up to 1 MiB by default, or 65,535
 bytes with a two-byte length. `read` raises
@@ -218,8 +231,11 @@ longer payload, before it reads any payload byte. A reader made with
 `~max_size:(Eio_net_framing.Config.buffer_size framing)` therefore never holds
 more than the longest frame.
 
-A datagram longer than a channel's `max_length` (64 KiB by default) raises the
-`Eio.Io` error `Too_long` instead of arriving truncated.
+`Eio_net.Frame.of_length_prefixed_flow ~framing flow` turns a byte stream into
+a frame channel with the same format, and `Eio_net.Frame.of_datagram_socket`
+sends one datagram per frame. A datagram longer than a channel's `max_length`
+(64 KiB by default) raises the `Eio.Io` error `Too_long` instead of arriving
+truncated.
 
 ## Accept loop
 
@@ -272,11 +288,11 @@ sub-library has its own directory under [`lib/`](lib/).
 
 eio-net.mem follows the chosen kernel in most of what a test can see. The tables
 below give, for each behaviour and each socket option, how closely it follows
-Linux and macOS. A modelled entry matches the kernel. An approximated one stays
-within the bound its note gives. A socket option that is stored only can be set
-and read back, and has no other effect. An unsupported one is refused. The
-tables are made from [`lib/mem/scope.ml`](lib/mem/scope.ml), and a test checks
-the class of each option against what a connection does.
+Linux and macOS. A modelled entry matches the kernel. An approximated one
+differs as its note says. A socket option that is stored only can be set and
+read back, and has no other effect. An unsupported one is refused. The tables
+are made from [`lib/mem/scope.ml`](lib/mem/scope.ml), and a test checks the
+class of each option against what a connection does.
 
 | Behaviour | Linux | macOS |
 | --- | --- | --- |
@@ -412,6 +428,21 @@ Notes:
 <!-- End of the section made from lib/mem/scope.ml -->
 
 ## Related work
+
+[Chaos engineering](https://principlesofchaos.org/) breaks a system on purpose
+to find what fails, and `eio-net.chaos` does it inside a test.
+[FoundationDB](https://apple.github.io/foundationdb/testing.html) runs its
+whole cluster in a deterministic simulation that injects faults and replays a
+failure exactly. [turmoil](https://github.com/tokio-rs/turmoil) does the same
+for Rust's tokio, with a simulated network. [Jepsen](https://jepsen.io/) breaks
+real clusters.
+
+[Netsem](https://www.cl.cam.ac.uk/~pes20/Netsem/) (Bishop et al., JACM 2018)
+specified TCP and the sockets API and checked the specification against
+traces of real kernels. `eio-net.mem` borrows that idea on a smaller scale:
+kernel traces recorded on Linux and macOS check its answers, and the
+[socket cases](test/oracle/README.md) adapt [gVisor](https://gvisor.dev/)'s
+[socket tests](https://github.com/google/gvisor/tree/master/test/syscalls/linux).
 
 Tokio's
 [LengthDelimitedCodec](https://docs.rs/tokio-util/latest/tokio_util/codec/length_delimited/struct.LengthDelimitedCodec.html)
