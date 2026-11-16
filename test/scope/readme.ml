@@ -39,11 +39,11 @@ let cell c =
   | None -> word
   | Some s -> Fmt.str "%s (%d)" word (index s 1 notes)
 
-let table b heading features =
-  Printf.bprintf b "\n| %s | Linux | macOS |\n| --- | --- | --- |\n" heading;
+let table ppf heading features =
+  Fmt.pf ppf "@\n| %s | Linux | macOS |@\n| --- | --- | --- |@\n" heading;
   List.iter
     (fun (f : Scope.feature) ->
-      Printf.bprintf b "| %s | %s | %s |\n" f.name (cell f.linux) (cell f.macos))
+      Fmt.pf ppf "| %s | %s | %s |@\n" f.name (cell f.linux) (cell f.macos))
     features
 
 (* [text] in lines of at most 80 columns, cut at spaces, each after the first
@@ -79,18 +79,19 @@ let intro =
 
 let section () =
   let b = Buffer.create 8192 in
-  Printf.bprintf b "%s: dune build @runtest --auto-promote -->\n\n%s\n" start
+  let ppf = Fmt.with_buffer b in
+  Fmt.pf ppf "%s: dune build @@runtest --auto-promote -->@\n@\n%s@\n" start
     (wrap ~indent:"" intro);
-  table b "Behaviour" Scope.behaviours;
-  table b "Option" Scope.options;
-  Printf.bprintf b "\nNotes:\n\n";
+  table ppf "Behaviour" Scope.behaviours;
+  table ppf "Option" Scope.options;
+  Fmt.pf ppf "@\nNotes:@\n@\n";
   List.iteri
     (fun i s ->
       let n = Fmt.str "%d. " (i + 1) in
-      Printf.bprintf b "%s\n"
+      Fmt.pf ppf "%s@\n"
         (wrap ~indent:(String.make (String.length n) ' ') (n ^ s)))
     notes;
-  Printf.bprintf b "\n%s\n" stop;
+  Fmt.pf ppf "@\n%s@\n%!" stop;
   Buffer.contents b
 
 let () =
