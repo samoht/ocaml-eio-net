@@ -17,6 +17,9 @@ type t = {
 val kind_name : kind -> string
 (** [kind_name k] is [k] in lower case. *)
 
+val equal_kind : kind -> kind -> bool
+(** [equal_kind a b] is [true] iff [a] and [b] are the same kind. *)
+
 val side_name : side -> string
 (** [side_name s] is ["c"] or ["s"]. *)
 

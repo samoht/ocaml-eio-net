@@ -21,6 +21,7 @@ let kind_name = function
   | `Write -> "write"
   | `Recv -> "recv"
 
+let equal_kind (a : kind) b = a = b
 let side_name = function `Client -> "c" | `Server -> "s"
 
 let family_of_stream : Eio.Net.Sockaddr.stream -> family = function

@@ -81,6 +81,10 @@ val interface : _ t -> interface
 val name : _ t -> string
 (** [name op] is the function that runs [op], as its library names it. *)
 
+val pp : _ t Fmt.t
+(** [pp] formats an operation as its {!name} and the {!interface} it belongs to:
+    [Eio.Net.accept of a listener]. *)
+
 val class_ : 'c t -> 'c class_
 (** [class_ op] is how the wrapper treats [op]. *)
 

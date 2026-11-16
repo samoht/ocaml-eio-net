@@ -138,6 +138,14 @@ let name : type c. c t -> string = function
   | Send -> "Eio.Net.send"
   | Recv -> "Eio.Net.recv"
 
+let pp ppf op =
+  Fmt.pf ppf "%s of %s" (name op)
+    (match interface op with
+    | `Network -> "a network"
+    | `Listening_socket -> "a listener"
+    | `Stream_socket -> "a stream"
+    | `Datagram_socket -> "a datagram socket")
+
 let stream_faults = Fault.[ Short 1; Stall 1.; Hang; Reset; Eof ]
 
 let class_ : type c. c t -> c class_ = function
