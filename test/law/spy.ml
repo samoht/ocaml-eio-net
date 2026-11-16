@@ -1,5 +1,7 @@
 type call = Law.interface * string
 
+let equal_call (a : call) b = a = b
+
 let operations =
   [
     (`Network, "Eio.Net.listen");

@@ -251,7 +251,7 @@ let transcript ~clock ~family ?spy net steps =
       in
       if !released then note "release" "ok";
       List.iter (run ~sw) rest;
-      let close r = try Eio.Resource.close r with _ -> () in
+      let close = Eio.Resource.close in
       List.iter (fun (_, s) -> close s) st.ends;
       List.iter close st.lost;
       List.iter (fun (_, d) -> close d) st.dgrams;
@@ -383,9 +383,7 @@ let faulty seed =
   let rng = Random.State.make [| seed; 1 |] in
   fun (op : Op.t) ->
     if op.index > 2 && Random.State.int rng 3 = 0 then
-      Some
-        (List.nth Test_law.faults
-           (Random.State.int rng (List.length Test_law.faults)))
+      Some (List.nth Faults.all (Random.State.int rng (List.length Faults.all)))
     else None
 
 let test_faults_release () =

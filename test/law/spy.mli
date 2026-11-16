@@ -5,6 +5,9 @@ type call = Law.interface * string
 (** An operation, by its interface and the function that runs it, as {!Law.name}
     names it. *)
 
+val equal_call : call -> call -> bool
+(** [equal_call a b] is [true] iff [a] and [b] are the same operation. *)
+
 val operations : call list
 (** [operations] is every operation of the interfaces the spy implements, Eio's
     and Eio_unix's, each of which needs a row of {!Law}. *)

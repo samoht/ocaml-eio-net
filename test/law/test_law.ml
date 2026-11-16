@@ -24,25 +24,6 @@ let dgram_addr family n : Eio.Net.Sockaddr.datagram =
   | `Inet -> `Udp (Eio.Net.Ipaddr.V4.loopback, 9000 + n)
   | `Unix -> `Unix (Fmt.str "/law-dgram-%d.sock" n)
 
-(* Every fault, each constructor once, with the arguments the rows use. *)
-let faults =
-  Fault.
-    [
-      Short 1;
-      Stall 1.;
-      Hang;
-      Reset;
-      Eof;
-      Refuse;
-      Timeout;
-      Unreachable;
-      Emfile;
-      Drop;
-      Dup;
-      Reorder;
-      Garble 3;
-    ]
-
 let constructor : Fault.t -> int = function
   | Short _ -> 0
   | Stall _ -> 1
@@ -239,11 +220,13 @@ let wrong ~family (Law.Op op) =
   let bare () =
     let a, _, _ = observe ~wrap:false ~family op in
     if a = answer then None
-    else Some (Fmt.str "answers %S where its base answers %S" answer a)
+    else Fmt.kstr Option.some "answers %S where its base answers %S" answer a
   in
   let calls_once kinds =
-    if calls <> [ me ] then Some (Fmt.str "calls %a of its base" pp_calls calls)
-    else if asked <> kinds then Some (Fmt.str "asks about %a" pp_kinds asked)
+    if not (List.equal Spy.equal_call calls [ me ]) then
+      Fmt.kstr Option.some "calls %a of its base" pp_calls calls
+    else if not (List.equal Op.equal_kind asked kinds) then
+      Fmt.kstr Option.some "asks about %a" pp_kinds asked
     else bare ()
   in
   match Law.class_ op with
@@ -260,9 +243,7 @@ let test_classes () =
         List.filter_map
           (fun (Law.Op o as op) ->
             Option.map
-              (Fmt.str "%a (%s) %s" pp_call
-                 (Law.interface o, Law.name o)
-                 (family_name family))
+              (Fmt.str "%a (%s) %s" Law.pp o (family_name family))
               (wrong ~family op))
           Law.all)
       [ `Inet; `Unix ]
@@ -276,7 +257,7 @@ let test_classes () =
 let first kind fault =
   let seen = ref false in
   fun (op : Op.t) ->
-    if op.kind = kind && not !seen then begin
+    if Op.equal_kind op.kind kind && not !seen then begin
       seen := true;
       fault
     end
@@ -367,9 +348,7 @@ let steps : Law.intercepted Law.t -> _ =
           ("recv", recv);
         ]
   in
-  let close r =
-    Option.iter (fun x -> try Eio.Resource.close x with _ -> ()) !r
-  in
+  let close r = Option.iter Eio.Resource.close !r in
   let close_all () =
     close c;
     close s;
@@ -425,7 +404,7 @@ let test_faults () =
           (fun op ->
             let listed = listed op family in
             let base = run op ~family None in
-            let where = Fmt.str "%s (%s)" (Law.name op) (family_name family) in
+            let where = Fmt.str "%a (%s)" Law.pp op (family_name family) in
             List.filter_map
               (fun fault ->
                 let got = run op ~family (Some fault) in
@@ -433,13 +412,13 @@ let test_faults () =
                 and expected = List.mem fault listed in
                 if changes = expected then None
                 else
-                  Some
-                    (Fmt.str "@[<v>%s: %a %s:@,%a@]" where Fault.pp fault
-                       (if changes then "changes it, not listed"
-                        else "changes nothing")
-                       Fmt.(list ~sep:cut string)
-                       got))
-              faults)
+                  Fmt.kstr Option.some "@[<v>%s: %a %s:@,%a@]" where Fault.pp
+                    fault
+                    (if changes then "changes it, not listed"
+                     else "changes nothing")
+                    Fmt.(list ~sep:cut string)
+                    got)
+              Faults.all)
           intercepted)
       [ `Inet; `Unix ]
   in
@@ -457,13 +436,12 @@ let test_released () =
                 match left_open op ~family fault with
                 | [] -> None
                 | l ->
-                    Some
-                      (Fmt.str "%s (%s) under %a leaves %a open" (Law.name op)
-                         (family_name family)
-                         Fmt.(option ~none:(any "no fault") Fault.pp)
-                         fault
-                         Fmt.(list ~sep:comma string)
-                         l))
+                    Fmt.kstr Option.some "%a (%s) under %a leaves %a open"
+                      Law.pp op (family_name family)
+                      Fmt.(option ~none:(any "no fault") Fault.pp)
+                      fault
+                      Fmt.(list ~sep:comma string)
+                      l)
               (None :: List.map Option.some (listed op family)))
           intercepted)
       [ `Inet; `Unix ]
@@ -496,7 +474,7 @@ let test_complete () =
       if eio && (not own) && not (List.mem call Spy.operations) then
         Alcotest.failf "%a is no operation of Eio" pp_call call)
     rows;
-  let ctors = List.sort_uniq compare (List.map constructor faults) in
+  let ctors = List.sort_uniq compare (List.map constructor Faults.all) in
   Alcotest.(check int) "every fault" 13 (List.length ctors);
   let rows =
     List.filter
@@ -511,9 +489,9 @@ let test_complete () =
     (fun op ->
       List.iter
         (fun f ->
-          if not (List.mem f faults) then
-            Alcotest.failf "%s lists %a, which the test does not try"
-              (Law.name op) Fault.pp f)
+          if not (List.mem f Faults.all) then
+            Alcotest.failf "%a lists %a, which the test does not try" Law.pp op
+              Fault.pp f)
         (listed op `Inet @ listed op `Unix))
     intercepted
 
