@@ -1,7 +1,6 @@
 module Frame = Frame
 module Stream = Stream
 module Local = Local
-module Tcp = Tcp
 module Interface = Interface
 
 let classify_connect = function

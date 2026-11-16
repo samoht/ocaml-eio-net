@@ -124,7 +124,6 @@ let arbitrary_wire sixteen sizes bytes =
     | exception Framing.Error (Truncated _) ->
         if Eio.Buf_read.buffered_bytes r <> 0 then
           fail "truncation retained the incomplete frame"
-    | exception Framing.Error Aborted -> fail "read reported Aborted"
   in
   go 0
 
@@ -172,7 +171,7 @@ let failed_writer sixteen budget payload =
   | exception Failure _ -> ());
   (match Eio_net.Frame.send channel [ Cstruct.of_string "later" ] with
   | () -> fail "a failed stream resumed"
-  | exception Framing.Error Aborted -> ()
+  | exception Eio_net.Frame.Aborted -> ()
   | exception Framing.Error _ -> fail "a failed stream did not report Aborted");
   if Buffer.length flow.buffer <> budget then
     fail "bytes reached the flow after the failure"

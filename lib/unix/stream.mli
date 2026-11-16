@@ -11,8 +11,3 @@ val offload_single_write : Eio_unix.Fd.t -> Cstruct.t list -> int
     buffers. A failure is the {!Eio.Io} error {!Eio_unix.Err.v} makes of it, as
     Eio's own sockets raise it: a peer that has gone (EPIPE, ECONNRESET) is
     [Eio.Net.Connection_reset]. *)
-
-val offload_writer : _ Eio.Resource.t -> (Cstruct.t list -> int) option
-(** [offload_writer flow] is [Some write] when [flow] exposes an OS file
-    descriptor, where [write] is {!offload_single_write} on it, and [None]
-    otherwise. *)

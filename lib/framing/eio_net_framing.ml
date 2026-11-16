@@ -6,7 +6,6 @@ type part = Prefix | Payload
 type error =
   | Invalid_length of { length : int64; min_length : int; max_length : int }
   | Truncated of { part : part; expected : int; received : int }
-  | Aborted
 
 let equal_error a b =
   match (a, b) with
@@ -18,8 +17,7 @@ let equal_error a b =
       a.part = b.part
       && Int.equal a.expected b.expected
       && Int.equal a.received b.received
-  | Aborted, Aborted -> true
-  | (Invalid_length _ | Truncated _ | Aborted), _ -> false
+  | (Invalid_length _ | Truncated _), _ -> false
 
 let pp_error ppf = function
   | Invalid_length { length; min_length; max_length } ->
@@ -28,7 +26,6 @@ let pp_error ppf = function
       Fmt.pf ppf "truncated %s: received %d of %d bytes"
         (match part with Prefix -> "length prefix" | Payload -> "payload")
         received expected
-  | Aborted -> Fmt.string ppf "the framed stream has been aborted"
 
 exception Error of error
 

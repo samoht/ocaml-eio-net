@@ -280,8 +280,7 @@ let test_partial_write_cancelled () =
     (fun () -> send channel "first")
     (fun () -> Eio.Promise.await started);
   Alcotest.check_raises "cancelled partial write cannot resume"
-    (Eio_net_framing.Error Eio_net_framing.Aborted) (fun () ->
-      send channel "second");
+    Eio_net.Frame.Aborted (fun () -> send channel "second");
   Eio.Flow.shutdown writer `Send;
   let wire =
     Eio.Buf_read.take_all (Eio.Buf_read.of_flow ~max_size:128 reader)
@@ -388,8 +387,7 @@ let test_cancelled_read () =
   Eio.Fiber.first (fun () -> ignore (Eio_net.Frame.recv channel)) (fun () -> ());
   List.iter (Eio.Stream.add script.input) [ Some "cde"; None ];
   Alcotest.check_raises "a receive cancelled inside a payload aborts"
-    (Eio_net_framing.Error Aborted) (fun () ->
-      ignore (Eio_net.Frame.recv channel));
+    Eio_net.Frame.Aborted (fun () -> ignore (Eio_net.Frame.recv channel));
   let script, flow = Scripted_flow.v [] in
   let channel = Eio_net.Frame.of_length_prefixed_flow flow in
   Eio.Fiber.first (fun () -> ignore (Eio_net.Frame.recv channel)) (fun () -> ());

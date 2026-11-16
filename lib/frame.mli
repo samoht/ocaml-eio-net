@@ -34,6 +34,10 @@
 type t
 (** The type for frame channels. *)
 
+exception Aborted
+(** The exception for a read or a write that failed partway through a frame, so
+    the channel refuses further reads or writes in that direction. *)
+
 (** {1:channels Channels} *)
 
 val v :
@@ -94,14 +98,14 @@ val of_length_prefixed_flow :
     range of [framing] ([Invalid_length _]). After such an error, or any
     exception that interrupts a frame after part of it was consumed (a
     cancellation), every later receive raises [Eio_net_framing.Error] with that
-    error, or [Aborted] for another exception, rather than read the middle of a
+    error, or {!Aborted} for another exception, rather than read the middle of a
     frame as a prefix.
 
     {!send} and {!send_batch} write a batch with one [Eio.Flow.write]. They
     raise [Eio_net_framing.Error (Invalid_length _)] before writing anything if
     a payload's length is outside the range of [framing], and the channel stays
     usable. Once a write has raised, part of a frame may be on the wire, so
-    every later send raises [Eio_net_framing.Error Aborted]. *)
+    every later send raises {!Aborted}. *)
 
 val pair : unit -> t * t
 (** [pair ()] is two in-memory frame channels where a frame sent on one is

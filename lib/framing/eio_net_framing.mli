@@ -43,11 +43,6 @@ type error =
       expected : int;  (** The length of that part, in bytes. *)
       received : int;  (** The bytes of that part the input holds. *)
     }  (** Input that ends inside a frame. *)
-  | Aborted
-      (** A read or a write failed partway through a frame, so the stream
-          refuses further reads or writes in that direction. The functions of
-          this module never return or raise it; a stream such as
-          [Eio_net.Frame.of_length_prefixed_flow] does. *)
 
 val pp_error : error Fmt.t
 (** [pp_error] formats an error with the lengths it carries. *)

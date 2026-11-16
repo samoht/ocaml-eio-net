@@ -10,7 +10,6 @@
 module Frame = Frame
 module Stream = Stream
 module Local = Local
-module Tcp = Tcp
 module Interface = Interface
 
 val classify_connect : exn -> Eio_net_connect.answer option

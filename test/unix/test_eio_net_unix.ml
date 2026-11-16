@@ -710,25 +710,6 @@ let test_local_listen_long () =
     "another file kept" "another"
     (In_channel.with_open_bin p In_channel.input_all)
 
-(* A TCP address in use is the Eio.Io error EADDRINUSE, where Eio's POSIX
-   backend raises bind(2)'s Unix_error. *)
-let test_tcp_listen_in_use () =
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  Eio.Switch.run @@ fun sw ->
-  let ip = Eio.Net.Ipaddr.V4.loopback in
-  let first = Eio_net_unix.Tcp.listen ~sw ~backlog:4 net ip 0 in
-  let port =
-    match Eio.Net.listening_addr first with
-    | `Tcp (_, port) -> port
-    | a -> Alcotest.failf "bound to %a" Eio.Net.Sockaddr.pp a
-  in
-  match Eio_net_unix.Tcp.listen ~sw ~backlog:4 net ip port with
-  | _ -> Alcotest.failf "bound port %d twice" port
-  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
-    ->
-      ()
-
 (* The Unix accept classifier reads a peer that reset its connection before
    the accept, and a process or system out of descriptors, as failures that
    leave the listener whole. Linking eio-net.unix leaves the portable
@@ -940,8 +921,6 @@ let suite =
         test_local_listen_existing;
       Alcotest.test_case "a local listener at a long path, and released" `Quick
         test_local_listen_long;
-      Alcotest.test_case "a TCP listener on a port in use" `Quick
-        test_tcp_listen_in_use;
       Alcotest.test_case "the longest path an address holds" `Quick
         test_local_max_length;
       Alcotest.test_case "a local socket by a path of any length" `Quick

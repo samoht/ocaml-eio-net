@@ -35,6 +35,3 @@ let offload_single_write fd bufs =
     end
   in
   if Array.length iov = 0 then 0 else attempt ()
-
-let offload_writer flow =
-  Option.map offload_single_write (Eio_unix.Resource.fd_opt flow)

@@ -8,6 +8,14 @@ type t = {
   send_batch : Cstruct.t list list -> unit;
 }
 
+exception Aborted
+
+let () =
+  Printexc.register_printer (function
+    | Aborted ->
+        Some "Eio_net.Frame: a read or a write failed partway through a frame"
+    | _ -> None)
+
 let pp ppf _ = Fmt.string ppf "<frame channel>"
 
 (* A frame the transports of this module receive is a fresh string that
@@ -87,22 +95,22 @@ let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
   in
   let read_frame () =
     match !read_failure with
-    | Some error -> raise (Eio_net_framing.Error error)
+    | Some exn -> raise exn
     | None -> (
         let consumed = Eio.Buf_read.consumed_bytes reader in
         match Eio_net_framing.read framing reader with
         | payload -> payload
-        | exception (Eio_net_framing.Error error as exn) ->
-            read_failure := Some error;
+        | exception (Eio_net_framing.Error _ as exn) ->
+            read_failure := Some exn;
             raise exn
         | exception End_of_file -> raise End_of_file
         | exception exn ->
             if Eio.Buf_read.consumed_bytes reader <> consumed then
-              read_failure := Some Eio_net_framing.Aborted;
+              read_failure := Some Aborted;
             raise exn)
   in
   let write_batch payloads =
-    if !write_failed then raise (Eio_net_framing.Error Eio_net_framing.Aborted);
+    if !write_failed then raise Aborted;
     match Eio_net_framing.encode ~prefixes framing payloads with
     | Error error -> raise (Eio_net_framing.Error error)
     | Ok [] -> ()
