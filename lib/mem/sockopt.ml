@@ -10,8 +10,14 @@ open Address
    buffers size the queues: [resized] tells the socket's queues. *)
 module O = Eio.Net.Sockopt
 
-type family = V4 | V6 | Local
-type kind = Unconnected | Listener | Client | Server | Datagram
+type family = Validation.family = V4 | V6 | Local
+
+type kind = Validation.kind =
+  | Unconnected
+  | Listener
+  | Client
+  | Server
+  | Datagram
 
 type t = {
   os : os;
@@ -108,7 +114,7 @@ let bound t (ip : Eio.Net.Ipaddr.v4v6) =
   then t.v6only <- true
 
 let tcp t = t.family <> Local && t.kind <> Datagram
-let connected t = t.kind = Client || t.kind = Server
+let connected t = Validation.connected t.kind
 
 (* The send and receive buffers each kernel gives a socket. *)
 let default_sndbuf t =
@@ -140,17 +146,6 @@ let default_rcvbuf t =
 
 let sndbuf t = Option.value t.sndbuf ~default:(default_sndbuf t)
 let rcvbuf t = Option.value t.rcvbuf ~default:(default_rcvbuf t)
-
-(* macOS's maximum segment size before a connection, and that of each end
-   of one over loopback, whose MTU is 16384. *)
-let default_maxseg t =
-  match (t.family, t.kind) with
-  | V4, Client -> 16332
-  | V6, Client -> 16312
-  | V4, Server -> 4024
-  | V6, Server -> 4004
-  | V6, _ -> 1024
-  | _ -> 512
 
 (* Linux's maximum segment size of a connection over loopback, less the
    12 bytes of the timestamp option from a size the socket set. *)
@@ -218,49 +213,17 @@ let error op code = raise (Posix.sockopt_error op code)
 (* An option of Linux's that eio_posix does not find on macOS. *)
 let missing () = raise (Eio.Net.err Invalid_option)
 
-type level = Socket | Tcp | Ip | Ipv6 | Linux_tcp | Linux_ip
-
-let level : type a. a Eio.Net.Sockopt.t -> level = function
-  | O.TCP_NODELAY | O.TCP_KEEPIDLE | O.TCP_KEEPINTVL | O.TCP_KEEPCNT
-  | O.TCP_MAXSEG ->
-      Tcp
-  | O.TCP_CONGESTION | O.TCP_CORK | O.TCP_USER_TIMEOUT | O.TCP_LINGER2
-  | O.TCP_DEFER_ACCEPT | O.TCP_SYNCNT | O.TCP_WINDOW_CLAMP | O.TCP_QUICKACK
-  | O.TCP_FASTOPEN ->
-      Linux_tcp
-  | O.IP_TTL -> Ip
-  | O.IP_FREEBIND | O.IP_BIND_ADDRESS_NO_PORT | O.IP_LOCAL_PORT_RANGE | O.IP_MTU
-  | O.IP_MTU_DISCOVER ->
-      Linux_ip
-  | O.IPV6_ONLY -> Ipv6
-  | _ -> Socket
-
-(* The kernel's refusal of an option at a level the socket's family or
-   type lacks. On macOS an IP or TCP option on a Unix-domain socket is read
-   as the local option of the same number, which [get] answers. *)
-let gate op t level =
-  let fail code = error op code in
-  let set = op = `Set in
-  match (t.os, level, t.family) with
-  | _, Socket, _ -> ()
-  | Macos, (Linux_tcp | Linux_ip), _ -> missing ()
-  | Linux, _, Local -> fail `Not_supported
-  | Linux, (Tcp | Linux_tcp), V4 when t.kind = Datagram ->
-      fail (if set then `No_option else `Not_supported)
-  | Linux, (Tcp | Linux_tcp), V6 when t.kind = Datagram -> fail `No_option
-  | Linux, Ipv6, V4 -> fail (if set then `No_option else `Not_supported)
-  | Linux, _, _ -> ()
-  | Macos, Ipv6, Local -> fail `Not_supported
-  | Macos, _, Local -> if set then fail `Not_supported
-  | Macos, Tcp, _ when t.kind = Datagram -> fail `Invalid
-  | Macos, Ipv6, V4 | Macos, Ip, V6 -> fail `Invalid
-  | Macos, _, _ -> ()
+let view (t : t) : Validation.socket =
+  let maxseg =
+    Option.value t.maxseg ~default:(Validation.default_maxseg t.family t.kind)
+  in
+  { os = t.os; family = t.family; kind = t.kind; maxseg }
 
 (* What setsockopt(2) takes of a float: whole seconds and microseconds,
    cut as OCaml's Unix cuts them. Linux keeps whole milliseconds, rounded
-   up, and a negative time as none; macOS refuses it. *)
+   up, and a negative time as none. *)
 let timeout t f =
-  if f < 0. then if t.os = Linux then 0. else error `Set `Domain
+  if f < 0. then 0.
   else
     let sec = Float.to_int f in
     let usec = Float.to_int (1e6 *. (f -. Float.of_int sec)) in
@@ -305,73 +268,29 @@ let buffer t ~min:least n =
   | Linux ->
       let n = if n < 0 || n > 7500000 then 7500000 else n in
       max (2 * n) least
-  | Macos -> if n <= 0 then error `Set `Invalid else min n 8388608
+  | Macos -> min n 8388608
 
-(* Up to the first NUL and 15 bytes, as Linux reads the name. *)
-let congestion name =
-  let name =
-    match String.index_opt name '\000' with
-    | Some i -> String.sub name 0 i
-    | None -> name
-  in
-  if String.length name > 15 then String.sub name 0 15 else name
+(* The low-water mark of receives the kernel keeps: Linux takes a negative
+   one as the largest, and caps a TCP one at half the receive buffer;
+   macOS at the receive buffer. *)
+let rcvlowat t v =
+  match t.os with
+  | Linux ->
+      let v = if v < 0 then 0x7fffffff else v in
+      let v =
+        if not (tcp t) then v
+        else min v (match t.rcvbuf with Some b -> b / 2 | None -> 16777216)
+      in
+      if v = 0 then 1 else v
+  | Macos -> min v (rcvbuf t)
 
-let non_negative name v =
-  if v < 0 then Fmt.invalid_arg "%s must be non-negative, got %d" name v
-
-(* The checks Eio makes before it calls setsockopt(2). *)
-let check : type a. a Eio.Net.Sockopt.t -> a -> unit =
- fun opt v ->
-  match opt with
-  | O.TCP_KEEPIDLE -> non_negative "O.TCP_KEEPIDLE" v
-  | O.TCP_KEEPINTVL -> non_negative "O.TCP_KEEPINTVL" v
-  | O.TCP_KEEPCNT -> non_negative "O.TCP_KEEPCNT" v
-  | O.TCP_USER_TIMEOUT -> non_negative "O.TCP_USER_TIMEOUT" v
-  | O.TCP_MAXSEG -> non_negative "O.TCP_MAXSEG" v
-  | O.TCP_LINGER2 -> (
-      match v with
-      | Some n when n < 0 ->
-          Fmt.invalid_arg "O.TCP_LINGER2 must be non-negative, got %d" n
-      | _ -> ())
-  | O.TCP_DEFER_ACCEPT -> non_negative "O.TCP_DEFER_ACCEPT" v
-  | O.TCP_SYNCNT ->
-      if v < 1 || v > 255 then
-        Fmt.invalid_arg "O.TCP_SYNCNT must be between 1 and 255, got %d" v
-  | O.TCP_WINDOW_CLAMP -> non_negative "O.TCP_WINDOW_CLAMP" v
-  | O.TCP_FASTOPEN ->
-      if v < 0 then
-        Fmt.invalid_arg
-          "O.TCP_FASTOPEN queue length must be non-negative, got %d" v
-  | O.IP_LOCAL_PORT_RANGE ->
-      let lower, upper = v in
-      if lower < 0 || lower > 65535 then
-        Fmt.invalid_arg
-          "O.IP_LOCAL_PORT_RANGE lower bound must be 0-65535, got %d" lower;
-      if upper < 0 || upper > 65535 then
-        Fmt.invalid_arg
-          "O.IP_LOCAL_PORT_RANGE upper bound must be 0-65535, got %d" upper;
-      if lower <> 0 && upper <> 0 && lower > upper then
-        Fmt.invalid_arg
-          "O.IP_LOCAL_PORT_RANGE lower bound (%d) must be <= upper bound (%d)"
-          lower upper
-  | O.IP_TTL ->
-      if v < 1 || v > 255 then
-        Fmt.invalid_arg "O.IP_TTL must be between 1 and 255, got %d" v
-  | O.IP_MTU -> invalid_arg "O.IP_MTU is a read-only socket option"
-  | _ -> ()
-
-let set : type a. t -> a Eio.Net.Sockopt.t -> a -> unit =
+(* What the kernel keeps of a value it takes, and what setting it does: the
+   buffers resize the queues. *)
+let store : type a. t -> a O.t -> a -> unit =
  fun t opt v ->
-  let opt = Posix.canonical opt in
-  check opt v;
-  gate `Set t (level opt);
-  let invalid () = error `Set `Invalid in
   let linux = t.os = Linux in
   match opt with
-  | _ when Posix.extra opt <> None -> error `Set `No_option
-  | O.SO_DEBUG ->
-      (* Only CAP_NET_ADMIN turns it on, on Linux. *)
-      if linux && v then error `Set `Denied else t.debug <- v
+  | O.SO_DEBUG -> t.debug <- v
   | O.SO_BROADCAST -> t.broadcast <- v
   | O.SO_REUSEADDR -> t.reuseaddr <- v
   | O.SO_KEEPALIVE -> t.keepalive <- v
@@ -384,74 +303,42 @@ let set : type a. t -> a Eio.Net.Sockopt.t -> a -> unit =
   | O.SO_RCVBUF ->
       t.rcvbuf <- Some (buffer t ~min:2304 v);
       t.resized ()
-  | O.SO_RCVLOWAT -> (
-      match t.os with
-      | Linux ->
-          let v = if v < 0 then 0x7fffffff else v in
-          let v =
-            if not (tcp t) then v
-            else
-              min v (match t.rcvbuf with Some b -> b / 2 | None -> 16777216)
-          in
-          t.rcvlowat <- (if v = 0 then 1 else v)
-      | Macos -> if v < 1 then invalid () else t.rcvlowat <- min v (rcvbuf t))
-  | O.SO_SNDLOWAT ->
-      if linux then error `Set `No_option
-      else if v < 1 then invalid ()
-      else t.sndlowat <- Some (min v (sndbuf t))
-  | O.SO_LINGER -> (
-      match v with
-      | Some n when (not linux) && (n < 0 || n > 32767) -> error `Set `Domain
-      | v -> t.linger <- v)
+  | O.SO_RCVLOWAT -> t.rcvlowat <- rcvlowat t v
+  | O.SO_SNDLOWAT -> t.sndlowat <- Some (min v (sndbuf t))
+  | O.SO_LINGER -> t.linger <- v
   | O.SO_RCVTIMEO -> t.rcvtimeo <- timeout t v
   | O.SO_SNDTIMEO -> t.sndtimeo <- timeout t v
   | O.TCP_NODELAY -> t.nodelay <- v
-  | O.TCP_KEEPIDLE ->
-      if linux then
-        if v < 1 || v > 32767 then invalid () else t.keepidle <- Some v
-      else t.keepidle <- (if v = 0 then None else Some v)
-  | O.TCP_KEEPINTVL ->
-      if linux then
-        if v < 1 || v > 32767 then invalid () else t.keepintvl <- Some v
-      else t.keepintvl <- (if v = 0 then None else Some v)
-  | O.TCP_KEEPCNT ->
-      if linux then if v < 1 || v > 127 then invalid () else t.keepcnt <- Some v
-      else t.keepcnt <- (if v = 0 then None else Some v)
-  | O.TCP_MAXSEG -> (
-      match t.os with
-      | Linux ->
-          if v <> 0 && (v < 88 || v > 32767) then invalid ()
-          else t.user_mss <- v
-      | Macos ->
-          let current = Option.value t.maxseg ~default:(default_maxseg t) in
-          if v <= 0 || v > current || v + 40 < 216 then invalid ()
-          else t.maxseg <- Some v)
-  | O.TCP_CONGESTION -> (
-      match congestion v with
-      | "" -> invalid ()
-      | ("reno" | "cubic") as name -> t.congestion <- name
-      | _ -> error `Set `Unknown)
+  | O.TCP_KEEPIDLE -> t.keepidle <- (if linux || v <> 0 then Some v else None)
+  | O.TCP_KEEPINTVL -> t.keepintvl <- (if linux || v <> 0 then Some v else None)
+  | O.TCP_KEEPCNT -> t.keepcnt <- (if linux || v <> 0 then Some v else None)
+  | O.TCP_MAXSEG -> if linux then t.user_mss <- v else t.maxseg <- Some v
+  | O.TCP_CONGESTION -> t.congestion <- Validation.congestion v
   | O.TCP_CORK -> t.cork <- v
   | O.TCP_USER_TIMEOUT -> t.user_timeout <- v
   | O.TCP_LINGER2 ->
       t.linger2 <- (match v with None -> 0 | Some n -> min n 120)
   | O.TCP_DEFER_ACCEPT -> t.defer_accept <- secs_to_retrans v
-  | O.TCP_SYNCNT -> if v > 127 then invalid () else t.syncnt <- v
+  | O.TCP_SYNCNT -> t.syncnt <- v
   | O.TCP_WINDOW_CLAMP ->
-      if v = 0 then
-        if t.kind = Unconnected then t.window_clamp <- Some 0 else invalid ()
-      else t.window_clamp <- Some (max v 1152)
+      t.window_clamp <- Some (if v = 0 then 0 else max v 1152)
   | O.TCP_QUICKACK -> t.quickack <- v
   | O.TCP_FASTOPEN ->
       (* The queue is at most [net.core.somaxconn] long. *)
-      if connected t then invalid () else t.fastopen <- min v 4096
+      t.fastopen <- min v 4096
   | O.IP_FREEBIND -> t.freebind <- v
   | O.IP_BIND_ADDRESS_NO_PORT -> t.bind_no_port <- v
   | O.IP_LOCAL_PORT_RANGE -> t.port_range <- v
   | O.IP_TTL -> t.ttl <- v
   | O.IP_MTU_DISCOVER -> t.mtu_discover <- v
-  | O.IPV6_ONLY -> if t.kind = Unconnected then t.v6only <- v else invalid ()
-  | _ -> missing ()
+  | O.IPV6_ONLY -> t.v6only <- v
+  | _ -> ()
+
+let set t opt v =
+  let opt = Posix.canonical opt in
+  match Validation.set (view t) opt v with
+  | Error r -> raise (Validation.exn `Set r)
+  | Ok () -> store t opt v
 
 (* macOS's answer to an IP or TCP option on a Unix-domain socket: the local
    option of the same number, LOCAL_PEERCRED for [TCP_NODELAY] and
@@ -483,18 +370,23 @@ let maxseg t =
   match (t.os, t.maxseg) with
   | Linux, Some n when connected t -> n
   | Linux, _ -> if t.user_mss > 0 then t.user_mss else 536
-  | Macos, maxseg -> Option.value maxseg ~default:(default_maxseg t)
+  | Macos, maxseg ->
+      Option.value maxseg ~default:(Validation.default_maxseg t.family t.kind)
 
 let get : type a. t -> a Eio.Net.Sockopt.t -> a =
  fun t opt ->
   let opt = Posix.canonical opt in
-  gate `Get t (level opt);
+  Result.iter_error
+    (fun r -> raise (Validation.exn `Get r))
+    (Validation.get (view t) opt);
   let linux = t.os = Linux in
   match (Posix.extra opt, opt) with
   | Some Acceptconn, _ -> if linux then t.kind = Listener else missing ()
   | Some Error, _ -> 0
   | Some Type, _ -> if t.kind = Datagram then 2 else 1
-  | None, _ when t.os = Macos && t.family = Local && level opt <> Socket ->
+  | None, _
+    when t.os = Macos && t.family = Local && not (Validation.socket_level opt)
+    ->
       local_macos t opt
   | None, opt -> (
       match opt with

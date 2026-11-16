@@ -1,0 +1,12 @@
+; The validation of socket options, on copies of eio-net.mem's private
+; modules, against the kernel's traces.
+
+(copy_files#
+ (files ../../../../lib/mem/{kernel,posix,validation}.{ml,mli}))
+
+(test
+ (name test)
+ (package eio-net)
+ (libraries hermetic eio eio.unix unix fmt alcotest)
+ (deps
+  (file ../traces/scenarios.csv)))

@@ -73,3 +73,10 @@ exclude = ["E956"]
 [[rules]]
 files = ["test/provenance/*"]
 exclude = ["E610"]
+
+# The validation test compiles copies of eio-net.mem's private modules, to
+# check that pure function alone against the kernel's traces: it links no
+# library of its own.
+[[rules]]
+files = ["test/interop/kernel/validation/*"]
+exclude = ["E606"]
