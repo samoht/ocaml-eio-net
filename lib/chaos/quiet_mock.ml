@@ -16,9 +16,12 @@ open! Hermetic
      while a program runs, and a run stops after [max_turns] turns;
    - [charge] takes a turn for a call that does not suspend, as a network
      operation does, so a loop of them moves the clock and meets the limits;
-   - [Eio_unix.run_in_systhread] runs its function at once, in the
-     scheduler, so a run stays deterministic; the fiber resumes on its next
-     turn, as it would once the systhread is done.
+   - the scheduler stops once [stop ()] holds, and when every fiber waits,
+     [idle ()] may wake one before the clock moves;
+   - an effect [effects] answers, as [Eio_unix.run_in_systhread], runs at
+     once, in the scheduler, so a run stays deterministic; the fiber resumes
+     on its next turn, as it would once the systhread is done;
+   - a deadlock names the fibers that wait.
 
    A loop run by the library reopens commit 495b8c2, which removed one along
    with the eio.mock dependency: hang detection and deterministic virtual time
@@ -46,8 +49,9 @@ module Suspended = Eio_utils.Suspended
 
 exception Deadlock_detected of Trace.id list
 exception Time_limit
-exception Busy_loop
-exception Too_many_turns
+exception Busy
+exception Too_long
+exception Stopped
 
 (* {1 Clock} *)
 
@@ -137,7 +141,11 @@ type t = {
   mutable turns : int;
   mutable waited : bool;
   waiting : (Trace.id, unit) Hashtbl.t;
+  idle : unit -> bool;
+  stop : unit -> bool;
 }
+
+type handler = { handle : 'a. 'a Effect.t -> (unit -> 'a) option }
 
 (* What a turn costs: a few microseconds of work between two suspensions, as
    a program does on eio_posix. *)
@@ -159,6 +167,7 @@ let charge t () =
 
 let rec schedule t : exit =
   match Lf_queue.pop t.run_q with
+  | _ when t.stop () -> `Exit_scheduler
   | Some f ->
       t.turns <- t.turns + 1;
       let now = Option.get (Mtime.add_span t.clock.now turn) in
@@ -171,6 +180,7 @@ let rec schedule t : exit =
         Mono.Impl.set_time t.clock now;
         f ()
       end
+  | None when t.idle () -> schedule t
   | None -> (
       match Mono.Impl.try_advance t.clock ~limit:t.limit with
       | `Advanced waited ->
@@ -181,7 +191,10 @@ let rec schedule t : exit =
           t.past_limit <- true;
           `Exit_scheduler)
 
-let run ~limit main =
+let no_effects = { handle = (fun _ -> None) }
+
+let run ?(idle = fun () -> false) ?(stop = fun () -> false)
+    ?(effects = no_effects) ~limit main =
   let clock = { Mono.Impl.now = Mtime.of_uint64_ns 0L; q = Mono.Q.empty } in
   let wall : float Eio.Time.clock_ty Eio.Resource.t =
     Eio.Resource.T (clock, wall_handler)
@@ -198,6 +211,8 @@ let run ~limit main =
       turns = 0;
       waited = false;
       waiting = Hashtbl.create 16;
+      idle;
+      stop;
     }
   in
   let rec fork ~new_fiber:fiber fn =
@@ -250,7 +265,7 @@ let run ~limit main =
                     let k = { Suspended.k; fiber } in
                     Lf_queue.push t.run_q (fun () -> Suspended.continue k v);
                     schedule t)
-                  (Posix.systhread e));
+                  (effects.handle e));
       }
   in
   let new_fiber = Fiber_context.make_root () in
@@ -263,8 +278,9 @@ let run ~limit main =
   match !result with
   | Some x -> x
   | None ->
-      if t.turns > max_turns then
-        raise (if t.waited then Too_many_turns else Busy_loop)
+      if t.stop () then raise Stopped
+      else if t.turns > max_turns then
+        raise (if t.waited then Too_long else Busy)
       else if t.past_limit then raise Time_limit
       else
         raise

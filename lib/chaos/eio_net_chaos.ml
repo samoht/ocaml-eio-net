@@ -78,7 +78,8 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
   let root = ref None and waiting = ref None in
   let failed =
     match
-      Quiet_mock.run ~limit:3600. @@ fun clock mono_clock charge ->
+      Quiet_mock.run ~effects:{ handle = Posix.systhread } ~limit:3600.
+      @@ fun clock mono_clock charge ->
       root :=
         Some
           (Eio.Private.Fiber_context.tid
@@ -110,12 +111,12 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
         Some "the run hangs: every fiber waits and no timer is due"
     | exception Quiet_mock.Time_limit ->
         Some "the run hangs: it is still running after an hour of its clock"
-    | exception Quiet_mock.Busy_loop ->
+    | exception Quiet_mock.Busy ->
         stopped := true;
         Some
           "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
            loop"
-    | exception Quiet_mock.Too_many_turns ->
+    | exception Quiet_mock.Too_long ->
         stopped := true;
         Some
           ("the run took 10,000,000 turns, more than a check can repeat: "
