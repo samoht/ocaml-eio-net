@@ -1645,12 +1645,12 @@ let pair ?os ?capacity () =
   in
   (client, server)
 
-let network ?os ~capacity ~bounded ?clock ~sw () =
+let network ?os ~capacity ~bounded ?mono ~sw () =
   let os = Kernel.of_arg os in
   let files = Files.v () in
-  let now = Option.map (fun clock () -> Eio.Time.Mono.now clock) clock in
-  let sleep = Option.map (fun clock d -> Eio.Time.Mono.sleep clock d) clock in
-  let timer = Option.map Pipe.timer clock in
+  let now = Option.map (fun mono () -> Eio.Time.Mono.now mono) mono in
+  let sleep = Option.map (fun mono d -> Eio.Time.Mono.sleep mono d) mono in
+  let timer = Option.map Pipe.timer mono in
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;
@@ -1673,14 +1673,14 @@ let network ?os ~capacity ~bounded ?clock ~sw () =
     ( Network.{ sw; os; hub; datagrams; capacity; bounded; sleep; timer },
       handler )
 
-let v ?os ?capacity ?clock ~sw () =
+let v ?os ?capacity ?mono ~sw () =
   network ?os
     ~capacity:(capacity_rule "v" capacity)
-    ~bounded:(Option.is_some capacity) ?clock ~sw ()
+    ~bounded:(Option.is_some capacity) ?mono ~sw ()
 
 module Private = struct
-  let v ?os ~capacity ?clock ~sw () =
-    network ?os ~capacity ~bounded:true ?clock ~sw ()
+  let v ?os ~capacity ?mono ~sw () =
+    network ?os ~capacity ~bounded:true ?mono ~sw ()
 
   let silence = Flow.silence
   let connection_id = Flow.connection

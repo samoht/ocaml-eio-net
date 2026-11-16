@@ -450,7 +450,7 @@ let replay_scenario ~os name =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let clock = env#mono_clock in
-  let net = Eio_net_mem.v ~os ~clock ~sw () in
+  let net = Eio_net_mem.v ~os ~mono:clock ~sw () in
   if Kernel_seq.timed name || Kernel_seq.narrow_ports name then
     Kernel_seq.scenario ~wait:(Eio.Time.Mono.sleep clock) net name
   else

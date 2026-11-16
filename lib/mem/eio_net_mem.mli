@@ -170,11 +170,11 @@ type Eio.Exn.Backend.t +=
 val v :
   ?os:[< `Linux | `Macos ] ->
   ?capacity:int ->
-  ?clock:_ Eio.Time.Mono.t ->
+  ?mono:_ Eio.Time.Mono.t ->
   sw:Eio.Switch.t ->
   unit ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~os ~capacity ~clock ~sw ()] is a network following the kernel [os]
+(** [v ~os ~capacity ~mono ~sw ()] is a network following the kernel [os]
     (defaults to [`Linux]) whose [listen] and [connect] operations are paired in
     memory, and whose datagram sockets deliver to each other.
     {!section-streams}, {!section-datagrams} and {!section-paths} say how its
@@ -193,12 +193,12 @@ val v :
     TCP and over a Unix path, above the default too, and it bounds what a
     socket's send and receive buffers give ({!section-options}).
 
-    On [clock], the end of a TCP connection whose FIN went first holds its
+    On [mono], the end of a TCP connection whose FIN went first holds its
     address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
     or 30 seconds under [`Macos]. Without a clock there is no TIME_WAIT: an
     address is free once both ends close.
 
-    On [clock], each end of a TCP connection gone silent ({!Private.silence})
+    On [mono], each end of a TCP connection gone silent ({!Private.silence})
     gives up on its peer as Linux does, measured over loopback. With
     [SO_KEEPALIVE] and no byte unacknowledged, it probes once [TCP_KEEPIDLE] has
     passed since the last segment it received. Its probes go [TCP_KEEPINTVL]
@@ -570,7 +570,7 @@ val pair :
 
     - Addresses. The loopback interface has 127.0.0.1 and [::1] only: a bind at
       another address of 127.0.0.0/8 raises [EADDRNOTAVAIL], a connect there is
-      never answered and fails after 75 seconds on [clock], with the [ETIMEDOUT]
+      never answered and fails after 75 seconds on [mono], with the [ETIMEDOUT]
       error eio_posix raises (it waits for ever without one), and a datagram
       sent there is lost. A TCP socket binds no multicast or broadcast address,
       and a [connect] reaches none: it raises {!Address_family}; a link-local
@@ -635,7 +635,7 @@ module Private : sig
   val v :
     ?os:[< `Linux | `Macos ] ->
     capacity:(int -> int) ->
-    ?clock:_ Eio.Time.Mono.t ->
+    ?mono:_ Eio.Time.Mono.t ->
     sw:Eio.Switch.t ->
     unit ->
     [ `Generic ] Eio.Net.ty Eio.Resource.t

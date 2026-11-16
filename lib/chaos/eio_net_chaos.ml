@@ -89,7 +89,7 @@ let world ~os ~faults ~wrapped (s : Plan.scenario) clock mono_clock charge ~sw =
     | Some Tiny_buffers -> Int.min Plan.tiny_buffer
     | _ -> Fun.id
   in
-  let base = Eio_net_mem.Private.v ~os ~capacity ~clock:mono_clock ~sw () in
+  let base = Eio_net_mem.Private.v ~os ~capacity ~mono:mono_clock ~sw () in
   let net =
     Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
       ~outage:(s.lasting = Some Outage) faults base

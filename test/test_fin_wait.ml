@@ -18,7 +18,7 @@ let test_linger2 () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.Mono.make () in
-  let net = Eio_net_mem.v ~clock ~sw () in
+  let net = Eio_net_mem.v ~mono:clock ~sw () in
   let addr = `Tcp (lo, 8190) in
   let listener = Eio.Net.listen ~sw ~backlog:1 net addr in
   let _client = Eio.Net.connect ~sw net addr in
