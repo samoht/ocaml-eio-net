@@ -37,6 +37,19 @@ let last_received lengths =
   in
   received 1
 
+(* [receive_rest ~failed fd buffers lengths] fills the datagrams of a batch
+   after its first, and is the index of the last one filled. A failure after
+   the first is kept in [failed] for the next receive. *)
+let receive_rest ~failed fd buffers lengths =
+  match
+    use fd (fun fd ->
+        recv_batch_raw fd buffers lengths 1 (Array.length buffers))
+  with
+  | extra -> extra
+  | exception Unix.Unix_error (e, fn, arg) ->
+      failed := Some (Eio_unix.Err.v e fn arg);
+      last_received lengths
+
 let receiver ~max_length ~max_batch socket fd =
   let check = check_length ~max_length in
   (* One byte of headroom tells a datagram longer than [max_length] from one
@@ -56,33 +69,30 @@ let receiver ~max_length ~max_batch socket fd =
         raise e)
       !failed
   in
-  let recv () =
+  let receive () =
     raise_failed ();
     let _source, len = Eio.Net.recv socket recv_buf in
     check len;
-    Cstruct.to_string ~len recv_buf
+    len
+  in
+  let recv () = Cstruct.to_string ~len:(receive ()) recv_buf in
+  (* The bytes are fresh, so the slice views them without a second copy. *)
+  let recv_slice () =
+    Bytesrw.Bytes.Slice.of_bytes_or_eod
+      (Cstruct.to_bytes ~len:(receive ()) recv_buf)
   in
   let recv_batch () =
     raise_failed ();
     let _source, first_len = Eio.Net.recv socket recv_buffers.(0) in
     recv_lengths.(0) <- first_len;
-    let extra =
-      match
-        use fd (fun fd ->
-            recv_batch_raw fd recv_buffers recv_lengths 1 max_batch)
-      with
-      | extra -> extra
-      | exception Unix.Unix_error (e, fn, arg) ->
-          failed := Some (Eio_unix.Err.v e fn arg);
-          last_received recv_lengths
-    in
+    let extra = receive_rest ~failed fd recv_buffers recv_lengths in
     for i = 0 to extra do
       check recv_lengths.(i)
     done;
     List.init (extra + 1) (fun i ->
         Cstruct.to_string ~len:recv_lengths.(i) recv_buffers.(i))
   in
-  (recv, recv_batch)
+  (recv, recv_slice, recv_batch)
 
 (* In microseconds. *)
 let min_backoff = 50
@@ -146,16 +156,19 @@ let of_connected_datagram_fd ?(max_length = 65536) ?(max_batch = 32) ~sw fd =
   let fd = Eio_unix.Resource.fd socket in
   (* Receiving and sending have their own buffers: a frame waiting to go out
      is not overwritten by one coming in. *)
-  let recv, recv_batch = receiver ~max_length ~max_batch socket fd in
+  let recv, recv_slice, recv_batch =
+    receiver ~max_length ~max_batch socket fd
+  in
   let send_batch = sender ~max_length ~max_batch fd in
   (* Receives share their buffers, and so do sends, which wait for the socket
      with a batch half sent: each direction runs one call at a time. *)
   let recv_lock = Eio.Mutex.create () and send_lock = Eio.Mutex.create () in
   let recv () = Eio.Mutex.use_ro recv_lock recv in
+  let recv_slice () = Eio.Mutex.use_ro recv_lock recv_slice in
   let recv_batch () = Eio.Mutex.use_ro recv_lock recv_batch in
   let send_batch frames =
     Eio.Mutex.use_ro send_lock (fun () -> send_batch frames)
   in
-  Eio_net.Frame.v ~recv_batch ~send_batch ~recv
+  Eio_net.Frame.v ~recv_batch ~recv_slice ~send_batch ~recv
     ~send:(fun frame -> send_batch [ frame ])
     ()

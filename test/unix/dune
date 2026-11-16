@@ -3,6 +3,7 @@
  (package eio-net)
  (libraries
   eio-net
+  bytesrw
   eio-net.unix
   eio-net.accept
   eio-net.connect

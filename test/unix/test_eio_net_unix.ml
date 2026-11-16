@@ -279,10 +279,18 @@ let test_connected_datagram_oversized () =
   Alcotest.(check bool)
     "recv_batch refuses it" true
     (refused (fun () -> Eio_net.Frame.recv_batch b));
+  Eio_net.Frame.send a [ Cstruct.of_string "123456789" ];
+  Alcotest.(check bool)
+    "recv_slice refuses it" true
+    (refused (fun () -> Eio_net.Frame.recv_slice b));
   Eio_net.Frame.send a [ Cstruct.of_string "12345678" ];
   Alcotest.(check (list string))
     "the channel stays usable" [ "12345678" ]
     (Eio_net.Frame.recv_batch b);
+  Eio_net.Frame.send a [ Cstruct.of_string "1234" ];
+  Alcotest.(check string)
+    "a slice of the next frame" "1234"
+    (Bytesrw.Bytes.Slice.to_string (Eio_net.Frame.recv_slice b));
   Unix.close fa;
   Unix.close fb
 

@@ -8,6 +8,7 @@
   eio
   eio.unix
   cstruct
+  bytesrw
   fpath
   ipaddr
   fmt
