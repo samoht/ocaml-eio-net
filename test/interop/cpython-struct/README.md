@@ -13,7 +13,12 @@ REGEN=1 dune build @test/interop/cpython-struct/regen-traces
 ```
 
 The generator creates a build-local venv, uses only the standard library, and
-refuses another interpreter/version. `traces/oracle.json` records the oracle.
+refuses another interpreter/version, 3.15.2 included. `traces/oracle.json`
+records the oracle. [`traces/provenance`](traces/provenance) records the
+revision, date, user, host and interpreter build, and the MD5 of each trace
+and of `generate.sh` and `generate.py`; regenerating rewrites it.
+[`test/provenance`](../../provenance) fails when one of those files differs
+from it. The current vectors predate it, so most of its values are unknown.
 Vectors cover empty frames, field boundaries, uint16 overflow and uint32 values
 whose sign bit is set. Oversized declarations must be refused before payload
 bytes are requested. This checks the length representation, independently of

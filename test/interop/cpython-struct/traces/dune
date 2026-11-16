@@ -3,11 +3,22 @@
  (mode promote)
  (enabled_if
   (= %{env:REGEN=0} 1))
- (targets vectors.csv oracle.json)
+ (targets vectors.csv oracle.json provenance)
  (deps
-  (source_tree ../scripts))
+  (source_tree ../scripts)
+  ../../../provenance/write.sh)
  (action
   (setenv
    VENV_DIR
    .venv
-   (run bash ../scripts/generate.sh .))))
+   (progn
+    (run bash ../scripts/generate.sh .)
+    (run
+     bash
+     ../../../provenance/write.sh
+     test/interop/cpython-struct
+     scripts/probe.sh
+     scripts/generate.sh
+     scripts/generate.py
+     --
+     %{targets})))))

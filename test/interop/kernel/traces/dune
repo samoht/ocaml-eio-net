@@ -10,9 +10,21 @@
   udp4.csv
   udp6.csv
   unix-dgram.csv
-  scenarios.csv)
+  scenarios.csv
+  provenance)
  (deps
   ../scripts/record.exe
-  (source_tree ../scripts))
+  (source_tree ../scripts)
+  ../../../provenance/write.sh)
  (action
-  (run bash ../scripts/generate.sh . ../scripts/record.exe)))
+  (progn
+   (run bash ../scripts/generate.sh . ../scripts/record.exe)
+   (run
+    bash
+    ../../../provenance/write.sh
+    test/interop/kernel
+    scripts/probe.sh
+    scripts/generate.sh
+    scripts/record.ml
+    --
+    %{targets}))))

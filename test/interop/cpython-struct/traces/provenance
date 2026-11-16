@@ -1,0 +1,20 @@
+# Where the traces beside this file come from. write.sh rewrites it on
+# REGEN=1; test/provenance checks it.
+#
+# These traces predate write.sh: nothing was recorded with them, and the
+# values below are what git and generate.py establish. git log --follow:
+# vectors.csv, oracle.json, generate.sh and generate.py were committed
+# together in c057acc (2026-10-28) and never changed. The input and trace
+# lines pin the files as they stood at e062124, so that a change to any of
+# them from now on asks for a regeneration.
+generator: test/interop/cpython-struct/scripts/generate.sh
+regenerate: REGEN=1 dune build @test/interop/cpython-struct/regen-traces
+revision: unknown
+recorded: unknown, committed on 2026-10-28
+uid: unknown
+host: unknown
+python: CPython 3.15.0, the only interpreter generate.py accepts; build unknown
+input: scripts/generate.sh 8005cc54067546e22a51d85723e612fc
+input: scripts/generate.py 61d512560671761a3db788877c849de0
+trace: traces/vectors.csv 72e0971cd0110a92a4b408d5583917d9
+trace: traces/oracle.json 85579c80f711646bd75af9e00c66b202

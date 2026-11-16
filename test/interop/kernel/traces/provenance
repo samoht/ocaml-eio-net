@@ -1,0 +1,31 @@
+# Where the traces beside this file come from. write.sh rewrites it on
+# REGEN=1; test/provenance checks it.
+#
+# These traces predate write.sh: nothing was recorded with them, and the
+# values below are what git and the traces themselves establish. git log
+# --follow: the six transport traces were committed once, in c5258bf
+# (2026-11-10), and never changed; scenarios.csv was first committed in
+# d9b7e99 (2026-11-10) and last changed in 69edf40 (2026-11-13), which added
+# one row. generate.sh and record.ml last changed in 33f2f8a (2026-11-12). The
+# input and trace lines pin the files as they stood at e062124, so that a
+# change to any of them from now on asks for a re-recording.
+generator: test/interop/kernel/scripts/generate.sh
+regenerate: REGEN=1 dune build @test/interop/kernel/regen-traces
+revision: unknown
+recorded: unknown, committed between 2026-11-10 and 2026-11-13
+uid: unknown
+host: unknown, a Mac with Docker, as generate.sh requires
+macos: unknown
+linux: unknown, the kernel of Docker's VM on that Mac
+linux.image: ocaml/opam@sha256:d161f099e5d053fe198accc09fda214c6275289570847fd906f9c65f862bf460, pinned in generate.sh since c5258bf
+linux.net.ipv4.tcp_syn_retries: 6, as TCP_SYNCNT reads on a new TCP socket in scenarios.csv
+linux.net.ipv4.ip_local_port_range: unknown, but 40000 40019 for the scenarios that run out of ports, as generate.sh sets it
+input: scripts/generate.sh 805175af5eb2c4f3840422c6f1e1e325
+input: scripts/record.ml ba456018f858abb4adc9324fa348faee
+trace: traces/tcp4.csv cf1b90ab7fcc549574eb1b9f416e8b75
+trace: traces/tcp6.csv 68b6d1ae30ab775e753bb3faf28a6704
+trace: traces/unix-stream.csv b945a0499c47c4f822966267f28b994a
+trace: traces/udp4.csv c371c7734e468c55f758553d11587647
+trace: traces/udp6.csv 2cc49f0840916f44043075b97d20899d
+trace: traces/unix-dgram.csv d6fa730a3f2bcbc4041bc7129139e3f6
+trace: traces/scenarios.csv eb190c1de47e0f645da999e761cd05d6

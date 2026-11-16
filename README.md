@@ -224,7 +224,11 @@ kernel at a time: Linux by default, macOS with `` ~os:`Macos ``. Kernel traces
 recorded on both systems check it. A pass says the program works under that
 kernel's rules on such a host, so run a check under each `?os` you ship on.
 `Eio_net_chaos.wrap` also follows the `?os` it is given, not the host's: over a
-real network, pass the host's kernel.
+real network, pass the host's kernel. Where each oracle comes from, and how to
+regenerate it, is in the READMEs of the
+[kernel traces](test/interop/kernel/README.md), the
+[CPython vectors](test/interop/cpython-struct/README.md) and the
+[socket cases](test/oracle/README.md).
 
 ### What a check can miss
 
