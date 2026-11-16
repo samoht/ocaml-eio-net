@@ -172,6 +172,22 @@ let test_too_long_prints () =
        (Eio.Exn.create
           (Eio.Exn.X (Eio_net.Datagram.Too_long { max_length = 8 }))))
 
+(* A channel prints its bound and its default destination. *)
+let test_pp () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let socket = Eio.Net.datagram_socket ~sw net `UdpV4 in
+  let pp = Fmt.to_to_string Eio_net.Datagram.pp in
+  let dst = `Udp (Eio.Net.Ipaddr.V4.loopback, 53) in
+  Alcotest.(check string)
+    "a bound and a destination"
+    "<datagram channel, max_length 512, dst udp:127.0.0.1:53>"
+    (pp (Eio_net.Datagram.of_socket ~max_length:512 ~dst socket));
+  Alcotest.(check string)
+    "the default bound" "<datagram channel, max_length 65536>"
+    (pp (Eio_net.Datagram.of_socket socket))
+
 let suite =
   ( "datagram",
     [
@@ -185,4 +201,6 @@ let suite =
         test_frame_carrier_refuses_oversize;
       Alcotest.test_case "concurrent receives" `Quick test_concurrent_receives;
       Alcotest.test_case "Too_long prints its bound" `Quick test_too_long_prints;
+      Alcotest.test_case "a channel prints its bound and destination" `Quick
+        test_pp;
     ] )
