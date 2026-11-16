@@ -419,7 +419,7 @@ let lease ?(bug = `None) env =
         incr seq;
         let s = !seq in
         Eio.Net.send sock ~dst:server_addr
-          [ Cstruct.of_string (Fmt.str "ACQ %s %d" id s) ];
+          [ Fmt.kstr Cstruct.of_string "ACQ %s %d" id s ];
         let r =
           match Eio.Time.with_timeout_exn clock 0.2 (fun () -> await s) with
           | r -> r

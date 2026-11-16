@@ -176,11 +176,10 @@ let wrong ~os cls sample =
         and with_ = trace ~os (base @ [ sample ]) in
         match cls with
         | Stored_only _ when without <> with_ ->
-            Some
-              (Fmt.str "@[<v>changes what a socket does:@,%a@]" pp_diff
-                 (without, with_))
+            Fmt.kstr Option.some "@[<v>changes what a socket does:@,%a@]"
+              pp_diff (without, with_)
         | (Modelled | Approximated _) when without = with_ ->
-            Some (Fmt.str "@[<v>changes nothing:@,%a@]" pp_trace without)
+            Fmt.kstr Option.some "@[<v>changes nothing:@,%a@]" pp_trace without
         | _ -> None)
 
 let test_options () =
