@@ -86,3 +86,10 @@ exclude = ["E606"]
 [[rules]]
 files = ["test/law/*"]
 exclude = ["E606"]
+
+# Scope's behaviours and options are tables of records, written through
+# feature and both so that a row shared by both kernels is written once: they
+# hold no logic, but the rule exempts a table only as bare literals.
+[[rules]]
+files = ["lib/mem/scope.ml"]
+exclude = ["E005"]
