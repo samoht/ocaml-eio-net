@@ -240,7 +240,7 @@ let timeout t f =
 
 (* Linux's [TCP_DEFER_ACCEPT] is a number of SYN-ACK retransmissions, the
    first after a second, each after twice as long, at most 120 seconds. *)
-let secs_to_retrans secs =
+let retrans_of_secs secs =
   if secs <= 0 then 0
   else
     let rec go res timeout period =
@@ -251,7 +251,7 @@ let secs_to_retrans secs =
     in
     go 1 1 1
 
-let retrans_to_secs n =
+let secs_of_retrans n =
   if n <= 0 then 0
   else
     let rec go n timeout period =
@@ -320,7 +320,7 @@ let store : type a. t -> a O.t -> a -> unit =
   | O.TCP_USER_TIMEOUT -> t.user_timeout <- v
   | O.TCP_LINGER2 ->
       t.linger2 <- (match v with None -> 0 | Some n -> min n 120)
-  | O.TCP_DEFER_ACCEPT -> t.defer_accept <- secs_to_retrans v
+  | O.TCP_DEFER_ACCEPT -> t.defer_accept <- retrans_of_secs v
   | O.TCP_SYNCNT -> t.syncnt <- v
   | O.TCP_WINDOW_CLAMP ->
       t.window_clamp <- Some (if v = 0 then 0 else max v 1152)
@@ -417,7 +417,7 @@ let get : type a. t -> a Eio.Net.Sockopt.t -> a =
       | O.TCP_CORK -> t.cork
       | O.TCP_USER_TIMEOUT -> t.user_timeout
       | O.TCP_LINGER2 -> Some (if t.linger2 = 0 then 60 else t.linger2)
-      | O.TCP_DEFER_ACCEPT -> retrans_to_secs t.defer_accept
+      | O.TCP_DEFER_ACCEPT -> secs_of_retrans t.defer_accept
       | O.TCP_SYNCNT -> t.syncnt
       | O.TCP_WINDOW_CLAMP -> (
           match t.window_clamp with
