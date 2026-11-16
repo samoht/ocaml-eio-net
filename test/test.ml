@@ -2,6 +2,7 @@ let () =
   Alcotest.run "eio-net"
     [
       Test_eio_net_mem.suite;
+      Test_fin_wait.suite;
       Test_frame.suite;
       Test_datagram.suite;
       Test_eio_net_chaos.suite;
