@@ -74,6 +74,16 @@ module Config = struct
     && Int.equal a.min_length b.min_length
     && Int.equal a.max_length b.max_length
 
+  let rank = function Uint16_be -> 0 | Uint32_be -> 1
+
+  let compare a b =
+    match Int.compare (rank a.length_field) (rank b.length_field) with
+    | 0 -> (
+        match Int.compare a.min_length b.min_length with
+        | 0 -> Int.compare a.max_length b.max_length
+        | c -> c)
+    | c -> c
+
   let pp ppf t =
     Fmt.pf ppf "%s length:%d-%d"
       (match t.length_field with

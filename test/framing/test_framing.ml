@@ -297,6 +297,11 @@ let test_config () =
     "equal" true
     (Framing.Config.equal config
        (Framing.Config.v ~length_field:Uint32_be ~max_length:1_048_576 ()));
+  let order a b = Int.compare (Framing.Config.compare a b) 0 in
+  let short = Framing.Config.v ~max_length:8 () in
+  Alcotest.(check (list int))
+    "compare agrees with equal and orders by range" [ 0; -1; 1 ]
+    [ order config config; order short config; order config short ];
   List.iter
     (fun (name, f) ->
       Alcotest.(check bool)

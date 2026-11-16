@@ -8,9 +8,16 @@
     only through the {!Eio.Path.t} it is handed ({!Local}). *)
 
 module Frame = Frame
+(** Frame channels over Unix datagram descriptors. *)
+
 module Stream = Stream
+(** Stream writes offloaded to a systhread. *)
+
 module Local = Local
+(** Unix-domain stream sockets. *)
+
 module Interface = Interface
+(** Interface addresses and their changes. *)
 
 val classify_connect : exn -> Eio_net_connect.answer option
 (** [classify_connect exn] is the answer a failed {!Eio.Net.connect} raising

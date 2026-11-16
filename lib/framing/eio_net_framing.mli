@@ -102,6 +102,9 @@ module Config : sig
   (** [equal c0 c1] is [true] iff [c0] and [c1] have the same length field and
       range. *)
 
+  val compare : t -> t -> int
+  (** [compare] is a total order on configurations compatible with {!equal}. *)
+
   val pp : t Fmt.t
   (** [pp] formats a configuration as its length field and its range, as in
       [uint32be length:0-1048576]. *)

@@ -7,7 +7,7 @@
     or replaced with noise. It chooses the scenarios from what the workload
     does.
 
-    {2 Exploration}
+    {2:exploration Exploration}
 
     A check runs the workload once with no fault and records its operations. Its
     scenarios are positions in that run, in two tiers:
@@ -36,7 +36,7 @@
     A check never passes on a partial linear tier. One that needs more runs than
     its budget fails and says so: shrink the workload or raise [~budget].
 
-    {2 Contracts}
+    {2:contracts Contracts}
 
     {b At most two faults per run.} A program that tries three times always
     succeeds, so [run] may demand success. A broker that fans a message out to
@@ -77,7 +77,7 @@
     checks how each ended. A garbled datagram is random bytes, so a parser that
     rejects most noise but accepts some may pass.
 
-    {2 Failures and replay}
+    {2:replay Failures and replay}
 
     A check is deterministic. A failure raises [Failure] with the scenario, the
     tier that found it, the operations of the failing run, and the
@@ -112,7 +112,7 @@
         run
     ]}
 
-    {2 Runs}
+    {2:runs Runs}
 
     Each run has its own event loop, inside or outside another one. A check runs
     to its end before it returns, so it blocks the event loop it is called from:
