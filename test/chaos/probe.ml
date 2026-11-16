@@ -5,6 +5,36 @@ module R = Eio.Buf_read
 let strict_line = App.strict_line
 let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 9100)
 
+(* A client of three requests, each tried three times on a connection it
+   opens again after a failure; it then tells the server it is done. *)
+let client ~sw env set_done () =
+  let conn = ref None in
+  let rec get n =
+    match
+      Eio.Time.with_timeout_exn env#clock 5. (fun () ->
+          let f, r =
+            match !conn with
+            | Some c -> c
+            | None ->
+                let f = Eio.Net.connect ~sw env#net addr in
+                let c = (f, R.of_flow ~max_size:256 f) in
+                conn := Some c;
+                c
+          in
+          Eio.Flow.copy_string "q\n" f;
+          strict_line r)
+    with
+    | (_ : string) -> ()
+    | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _) ->
+        conn := None;
+        if n < 3 then get (n + 1)
+  in
+  for _ = 1 to 3 do
+    get 1
+  done;
+  (match !conn with Some (f, _) -> Eio.Resource.close f | None -> ());
+  Eio.Promise.resolve set_done ()
+
 (* One-sided reset: a client drops a reset connection without closing it;
    the test waits for the server's handlers to end. On TCP the handler of
    that connection reads the reset at once. *)
@@ -31,38 +61,7 @@ let one_sided () =
         done)
       (fun () -> Eio.Promise.await done_)
   in
-  let client () =
-    let conn = ref None in
-    let get () =
-      let rec go n =
-        match
-          Eio.Time.with_timeout_exn env#clock 5. (fun () ->
-              let f, r =
-                match !conn with
-                | Some c -> c
-                | None ->
-                    let f = Eio.Net.connect ~sw env#net addr in
-                    let c = (f, R.of_flow ~max_size:256 f) in
-                    conn := Some c;
-                    c
-              in
-              Eio.Flow.copy_string "q\n" f;
-              strict_line r)
-        with
-        | v -> Ok v
-        | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _) ->
-            conn := None;
-            if n < 3 then go (n + 1) else Error ()
-      in
-      go 1
-    in
-    for _ = 1 to 3 do
-      ignore (get ())
-    done;
-    (match !conn with Some (f, _) -> Eio.Resource.close f | None -> ());
-    Eio.Promise.resolve set_done ()
-  in
-  Eio.Fiber.both server client
+  Eio.Fiber.both server (client ~sw env set_done)
 
 (* Coalescing: the server handles fragmented requests, but takes one
    request per read and drops what follows. The client pipelines two
@@ -209,35 +208,4 @@ let one_sided_timeout () =
         done)
       (fun () -> Eio.Promise.await done_)
   in
-  let client () =
-    let conn = ref None in
-    let get () =
-      let rec go n =
-        match
-          Eio.Time.with_timeout_exn env#clock 5. (fun () ->
-              let f, r =
-                match !conn with
-                | Some c -> c
-                | None ->
-                    let f = Eio.Net.connect ~sw env#net addr in
-                    let c = (f, R.of_flow ~max_size:256 f) in
-                    conn := Some c;
-                    c
-              in
-              Eio.Flow.copy_string "q\n" f;
-              strict_line r)
-        with
-        | v -> Ok v
-        | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _) ->
-            conn := None;
-            if n < 3 then go (n + 1) else Error ()
-      in
-      go 1
-    in
-    for _ = 1 to 3 do
-      ignore (get ())
-    done;
-    (match !conn with Some (f, _) -> Eio.Resource.close f | None -> ());
-    Eio.Promise.resolve set_done ()
-  in
-  Eio.Fiber.both server client
+  Eio.Fiber.both server (client ~sw env set_done)
