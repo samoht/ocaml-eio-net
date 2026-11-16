@@ -7,155 +7,18 @@
     or replaced with noise. It chooses the scenarios from what the workload
     does.
 
-    {2:exploration Exploration}
-
-    A check runs the workload once with no fault and records its operations. Its
-    scenarios are positions in that run, in two tiers:
-
-    - the linear tier always runs whole. It takes the structure of the run: the
-      first three connections, the last, and the first of each class, the length
-      classes each side writes, a length rounded down to a power of two. On each
-      end of these it cuts the bytes around the ends of the first three of the
-      peer's writes, its last, and the first of each length class, and it fails
-      their connects and accepts. On each datagram socket it fails the first
-      three datagrams received, the last, and the first of each length class. It
-      runs each lasting condition. It grows with the structure of the exchange,
-      not with its bytes, its clients or its messages;
-    - the sampled tier spends the rest, at most half as much as the linear tier
-      and at least 200 runs: the faults the linear tier left, on other write
-      ends, connections and datagrams, and pairs of faults, the second at a
-      position of the run the first one changed. That is where a retry, or a
-      second connection after a reset, gets tested. When it has fewer runs than
-      scenarios of a kind, it splits them, in order, into as many groups of
-      neighbours as it has runs, and runs one scenario of each group, drawn from
-      a seed. Each draw may land on any scenario of its group, so a pattern that
-      repeats along the scenarios, as the faults tried at each position do,
-      hides no kind of fault from it, where taking every k-th scenario may meet
-      only one.
-
-    A check never passes on a partial linear tier. One that needs more runs than
-    its budget fails and says so: shrink the workload or raise [~budget].
-
-    {2:contracts Contracts}
-
-    {b At most two faults per run.} A program that tries three times always
-    succeeds, so [run] may demand success. A broker that fans a message out to
-    three subscribers may demand that one of them gets everything: two faults
-    reach two subscribers at most. The second fault of a pair may be a mild one,
-    a read or a write that moves one byte, or a connect or a datagram held back
-    for 50 ms, and it counts as one of the two. A lasting condition runs alone
-    and counts as one fault, though it reaches every connection of the run.
-
-    {b Every program on the network meets the faults}, the test's own peers
-    included. A connection may go silent for good, as when a host loses power,
-    and no close or reset then ends a wait on it, only the kernel's keepalive or
-    retransmission timeouts: give each read a timeout, and each write that may
-    fill a socket's buffer, in test servers and clients alike. Write test
-    servers with [Eio.Net.run_server ~on_error:ignore]; catch
-    [Eio.Io _ | End_of_file] in test clients; and parse strictly in both: a peer
-    that takes a partial line for a whole one turns an injected end of stream
-    into a wrong answer. Under [Eio.Fiber.both] or [Eio.Fiber.all], two fibers
-    that each meet the fault, as both directions of one connection do, fail
-    together with [Eio.Exn.Multiple]: catch the errors inside each fiber, or
-    catch [Eio.Exn.Multiple] too.
-
-    {b Ports are held as on Linux.} The end of a connection that closes first
-    holds its port for 60 seconds of the run's clock, in TIME_WAIT. A server
-    that closes its connections and listens again on the same port within a run
-    fails with an address in use, as it would on Linux: listen with
-    [~reuse_addr:true], as a real server does.
-
-    {b Assert latency to catch a missing timeout.} A connect that times out
-    takes 133 seconds, as on Linux, and then fails: a program without a connect
-    timeout waits for it and still succeeds. A test that bounds its program's
-    latency reads [env#clock] before and after.
-
-    {b What a check does not catch.} A bug that needs a datagram delayed with
-    others, or for longer than 50 ms, may pass: the linear tier delays one
-    datagram at a time. A program that never fails the calls still waiting on a
-    connection that died passes unless the workload waits for every call and
-    checks how each ended. A garbled datagram is random bytes, so a parser that
-    rejects most noise but accepts some may pass.
-
-    {2:replay Failures and replay}
-
-    A check is deterministic. A failure raises [Failure] with the scenario, the
-    tier that found it, the operations of the failing run, and the
-    [~replay:"..."] argument that runs that scenario alone; a failure of the run
-    with no fault, with its operations and the replay that runs it again. Each
-    operation shows the fault it met, and one cut short where a fault lands
-    names that fault. A block of up to eight operations repeated three times or
-    more, on the same sockets each time or each time on the next ones, as a loop
-    that reconnects makes them, shows its first and last instances if that hides
-    two lines or more, and a report longer than that keeps its first and last
-    hundred lines and those around its first fault, so its size is bounded by
-    the workload's structure rather than its bytes. The scenario is found by its
-    position and fault, so a replay still runs after a fix that changes the
-    workload's first run, such as the size of its reads: a failure then says the
-    scenario was re-matched, and a re-matched replay that passes returns as any
-    passing check does, saying nothing. A replay whose scenario the check no
-    longer has fails, and one whose scenario is not of the form a failure names
-    is refused.
-
-    The sampled tier draws its scenarios from a seed, the same one on every
-    check unless [~seed] gives another, so a check meets the same faults each
-    time. A replay names its scenario, not the draw that found it, so it needs
-    no seed.
-
-    A check reads no environment variable and prints nothing. A test that wants
-    a larger budget at night, or other faults in the sampled tier, reads its
-    own:
-    {[
-    let check run =
-      let int name = Option.map int_of_string (Sys.getenv_opt name) in
-      Eio_net_chaos.check ?budget:(int "CHAOS_BUDGET") ?seed:(int "CHAOS_SEED")
-        run
-    ]}
-
-    {2:runs Runs}
-
-    Each run has its own event loop, inside or outside another one. A check runs
-    to its end before it returns, so it blocks the event loop it is called from:
-    the other fibers of that loop wait for it.
-
-    Its clocks start at [0.]. Each turn of a fiber, resumed by a yield, an I/O
-    completion or a timer, moves them by 1 us, as a program's work takes time,
-    and so does each network operation, one that never waits included: a listen,
-    a send, a lookup or a close. When every fiber waits they move to the next
-    timer, so a timeout of an hour takes no time. A call of
-    [Eio_unix.run_in_systhread] runs its function at once, in the run's own
-    thread, so the run stays deterministic.
-
-    A run hangs, and fails, when every fiber waits and no timer is due, when it
-    is still running after an hour of its clock, and when the same network
-    operation fails 10000 times on the same target while its clock stands still,
-    as a loop that retries at once with no wait in between makes them: a connect
-    to one address, or a read or a write on one accepted connection or on any of
-    the connections a client made to one address. Failures on distinct targets,
-    as a scan of many ports makes, do not count together, and an end of file is
-    an answer: it counts only against the connection it ended. When every fiber
-    waits and the workload's own fiber is in no network operation, as a switch
-    whose body returned waits on the fibers it forked, the report names up to
-    five of the others by the operation each waits in and the last one it made.
-
-    A run also stops, and fails, after ten million turns. A check repeats a run
-    hundreds of times, so it cannot check a larger one, and the limit bounds the
-    CPU time of each run. If the run took ten million turns in a row with no
-    wait of 1 ms or more, the report calls it a busy loop; otherwise, a busy
-    loop or a workload too large for a check. A run fails the same way after
-    100,000 connects, accepts, reads, writes and receives, as a check plans from
-    each of them, so that the operations it keeps stay bounded. The reads and
-    writes a one-byte condition splits do not count: a report of a run stopped
-    while they ran says how many there were, and shows its first and last 10,000
-    operations. *)
+    The {{!checks}checks} and their {{!blocks}building blocks} come first, then
+    how a check works: its {{!exploration}exploration}, the
+    {{!contracts}contracts} a workload meets, its
+    {{!replay}failures and replay}, and its {{!runs}runs}. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t >
 (** The type for what a workload runs with: a fresh in-memory network and the
-    run's clocks. [Eio_fs.Chaos.env] has the same shape, with [fs] in place of
-    [net]. *)
+    run's clocks. [Eio_fs.Chaos.env] has the same shape, with [fs] and [cwd] in
+    place of [net]. *)
 
 (** {1:checks Checks} *)
 
@@ -169,11 +32,12 @@ val check :
 (** [check ~os ~budget ~seed ~replay run] calls [run] many times, each with a
     fresh in-memory network of {!Eio_net_mem}. The first run has no fault.
 
-    The linear tier tries each of these alone:
+    The linear tier ({!section-exploration}) tries each of these alone:
 
-    - at each structural position of what one end of a structural connection
-      reads, the connection is reset at both ends, as on TCP, or the peer closes
-      it, or the connection goes silent for good;
+    - at each {{!exploration}structural position} of what one end of a
+      {{!exploration}structural connection} reads, the connection is reset at
+      both ends, as on TCP, or the peer closes it, or the connection goes silent
+      for good;
     - at each structural position of what one end writes, the connection is
       reset, or this end closes it, as a process killed in the middle of a
       message does;
@@ -210,9 +74,10 @@ val check :
     refuses connects only.
 
     A run passes if [run] returns. [run] catches the errors its program may
-    raise and checks the results itself: any exception that escapes it fails the
-    check, an injected [Eio.Io] included. So does a hang, a first run that makes
-    no network operation, and two first runs that make different ones.
+    raise and checks the results itself ({!section-contracts}): any exception
+    that escapes it fails the check, an injected [Eio.Io] included. So does a
+    hang ({!section-runs}), a first run that makes no network operation, and two
+    first runs that make different ones.
 
     [os] (defaults to [`Linux]) is the kernel the network follows, as
     {!Eio_net_mem.v} takes it. Under [`Macos] a connect that times out takes 75
@@ -222,7 +87,7 @@ val check :
     [budget] (defaults to [2_000]) bounds the runs. [seed] (defaults to [0])
     draws the scenarios of the sampled tier: another seed meets other faults.
     [replay] runs only the scenario a failure named, whatever the seed that
-    found it.
+    found it ({!section-replay}).
 
     @raise Failure with a report of the first failing run.
     @raise Invalid_argument if [budget] is less than [1]. *)
@@ -413,11 +278,11 @@ val wrap :
     Linux this end reads what is queued, then end of file, and on macOS it reads
     end of file at once, as macOS drops what is queued.
 
-    After the same operation fails 10000 times on the same target while [clock]
+    After the same operation fails 10,000 times on the same target while [clock]
     stands still, with no success there in between, the next attempt raises
-    [Failure], as the program that makes them spins for ever, and after 20000 it
-    waits for ever. An end of file counts only against the connection it ended:
-    a read of it again and again spins, a reconnect after each does not.
+    [Failure], as the program that makes them spins for ever, and after 20,000
+    it waits for ever. An end of file counts only against the connection it
+    ended: a read of it again and again spins, a reconnect after each does not.
 
     A read or a write after the flow's own close raises [Invalid_argument]
     before [f] is asked, as Eio's own sockets do, and a read under way as
@@ -438,3 +303,157 @@ val pair :
     first, with [f] asked about each read and write of either end, as {!wrap}
     asks: [socket] is [1]. Its streams follow [os] (defaults to [`Linux]), as
     {!Eio_net_mem.pair} takes it. A fuzzer drives it from its input. *)
+
+(** {1:exploration Exploration}
+
+    A check runs the workload once with no fault and records its operations. Its
+    scenarios are positions in that run, chosen from its structure.
+
+    The structural elements of a sequence are its first three, its last, and the
+    first of each class. The length class of a length is that length rounded
+    down to a power of two.
+
+    - The {e structural connections} of a run are those of its connections,
+      classed by their address family and the length classes each side writes.
+    - The {e structural writes} of an end are those of its writes, classed by
+      length, and the {e structural datagrams} of a datagram socket are those of
+      the datagrams it receives, classed by length.
+    - The {e structural positions} of what an end reads are its first byte and
+      the ends of its peer's structural writes. Those of what an end writes are
+      the starts of its structural writes and, over IP, its last byte. Over IP
+      the byte either side of a position is one too, as TCP splits and joins
+      segments.
+
+    The scenarios come in two tiers:
+
+    - the linear tier always runs whole. On each end of each structural
+      connection it cuts the bytes at each structural position, and it fails the
+      connection's connect and accept. On each datagram socket it fails each
+      structural datagram. It runs each lasting condition. It grows with the
+      structure of the exchange, not with its bytes, its clients or its
+      messages;
+    - the sampled tier spends the rest, at most half as much as the linear tier
+      and at least 200 runs: the faults the linear tier left, on other write
+      ends, connections and datagrams, and pairs of faults, the second at a
+      position of the run the first one changed. That is where a retry, or a
+      second connection after a reset, gets tested. When it has fewer runs than
+      scenarios of a kind, it splits them, in order, into as many groups of
+      neighbours as it has runs, and runs one scenario of each group, drawn from
+      a seed. Each draw may land on any scenario of its group, so a pattern that
+      repeats along the scenarios, as the faults tried at each position do,
+      hides no kind of fault from it, where taking every k-th scenario may meet
+      only one.
+
+    A check never passes on a partial linear tier. One that needs more runs than
+    its budget fails and says so: shrink the workload or raise [~budget]. *)
+
+(** {1:contracts Contracts}
+
+    {b At most two faults per run.} A program that tries three times always
+    succeeds, so [run] may demand success. A broker that fans a message out to
+    three subscribers may demand that one of them gets everything: two faults
+    reach two subscribers at most. The second fault of a pair may be a mild one,
+    a read or a write that moves one byte, or a connect or a datagram held back
+    for 50 ms, and it counts as one of the two. A lasting condition runs alone
+    and counts as one fault, though it reaches every connection of the run.
+
+    {b Every program on the network meets the faults}, the test's own peers
+    included. A connection may go silent for good, as when a host loses power,
+    and no close or reset then ends a wait on it, only the kernel's keepalive or
+    retransmission timeouts: give each read a timeout, and each write that may
+    fill a socket's buffer, in test servers and clients alike. Write test
+    servers with [Eio.Net.run_server ~on_error:ignore]; catch
+    [Eio.Io _ | End_of_file] in test clients; and parse strictly in both: a peer
+    that takes a partial line for a whole one turns an injected end of stream
+    into a wrong answer. Under [Eio.Fiber.both] or [Eio.Fiber.all], two fibers
+    that each meet the fault, as both directions of one connection do, fail
+    together with [Eio.Exn.Multiple]: catch the errors inside each fiber, or
+    catch [Eio.Exn.Multiple] too.
+
+    {b Ports are held as on Linux.} The end of a connection that closes first
+    holds its port for 60 seconds of the run's clock, in TIME_WAIT. A server
+    that closes its connections and listens again on the same port within a run
+    fails with an address in use, as it would on Linux: listen with
+    [~reuse_addr:true], as a real server does.
+
+    {b Assert latency to catch a missing timeout.} A connect that times out
+    takes 133 seconds, as on Linux, and then fails: a program without a connect
+    timeout waits for it and still succeeds. A test that bounds its program's
+    latency reads [env#clock] before and after.
+
+    {b What a check does not catch.} A bug that needs a datagram delayed with
+    others, or for longer than 50 ms, may pass: the linear tier delays one
+    datagram at a time. A program that never fails the calls still waiting on a
+    connection that died passes unless the workload waits for every call and
+    checks how each ended. A garbled datagram is random bytes, so a parser that
+    rejects most noise but accepts some may pass. *)
+
+(** {1:replay Failures and replay}
+
+    A check is deterministic. A failure raises [Failure] with the scenario, the
+    tier that found it, the operations of the failing run, and the
+    [~replay:"..."] argument that runs that scenario alone; a failure of the run
+    with no fault, with its operations and the replay that runs it again. Each
+    operation shows the fault it met, and one cut short where a fault lands
+    names that fault. Repeated operations are folded and a long report is cut
+    around its first fault.
+
+    The scenario is found by its position and fault, so a replay still runs
+    after a fix that changes the workload's first run, such as the size of its
+    reads: a failure then says the scenario was re-matched, and a re-matched
+    replay that passes returns as any passing check does, saying nothing. A
+    replay whose scenario the check no longer has fails, and one whose scenario
+    is not of the form a failure names is refused.
+
+    The sampled tier draws its scenarios from a seed, the same one on every
+    check unless [~seed] gives another, so a check meets the same faults each
+    time. A replay names its scenario, not the draw that found it, so it needs
+    no seed.
+
+    A check reads no environment variable and prints nothing. A test that wants
+    a larger budget at night, or other faults in the sampled tier, reads its
+    own:
+    {[
+    let check run =
+      let int name = Option.map int_of_string (Sys.getenv_opt name) in
+      Eio_net_chaos.check ?budget:(int "CHAOS_BUDGET") ?seed:(int "CHAOS_SEED")
+        run
+    ]} *)
+
+(** {1:runs Runs}
+
+    Each run has its own event loop, inside or outside another one. A check runs
+    to its end before it returns, so it blocks the event loop it is called from:
+    the other fibers of that loop wait for it.
+
+    Its clocks start at [0.]. Each turn of a fiber, resumed by a yield, an I/O
+    completion or a timer, moves them by 1 us, as a program's work takes time,
+    and so does each network operation, one that never waits included: a listen,
+    a send, a lookup or a close. When every fiber waits they move to the next
+    timer, so a timeout of an hour takes no time. A call of
+    [Eio_unix.run_in_systhread] runs its function at once, in the run's own
+    thread, so the run stays deterministic.
+
+    A run hangs, and fails, when every fiber waits and no timer is due, when it
+    is still running after an hour of its clock, and when the same network
+    operation fails 10,000 times on the same target while its clock stands
+    still, as a loop that retries at once with no wait in between makes them: a
+    connect to one address, or a read or a write on one accepted connection or
+    on any of the connections a client made to one address. Failures on distinct
+    targets, as a scan of many ports makes, do not count together, and an end of
+    file is an answer: it counts only against the connection it ended. When
+    every fiber waits and the workload's own fiber is in no network operation,
+    as a switch whose body returned waits on the fibers it forked, the report
+    names up to five of the others by the operation each waits in and the last
+    one it made.
+
+    A run also stops, and fails, after 10,000,000 turns. A check repeats a run
+    hundreds of times, so it cannot check a larger one, and the limit bounds the
+    CPU time of each run. If the run took 10,000,000 turns in a row with no wait
+    of 1 ms or more, the report calls it a busy loop; otherwise, a busy loop or
+    a workload too large for a check. A run fails the same way after 100,000
+    connects, accepts, reads, writes and receives, as a check plans from each of
+    them, so that the operations it keeps stay bounded. The reads and writes a
+    one-byte condition splits do not count: a report of a run stopped while they
+    ran says how many there were, and shows its first and last 10,000
+    operations. *)
