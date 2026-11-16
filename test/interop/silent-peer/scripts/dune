@@ -1,0 +1,6 @@
+(executable
+ (name measure)
+ (foreign_stubs
+  (language c)
+  (names silence_stubs))
+ (libraries unix threads.posix mtime mtime.clock.os))
