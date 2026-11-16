@@ -1,3 +1,19 @@
+(test
+ (name test)
+ (package eio-net)
+ (libraries
+  eio-net.chaos
+  eio-net.mem
+  eio
+  eio.mock
+  eio.unix
+  unix
+  mtime
+  fmt
+  alcotest)
+ (deps
+  (source_tree traces)))
+
 ; Re-measure the connect timeouts, on macOS with Docker:
 ; REGEN=1 dune build @test/interop/connect-timeout/regen-traces
 

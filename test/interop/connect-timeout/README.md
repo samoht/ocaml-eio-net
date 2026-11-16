@@ -3,7 +3,10 @@
 `traces/connect.csv` holds how long a TCP connect whose SYNs are all dropped
 takes to fail on Linux and macOS, and with what error, as eio_posix,
 eio_linux and a plain `Unix.connect` see it: one row per connect, timed on
-the monotonic clock.
+the monotonic clock. The test checks, on Eio's mock clock, that a lost
+handshake in `eio-net.chaos` fails within the times measured on its kernel,
+Linux or macOS, and that so does a connect to 127.0.0.2 in `eio-net.mem`
+answering as macOS.
 
 [`scripts/generate.sh`](scripts/generate.sh) measures them on a Mac, running
 [`scripts/measure.ml`](scripts/measure.ml) for ten connects per client,

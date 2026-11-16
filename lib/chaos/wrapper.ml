@@ -1075,8 +1075,10 @@ module Network = struct
              miss. *)
           go ()
       | Some Timeout ->
-          (* Linux gives up after its sixth SYN retry, macOS after
-             net.inet.tcp.keepinit. *)
+          (* Linux gives up 64 s after its tenth SYN retransmission
+             (tcp_syn_retries 6 plus tcp_syn_linear_timeouts 4), macOS after
+             net.inet.tcp.keepinit; test/interop/connect-timeout measures
+             both. *)
           Eio.Time.sleep ctx.clock
             (match ctx.os with `Linux -> 133. | `Macos -> 75.);
           raise (Posix.timeout ())
