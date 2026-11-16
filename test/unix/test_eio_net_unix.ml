@@ -502,10 +502,10 @@ let of_length n =
   if pad < 1 then Alcotest.failf "%s is longer than %d bytes" dir n;
   Filename.concat dir (String.make pad 's')
 
-(* A path of max_length bytes binds; one byte more is refused before any
+(* A path of max_path_length bytes binds; one byte more is refused before any
    system call, as every sockaddr_un is. *)
-let test_local_max_length () =
-  let n = Eio_net_unix.Local.max_length in
+let test_local_max_path_length () =
+  let n = Eio_net_unix.Local.max_path_length in
   Alcotest.(check bool) "103 or 107" true (n = 103 || n = 107);
   let bind p =
     let s = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
@@ -518,7 +518,7 @@ let test_local_max_length () =
             Ok ()
         | exception Unix.Unix_error (e, _, _) -> Error e)
   in
-  Alcotest.(check bool) "max_length binds" true (bind (of_length n) = Ok ());
+  Alcotest.(check bool) "max_path_length binds" true (bind (of_length n) = Ok ());
   Alcotest.(check bool)
     "one more byte is too long" true
     (bind (of_length (n + 1)) = Error Unix.ENAMETOOLONG)
@@ -930,7 +930,7 @@ let suite =
       Alcotest.test_case "a local listener at a long path, and released" `Quick
         test_local_listen_long;
       Alcotest.test_case "the longest path an address holds" `Quick
-        test_local_max_length;
+        test_local_max_path_length;
       Alcotest.test_case "a local socket by a path of any length" `Quick
         test_local_connect;
       Alcotest.test_case "a local socket that is missing or refusing" `Quick

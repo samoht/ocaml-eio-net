@@ -7,11 +7,11 @@
     directory confines it. No function here opens a file by a name of its own,
     changes the working directory of the process or its umask. *)
 
-val max_length : int
-(** [max_length] is the longest path, in bytes, a Unix-domain socket address
-    holds: the size of [sun_path] less its terminating NUL, 103 on macOS and 107
-    on Linux. {!connect} refuses a longer path; {!connect_at} and {!listen}
-    reach one through its directory. *)
+val max_path_length : int
+(** [max_path_length] is the longest path, in bytes, a Unix-domain socket
+    address holds: the size of [sun_path] less its terminating NUL, 103 on macOS
+    and 107 on Linux. {!connect} refuses a longer path; {!connect_at} and
+    {!listen} reach one through its directory. *)
 
 val connect :
   sw:Eio.Switch.t ->
@@ -20,7 +20,7 @@ val connect :
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 (** [connect ~sw ~net path] is [Eio.Net.connect ~sw net (`Unix path)]: the
     connection [net] makes to the Unix-domain stream socket at [path], and
-    nothing else. A path longer than {!max_length} is refused with
+    nothing else. A path longer than {!max_path_length} is refused with
     [ENAMETOOLONG], an {!Eio.Io} error made by {!Eio_unix.Err.v}, before [net]
     is asked: {!connect_at} reaches it through its directory. *)
 
@@ -48,9 +48,9 @@ val connect_at :
     outside the directory. macOS gives no descriptor of a socket's file to
     connect through, and the window is left open on every system: [connect_at]
     is for a directory no untrusted user writes. The base name must fit an
-    address: {!max_length} bytes on macOS and FreeBSD, and on Linux
-    {!max_length} less the length of the [/proc/self/fd/<dir>/] prefix; a longer
-    one is refused with [ENAMETOOLONG]. On a Linux system with no [/proc]
+    address: {!max_path_length} bytes on macOS and FreeBSD, and on Linux
+    {!max_path_length} less the length of the [/proc/self/fd/<dir>/] prefix; a
+    longer one is refused with [ENAMETOOLONG]. On a Linux system with no [/proc]
     mounted, the link does not resolve and the connect fails as a missing socket
     does, with [Eio.Fs.Not_found]. Other systems refuse with [ENOSYS]. A failure
     is the {!Eio.Io} error {!Eio.Net.connect} raises: a missing socket or
@@ -98,11 +98,11 @@ val listen :
     made by {!Eio_unix.Err.v}.
 
     {!Eio.Net.listening_addr} is [`Unix p], with [p] the native path of [path]
-    ({!Eio.Path.native}), which may be longer than {!max_length}. The kernel
-    knows the socket only by the name it was bound at in its private directory,
-    so that name, which reaches nothing, is what a client's getpeername(2)
-    reports. Its connections keep the Unix platform's type, so that they pass
-    descriptors ({!receive}).
+    ({!Eio.Path.native}), which may be longer than {!max_path_length}. The
+    kernel knows the socket only by the name it was bound at in its private
+    directory, so that name, which reaches nothing, is what a client's
+    getpeername(2) reports. Its connections keep the Unix platform's type, so
+    that they pass descriptors ({!receive}).
 
     Raises [Invalid_argument] as {!connect_at} does. *)
 

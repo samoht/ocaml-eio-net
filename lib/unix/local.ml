@@ -1,6 +1,6 @@
 external sun_path_size : unit -> int = "caml_eio_net_sun_path_size"
 
-let max_length = sun_path_size () - 1
+let max_path_length = sun_path_size () - 1
 
 type fd = Unix.file_descr
 
@@ -24,7 +24,7 @@ let eio f =
 
 let connect ~sw ~net path =
   let s = Fpath.to_string path in
-  if String.length s > max_length then
+  if String.length s > max_path_length then
     raise (Eio_unix.Err.v ENAMETOOLONG "connect" s);
   (Eio.Net.connect ~sw net (`Unix s) :> stream)
 
