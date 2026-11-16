@@ -11,21 +11,21 @@ open! Hermetic
    - the scheduler stops instead of moving the clock past [limit], so a run
      that every fiber waits in reports as a hang, and one that keeps a timer
      going reports as a run past its time limit;
-   - every turn of the scheduler, a fiber resumed by a yield, an I/O
-     completion or a timer, moves the clock on by 1 us, as real time passes
-     while a program runs, and a run stops after [max_turns] turns;
-   - [charge] takes a turn for a call that does not suspend, as a network
-     operation does, so a loop of them moves the clock and meets the limits;
-   - the scheduler stops once [stop ()] holds, and when every fiber waits,
-     [idle ()] may wake one before the clock moves;
+   - the scheduler stops once [stop ()] holds, whatever its fibers do, and
+     when every fiber waits, [idle ()] may wake one before the clock moves;
+   - each turn, a fiber resumed by a yield, another fiber or a timer,
+     charges [turn] of clock, as a program's CPU time passes between two,
+     and a run stops at [max_turns] turns: as a busy loop if no fiber
+     waited [min_wait] or more for a timer in the last [max_turns], and as
+     too long otherwise;
+   - [charge] takes a turn for work that does not suspend, so a loop of it
+     moves the clock and meets the limits;
    - an effect [effects] answers, as [Eio_unix.run_in_systhread], runs at
-     once, in the scheduler, so a run stays deterministic; the fiber resumes
-     on its next turn, as it would once the systhread is done;
+     once, in the scheduler, and its fiber resumes on its next turn;
    - a deadlock names the fibers that wait.
 
-   A loop run by the library reopens commit 495b8c2, which removed one along
-   with the eio.mock dependency: hang detection and deterministic virtual time
-   need a loop the check owns. This copy needs no eio.mock.
+   Hang detection and deterministic virtual time need a loop the check owns.
+   eio-fs carries the same copy. This one needs no eio.mock.
 
    Copyright (C) 2021 Anil Madhavapeddy
    Copyright (C) 2022 Thomas Leonard
@@ -99,19 +99,16 @@ module Mono = struct
       drain ();
       t.now <- time
 
-    (* Eio_mock's [try_advance], which does not move past [limit]. It says
-       whether the timer it moves to waited 1 ms or more. *)
+    (* Eio_mock's [try_advance], which does not move past [limit], nor back
+       to a timer the turns since passed, and says how long the timer it
+       moves to waited. *)
     let try_advance t ~limit =
       match Q.min t.q with
       | None -> `Idle
       | Some (_, v) when Mtime.compare v.time limit > 0 -> `Past_limit
       | Some (_, v) ->
-          let waited =
-            Mtime.Span.compare (Mtime.span v.since v.time) Mtime.Span.ms >= 0
-            || Mtime.Span.compare (Mtime.span t.now v.time) Mtime.Span.ms >= 0
-          in
-          set_time t v.time;
-          `Advanced waited
+          set_time t (if Mtime.compare v.time t.now > 0 then v.time else t.now);
+          `Advanced (Mtime.span v.since v.time)
   end
 
   let handler = Eio.Time.Pi.clock (module Impl)
@@ -138,28 +135,35 @@ type t = {
   clock : Mono.Impl.t;
   limit : Mtime.t;
   mutable past_limit : bool;
-  mutable turns : int;
-  mutable waited : bool;
-  waiting : (Trace.id, unit) Hashtbl.t;
+  mutable turns : int; (* since a fiber last waited [min_wait] or more *)
+  mutable total : int;
+  mutable busy : bool;
   idle : unit -> bool;
   stop : unit -> bool;
+  waiting : (Trace.id, unit) Hashtbl.t;
 }
 
 type handler = { handle : 'a. 'a Effect.t -> (unit -> 'a) option }
 
-(* What a turn costs: a few microseconds of work between two suspensions, as
-   a program does on eio_posix. *)
+(* A turn costs about 0.1 us on eio_posix on Linux, and up to 20 us on a
+   loaded Mac: 1 us, fixed. *)
 let turn = Mtime.Span.(1 * us)
 let max_turns = 10_000_000
+let min_wait = Mtime.Span.(1 * ms)
 
 (* A turn taken in a fiber: past the limits, the fiber waits for ever, and
    the scheduler stops at its next turn. *)
 let charge t () =
   t.turns <- t.turns + 1;
-  let now = Option.get (Mtime.add_span t.clock.now turn) in
+  t.total <- t.total + 1;
+  let now =
+    Option.value
+      (Mtime.add_span (Mono.Impl.now t.clock) turn)
+      ~default:Mtime.max_stamp
+  in
   let past = Mtime.compare now t.limit > 0 in
-  if t.turns > max_turns || past then begin
-    if past then t.past_limit <- true;
+  if t.total > max_turns || past then begin
+    if past then t.past_limit <- true else t.busy <- true;
     Eio.Cancel.protect (fun () ->
         Eio.Promise.await (fst (Eio.Promise.create ())))
   end
@@ -170,21 +174,30 @@ let rec schedule t : exit =
   | _ when t.stop () -> `Exit_scheduler
   | Some f ->
       t.turns <- t.turns + 1;
-      let now = Option.get (Mtime.add_span t.clock.now turn) in
-      if t.turns > max_turns then `Exit_scheduler
-      else if Mtime.compare now t.limit > 0 then begin
-        t.past_limit <- true;
+      t.total <- t.total + 1;
+      if t.total > max_turns then begin
+        t.busy <- true;
         `Exit_scheduler
       end
-      else begin
-        Mono.Impl.set_time t.clock now;
-        f ()
-      end
+      else
+        let now =
+          Option.value
+            (Mtime.add_span (Mono.Impl.now t.clock) turn)
+            ~default:Mtime.max_stamp
+        in
+        if Mtime.compare now t.limit > 0 then begin
+          t.past_limit <- true;
+          `Exit_scheduler
+        end
+        else begin
+          Mono.Impl.set_time t.clock now;
+          f ()
+        end
   | None when t.idle () -> schedule t
   | None -> (
       match Mono.Impl.try_advance t.clock ~limit:t.limit with
       | `Advanced waited ->
-          if waited then t.waited <- true;
+          if Mtime.Span.compare waited min_wait >= 0 then t.turns <- 0;
           schedule t
       | `Idle -> `Exit_scheduler
       | `Past_limit ->
@@ -209,10 +222,11 @@ let run ?(idle = fun () -> false) ?(stop = fun () -> false)
       limit = Wall.wall_to_mtime limit;
       past_limit = false;
       turns = 0;
-      waited = false;
-      waiting = Hashtbl.create 16;
+      total = 0;
+      busy = false;
       idle;
       stop;
+      waiting = Hashtbl.create 16;
     }
   in
   let rec fork ~new_fiber:fiber fn =
@@ -279,8 +293,8 @@ let run ?(idle = fun () -> false) ?(stop = fun () -> false)
   | Some x -> x
   | None ->
       if t.stop () then raise Stopped
-      else if t.turns > max_turns then
-        raise (if t.waited then Too_long else Busy)
+      else if t.busy && t.turns >= max_turns then raise Busy
+      else if t.busy then raise Too_long
       else if t.past_limit then raise Time_limit
       else
         raise
