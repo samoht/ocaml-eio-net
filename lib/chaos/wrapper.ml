@@ -229,10 +229,18 @@ let activity ctx =
       a
 
 (* Under [ctx.lock]. *)
-let ask_locked ctx kind ~socket ~side ~family ~offset ~length =
+let ask_locked ctx law ~socket ~side ~family ~offset ~length =
   ctx.index <- ctx.index + 1;
   let op =
-    { Op.index = ctx.index; kind; socket; side; family; offset; length }
+    {
+      Op.index = ctx.index;
+      kind = Law.kind law;
+      socket;
+      side;
+      family;
+      offset;
+      length;
+    }
   in
   if Option.is_some ctx.charge then (activity ctx).last <- Some op;
   if ctx.split op then ctx.splits <- ctx.splits + 1 else ctx.ops <- ctx.ops + 1;
@@ -307,20 +315,13 @@ let tick ctx =
 (* An end of file is an answer, not a failure, so it counts only against
    [eof], the connection it ended: a program that reads it again and again
    spins, one that reconnects after each does not. *)
-let guard ?eof ctx target f =
+let guard ?eof ctx law target f =
   tick ctx;
   let inside k =
     if Option.is_some ctx.charge then
       locked ctx (fun () -> (activity ctx).inside <- k)
   in
-  inside
-    (Some
-       (match target with
-       | Connect _ -> `Connect
-       | Accept _ -> `Accept
-       | Read _ | Ended _ -> `Read
-       | Write _ -> `Write
-       | Recv _ -> `Recv));
+  inside (Some (Law.kind law));
   match f () with
   | v ->
       inside None;
@@ -343,9 +344,12 @@ let guard ?eof ctx target f =
    socket, so the accepts that [Fault.Emfile] fails go through again. *)
 let free ctx = locked ctx (fun () -> ctx.exhausted <- false)
 
-let ask ctx kind ~socket ~side ~family ~offset ~length =
+let ask ctx law ~socket ~side ~family ~offset ~length =
   locked ctx (fun () ->
-      ask_locked ctx kind ~socket ~side ~family ~offset ~length)
+      ask_locked ctx law ~socket ~side ~family ~offset ~length)
+
+(* The start of an operation the wrapper hands to its base. *)
+let forward ctx (_ : Law.forwarded Law.t) = charge ctx
 
 let next_socket ctx =
   ctx.sockets <- ctx.sockets + 1;
@@ -538,8 +542,9 @@ module Flow = struct
             if Cstruct.length dst = 0 then None
             else
               muted t
-                (ask t.ctx `Read ~socket:t.socket ~side:t.side ~family:t.family
-                   ~offset:t.delivered ~length:(Cstruct.length dst)))
+                (ask t.ctx Law.Single_read ~socket:t.socket ~side:t.side
+                   ~family:t.family ~offset:t.delivered
+                   ~length:(Cstruct.length dst)))
       in
       if Cstruct.length dst = 0 then 0
       else
@@ -587,8 +592,8 @@ module Flow = struct
         | `Write ->
             let fault =
               muted t
-                (ask t.ctx `Write ~socket:t.socket ~side:t.side ~family:t.family
-                   ~offset:t.written ~length:total)
+                (ask t.ctx Law.Single_write ~socket:t.socket ~side:t.side
+                   ~family:t.family ~offset:t.written ~length:total)
             in
             let n =
               match fault with
@@ -643,29 +648,29 @@ module Flow = struct
     let single_read t dst =
       guard
         ~eof:(Ended (t.socket, t.side))
-        t.ctx (Read t.peer)
+        t.ctx Law.Single_read (Read t.peer)
         (fun () -> single_read_ t dst)
 
     let single_write t bufs =
-      guard t.ctx (Write t.peer) (fun () -> write_ t bufs)
+      guard t.ctx Law.Single_write (Write t.peer) (fun () -> write_ t bufs)
 
     let copy t ~src = Eio.Flow.Pi.simple_copy ~single_write t ~src
     let read_methods = []
 
     let shutdown t cmd =
-      charge t.ctx;
+      forward t.ctx Law.Shutdown;
       try Eio.Flow.shutdown t.sock cmd with Eio.Io _ when broken t -> ()
 
     let close t =
-      charge t.ctx;
+      forward t.ctx Law.Close;
       drop t
 
     let setsockopt t opt v =
-      charge t.ctx;
+      forward t.ctx Law.Setsockopt;
       Eio.Net.setsockopt t.sock opt v
 
     let getsockopt t opt =
-      charge t.ctx;
+      forward t.ctx Law.Getsockopt;
       Eio.Net.getsockopt t.sock opt
   end
 
@@ -800,7 +805,7 @@ module Datagram = struct
             | [] -> (
                 let fault =
                   match
-                    ask t.ctx `Recv ~socket:t.socket ~side:`Client
+                    ask t.ctx Law.Recv ~socket:t.socket ~side:`Client
                       ~family:t.family ~offset
                       ~length:(String.length (snd d))
                   with
@@ -851,28 +856,29 @@ module Datagram = struct
               recv_ t buf
           | `Wait None -> Eio.Fiber.await_cancel ())
 
-    let recv t buf = guard t.ctx (Recv t.socket) (fun () -> recv_ t buf)
+    let recv t buf =
+      guard t.ctx Law.Recv (Recv t.socket) (fun () -> recv_ t buf)
 
     let send t ?dst bufs =
-      charge t.ctx;
+      forward t.ctx Law.Send;
       Eio.Net.send t.sock ?dst bufs
 
     let shutdown t cmd =
-      charge t.ctx;
+      forward t.ctx Law.Datagram_shutdown;
       shutdown_of t.sock cmd
 
     let close t =
-      charge t.ctx;
+      forward t.ctx Law.Datagram_close;
       Eio.Switch.remove_hook t.release;
       release t;
       Eio.Resource.close t.sock
 
     let setsockopt t opt v =
-      charge t.ctx;
+      forward t.ctx Law.Datagram_setsockopt;
       Eio.Net.setsockopt t.sock opt v
 
     let getsockopt t opt =
-      charge t.ctx;
+      forward t.ctx Law.Datagram_getsockopt;
       Eio.Net.getsockopt t.sock opt
   end
 
@@ -967,7 +973,7 @@ module Listener = struct
           locked ctx (fun () ->
               let offset = ctx.accepts in
               ctx.accepts <- offset + 1;
-              ask_locked ctx `Accept ~socket ~side:`Server ~family ~offset
+              ask_locked ctx Law.Accept ~socket ~side:`Server ~family ~offset
                 ~length:0)
         with
         | fault -> fault
@@ -1006,24 +1012,25 @@ module Listener = struct
       | None ->
           (Flow.resource flow, peer)
 
-    let accept t ~sw = guard t.ctx (Accept t.number) (fun () -> accept_ t ~sw)
+    let accept t ~sw =
+      guard t.ctx Law.Accept (Accept t.number) (fun () -> accept_ t ~sw)
 
     let close t =
-      charge t.ctx;
+      forward t.ctx Law.Listener_close;
       Eio.Switch.remove_hook t.release;
       Eio.Resource.close t.l;
       release t
 
     let listening_addr t =
-      charge t.ctx;
+      forward t.ctx Law.Listening_addr;
       Eio.Net.listening_addr t.l
 
     let setsockopt t opt v =
-      charge t.ctx;
+      forward t.ctx Law.Listener_setsockopt;
       Eio.Net.setsockopt t.l opt v
 
     let getsockopt t opt =
-      charge t.ctx;
+      forward t.ctx Law.Listener_getsockopt;
       Eio.Net.getsockopt t.l opt
   end
 
@@ -1057,7 +1064,7 @@ module Network = struct
             ctx.connects <- offset + 1;
             let socket = next_socket ctx in
             ( socket,
-              ask_locked ctx `Connect ~socket ~side:`Client ~family ~offset
+              ask_locked ctx Law.Connect ~socket ~side:`Client ~family ~offset
                 ~length:0 ))
       in
       let go () =
@@ -1092,11 +1099,11 @@ module Network = struct
           go ()
 
     let connect t ~bind_to ~options ~sw addr =
-      guard t.ctx (Connect addr) (fun () ->
+      guard t.ctx Law.Connect (Connect addr) (fun () ->
           connect_ t ~bind_to ~options ~sw addr)
 
     let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
-      charge t.ctx;
+      forward t.ctx Law.Listen;
       let l = Eio.Net.listen ~reuse_addr ~reuse_port ~backlog ~sw t.net addr in
       let listener =
         {
@@ -1118,18 +1125,18 @@ module Network = struct
       Eio.Resource.T (listener, Listener.handler)
 
     let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
-      charge t.ctx;
+      forward t.ctx Law.Datagram_socket;
       Datagram.v ~sw t.ctx
         ~family:(Op.family_of_datagram addr)
         (Eio.Net.datagram_socket ~reuse_addr ~reuse_port ~sw t.net addr
           :> Datagram.socket)
 
     let getaddrinfo t ~service node =
-      charge t.ctx;
+      forward t.ctx Law.Getaddrinfo;
       Eio.Net.getaddrinfo ~service t.net node
 
     let getnameinfo t addr =
-      charge t.ctx;
+      forward t.ctx Law.Getnameinfo;
       Eio.Net.getnameinfo t.net addr
   end
 
