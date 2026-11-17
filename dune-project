@@ -14,11 +14,12 @@
 
 (package
  (name eio-net)
- (synopsis "Network channels and chaos tests for Eio")
+ (synopsis "Network tests and channels for Eio")
  (description
-  "\| Tests protocols without real sockets: an in-memory network following
-  "\| Linux or macOS, and a check that runs a workload on it under network
-  "\| faults.
+  "\| Answers two questions, with one call each: does an Eio program cope
+  "\| with a network that fails, and does an Eio network answer as Linux or
+  "\| macOS does? Both run on an in-memory network that follows either
+  "\| kernel.
   )
  (tags (eio network framing test))
  (depends

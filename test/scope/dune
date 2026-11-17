@@ -8,8 +8,8 @@
  (libraries eio))
 
 (executable
- (name readme)
- (modules readme)
+ (name model)
+ (modules model)
  (libraries mem_scope fmt))
 
 (test
@@ -30,11 +30,11 @@
 
 (rule
  (with-stdout-to
-  README.md.scope
-  (run ./readme.exe %{dep:../../README.md})))
+  MODEL.md.scope
+  (run ./model.exe %{dep:../../MODEL.md})))
 
 (rule
  (alias runtest)
  (package eio-net)
  (action
-  (diff ../../README.md README.md.scope)))
+  (diff ../../MODEL.md MODEL.md.scope)))

@@ -1,4 +1,4 @@
-(* Prints the README given as its argument, its section on what mem models of
+(* Prints the page given as its argument, its section on what mem models of
    each kernel made again from Scope's table. *)
 
 let start = "<!-- Made from lib/mem/scope.ml"
@@ -100,7 +100,7 @@ let () =
   let rec copy found = function
     | [] ->
         if not found then
-          failwith "README.md has no section made from lib/mem/scope.ml"
+          failwith "the page has no section made from lib/mem/scope.ml"
     | l :: rest when String.starts_with ~prefix:start l ->
         print_string (section ());
         skip rest
@@ -108,7 +108,7 @@ let () =
         print_endline l;
         copy found rest
   and skip = function
-    | [] -> failwith "README.md: the section made from scope.ml has no end"
+    | [] -> failwith "the section made from lib/mem/scope.ml has no end"
     | l :: rest when l = stop -> copy true rest
     | _ :: rest -> skip rest
   in
