@@ -13,7 +13,7 @@ let ticking () =
         Eio.Time.sleep env#clock 1.0
       done;
       `Stop_daemon);
-  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       (try
          let flow, _ = Eio.Net.accept ~sw l in
@@ -31,7 +31,7 @@ let transfer ?budget n size () =
   let big = String.init size (fun i -> Char.chr (65 + (i mod 26))) in
   Eio_net_chaos.run ?budget @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       (try
          let flow, _ = Eio.Net.accept ~sw l in
@@ -60,7 +60,7 @@ let transfer ?budget n size () =
 let resume ?replay ?bug () =
   Eio_net_chaos.run ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Resume.serve ~clock:env#clock flow));

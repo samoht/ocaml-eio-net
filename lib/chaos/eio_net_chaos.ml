@@ -78,23 +78,8 @@ let waits_on net ~(root : Eio.Private.Trace.id) tids =
            (List.map fiber (List.filteri (fun i _ -> i < named) others)))
         (if n > named then Fmt.str "; and %d more" (n - named) else "")
 
-(* The world a run of [s] gives its workload, on the clocks of its loop:
-   eio-net.mem under the wrapper that injects [faults], which [wrapped] is set
-   to. *)
-let world ~os ~faults ~wrapped (s : Plan.scenario) clock mono_clock charge ~sw =
-  (* Tiny buffers lower each connection's queue to 32 KiB, or keep the
-     kernel's default for its family if that is smaller. *)
-  let capacity =
-    match s.lasting with
-    | Some Tiny_buffers -> Int.min Plan.tiny_buffer
-    | _ -> Fun.id
-  in
-  let base = Eio_net_mem.Private.v ~os ~capacity ~mono:mono_clock ~sw () in
-  let net =
-    Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
-      ~outage:(s.lasting = Some Outage) faults base
-  in
-  wrapped := Some net;
+(* The environment a workload runs with: [net], on the clocks of its loop. *)
+let env net clock mono_clock : env =
   object
     method net = net
     method clock = clock
@@ -127,9 +112,34 @@ let explain (s : Plan.scenario) ~wrapped ~root ~waiting ~stopped failed =
   | Some net when stopped -> Option.map (multiplied net) failed
   | _ -> failed
 
-(* A run of [s]: why it failed if it did. [observe] sees each operation and
-   the fault it met. *)
-let exec_with ~os ~observe run (s : Plan.scenario) =
+(* Where a run failed: in itself, in [inspect] after it, or in the restart
+   that follows it, with what the run with a fault raised, if anything. *)
+type stage = In_run | In_inspect of exn option | In_restart of exn option
+type failure = { stage : stage; error : string }
+
+(* What a check runs: [setup] before each run, [app], and [inspect] after a
+   run with a fault, on a network that follows [os]. *)
+type workload = {
+  os : [ `Linux | `Macos ];
+  setup : env -> unit;
+  inspect : env -> unit;
+  app : env -> unit;
+}
+
+(* An error the network gave, which a run with a fault may let escape. *)
+let rec indeterminate = function
+  | Eio.Io _ | End_of_file -> true
+  | Eio.Exn.Multiple l ->
+      l <> [] && List.for_all (fun (x, _) -> indeterminate x) l
+  | _ -> false
+
+(* A run of [s] on a fresh network that [setup] prepared, then, if [s] has a
+   fault, [inspect] and [app] again on the same network, healed: why it
+   failed if it did. [observe] sees each operation of the run with the fault
+   and the fault it met. *)
+let exec_with w ~observe (s : Plan.scenario) =
+  let os = w.os in
+  let faulty = s <> Plan.none in
   let faults = Plan.faults s in
   let f op =
     let fault = faults op in
@@ -138,6 +148,16 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
   in
   let wrapped = ref None and stopped = ref false in
   let root = ref None and waiting = ref None in
+  let stage = ref In_run and healed = ref false in
+  (* Tiny buffers lower each connection's queue to 32 KiB, or keep the
+     kernel's default for its family if that is smaller, until the network
+     heals. *)
+  let capacity =
+    match s.lasting with
+    | Some Tiny_buffers ->
+        fun c -> if !healed then c else Int.min Plan.tiny_buffer c
+    | _ -> Fun.id
+  in
   let failed =
     match
       Quiet_mock.run ~effects:{ handle = Posix.systhread } ~limit:3600.
@@ -147,7 +167,28 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
           (Eio.Private.Fiber_context.tid
              (Effect.perform Eio.Private.Effects.Get_context));
       Eio.Switch.run @@ fun sw ->
-      run (world ~os ~faults:f ~wrapped s clock mono_clock charge ~sw)
+      let base = Eio_net_mem.Private.v ~os ~capacity ~mono:mono_clock ~sw () in
+      let quiet () =
+        Wrapper.v ~os ~max_ops ~charge ~clock ~outage:false (fun _ -> None) base
+      in
+      w.setup (env (quiet ()) clock mono_clock);
+      let net =
+        Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
+          ~outage:(s.lasting = Some Outage) f base
+      in
+      wrapped := Some net;
+      let restart ended =
+        healed := true;
+        let net = quiet () in
+        wrapped := Some net;
+        stage := In_inspect ended;
+        w.inspect (env net clock mono_clock);
+        stage := In_restart ended;
+        w.app (env net clock mono_clock)
+      in
+      match w.app (env net clock mono_clock) with
+      | () -> if faulty then restart None
+      | exception x when faulty && indeterminate x -> restart (Some x)
     with
     | () -> None
     | exception Quiet_mock.Deadlock_detected tids ->
@@ -169,6 +210,7 @@ let exec_with ~os ~observe run (s : Plan.scenario) =
   in
   explain s ~wrapped:!wrapped ~root:!root ~waiting:!waiting ~stopped:!stopped
     failed
+  |> Option.map (fun error -> { stage = !stage; error })
 
 (* The operations of a run a report shows: all of them, or, for a lasting
    condition, which a one-byte one may multiply up to the limit on turns, the
@@ -179,7 +221,7 @@ let kept = 10_000
 
 (* A run of [s]: the operations a report shows, and why it failed if it
    did. *)
-let exec_shown ~os run (s : Plan.scenario) =
+let exec_shown w (s : Plan.scenario) =
   let head = ref [] and n = ref 0 in
   let tail = Queue.create () and left_out = ref 0 in
   let observe op fault =
@@ -195,7 +237,7 @@ let exec_shown ~os run (s : Plan.scenario) =
       end
     end
   in
-  let failed = exec_with ~os ~observe run s in
+  let failed = exec_with w ~observe s in
   ( {
       head = List.rev !head;
       left_out = !left_out;
@@ -205,8 +247,8 @@ let exec_shown ~os run (s : Plan.scenario) =
 
 (* A run of a scenario with no lasting condition: all its operations, and why
    it failed if it did. *)
-let exec ~os run s =
-  let shown, failed = exec_shown ~os run s in
+let exec w s =
+  let shown, failed = exec_shown w s in
   (shown.head, failed)
 
 (* {1 Reports} *)
@@ -355,14 +397,33 @@ let pp_trace rules ppf { head; left_out; tail } =
   in
   pp 0
 
-let report ?matched ~hash s trace error =
+(* The report of a scenario whose run, [inspect] or restart failed. *)
+let report ?matched ~hash s trace { stage; error } =
+  let title, ended =
+    match stage with
+    | In_run -> ("the workload failed under a fault", None)
+    | In_inspect e -> ("inspect rejected what the fault left", Some e)
+    | In_restart e ->
+        ( "the restart failed: the workload, run again with no fault on the \
+           same network, did not return",
+          Some e )
+  in
+  let ended =
+    Option.map
+      (function
+        | None -> "the faulty run returned"
+        | Some x -> "the faulty run raised " ^ Printexc.to_string x)
+      ended
+  in
   Fmt.failwith
-    "%s: the workload failed under a fault@\n\
+    "%s: %s@\n\
     \  faults:   %s@\n\
-     %a  error:    %s@\n\
+     %a%a  error:    %s@\n\
     \  trace:@\n\
      %a  replay:   %s ~replay:\"net/%s/%s\" app"
-    name (Plan.text s)
+    name title (Plan.text s)
+    Fmt.(option (any "  ended:    " ++ string ++ any "@\n"))
+    ended
     Fmt.(option (any "  matched:  " ++ string ++ any "@\n"))
     matched error (pp_trace s.rules) trace name hash (Plan.key s)
 
@@ -373,7 +434,7 @@ let digest (trace : Plan.trace) =
 
 (* Where a run with no fault first differs from [first], if it does, seen
    as it runs, so that its operations are not kept. *)
-let diverges ~os run (first : Plan.trace) =
+let diverges w (first : Plan.trace) =
   let rest = ref first and diverged = ref None in
   let observe op _ =
     if Option.is_none !diverged then
@@ -383,7 +444,7 @@ let diverges ~os run (first : Plan.trace) =
           diverged := Fmt.kstr Option.some "%a, then %a" Op.pp x Op.pp op
       | [] -> diverged := Fmt.kstr Option.some "%a, then nothing" Op.pp op
   in
-  ignore (exec_with ~os ~observe run Plan.none : string option);
+  ignore (exec_with w ~observe Plan.none : failure option);
   match (!diverged, !rest) with
   | Some d, _ -> Some d
   | None, (x, _) :: _ -> Fmt.kstr Option.some "%a, then nothing" Op.pp x
@@ -401,15 +462,16 @@ let parse_replay r =
     when String.length h = 8 && String.for_all hex h && Plan.is_key k ->
       (String.lowercase_ascii h, k)
   | _ ->
-      fail
-        "~replay:%S is not a replay of eio-net: one is net/HASH/SCENARIO, HASH \
-         8 hexadecimal digits and SCENARIO as a failure names it"
-        r
+      Fmt.invalid_arg
+        "%s: replay is %S, not a replay string of eio-net: one is \
+         net/HASH/SCENARIO, HASH 8 hexadecimal digits and SCENARIO as a \
+         failure names it"
+        name r
 
 let find k = List.find_opt (fun s -> Plan.key s = k)
 
 (* The scenario a replay names, if the check still has it. *)
-let scenario ~os run ~first ~linear k =
+let scenario w ~first ~linear k =
   match find k linear with
   | Some _ as s -> s
   | None when k = Plan.key Plan.none -> Some Plan.none
@@ -422,7 +484,7 @@ let scenario ~os run ~first ~linear k =
           | Some i -> (
               match find (String.sub k 0 i) linear with
               | Some ({ rules = [ r ]; _ } as s1) ->
-                  let after, _ = exec ~os run s1 in
+                  let after, _ = exec w s1 in
                   Plan.seconds r ~first ~after |> find k
               | _ -> None)))
 
@@ -439,7 +501,7 @@ let first_failed ~hash trace error =
 
 (* The run a replay names: [(h, k)], the first run's hash and the
    scenario's key, against the check's first run, of hash [hash]. *)
-let replay_one ~os run ~first ~linear ~hash ~attempt (h, k) =
+let replay_one w ~first ~linear ~hash ~attempt (h, k) =
   (* After a fix the first run may differ: the scenario is found by its
      position and fault, which the key names. *)
   let matched =
@@ -448,7 +510,7 @@ let replay_one ~os run ~first ~linear ~hash ~attempt (h, k) =
       Fmt.kstr Option.some
         "the replay named first run %s, and the workload's is now %s" h hash
   in
-  match scenario ~os run ~first ~linear k with
+  match scenario w ~first ~linear k with
   | Some s -> ignore (attempt ?matched s : Plan.trace)
   | None when h = hash ->
       fail "the replay names %s, a scenario this check no longer has" k
@@ -497,29 +559,33 @@ let explore ~budget ~seed ~first ~linear ~attempt =
         (Plan.sample rng share c))
     classes
 
-let run ?os ?(budget = 2_000) ?(seed = 0) ?replay app =
+let run ?os ?(budget = 2_000) ?(seed = 0) ?replay ?(setup = ignore)
+    ?(inspect = ignore) app =
   let os =
     match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux
   in
   if budget < 1 then
     Fmt.invalid_arg "%s: budget is %d, it must be positive" name budget;
   let replay = Option.map parse_replay replay in
-  let first, failed = exec ~os app Plan.none in
-  Option.iter (first_failed ~hash:(digest first) first) failed;
+  let w = { os; setup; inspect; app } in
+  let first, failed = exec w Plan.none in
+  Option.iter
+    (fun { error; _ } -> first_failed ~hash:(digest first) first error)
+    failed;
   if first = [] then
     fail "the workload makes no network operation, so it tests nothing";
   Option.iter
     (fail
        "two runs with no fault made different operations (%s); the workload \
         must be deterministic")
-    (diverges ~os app first);
+    (diverges w first);
   let hash = digest first in
   let linear = Plan.linear first in
   let attempt ?matched s =
-    let shown, failed = exec_shown ~os app s in
+    let shown, failed = exec_shown w s in
     Option.iter (report ?matched ~hash s shown) failed;
     shown.head
   in
   match replay with
-  | Some r -> replay_one ~os app ~first ~linear ~hash ~attempt r
+  | Some r -> replay_one w ~first ~linear ~hash ~attempt r
   | None -> explore ~budget ~seed ~first ~linear ~attempt

@@ -27,7 +27,7 @@ let banner env =
     App.strict_line (Eio.Buf_read.of_flow flow ~max_size:255) ^ "\n"
   in
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7022) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net (tcp 7022) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Eio.Flow.copy_string id_s flow;
@@ -47,7 +47,7 @@ let banner env =
    EHOSTUNREACH, which eio_posix raises unclassified, escapes. *)
 let connfail ?(bug = `None) env =
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7050) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net (tcp 7050) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Eio.Flow.copy_string "hi\n" flow));
@@ -72,7 +72,12 @@ let connfail ?(bug = `None) env =
           | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) ->
               attempt (n + 1))
   in
-  expect env Fmt.Dump.string "hi" (attempt 1)
+  (* The client must not give up under one fault, so an error that escapes
+     it fails the check. *)
+  let got =
+    try attempt 1 with Eio.Io _ as e -> Fmt.failwith "raised %a" Fmt.exn e
+  in
+  expect env Fmt.Dump.string "hi" got
 
 (* A server whose accept loop, under [Fault.No_descriptor], retries the accept at
    once: with no descriptor left it spins. *)
@@ -85,7 +90,7 @@ let busy_accept () =
     else None
   in
   let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
-  let l = Eio.Net.listen ~sw ~backlog:5 net (tcp 7060) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 net (tcp 7060) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let rec loop () =
         match Eio.Net.accept ~sw l with
@@ -117,7 +122,7 @@ let accept_loop () =
     else None
   in
   let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
-  let l = Eio.Net.listen ~sw ~backlog:5 net (tcp 7061) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 net (tcp 7061) in
   let stop, set_stop = Eio.Promise.create () in
   let shed = ref false in
   Eio.Fiber.both
@@ -144,7 +149,7 @@ let accept_loop () =
 let echo n env =
   let lines = List.init n (fun i -> String.make (1 + (i * 7 mod 11)) 'x') in
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7040) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net (tcp 7040) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let r = Eio.Buf_read.of_flow flow ~max_size:256 in
@@ -174,7 +179,7 @@ let echo n env =
    fails. *)
 let shed ?(bug = `None) env =
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:16 env#net (tcp 7009) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:16 env#net (tcp 7009) in
   let active = ref 0 in
   let handle flow =
     let r = Eio.Buf_read.of_flow flow ~max_size:64 in
@@ -247,7 +252,7 @@ let rpc ?(bug = `None) env =
     else Eio.Buf_read.take n r
   in
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7000) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net (tcp 7000) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let r = Eio.Buf_read.of_flow flow ~max_size:2048 in
@@ -285,7 +290,7 @@ let greetings env =
     Cstruct.to_string buf
   in
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7070) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net (tcp 7070) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Eio.Flow.copy_string server_hello flow;
@@ -308,7 +313,7 @@ let greetings env =
 let unix_stream env =
   let path = `Unix "/tmp/pingpong.sock" in
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net path in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net path in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let r = Eio.Buf_read.of_flow flow ~max_size:64 in
@@ -365,10 +370,11 @@ let unix_datagram env =
     [ "1"; "2"; "3" ]
 
 (* A leader lease over UDP: a server grants a lease of 1 s; client A renews
-   it until t = 2 s, then stops; B polls and must take over. The leaderships
+   it for 2 s, then stops; B polls and must take over. The leaderships
    the clients believe in must never overlap. With [`Receipt] a client counts
    its lease from when the grant arrived, not from when it asked. *)
 let lease ?(bug = `None) env =
+  let t0 = Eio.Time.now env#clock in
   let server_addr = `Udp (Eio.Net.Ipaddr.V4.loopback, 7100) in
   let server ~sw =
     let sock = Eio.Net.datagram_socket ~sw env#net server_addr in
@@ -417,7 +423,7 @@ let lease ?(bug = `None) env =
     in
     let rec loop () =
       let asked = Eio.Time.now clock in
-      if asked < stop then begin
+      if asked -. t0 < stop then begin
         incr seq;
         let s = !seq in
         Eio.Net.send sock ~dst:server_addr
@@ -465,7 +471,7 @@ let lease ?(bug = `None) env =
 let pipelined env =
   let keys = [ "a"; "b"; "c" ] in
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net (tcp 7001) in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net (tcp 7001) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let r = Eio.Buf_read.of_flow flow ~max_size:256 in

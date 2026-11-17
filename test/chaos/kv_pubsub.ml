@@ -9,13 +9,20 @@ let test_kv ?bug ?lenient () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (serve ?lenient));
   let c = v ~sw ~clock:env#clock env#net addr in
+  (* The client must not give up under one fault, so an error that escapes
+     it fails the check. *)
+  let get k =
+    try get ?bug c k
+    with (Eio.Io _ | End_of_file) as e ->
+      Fmt.failwith "GET %s raised %a" k Fmt.exn e
+  in
   List.iter
     (fun k ->
-      match (get ?bug c k, Eio_net_chaos.is_outage env) with
+      match (get k, Eio_net_chaos.is_outage env) with
       | Ok v, false when v = value k -> ()
       | Error _, true -> ()
       | Ok v, _ -> Fmt.failwith "GET %s returned %S" k v
@@ -28,7 +35,7 @@ let scenario ?bug env =
   Eio.Switch.run @@ fun sw ->
   let clock = env#clock and net = env#net in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 7000) in
-  let l = Eio.Net.listen ~sw ~backlog:8 net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:8 net addr in
   let b = v () in
   Eio.Fiber.fork_daemon ~sw (fun () -> serve ?bug ~sw ~clock b l);
   let fast =

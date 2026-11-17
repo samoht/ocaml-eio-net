@@ -8,7 +8,7 @@ let line tag i = Fmt.str "%c%06d" tag i
 let download ?(bug = `None) ~body (env : Eio_net_chaos.env) =
   let within f = Eio.Time.with_timeout_exn env#clock 2.0 f in
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net tcp in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net tcp in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           for i = 1 to head do

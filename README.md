@@ -64,7 +64,7 @@ val strict_line : Eio.Buf_read.t -> string = <fun>
 val get : timeout:bool -> Eio_net_chaos.env -> string option = <fun>
 # let workload ~timeout env =
     Eio.Switch.run @@ fun sw ->
-    let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+    let l = Eio.Net.listen ~sw ~reuse_addr:true ~backlog:5 env#net addr in
     Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
             let r = Eio.Buf_read.of_flow flow ~max_size:64 in

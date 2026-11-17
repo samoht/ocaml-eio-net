@@ -13,7 +13,7 @@ let test_frames ?budget ?replay ~read () =
   Eio_net_chaos.run ?budget ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
-  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       (try
          let flow, _ = Eio.Net.accept ~sw l in
@@ -47,7 +47,7 @@ let test_cut ~read () =
   in
   let net = Eio_net_chaos.wrap ~clock:env#clock cut (Eio_net_mem.v ~sw ()) in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
-  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let flow, _ = Eio.Net.accept ~sw l in
       (try List.iter (App.Frame.write flow) msgs with Eio.Io _ -> ());
@@ -63,7 +63,7 @@ let test_retries ~fetch () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           App.Frame.write flow "pong"));

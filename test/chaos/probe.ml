@@ -40,7 +40,7 @@ let client ~sw env set_done () =
 let one_sided () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   let done_, set_done = Eio.Promise.create () in
   let server () =
     Eio.Switch.run @@ fun hsw ->
@@ -68,7 +68,7 @@ let one_sided () =
 let coalesce ?(bug = true) () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let buf = Cstruct.create 256 and acc = Buffer.create 16 in
@@ -108,7 +108,7 @@ let coalesce ?(bug = true) () =
 let stream n () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Eio.Flow.copy_string (Fmt.str "%d\n" (n * 100)) flow;
@@ -132,7 +132,7 @@ let stream n () =
 let coalesce_retry ?(bug = true) () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let buf = Cstruct.create 256 and acc = Buffer.create 16 in
@@ -184,7 +184,7 @@ let coalesce_retry ?(bug = true) () =
 let one_sided_timeout () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   let done_, set_done = Eio.Promise.create () in
   let server () =
     Eio.Switch.run @@ fun hsw ->

@@ -13,6 +13,13 @@ let error_is expected f () =
   let error = Expect.field "error" (Expect.report f) in
   Alcotest.(check string) "error" expected error
 
+let invalid_with prefix f () =
+  match f () with
+  | () -> Alcotest.fail "the check passed"
+  | exception Invalid_argument m ->
+      if not (String.starts_with ~prefix m) then
+        Alcotest.failf "the check refused with %S" m
+
 let refused_with prefix f () =
   let m = Expect.report f in
   if not (String.starts_with ~prefix m) then
@@ -23,7 +30,7 @@ let refused_with prefix f () =
 let logged log () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Eio.Flow.copy_string "0123456789" flow));
@@ -102,7 +109,7 @@ let hash replay = List.nth (String.split_on_char '/' replay) 1
 let message ?replay ~size ~bug () =
   Eio_net_chaos.run ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           Eio.Flow.copy_string "0123456789" flow));
@@ -164,8 +171,8 @@ let test_unknown_replay () =
     (fun () ->
       mutant ~replay:(Fmt.str "net/%s/read9c@0.reset" (hash replay)) ())
     ();
-  refused_with
-    "Eio_net_chaos.run: ~replay:\"fs/x/y\" is not a replay of eio-net"
+  invalid_with
+    "Eio_net_chaos.run: replay is \"fs/x/y\", not a replay string of eio-net"
     (fun () -> mutant ~replay:"fs/x/y" ())
     ()
 
@@ -265,7 +272,7 @@ let test_nested () =
 let spin () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
   (* Its own bound, well past the guard's: without the guard, the run fails
@@ -287,7 +294,7 @@ let spin () =
 let reconnect () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
   (* Its own bound, well past the guard's: without the guard, the run fails
@@ -311,7 +318,7 @@ let reconnect () =
 let batch () =
   Eio_net_chaos.run ~budget:1 @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           ignore (Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:16))));
@@ -333,7 +340,7 @@ let batch () =
 let broken_server () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   let broken = ref false in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
@@ -515,19 +522,21 @@ let test_report_collapses_by_shape () =
       (List.length lines) (String.concat "\n" lines)
 
 (* A write cut where a reset lands says so: the write before it moves what
-   comes before the reset. *)
+   comes before the reset. The client demands every byte. *)
 let test_report_names_the_cut () =
   let run ?replay () =
     Eio_net_chaos.run ?replay @@ fun env ->
     Eio.Switch.run @@ fun sw ->
-    let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+    let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
     Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
             Eio.Flow.copy_string "0123456789" flow));
     Eio.Switch.run @@ fun sw ->
     let flow = Eio.Net.connect ~sw env#net addr in
-    let got = Eio.Flow.read_all flow in
-    if got <> "0123456789" then Fmt.failwith "got %S" got
+    match Eio.Flow.read_all flow with
+    | "0123456789" -> ()
+    | got -> Fmt.failwith "got %S" got
+    | exception Eio.Io _ -> failwith "reset"
   in
   let h = hash (replay_of (Expect.report run)) in
   let report =
@@ -544,8 +553,9 @@ let test_report_names_the_cut () =
 let test_malformed_replay () =
   List.iter
     (fun replay ->
-      refused_with
-        (Fmt.str "Eio_net_chaos.run: ~replay:%S is not a replay of eio-net"
+      invalid_with
+        (Fmt.str
+           "Eio_net_chaos.run: replay is %S, not a replay string of eio-net"
            replay)
         (fun () -> mutant ~replay ())
         ())
@@ -557,7 +567,7 @@ let test_loop_named () =
   let run () =
     Eio_net_chaos.run @@ fun env ->
     Eio.Switch.run @@ fun sw ->
-    let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
+    let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
     Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun _ _ -> ()));
     while true do
@@ -643,7 +653,7 @@ let handshake () =
 let pingpong () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
           let buf = Cstruct.create 1 in
@@ -826,8 +836,9 @@ let test_malformed_scenario () =
   List.iter
     (fun k ->
       let replay = Fmt.str "net/%s/%s" h k in
-      refused_with
-        (Fmt.str "Eio_net_chaos.run: ~replay:%S is not a replay of eio-net"
+      invalid_with
+        (Fmt.str
+           "Eio_net_chaos.run: replay is %S, not a replay string of eio-net"
            replay)
         (fun () -> mutant ~replay ())
         ())
@@ -1016,7 +1027,7 @@ let queries () =
 let slow_reply () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       (try
          let flow, _ = Eio.Net.accept ~sw l in
@@ -1059,7 +1070,7 @@ let test_forgotten_server () =
     Expect.report @@ fun () ->
     Eio_net_chaos.run @@ fun env ->
     Eio.Switch.run @@ fun sw ->
-    let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+    let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
     Eio.Fiber.fork ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
             Eio.Flow.copy_string "hi" flow));
@@ -1092,7 +1103,7 @@ let test_busy_memory () =
     Eio_net_chaos.run @@ fun env ->
     first := None;
     Eio.Switch.run @@ fun sw ->
-    let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
+    let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 env#net addr in
     Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
             let buf = Cstruct.create 1 in

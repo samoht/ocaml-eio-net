@@ -1,99 +1,128 @@
 (** Network faults, for tests of Eio programs.
 
-    {!run} runs a workload on an in-memory network that fails in a different way
-    on each run: a read returns one byte or several messages at once, a
-    connection is reset, ends midway or goes silent, a send buffer fills, a
-    connect is refused or times out, a datagram is lost, duplicated, reordered
-    or replaced with noise. It chooses the scenarios from what the workload
-    does.
+    {!run} answers one question: does this Eio program cope with a network that
+    fails? It runs the program many times on in-memory networks that fail, and
+    after each failure starts it again on the same network, healed, as a machine
+    restarts a service.
 
-    The {{!checks}checks} and their {{!blocks}building blocks} come first, then
-    how a check works: its {{!exploration}exploration}, the
-    {{!contracts}contracts} a workload meets, its
-    {{!replay}failures and replay}, and its {{!runs}runs}. *)
+    It raises [Failure] with a report when the answer is no, as an assertion
+    does, so it is the body of a test in any test runner. A test that wants one
+    fault at one place builds it from the {{!blocks}building blocks}: {!wrap}
+    for a network, {!pair} for two connected streams.
+
+    {!run} and {!wrap} take [?os], as {!Eio_net_mem.v} does: [`Linux], the
+    default, or [`Macos]. It picks the network's answers and the kernel's
+    timings the faults follow. The choice comes from the argument, never from
+    the host, so a test checks the same thing on every machine.
+
+    How a check picks its {{!exploration}faults}, the {{!contracts}contracts} a
+    program meets, its {{!replay}failures and replay} and its {{!runs}runs} come
+    after. *)
 
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t >
-(** The type for what a workload runs with: a fresh in-memory network and the
-    run's clocks. [Eio_fs.Chaos.env] has the same shape, with [fs] and [cwd] in
-    place of [net]. *)
+(** The type for what a program runs with: an in-memory network of
+    {!Eio_net_mem}, and clocks on which a wait takes no time. A program written
+    against [Eio.Stdenv] fields of these names takes it unchanged.
+    [Eio_fs_chaos.env] has the same shape, with [fs] and [cwd] in place of
+    [net]. *)
 
-(** {1:checks Checks} *)
+(** {1:program Testing a program} *)
 
 val run :
   ?os:[< `Linux | `Macos ] ->
   ?budget:int ->
   ?seed:int ->
   ?replay:string ->
+  ?setup:(env -> unit) ->
+  ?inspect:(env -> unit) ->
   (env -> unit) ->
   unit
-(** [run ~os ~budget ~seed ~replay app] calls [app] many times, each with a
-    fresh in-memory network of {!Eio_net_mem}. The first run has no fault.
+(** [run ~os ~budget ~seed ~replay ~setup ~inspect app] runs [app] once with no
+    fault on an in-memory network that answers as [os] (defaults to [`Linux])
+    does and holds what [setup] (defaults to doing nothing) left there. It then
+    runs [app] again many times, each time on a new network prepared the same
+    way, with one fault:
 
-    The linear tier ({!section-exploration}) tries each of these alone:
+    - a connection is reset at both ends, as on TCP, or one end closes it in the
+      middle of a message, or it goes silent for good, as when the peer's host
+      loses power;
+    - a connect is refused, times out after 133 seconds, or finds no route to
+      its host; an accepted connection is reset before its first byte, as when
+      the client left first;
+    - a datagram is lost, duplicated, held back behind the next, replaced with
+      noise from the same sender, or delivered 50 ms late;
+    - for the whole run, every read returns one byte, or every write takes one
+      byte, until its end has moved 4 KiB; or every read waits 5 ms and takes
+      what several writes sent; or every connection queues 32 KiB each way, or
+      the kernel's default for its family if that is smaller, so a writer whose
+      reader does not read blocks;
+    - the outage, for the whole run: every connect is refused and every datagram
+      lost. {!is_outage} is then [true].
 
-    - at each {{!exploration}structural position} of what one end of a
-      {{!exploration}structural connection} reads, the connection is reset at
-      both ends, as on TCP, or the peer closes it, or the connection goes silent
-      for good;
-    - at each structural position of what one end writes, the connection is
-      reset, or this end closes it, as a process killed in the middle of a
-      message does;
-    - each connect of a structural connection is refused, times out after 133
-      seconds, or finds no route to its host; each accepted one is reset before
-      its first byte, as when the client left first;
-    - each structural datagram received is lost, duplicated, held back behind
-      the next, replaced with noise from the same sender, or delivered 50 ms
-      late, alone;
-    - every read returns one byte until its end has read 4 KiB, or every write
-      takes one byte until its end has written 4 KiB; every read waits 5 ms and
-      takes what several writes sent; every connection queues 32 KiB each way,
-      or the chosen kernel's default for its family if that is smaller, so a
-      writer whose reader does not read blocks, and a write of more takes 32
-      KiB, as a full socket buffer cuts it short. With both socket buffers at
-      their minimum, Linux holds as little as about 4 KiB each way over TCP and
-      2 KiB over AF_UNIX, so 32 KiB blocks no writer it could not;
-    - the outage: every connect is refused and every datagram lost, for the
-      whole run. {!is_outage} is then [true], so [app] checks what its program
-      does when it gives up.
+    [app] is everything on the network: a client under test comes with the
+    server it talks to, and a server with a client. Every one of them meets the
+    faults. A Unix-domain socket meets only what AF_UNIX can do, as it is
+    reliable and ordered (unix(7)): a connect may be refused, but neither times
+    out nor finds no route; a peer may close, crash or hang, and its reader
+    still gets every byte whose write returned; reads may take what several
+    writes sent, and a write of up to 32 KiB arrives whole. No datagram is lost,
+    duplicated, reordered or garbled, and the outage refuses connects only.
 
-    {!Fault.No_descriptor} is not among them: {!Eio.Net.run_server} stops on it,
-    so a test that wants it asks for it with {!wrap}.
+    After each of those runs, [run] runs [app] again with no fault, on the same
+    network, healed, as a machine restarts a service. The network keeps what the
+    run left: a port still held after a close, in TIME_WAIT.
 
-    A Unix-domain socket meets only what AF_UNIX can do, as it is reliable and
-    ordered (unix(7)). A connect may be refused, but neither times out nor finds
-    no route; an accepted connection may have been closed by its client; a peer
-    may close, crash or hang, and its reader still gets every byte whose write
-    returned; reads may take what several writes sent. A write of up to 32 KiB
-    arrives whole, so there are no one-byte reads or writes, and a cut lands
-    between two writes; a larger one is cut short when every connection queues
-    32 KiB, as Linux cuts a 300,000-byte write to what its socket's buffer
-    takes. No datagram is lost, duplicated, reordered or garbled, and the outage
-    refuses connects only.
+    {b How the faults are picked.} [run] learns the operations of [app] from its
+    first run. It tries every fault above at every operation of that run, but
+    for the many reads, writes and datagrams of one connection or socket, of
+    which it takes the first three, the last and one of each size. Then it
+    spends the rest of [budget] (defaults to [2_000]) runs, at most half as many
+    as it has run and at least 200, on runs drawn at random from [seed]
+    (defaults to [0]): the other reads, writes and datagrams, and two faults in
+    a run, the second on the path the first one opened, such as the second
+    connection after a reset. Another [seed] draws other runs.
+    {!section-exploration} says more.
 
-    A run passes if [app] returns. [app] catches the errors its program may
-    raise and checks the results itself ({!section-contracts}): any exception
-    that escapes it fails the check, an injected [Eio.Io] included. So does a
-    hang ({!section-runs}), a first run that makes no network operation, and two
-    first runs that make different ones.
+    {!Fault.No_descriptor} is not among the faults: {!Eio.Net.run_server} stops
+    on it, so a test that wants it asks for it with {!wrap}.
 
-    [os] (defaults to [`Linux]) is the kernel the network follows, as
-    {!Eio_net_mem.v} takes it. Under [`Macos] a connect that times out takes 75
-    seconds, TIME_WAIT lasts 30, and a Unix-domain crash reads as end of file at
-    both ends, as macOS reports no reset on AF_UNIX.
+    {b When it passes.} [run] passes iff:
 
-    [budget] (defaults to [2_000]) bounds the runs. [seed] (defaults to [0])
-    draws the scenarios of the sampled tier: another seed meets other faults.
-    [replay] runs only the scenario a failure named, whatever the seed that
-    found it ({!section-replay}).
+    - the first run returns;
+    - no run hangs or raises an exception other than [Eio.Io] and [End_of_file],
+      alone or together in an [Eio.Exn.Multiple], an assertion of [app]
+      included. A program with no timeout hangs on a silent peer;
+    - after each fault, [inspect] (defaults to doing nothing), called on the
+      healed network, returns;
+    - each restart returns: the program can listen and connect again.
 
-    @raise Failure with a report of the first failing run.
-    @raise Invalid_argument if [budget] is less than [1]. *)
+    An [Eio.Io] error or an [End_of_file] that escapes a run with a fault
+    neither passes nor fails it: the network did fail, so what decides is
+    whether the program works again once the network does, which the restart
+    checks. A program that must succeed despite a fault says so with its own
+    assertion, and {!is_outage} tells it when it may give up.
+
+    Under [`Macos] a connect that times out takes 75 seconds, TIME_WAIT lasts
+    30, and a Unix-domain crash reads as end of file at both ends, as macOS
+    reports no reset on AF_UNIX. The networks live in memory and their clocks
+    jump to the next timer, so a check of a small program takes milliseconds.
+
+    @raise Failure
+      with a report of the first failing run: the fault, the operations of the
+      run, the error, and the line to paste that runs it alone, as
+      [Eio_net_chaos.run ~replay:"net/85d85f49/connect1c@0.timeout" app].
+      [replay] reruns that one case, and its restart, whatever the [seed] that
+      found it.
+    @raise Invalid_argument
+      if [budget] is not positive, or [replay] is not a replay string of
+      eio-net. *)
 
 val is_outage : env -> bool
-(** [is_outage env] is [true] iff [env] is that of the outage run of {!run}. *)
+(** [is_outage env] is [true] iff [env] is that of the outage run of {!run}. A
+    program that must succeed under any single fault may give up only then. *)
 
 (** {1:blocks Building blocks} *)
 
@@ -362,19 +391,23 @@ val pair :
     and no close or reset then ends a wait on it, only the kernel's keepalive or
     retransmission timeouts: give each read a timeout, and each write that may
     fill a socket's buffer, in test servers and clients alike. Write test
-    servers with [Eio.Net.run_server ~on_error:ignore]; catch
-    [Eio.Io _ | End_of_file] in test clients; and parse strictly in both: a peer
-    that takes a partial line for a whole one turns an injected end of stream
-    into a wrong answer. Under [Eio.Fiber.both] or [Eio.Fiber.all], two fibers
-    that each meet the fault, as both directions of one connection do, fail
-    together with [Eio.Exn.Multiple]: catch the errors inside each fiber, or
-    catch [Eio.Exn.Multiple] too.
+    servers with [Eio.Net.run_server ~on_error:ignore], and parse strictly: a
+    peer that takes a partial line for a whole one turns an injected end of
+    stream into a wrong answer.
+
+    {b Let time pass between retries.} A program that reconnects at once, with
+    no sleep, spins under the outage, and fails as a hang ({!section-runs}).
 
     {b Ports are held as on Linux.} The end of a connection that closes first
     holds its port for 60 seconds of the run's clock, in TIME_WAIT. A server
-    that closes its connections and listens again on the same port within a run
-    fails with an address in use, as it would on Linux: listen with
+    that listens again on the same port, within a run or in the restart that
+    follows it, fails with an address in use, as it would on Linux: listen with
     [~reuse_addr:true], as a real server does.
+
+    {b A restart is a fresh process.} It runs on the network the fault left,
+    healed, and so does [inspect]: neither may read state an earlier run left in
+    memory. They share the run's event loop, its clock and its limits
+    ({!section-runs}).
 
     {b Assert latency to catch a missing timeout.} A connect that times out
     takes 133 seconds, as on Linux, and then fails: a program without a connect
@@ -391,11 +424,12 @@ val pair :
 (** {1:replay Failures and replay}
 
     A check is deterministic. A failure raises [Failure] with the scenario, the
-    operations of the failing run, and the [~replay:"..."] argument that runs
-    that scenario alone; a failure of the run with no fault, with its operations
-    and the replay that runs it again. Each operation shows the fault it met,
-    and one cut short where a fault lands names that fault. Repeated operations
-    are folded and a long report is cut around its first fault.
+    operations of the failing run, how it ended when its [inspect] or restart
+    failed, and the [Eio_net_chaos.run ~replay:"..." app] call that runs that
+    scenario alone; a failure of the run with no fault, with its operations and
+    the replay that runs it again. Each operation shows the fault it met, and
+    one cut short where a fault lands names that fault. Repeated operations are
+    folded and a long report is cut around its first fault.
 
     The scenario is found by its position and fault, so a replay still runs
     after a fix that changes the workload's first run, such as the size of its
@@ -421,9 +455,9 @@ val pair :
 
 (** {1:runs Runs}
 
-    Each run has its own event loop, inside or outside another one. A check runs
-    to its end before it returns, so it blocks the event loop it is called from:
-    the other fibers of that loop wait for it.
+    Each run, with its restart, has its own event loop, inside or outside
+    another one. A check runs to its end before it returns, so it blocks the
+    event loop it is called from: the other fibers of that loop wait for it.
 
     Its clocks start at [0.]. Each turn of a fiber, resumed by a yield, an I/O
     completion or a timer, moves them by 1 us, as a program's work takes time,

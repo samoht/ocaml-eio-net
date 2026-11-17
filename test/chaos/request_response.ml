@@ -7,7 +7,7 @@ let n = 5
 let test ~serve () =
   Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let l = Eio.Net.listen ~sw ~backlog:n env#net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:n env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () -> serve ~clock:env#clock l);
   let client i =
     let req = Fmt.str "req%d" i in
@@ -36,7 +36,7 @@ let test_idle ~serve () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
-  let l = Eio.Net.listen ~sw ~backlog:n net addr in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:n net addr in
   Eio.Fiber.fork_daemon ~sw (fun () -> serve ~clock:env#clock l);
   let flow = Eio.Net.connect ~sw net addr in
   (* The client sends nothing; the server must close within its timeout.
