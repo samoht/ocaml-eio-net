@@ -589,3 +589,10 @@ let run ?os ?(budget = 2_000) ?(seed = 0) ?replay ?(setup = ignore)
   match replay with
   | Some r -> replay_one w ~first ~linear ~hash ~attempt r
   | None -> explore ~budget ~seed ~first ~linear ~attempt
+
+let device ?os:_ _ = failwith "Eio_net_chaos.device: not implemented"
+
+module Private = struct
+  let device_allowances = []
+  let device_allowed _ _ = []
+end

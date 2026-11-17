@@ -1,21 +1,24 @@
-(** Network faults, for tests of Eio programs.
+(** Network faults, for tests of Eio programs and of Eio networks.
 
-    {!run} answers one question: does this Eio program cope with a network that
-    fails? It runs the program many times on in-memory networks that fail, and
-    after each failure starts it again on the same network, healed, as a machine
-    restarts a service.
+    [Eio_net_chaos] answers two questions, with one function each:
 
-    It raises [Failure] with a report when the answer is no, as an assertion
-    does, so it is the body of a test in any test runner. A test that wants one
-    fault at one place builds it from the {{!blocks}building blocks}: {!wrap}
-    for a network, {!pair} for two connected streams.
+    - {!run}: does this Eio program cope with a network that fails? It runs the
+      program many times on in-memory networks that fail, and after each failure
+      starts it again on the same network, healed, as a machine restarts a
+      service.
+    - {!device}: does this Eio network answer as Linux or macOS does?
 
-    {!run} and {!wrap} take [?os], as {!Eio_net_mem.v} does: [`Linux], the
-    default, or [`Macos]. It picks the network's answers and the kernel's
-    timings the faults follow. The choice comes from the argument, never from
-    the host, so a test checks the same thing on every machine.
+    Both raise [Failure] with a report when the answer is no, as an assertion
+    does, so they are the body of a test in any test runner. A test that wants
+    one fault at one place builds it from the {{!blocks}building blocks}:
+    {!wrap} for a network, {!pair} for two connected streams.
 
-    How a check picks its {{!exploration}faults}, the {{!contracts}contracts} a
+    {!run}, {!device} and {!wrap} take [?os], as {!Eio_net_mem.v} does:
+    [`Linux], the default, or [`Macos]. It picks the answers expected and the
+    kernel's timings the faults follow. The choice comes from the argument,
+    never from the host, so a test checks the same thing on every machine.
+
+    How {!run} picks its {{!exploration}faults}, the {{!contracts}contracts} a
     program meets, its {{!replay}failures and replay} and its {{!runs}runs} come
     after. *)
 
@@ -123,6 +126,56 @@ val run :
 val is_outage : env -> bool
 (** [is_outage env] is [true] iff [env] is that of the outage run of {!run}. A
     program that must succeed under any single fault may give up only then. *)
+
+(** {1:network Testing a network} *)
+
+val device :
+  ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
+(** [device ~os net] runs each sequence of socket operations recorded on the
+    kernel of [os] (defaults to [`Linux]) on a fresh network [net ~sw], and
+    compares each answer with the kernel's. [sw] ends with the sequence, so what
+    [net] holds under it is released there.
+
+    {[
+    let () =
+      Eio_main.run @@ fun _ ->
+      Eio_net_chaos.device (fun ~sw -> Eio_net_mem.v ~sw ())
+    ]}
+
+    A network is a whole {!Eio.Net.t}: the two ends of each connection are made
+    by its own [listen] and [connect], so a sequence sees what a close at one
+    end does at the other. The sequences cover, over TCP, UDP and Unix-domain
+    sockets, on IPv4 and IPv6: every order of up to four of listen, connect,
+    accept, read, write, shutdown and close, and of up to three datagram
+    operations; then binds, backlogs and the reuse of an address after a close,
+    Unix paths, name resolution and socket options.
+
+    An answer is a result, "would wait" for an operation that does not complete
+    at once, or an error. Each step has the set of answers [os] allows: the one
+    the kernel gave and, where the answer depends on the host's configuration
+    (its addresses, name server, services database or host name) or on how the
+    kernel counts a buffer's memory, the answers other hosts give. An answer
+    passes iff it is in the set. Errors compare by the class Eio gives them
+    ([Connection_reset], [Connection_failure], [Not_found]), else by their
+    errno, and an error of a backend that carries no errno is any error.
+    {!Eio_net_mem.v} passes for the [os] it is given.
+
+    [device] runs every sequence, whatever the earlier ones answered. In a
+    sequence it stops at the first answer outside its set, as the later ones
+    depend on it. It leaves out the sequences only a prepared host can answer:
+    those that wait 60 seconds for a port to be free again, those that use up
+    every port, and those that send off the loopback interface; and, under
+    [`Macos], those whose answer depends on timing, of which the traces hold one
+    answer. It must be called from an Eio event loop. Unix paths are made in the
+    current directory.
+
+    @raise Failure
+      if an answer is outside its set, with one line for each such sequence: its
+      operations up to the one that differs, the answers allowed and the one
+      given, as
+      [tcp4 connect; accept; close C; read S 1: expected one of {EOF}, got would
+       wait]; then how many passed, differed and were left out, and why. Past
+      the first hundred lines it gives the count alone. *)
 
 (** {1:blocks Building blocks} *)
 
@@ -490,3 +543,14 @@ val pair :
     one-byte condition splits do not count: a report of a run stopped while they
     ran says how many there were, and shows its first and last 10,000
     operations. *)
+
+(**/**)
+
+(* For this package's tests: the allowances of [device], and those a
+   network's answers needed. *)
+module Private : sig
+  val device_allowances : ([ `Linux | `Macos ] * string) list
+
+  val device_allowed :
+    [ `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> string list
+end
