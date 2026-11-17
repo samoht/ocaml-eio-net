@@ -1,3 +1,4 @@
 (library
- (name kernel_seq)
+ (name eio_net_kernel)
+ (package eio-net)
  (libraries eio-net.mem eio eio.unix cstruct fmt unix))

@@ -15,7 +15,7 @@ let transport_name = function
 let transport_of_string s =
   match List.find_opt (fun t -> transport_name t = s) transports with
   | Some t -> t
-  | None -> invalid_arg ("Kernel_seq.transport_of_string: " ^ s)
+  | None -> invalid_arg ("Eio_net_kernel.transport_of_string: " ^ s)
 
 let is_stream = function
   | Tcp4 | Tcp6 | Unix_stream -> true

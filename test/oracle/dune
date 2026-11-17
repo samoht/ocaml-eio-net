@@ -3,7 +3,7 @@
  (package eio-net)
  (libraries
   eio-net.mem
-  kernel_seq
+  eio_net_kernel
   eio
   eio.mock
   eio.unix

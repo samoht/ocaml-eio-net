@@ -1,7 +1,7 @@
 # Kernel traces
 
 `traces/*.csv` hold what Linux and macOS answer to every operation sequence
-and scenario of the [`seq`](seq) library, recorded through
+and scenario of [`Eio_net_kernel`](../../../lib/kernel/eio_net_kernel.mli), recorded through
 `eio_posix`: one row per sequence, a column per kernel. The test replays each
 row on `eio-net.mem` and compares.
 
@@ -25,7 +25,7 @@ VM, the settings the traces depend on (from
 `generate.sh` and `record.ml`. Regenerating rewrites it.
 
 [`test/provenance`](../../provenance) fails when a trace or a pinned input
-differs from what the file records. The `seq` library is not pinned: the replay
+differs from what the file records. `Eio_net_kernel` is not pinned: the replay
 also runs it, and it maps `eio-net.mem`'s exceptions, so most of its edits
 change no recording. The replay test checks instead that the traces hold exactly
 its sequences and scenarios, so an added, removed or renamed one asks for a

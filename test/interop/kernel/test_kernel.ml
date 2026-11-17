@@ -8,7 +8,7 @@
    scenarios listed below by name, which depend on timing.
    Regenerate, on macOS: REGEN=1 dune build @test/interop/kernel/regen-traces *)
 
-open Kernel_seq
+open Eio_net_kernel
 
 type os = [ `Linux | `Macos ]
 
@@ -35,7 +35,8 @@ let rows t =
 
 let replay ~os t ops =
   Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw -> Kernel_seq.run (Eio_net_mem.v ~os ~sw ()) t ops
+  Eio.Switch.run @@ fun sw ->
+  Eio_net_kernel.run (Eio_net_mem.v ~os ~sw ()) t ops
 
 let starts_with ~prefix s =
   String.length s >= String.length prefix
@@ -48,7 +49,8 @@ let test_transport os t () =
   let rows = rows t in
   if List.map (fun r -> r.ops) rows <> sequences t then
     Alcotest.failf
-      "the %s traces hold other sequences than Kernel_seq's: regenerate them"
+      "the %s traces hold other sequences than Eio_net_kernel's: regenerate \
+       them"
       (transport_name t);
   let unexpected =
     List.filter_map
@@ -329,12 +331,12 @@ let replay_scenario ~os name =
   Eio.Switch.run @@ fun sw ->
   let clock = env#mono_clock in
   let net = Eio_net_mem.v ~os ~mono:clock ~sw () in
-  if Kernel_seq.timed name || Kernel_seq.narrow_ports name then
-    Kernel_seq.scenario ~wait:(Eio.Time.Mono.sleep clock) net name
+  if Eio_net_kernel.timed name || Eio_net_kernel.narrow_ports name then
+    Eio_net_kernel.scenario ~wait:(Eio.Time.Mono.sleep clock) net name
   else
     match
       Eio.Time.with_timeout_exn env#clock 2. (fun () ->
-          Kernel_seq.scenario net name)
+          Eio_net_kernel.scenario net name)
     with
     | r -> r
     | exception Eio.Time.Timeout -> "timeout"
@@ -343,8 +345,8 @@ let test_scenarios os () =
   let rows = scenario_rows () in
   if List.map (fun (n, _, _) -> n) rows <> scenarios then
     Alcotest.fail
-      "the scenario traces hold other scenarios than Kernel_seq's: regenerate \
-       them";
+      "the scenario traces hold other scenarios than Eio_net_kernel's: \
+       regenerate them";
   let unexpected =
     List.filter_map
       (fun (name, linux, macos) ->
