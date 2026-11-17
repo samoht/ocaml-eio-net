@@ -25,10 +25,10 @@ let free_port ctx =
 let cases =
   List.concat
     [
-      (* An empty write after our own send shutdown writes nothing on Linux;
-         macOS fails it with EPIPE. *)
+      (* An empty write after our own send shutdown fails with EPIPE, as
+         eio_posix sends it with sendmsg(2). *)
       per_stream ~test:"EmptyWriteAfterShutdownSend" [ Tcp4; Unix_stream ]
-        (fun _ -> expect ~macos:"reset" "wrote 0")
+        (fun _ -> expect "reset")
         (fun ctx k ->
           let c, _, _ = stream_pair ctx k in
           Eio.Flow.shutdown c `Send;
