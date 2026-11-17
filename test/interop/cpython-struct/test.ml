@@ -87,7 +87,7 @@ let () =
     In_channel.with_open_bin "traces/vectors.csv" In_channel.input_all
   in
   let vectors = vectors input in
-  Alcotest.run "framing-python"
+  Alcotest.run "eio-net.cpython-struct"
     [
       ( "struct",
         List.map

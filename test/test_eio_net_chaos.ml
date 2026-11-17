@@ -1537,57 +1537,74 @@ let test_unix_hang_stops_write () =
 let suite =
   ( "eio_net_chaos",
     [
-      Alcotest.test_case "flow short reads" `Quick test_flow_short;
-      Alcotest.test_case "tiny buffers under macOS over AF_UNIX" `Quick
+      Alcotest.test_case "Short cuts each read to its length" `Quick
+        test_flow_short;
+      Alcotest.test_case "tiny buffers never raise macOS's AF_UNIX queue" `Quick
         test_tiny_buffers_macos_unix;
-      Alcotest.test_case "flow stall coalesces writes" `Quick
+      Alcotest.test_case "a stalled read takes what several writes sent" `Quick
         test_flow_stall_coalesces;
-      Alcotest.test_case "flow buffered bytes before end of stream" `Quick
-        test_flow_buffered_before_eof;
-      Alcotest.test_case "flow torn write" `Quick test_flow_torn_write;
-      Alcotest.test_case "flow reset at both ends" `Quick
+      Alcotest.test_case "buffered bytes are read before the end of stream"
+        `Quick test_flow_buffered_before_eof;
+      Alcotest.test_case
+        "a write cut short moves its prefix, then a reset reaches both ends"
+        `Quick test_flow_torn_write;
+      Alcotest.test_case "a reset reaches both ends" `Quick
         test_flow_reset_both_ends;
-      Alcotest.test_case "flow reset reported once" `Quick
+      Alcotest.test_case "a reset is reported once" `Quick
         test_flow_reset_reported_once;
-      Alcotest.test_case "flow end on a read" `Quick test_flow_eof_on_read;
-      Alcotest.test_case "flow end on a write" `Quick test_flow_eof_on_write;
-      Alcotest.test_case "accept reset" `Quick test_accept_reset;
-      Alcotest.test_case "accept EMFILE" `Quick test_accept_emfile;
+      Alcotest.test_case "Eof on a read is the peer's close" `Quick
+        test_flow_eof_on_read;
+      Alcotest.test_case "Eof on a write is this end's close" `Quick
+        test_flow_eof_on_write;
+      Alcotest.test_case "Reset on an accept is a client that left first" `Quick
+        test_accept_reset;
+      Alcotest.test_case
+        "No_descriptor keeps the connection queued until a descriptor is freed"
+        `Quick test_accept_emfile;
       Alcotest.test_case "a write cut short waits for room" `Quick
         test_flow_short_write_waits;
       Alcotest.test_case "a failed accept keeps its connection" `Quick
         test_accept_keeps_connection;
-      Alcotest.test_case "flow write after close" `Quick
+      Alcotest.test_case "a write after close raises before f is asked" `Quick
         test_flow_write_after_close;
-      Alcotest.test_case "flow buffer follows the read side" `Quick
+      Alcotest.test_case
+        "buffered bytes follow the read side's close or shutdown" `Quick
         test_flow_buffer_follows_read_side;
       Alcotest.test_case "a fault-free wrapper does what its network does"
         `Quick test_fault_free_identity;
-      Alcotest.test_case "datagram drop" `Quick test_dgram_drop;
-      Alcotest.test_case "datagram dup" `Quick test_dgram_dup;
-      Alcotest.test_case "datagram reorder" `Quick test_dgram_reorder;
+      Alcotest.test_case "Drop loses one datagram" `Quick test_dgram_drop;
+      Alcotest.test_case "Dup delivers one datagram twice" `Quick test_dgram_dup;
+      Alcotest.test_case "Reorder delivers one datagram after the next" `Quick
+        test_dgram_reorder;
       Alcotest.test_case "a failed receive keeps its datagram" `Quick
         test_dgram_failed_recv_keeps_datagram;
-      Alcotest.test_case "datagram cancelled receive draws no fault" `Quick
+      Alcotest.test_case "a cancelled receive draws no fault" `Quick
         test_dgram_cancelled_recv_draws_no_fault;
-      Alcotest.test_case "datagram held back kept whole" `Quick
+      Alcotest.test_case "a datagram held back is kept whole" `Quick
         test_dgram_held_kept_whole;
-      Alcotest.test_case "datagram close drops the held one" `Quick
+      Alcotest.test_case "a close drops the datagram held back" `Quick
         test_dgram_close_drops_held;
-      Alcotest.test_case "datagram reorder survives a cancelled receive" `Quick
+      Alcotest.test_case "Reorder survives a cancelled receive" `Quick
         test_dgram_reorder_cancelled;
-      Alcotest.test_case "datagram cancelled drop keeps the count" `Quick
+      Alcotest.test_case "a receive cancelled after Drop keeps the count" `Quick
         test_dgram_cancelled_drop_keeps_count;
-      Alcotest.test_case "datagram stall survives a cancelled receive" `Quick
+      Alcotest.test_case "Stall survives a cancelled receive" `Quick
         test_dgram_stall_cancelled;
-      Alcotest.test_case "datagram garble" `Quick test_dgram_garble;
-      Alcotest.test_case "net short reads" `Quick test_net_short_reads;
-      Alcotest.test_case "net connect refused" `Quick test_net_connect_refused;
-      Alcotest.test_case "net connect timeout" `Quick test_net_connect_timeout;
-      Alcotest.test_case "net connect unreachable" `Quick
+      Alcotest.test_case "Garble replaces a datagram with deterministic noise"
+        `Quick test_dgram_garble;
+      Alcotest.test_case "Short cuts the reads of a connected flow" `Quick
+        test_net_short_reads;
+      Alcotest.test_case "Refuse fails a connect with Refused" `Quick
+        test_net_connect_refused;
+      Alcotest.test_case
+        "Timeout fails a connect after 133 s, or 75 s under macOS" `Quick
+        test_net_connect_timeout;
+      Alcotest.test_case "Unreachable fails a connect at once" `Quick
         test_net_connect_unreachable;
-      Alcotest.test_case "net connect stall" `Quick test_net_connect_stall;
-      Alcotest.test_case "net operations" `Quick test_ops;
+      Alcotest.test_case "Stall delays a connect that then connects" `Quick
+        test_net_connect_stall;
+      Alcotest.test_case "the operations f sees name each socket and end" `Quick
+        test_ops;
       Alcotest.test_case "a scan is not a spin" `Quick test_scan_is_not_a_spin;
       Alcotest.test_case "an AF_UNIX reset reaches the survivor only" `Quick
         test_unix_reset_survivor;

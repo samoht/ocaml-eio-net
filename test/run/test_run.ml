@@ -668,60 +668,55 @@ let test_stop_sheds_incomplete_heads () =
     "ok kept\n" !answer;
   check_no_error seen
 
+(* [scaled name f] runs [f n] with 10 and with 100 peers. *)
+let scaled name f =
+  List.map
+    (fun n -> Alcotest.test_case (Fmt.str "%s, %d peers" name n) `Quick (f n))
+    [ 10; 100 ]
+
 let suite =
   ( "run",
     [
       Alcotest.test_case "an aborted accept is followed by the next" `Quick
         test_aborted_accept_is_followed_by_the_next;
-      Alcotest.test_case "10 held connections shed the least progressed" `Quick
-        (pressure_sheds_the_least_progressed `Held 10);
-      Alcotest.test_case "100 held connections shed the least progressed" `Quick
-        (pressure_sheds_the_least_progressed `Held 100);
-      Alcotest.test_case "no descriptor sheds the least progressed of 10" `Quick
-        (pressure_sheds_the_least_progressed `Descriptors 10);
-      Alcotest.test_case "no descriptor sheds the least progressed of 100"
-        `Quick
-        (pressure_sheds_the_least_progressed `Descriptors 100);
-      Alcotest.test_case
-        "10 heads read through a layer shed the least progressed" `Quick
-        (pressure_sheds_the_least_progressed ~server:layered_server `Held 10);
-      Alcotest.test_case
-        "100 heads read through a layer shed the least progressed" `Quick
-        (pressure_sheds_the_least_progressed ~server:layered_server `Held 100);
-      Alcotest.test_case "no descriptor on a second loop sheds of 10" `Quick
-        (descriptors_are_shared_across_loops 10);
-      Alcotest.test_case "no descriptor on a second loop sheds of 100" `Quick
-        (descriptors_are_shared_across_loops 100);
-      Alcotest.test_case "no descriptor sheds no other pool's of 10" `Quick
-        (descriptors_are_not_shared_without_a_pool 10);
-      Alcotest.test_case "no descriptor sheds no other pool's of 100" `Quick
-        (descriptors_are_not_shared_without_a_pool 100);
-      Alcotest.test_case "no descriptor and none held raises" `Quick
-        test_no_descriptor_and_none_held_raises;
-      Alcotest.test_case "no classifier reads the portable errors" `Quick
-        test_no_classifier_reads_the_portable_errors;
-      Alcotest.test_case "each loop reads failures with its classifier" `Quick
-        test_each_loop_reads_failures_with_its_classifier;
-      Alcotest.test_case "a connection ending during its shedding" `Quick
-        test_a_connection_ending_during_its_shedding;
-      Alcotest.test_case "10 complete heads are not shed" `Quick
-        (complete_heads_are_not_shed 10);
-      Alcotest.test_case "100 complete heads are not shed" `Quick
-        (complete_heads_are_not_shed 100);
-      Alcotest.test_case "a failed connection leaves the loop" `Quick
-        test_a_failed_connection_leaves_the_loop;
-      Alcotest.test_case "10 exceptions end their own connections" `Quick
-        (exceptions_end_their_connection 10);
-      Alcotest.test_case "100 exceptions end their own connections" `Quick
-        (exceptions_end_their_connection 100);
-      Alcotest.test_case "a failed connection is logged by default" `Quick
-        test_a_failed_connection_is_logged_by_default;
-      Alcotest.test_case "a malformed peer leaves the loop" `Quick
-        test_a_malformed_peer_leaves_the_loop;
-      Alcotest.test_case "on_error raising ends the loop" `Quick
-        test_on_error_raising_ends_the_loop;
-      Alcotest.test_case "a connection shed after stop is not reported" `Quick
-        test_a_connection_shed_after_stop_is_not_reported;
-      Alcotest.test_case "stop sheds the incomplete heads" `Quick
-        test_stop_sheds_incomplete_heads;
-    ] )
+    ]
+    @ scaled "a full loop sheds the head with the least progress"
+        (pressure_sheds_the_least_progressed `Held)
+    @ scaled "out of descriptors, a loop sheds the head with the least progress"
+        (pressure_sheds_the_least_progressed `Descriptors)
+    @ scaled "a full loop counts the progress of a head read through a layer"
+        (pressure_sheds_the_least_progressed ~server:layered_server `Held)
+    @ scaled
+        "out of descriptors, a loop sheds a head of another loop of its pool"
+        descriptors_are_shared_across_loops
+    @ scaled "out of descriptors, a loop sheds no head of another pool"
+        descriptors_are_not_shared_without_a_pool
+    @ [
+        Alcotest.test_case "no descriptor and none held raises" `Quick
+          test_no_descriptor_and_none_held_raises;
+        Alcotest.test_case "no classifier reads the portable errors" `Quick
+          test_no_classifier_reads_the_portable_errors;
+        Alcotest.test_case "each loop reads failures with its classifier" `Quick
+          test_each_loop_reads_failures_with_its_classifier;
+        Alcotest.test_case "a connection ending during its shedding" `Quick
+          test_a_connection_ending_during_its_shedding;
+      ]
+    @ scaled "a full loop sheds no complete head" complete_heads_are_not_shed
+    @ [
+        Alcotest.test_case "a failed connection leaves the loop" `Quick
+          test_a_failed_connection_leaves_the_loop;
+      ]
+    @ scaled "an exception ends only the connection that raised it"
+        exceptions_end_their_connection
+    @ [
+        Alcotest.test_case "a failed connection is logged by default" `Quick
+          test_a_failed_connection_is_logged_by_default;
+        Alcotest.test_case "a malformed peer leaves the loop" `Quick
+          test_a_malformed_peer_leaves_the_loop;
+        Alcotest.test_case "on_error raising ends the loop" `Quick
+          test_on_error_raising_ends_the_loop;
+        Alcotest.test_case "a connection shed after stop is not reported" `Quick
+          test_a_connection_shed_after_stop_is_not_reported;
+        Alcotest.test_case "stop sheds the incomplete heads" `Quick
+          test_stop_sheds_incomplete_heads;
+      ] )
