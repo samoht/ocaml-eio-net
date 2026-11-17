@@ -46,7 +46,11 @@ let stagger = 0.7
 
 let timed f =
   let t = Mtime_clock.counter () in
-  let r = match f () with () -> "connected" | exception e -> outcome e in
+  let r =
+    match f () with
+    | () -> "connected"
+    | exception ((Unix.Unix_error _ | Eio.Io _) as e) -> outcome e
+  in
   (Mtime.Span.to_float_ns (Mtime_clock.count t) /. 1e9, r)
 
 let unix n addr =
@@ -82,7 +86,7 @@ let () =
         match client with "unix" -> unix | "eio" -> eio | _ -> exit 2
       in
       run (int_of_string n) (target t)
-      |> List.iter (fun (s, r) -> Printf.printf "%.3f,%s\n" s r)
+      |> List.iter (fun (s, r) -> Fmt.pr "%.3f,%s@." s r)
   | _ ->
       prerr_endline "usage: measure (unix | eio) N (full | IP:PORT)";
       exit 2
