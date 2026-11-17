@@ -19,7 +19,7 @@ let plural = Text.plural
 (* A run that makes more operations is a busy loop or too large to check; the
    limit also bounds the trace a run keeps. *)
 let max_ops = 100_000
-let too_large = "a busy loop, or a workload too large for a check"
+let too_large = "a busy loop, or a program too large for a check"
 
 let ops_message =
   Fmt.str "the run made %a network operations, more than a check plans from: %s"
@@ -32,7 +32,7 @@ let in_kind = function
   | `Write -> "a write"
   | `Recv -> "a receive"
 
-(* What a hang adds when the workload's own fiber, [root], waits in no
+(* What a hang adds when the program's own fiber, [root], waits in no
    network operation on other fibers that still run, as a switch whose body
    returned waits on the fibers it forked: those fibers, by what they do. *)
 let waits_on net ~(root : Eio.Private.Trace.id) tids =
@@ -57,7 +57,7 @@ let waits_on net ~(root : Eio.Private.Trace.id) tids =
       in
       let n = List.length others in
       Fmt.str
-        ". The workload's own fiber waits on %d fiber%s still running, as a \
+        ". The program's own fiber waits on %d fiber%s still running, as a \
          switch does once its body returned: %s%s"
         n (plural n)
         (String.concat "; "
@@ -66,7 +66,7 @@ let waits_on net ~(root : Eio.Private.Trace.id) tids =
 
 (* The failure a run reports, from [failed] and its network [wrapped]: a
    limit of the wrapper's first, then, when [waiting] says the run hung, the
-   fibers the workload's [root] waits on. *)
+   fibers the program's [root] waits on. *)
 let explain (s : Plan.scenario) ~wrapped ~root ~waiting ~stopped failed =
   (* A run stopped at a limit says how many of its operations a one-byte
      condition split. *)
@@ -98,7 +98,7 @@ type failure = { stage : stage; error : string; output : int * string }
 (* What a check runs: [setup] before each run, [app], and [inspect] after a
    run with a fault, on a network that follows [os], each process with
    entropy and [Random] drawn from [seed]. *)
-type workload = {
+type program = {
   os : [ `Linux | `Macos ];
   seed : int;
   setup : env -> unit;
@@ -430,10 +430,10 @@ let pp_replay ppf (seed, hash, key) =
 let report ?matched ?diverged ~seed ~hash s trace { stage; error; output } =
   let title, ended =
     match stage with
-    | Run -> ("the workload failed under a fault", None)
+    | Run -> ("the program failed under a fault", None)
     | Inspect e -> ("inspect rejected what the fault left", Some e)
     | Restart e ->
-        ( "the restart failed: the workload, run again with no fault on the \
+        ( "the restart failed: the program, run again with no fault on the \
            same network, did not return",
           Some e )
   in
@@ -533,7 +533,7 @@ let replay_one w ~first ~linear ~hash ~attempt (h, k) =
     if h = hash then None
     else
       Fmt.kstr Option.some
-        "the replay named first run %s, and the workload's is now %s" h hash
+        "the replay named first run %s, and the program's is now %s" h hash
   in
   match scenario w ~first ~linear k with
   | Some s -> ignore (attempt ?matched s : Plan.trace)
@@ -551,7 +551,7 @@ let explore ~budget ~seed ~first ~linear ~attempt =
   if n > budget then
     fail
       "the linear tier needs %d runs, more than the budget of %d, and a check \
-       never passes on a partial one. Shrink the workload, or raise ~budget."
+       never passes on a partial one. Shrink the program, or raise ~budget."
       n budget;
   let others = Plan.others first in
   let rng = Random.State.make [| seed |] in
@@ -599,7 +599,7 @@ let run ?os ?(budget = 2_000) ?(seed = 0) ?replay ?(setup = ignore)
   let first, failed = exec w Plan.none in
   Option.iter (first_failed ~seed ~hash:(digest first) first) failed;
   if first = [] then
-    fail "the workload makes no network operation, so it tests nothing";
+    fail "the program makes no network operation, so it tests nothing";
   (* Runs with no fault differ only through what the check does not
      control: the check goes on, and its failures say so. *)
   let diverged =

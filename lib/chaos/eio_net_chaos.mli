@@ -425,7 +425,7 @@ val pair :
 
 (** {1:exploration Exploration}
 
-    A check runs the workload once with no fault and records its operations. Its
+    A check runs the program once with no fault and records its operations. Its
     scenarios are positions in that run, chosen from its structure.
 
     The structural elements of a sequence are its first three, its last, and the
@@ -464,7 +464,7 @@ val pair :
       only one.
 
     A check never passes on a partial linear tier. One that needs more runs than
-    its budget fails and says so: shrink the workload or raise [~budget]. *)
+    its budget fails and says so: shrink the program or raise [~budget]. *)
 
 (** {1:contracts Contracts}
 
@@ -507,7 +507,7 @@ val pair :
     {b What a check does not catch.} A bug that needs a datagram delayed with
     others, or for longer than 50 ms, may pass: the linear tier delays one
     datagram at a time. A program that never fails the calls still waiting on a
-    connection that died passes unless the workload waits for every call and
+    connection that died passes unless the program waits for every call and
     checks how each ended. A garbled datagram is random bytes, so a parser that
     rejects most noise but accepts some may pass. *)
 
@@ -522,7 +522,7 @@ val pair :
     folded and a long report is cut around its first fault.
 
     The scenario is found by its position and fault, so a replay still runs
-    after a fix that changes the workload's first run, such as the size of its
+    after a fix that changes the program's first run, such as the size of its
     reads: a failure then says the scenario was re-matched, and a re-matched
     replay that passes returns as any passing check does, saying nothing. A
     replay whose scenario the check no longer has fails, and one whose scenario
@@ -565,16 +565,16 @@ val pair :
     on any of the connections a client made to one address. Failures on distinct
     targets, as a scan of many ports makes, do not count together, and an end of
     file is an answer: it counts only against the connection it ended. When
-    every fiber waits and the workload's own fiber is in no network operation,
-    as a switch whose body returned waits on the fibers it forked, the report
-    names up to five of the others by the operation each waits in and the last
-    one it made.
+    every fiber waits and the program's own fiber is in no network operation, as
+    a switch whose body returned waits on the fibers it forked, the report names
+    up to five of the others by the operation each waits in and the last one it
+    made.
 
     A run also stops, and fails, after 10,000,000 turns. A check repeats a run
     hundreds of times, so it cannot check a larger one, and the limit bounds the
     CPU time of each run. If the run took 10,000,000 turns in a row with no wait
     of 1 ms or more, the report calls it a busy loop; otherwise, a busy loop or
-    a workload too large for a check. A run fails the same way after 100,000
+    a program too large for a check. A run fails the same way after 100,000
     connects, accepts, reads, writes and receives, as a check plans from each of
     them, so that the operations it keeps stay bounded. The reads and writes a
     one-byte condition splits do not count: a report of a run stopped while they

@@ -144,12 +144,12 @@ let test_rematched_replay () =
     (Expect.field "faults" again);
   Alcotest.(check string)
     "re-matched"
-    (Fmt.str "the replay named first run %s, and the workload's is now %s"
+    (Fmt.str "the replay named first run %s, and the program's is now %s"
        (hash replay)
        (hash (replay_of again)))
     (Expect.field "matched" again)
 
-(* A replay whose scenario the workload no longer has is refused. *)
+(* A replay whose scenario the program no longer has is refused. *)
 let test_stale_replay () =
   let replay = replay_of (Expect.report (fun () -> mutant ())) in
   let other env =
@@ -227,7 +227,7 @@ let test_restart () =
   then Alcotest.failf "failed with %S" m
 
 let test_nothing () =
-  refused_with "Eio_net_chaos.run: the workload makes no network operation"
+  refused_with "Eio_net_chaos.run: the program makes no network operation"
     (fun () -> Eio_net_chaos.run ignore)
     ()
 
@@ -609,7 +609,7 @@ let test_malformed_replay () =
     [ "net/zzzz/none"; "net/0123456/none"; "net/0123456789/none" ]
 
 (* A client that connects and reads to the server's close for ever, with no
-   failure: the report says the workload looks like a busy loop. *)
+   failure: the report says the program looks like a busy loop. *)
 let test_loop_named () =
   let run () =
     Eio_net_chaos.run @@ fun env ->
@@ -827,7 +827,7 @@ let test_tiny_budget () =
   if not (contains report says) then
     Alcotest.failf "the report does not say %S: %s" says report;
   if contains report "loops for ever" then
-    Alcotest.failf "the report calls the workload a loop: %s" report
+    Alcotest.failf "the report calls the program a loop: %s" report
 
 (* A check keeps no run's operations once it has planned from them: over
    the 1500 runs of a linear tier, each of 300 datagrams, the live words grow
@@ -929,11 +929,11 @@ let busy =
 
 let too_large =
   "the run took 10,000,000 turns, more than a check can repeat: a busy loop, \
-   or a workload too large for a check"
+   or a program too large for a check"
 
 let ops =
   "the run made 100,000 network operations, more than a check plans from: a \
-   busy loop, or a workload too large for a check"
+   busy loop, or a program too large for a check"
 
 (* 200 fibers on a 20 ms heartbeat for 600 s of the clock: six million
    turns, each heartbeat a wait. *)
@@ -1111,7 +1111,7 @@ let systhread () =
 
 (* A server forked with [Fiber.fork] rather than [Fiber.fork_daemon]: once
    the client is done, the switch waits on it for ever. The report names the
-   fiber the workload waits on by what it does. *)
+   fiber the program waits on by what it does. *)
 let test_forgotten_server () =
   let report =
     Expect.report @@ fun () ->
@@ -1129,8 +1129,8 @@ let test_forgotten_server () =
       if not (contains report says) then
         Alcotest.failf "the report does not say %S: %s" says report)
     [
-      "the run hangs: every fiber waits and no timer is due. The workload's \
-       own fiber waits on 1 fiber still running";
+      "the run hangs: every fiber waits and no timer is due. The program's own \
+       fiber waits on 1 fiber still running";
       "a fiber in an accept, last #";
     ]
 
@@ -1239,7 +1239,7 @@ let suite =
         test_report_shows_three;
       Alcotest.test_case "a hang names the fibers a switch waits on" `Quick
         test_forgotten_server;
-      Alcotest.test_case "a workload may run work in a systhread" `Quick
+      Alcotest.test_case "a program may run work in a systhread" `Quick
         (Expect.passes systhread);
       Alcotest.test_case "a replay's hash may be uppercase" `Quick
         test_replay_case;
@@ -1292,7 +1292,7 @@ let suite =
         test_budget;
       Alcotest.test_case "a restarted server needs reuse_addr" `Quick
         test_restart;
-      Alcotest.test_case "a workload with no operation is refused" `Quick
+      Alcotest.test_case "a program with no operation is refused" `Quick
         test_nothing;
       Alcotest.test_case "a program that differs between runs is checked" `Quick
         test_nondeterministic;

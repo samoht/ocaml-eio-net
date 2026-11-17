@@ -1,4 +1,4 @@
-(* What a check is expected to do with a workload. *)
+(* What a check is expected to do with a program. *)
 
 let field name report =
   let prefix = "  " ^ name ^ ":" in
@@ -17,7 +17,7 @@ let report f =
 
 let caught f () =
   let m = report f in
-  if not (String.starts_with ~prefix:"Eio_net_chaos.run: the workload" m) then
+  if not (String.starts_with ~prefix:"Eio_net_chaos.run: the program" m) then
     Alcotest.failf "the check failed for another reason: %s" m
 
 let pinned f () =

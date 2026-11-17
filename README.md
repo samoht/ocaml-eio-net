@@ -70,7 +70,7 @@ server that listens without `~reuse_addr:true` cannot restart:
 # match Eio_net_chaos.run (app ~reuse_addr:false) with
   | () -> print_endline "passed"
   | exception Failure report -> print_endline report;;
-Eio_net_chaos.run: the restart failed: the workload, run again with no fault on the same network, did not return
+Eio_net_chaos.run: the restart failed: the program, run again with no fault on the same network, did not return
   faults:   accept of 1s at 0 is reset
   ended:    the faulty run raised Eio.Io Net Connection_reset Injected_fault (eio-net.chaos)
   error:    Eio.Io Unix_error (Address already in use, "bind", "")

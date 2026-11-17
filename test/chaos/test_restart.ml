@@ -104,7 +104,7 @@ let suite =
         ended_field;
       Alcotest.test_case "setup runs before the first run" `Quick
         (starts "Eio_net_chaos.run: the run with no fault failed" setup_holds);
-      Alcotest.test_case "setup's network is the workload's" `Quick setup_reused;
+      Alcotest.test_case "setup's network is the program's" `Quick setup_reused;
       Alcotest.test_case "inspect runs after a fault" `Quick inspected;
       Alcotest.test_case "inspect that raises fails the check" `Quick
         (starts "Eio_net_chaos.run: inspect rejected what the fault left"
