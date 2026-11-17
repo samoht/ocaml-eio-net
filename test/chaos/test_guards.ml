@@ -589,7 +589,7 @@ let test_report_names_the_cut () =
   let report =
     Expect.report (run ~replay:(Fmt.str "net/%s/write1s@1.reset" h))
   in
-  let cut = "<- moves 1 byte(s), up to where it is reset" in
+  let cut = "<- moves 1 byte, up to where it is reset" in
   if
     not
       (List.exists

@@ -73,6 +73,13 @@ let test_allowances () =
 
 (* A network whose connects are all reset fails, and the report says
    where. *)
+let contains s sub =
+  let n = String.length sub in
+  let rec go i =
+    i + n <= String.length s && (String.sub s i n = sub || go (i + 1))
+  in
+  go 0
+
 let test_broken () =
   Eio_mock.Backend.run_full @@ fun env ->
   let reset (op : Eio_net_chaos.Op.t) =
@@ -85,17 +92,30 @@ let test_broken () =
   | () -> Alcotest.fail "a network that resets every connect passed"
   | exception Failure m ->
       let lines = String.split_on_char '\n' m in
-      let has line =
-        if not (List.mem line lines) then
-          Alcotest.failf "no line %S in:@.%s" line m
-      in
       if
         not
           (String.starts_with ~prefix:"Eio_net_chaos.device: " (List.hd lines))
       then Alcotest.failf "the report starts %S" (List.hd lines);
-      has
-        "  tcp4 accept; connect: expected one of {ok}, got Refused, in 306 \
-         sequences";
+      (* Sequences that differ at the same step with the same answers are
+         one line, with an example. *)
+      let grouped =
+        List.exists
+          (fun l ->
+            String.starts_with
+              ~prefix:"  connect: expected ok, got Refused, in " l
+            && contains l " sequences, e.g. tcp4 "
+            && String.ends_with ~suffix:"connect" l)
+          lines
+      in
+      if not grouped then Alcotest.failf "no grouped connect line in:@.%s" m;
+      (* Answers are named, not given as the traces' tokens. *)
+      List.iter
+        (fun l ->
+          List.iter
+            (fun raw ->
+              if contains l raw then Alcotest.failf "a raw token %S in %S" raw l)
+            [ " blk"; "{blk"; "got Fs"; "got Net"; "got r1"; " r1 " ])
+        lines;
       let last = List.nth lines (List.length lines - 1) in
       if
         not
