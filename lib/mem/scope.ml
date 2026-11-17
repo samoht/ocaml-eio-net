@@ -74,7 +74,12 @@ let behaviours =
             at least 128 bytes, where macOS counts mbufs.");
     both "Accept queue" Modelled;
     both "Routes off loopback" Modelled;
-    both "TIME_WAIT and FIN_WAIT2, on a clock" Modelled;
+    feature "TIME_WAIT and FIN_WAIT2, on a clock" ~linux:Modelled
+      ~macos:
+        (Approximated
+           "The end that closes second frees its port at once, where macOS \
+            holds it until the peer's last ACK arrives, a few milliseconds \
+            over loopback.");
     both "A silent connection, on a clock" Modelled;
   ]
 
