@@ -14,4 +14,5 @@ let () =
       Test_keepalive.suite;
       Test_guards.suite;
       Test_sampling.suite;
+      Test_restart.suite;
     ]
