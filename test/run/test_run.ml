@@ -625,9 +625,10 @@ let test_a_connection_shed_after_stop_is_not_reported () =
       Eio.Promise.resolve release_r ());
   check_no_error seen
 
-(* Once [stop] resolves the loop accepts no more, sheds each connection whose
-   head is incomplete, at once or when it next reads a head, and returns
-   [stop]'s value once the connections it is serving end. *)
+(* Once [stop] resolves the loop closes its listener, so a peer that connects
+   is refused rather than left in a backlog nobody accepts from, sheds each
+   connection whose head is incomplete, at once or when it next reads a head,
+   and returns [stop]'s value once the connections it is serving end. *)
 let test_stop_sheds_incomplete_heads () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -658,6 +659,12 @@ let test_stop_sheds_incomplete_heads () =
       Eio.Promise.resolve stop_r 42;
       settle 3;
       Alcotest.(check int) "both incomplete heads are shed" 2 !stalled;
+      Alcotest.(check bool)
+        "a peer that connects after the stop is refused" true
+        (match Eio.Switch.run (fun csw -> Eio.Net.connect ~sw:csw net addr) with
+        | _ -> false
+        | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) ->
+            true);
       Alcotest.(check (option int))
         "the loop waits for the served" None !returned;
       Eio.Promise.resolve release_r ());
