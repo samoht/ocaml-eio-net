@@ -414,7 +414,7 @@ module Listening_socket = struct
     (match addr with
     | `Tcp (ip, _) ->
         check_local ~os:(Ports.os hub.ports) ~tcp:true ~fail:bind_fail ip
-    | `Unix path -> check_path ~os:(Ports.os hub.ports) ~raw:true path);
+    | `Unix path -> check_path ~os:(Ports.os hub.ports) ~bind:true path);
     match
       Eio.Mutex.use_rw ~protect:true hub.mutex (fun () ->
           bind hub ~reuse_addr ~backlog addr)
@@ -428,19 +428,21 @@ module Listening_socket = struct
      a kernel resets them. A connect that queues one after this is
      refused ([Network.connect]). *)
   let shut t =
-    (* A path taken over is its new listener's to free. A close in a
-       cancelled fiber frees the address all the same: taking the mutex is
-       not cancelled. *)
+    (* A close in a cancelled fiber frees the address all the same: taking
+       the mutex is not cancelled. Eio's backends remove the file at a
+       listener's path as it closes, even one a new listener took over. *)
     Eio.Cancel.protect @@ fun () ->
     Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
-        match Hashtbl.find_opt t.hub.listeners t.addr with
+        (match Hashtbl.find_opt t.hub.listeners t.addr with
         | Some held when held == t -> (
             Hashtbl.remove t.hub.listeners t.addr;
             match (t.addr, t.hold) with
             | `Tcp (_, port), Some h -> Ports.remove t.hub.ports port h
-            | `Tcp _, None -> ()
-            | `Unix path, _ -> Files.leave t.hub.files path Listener)
+            | `Tcp _, None | `Unix _, _ -> ())
         | Some _ | None -> ());
+        match t.addr with
+        | `Unix path -> Files.leave ~remove:true t.hub.files path Listener
+        | `Tcp _ -> ());
     let queued =
       Mutex.protect t.lock @@ fun () ->
       let queued = List.of_seq (Queue.to_seq t.incoming) in
@@ -618,7 +620,7 @@ module Datagram_socket = struct
   let v hub ~reuse addr =
     (match addr with
     | `Udp (ip, _) -> check_local ~os:hub.os ~fail:bind_fail ip
-    | `Unix path -> check_path ~os:hub.os ~raw:true path
+    | `Unix path -> check_path ~os:hub.os ~bind:true path
     | `UdpV4 | `UdpV6 -> ());
     Mutex.protect hub.mutex @@ fun () ->
     let addr : Eio.Net.Sockaddr.datagram =
@@ -998,7 +1000,7 @@ module Datagram_socket = struct
           done;
           List.iter (Hashtbl.add t.hub.sockets t.addr) (List.rev others);
           match (t.addr, t.hold) with
-          | `Unix path, _ -> Files.leave t.hub.files path Datagram
+          | `Unix path, _ -> Files.leave ~remove:true t.hub.files path Datagram
           | `Udp (_, port), Some h -> Ports.remove t.hub.ports port h
           | `Udp _, None -> ());
       Eio.Condition.broadcast t.readable
@@ -1155,23 +1157,7 @@ module Network = struct
       invalid_arg
         "Eio.Net.listen: reuse_port is true, which Eio_net_mem does not support";
     Eio.Switch.check sw;
-    (* eio_posix removes a listener's file when [sw] finishes, and fails to
-       for a path with a NUL, as there is none. *)
-    (match addr with
-    | `Unix path when embedded_nul ~os:Linux path ->
-        Eio.Switch.on_release sw (fun () ->
-            raise (Posix.bind_error (`Unlink path)))
-    | _ -> ());
     let listener = Listening_socket.v t.hub ~reuse_addr ~backlog addr in
-    (* The file a listener leaves goes when the listen's switch finishes, as
-       eio_linux removes it then, closed by hand or not; eio_posix keeps the
-       file of a listener closed by hand. This runs after the close the hooks
-       below make. *)
-    (match listener.addr with
-    | `Unix path ->
-        Eio.Switch.on_release sw (fun () ->
-            Files.leave ~remove:true t.hub.files path Stale)
-    | `Tcp _ -> ());
     let socket = Eio.Resource.T (listener, listening_handler) in
     let close () = Eio.Resource.close socket in
     listener.hooks <-
@@ -1284,7 +1270,11 @@ module Network = struct
             List.find_map
               (fun ip -> Hashtbl.find_opt t.hub.listeners (`Tcp (ip, port)))
               (reaching ip)
-        | `Unix _ -> Hashtbl.find_opt t.hub.listeners addr)
+        (* A listener whose file was removed is out of reach. *)
+        | `Unix path -> (
+            match Files.find t.hub.files ~stream:true path with
+            | Some Listener -> Hashtbl.find_opt t.hub.listeners addr
+            | Some (Datagram | Client | Stale) | None -> None))
 
   (* A connect reaches no broadcast or multicast address, nor one off
      loopback, and a link-local one needs a scope, as on Linux. *)
@@ -1588,9 +1578,9 @@ module Network = struct
      give a Unix address. *)
   let getnameinfo t = function
     | `Unix _ when t.os = Macos ->
-        (* macOS's getnameinfo(3) names no Unix address, and OCaml's [Unix]
-           raises [Not_found] then. *)
-        raise Not_found
+        (* macOS's getnameinfo(3) names no Unix address, and eio_posix
+           raises this then. *)
+        raise (Eio.Net.err (Address_lookup_failed UNKNOWN))
     | `Tcp (ip, port) | `Udp (ip, port) ->
         let lo = Eio.Net.Ipaddr.V4.loopback in
         let host =

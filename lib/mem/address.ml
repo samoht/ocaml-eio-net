@@ -105,8 +105,8 @@ let unanswered (ip : Eio.Net.Ipaddr.v4v6) =
   && (not (same ip (Eio.Net.Ipaddr.V4.loopback :> Eio.Net.Ipaddr.v4v6)))
   && not (lo_broadcast ip)
 
-(* eio_posix raises bind(2)'s errors from [listen] and [datagram_socket] as a
-   raw [Unix.Unix_error], and a [connect]'s as an {!Eio.Io} error. *)
+(* eio_posix raises bind(2)'s errors from [listen] and [datagram_socket]
+   carrying [Eio_unix.Unix_error], and a [connect]'s marked by a code. *)
 let bind_fail code =
   raise
     (Posix.bind_error
@@ -163,17 +163,18 @@ let embedded_nul ~os path =
 
 (* OCaml's [Unix] refuses a path that [sun_path], 108 bytes on Linux and
    104 on macOS, cannot hold with its NUL, and one with a NUL past its first
-   byte with ENOENT, as no file has that name: raw from a bind, as
-   [Eio.Fs.Not_found] from a [connect] or a [send]. macOS binds no empty
-   path, with EINVAL. *)
-let check_path ~os ?(raw = false) path =
+   byte with ENOENT, as no file has that name: eio_posix's error from a
+   bind, [Eio.Fs.Not_found] from a [connect] or a [send]. macOS binds no
+   empty path, with EINVAL. *)
+let check_path ~os ?(bind = false) path =
   if String.length path >= match os with Linux -> 108 | Macos -> 104 then
-    if raw then raise (Posix.bind_error (`Name_too_long path))
+    if bind then raise (Posix.bind_error (`Name_too_long path))
     else fail Name_too_long
   else if embedded_nul ~os path then
-    if raw then raise (Posix.bind_error (`No_file path)) else raise (no_file ())
+    if bind then raise (Posix.bind_error (`No_file path))
+    else raise (no_file ())
   else if os = Macos && path = "" then
-    if raw then raise (Posix.bind_error `Invalid) else fail Invalid_address
+    if bind then raise (Posix.bind_error `Invalid) else fail Invalid_address
 
 let cross_family ~os (src : Eio.Net.Ipaddr.v4v6) (dst : Eio.Net.Ipaddr.v4v6) =
   if String.length (src :> string) <> 16 || String.length (dst :> string) <> 16

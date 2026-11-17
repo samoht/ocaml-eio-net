@@ -10,15 +10,15 @@
 
 (** {1:errors Errors}
 
-    A bind that fails in [listen] or [datagram_socket] raises the raw
-    [Unix.Unix_error] eio_posix raises there, so that one handler serves both:
-    [EADDRINUSE], [EADDRNOTAVAIL] or [EINVAL] from ["bind"], and [ENAMETOOLONG]
-    with the path for a Unix path [sun_path] cannot hold. A socket option the
-    kernel refuses raises the error eio_posix raises ({!section-options}). Every
-    other error is an {!Eio.Io} error marked by one of these codes, unclassified
-    unless the code's doc names its class. Below, "raises {!Closed}" means
-    raises the {!Eio.Io} error marked by {!Closed}, and likewise for each code.
-*)
+    A bind that fails in [listen] or [datagram_socket] raises the {!Eio.Io}
+    error eio_posix raises there, carrying [Eio_unix.Unix_error], so that one
+    handler serves both: [EADDRINUSE], [EADDRNOTAVAIL] or [EINVAL] from
+    ["bind"], and [ENAMETOOLONG] with the path for a Unix path [sun_path] cannot
+    hold. A socket option the kernel refuses raises the error eio_posix raises
+    ({!section-options}). Every other error is an {!Eio.Io} error marked by one
+    of these codes, unclassified unless the code's doc names its class. Below,
+    "raises {!Closed}" means raises the {!Eio.Io} error marked by {!Closed}, and
+    likewise for each code. *)
 
 type Eio.Exn.Backend.t +=
   | Closed
@@ -71,13 +71,12 @@ type Eio.Exn.Backend.t +=
   | No_listener
         (** The backend code carried by the connection failure [connect] raises
             when no listener is bound at a TCP address, or the listener closes
-            while the connection waits for it, or at a Unix path whose socket
-            has closed or that a client is bound at, as a real socket raises
-            [Connection_failure (Refused _)], and of the one a datagram [send]
-            raises at the path of a closed Unix-domain datagram socket, or at an
-            abstract address no socket of its type binds. It is also the code of
-            the [Eio.Fs.Not_found] error a [connect] or a datagram [send] raises
-            at a Unix path no socket binds, which has no file. *)
+            while the connection waits for it, or at a Unix path a client is
+            bound at, as a real socket raises [Connection_failure (Refused _)],
+            and of the one a datagram [send] raises at an abstract address no
+            socket of its type binds. It is also the code of the
+            [Eio.Fs.Not_found] error a [connect] or a datagram [send] raises at
+            a Unix path no socket binds, which has no file. *)
   | Address_in_use
         (** The code of the error a [connect] bound with [bind_to] raises at an
             address a socket holds, or at port 0 when every port of the dynamic
@@ -85,7 +84,7 @@ type Eio.Exn.Backend.t +=
             that fails holds the address it was bound at until its switch
             finishes, as eio_posix keeps its socket there and Linux its address;
             under [`Macos] a TCP one is free at once, as macOS frees it.
-            [listen] and [datagram_socket] raise that one raw
+            [listen] and [datagram_socket] raise eio_posix's error instead
             ({!section-errors}). *)
   | No_destination
         (** The code of the error a UDP [send] without a destination raises, as
@@ -129,7 +128,7 @@ type Eio.Exn.Backend.t +=
   | Address_not_available
         (** The code of the error a [connect] with [bind_to] raises at an IP
             address no interface has, where bind(2) fails with [EADDRNOTAVAIL];
-            [listen] and [datagram_socket] raise that one raw. A [connect]
+            [listen] and [datagram_socket] raise eio_posix's. A [connect]
             without [bind_to] raises it when no port of the dynamic range is
             free toward its destination ({!section-streams}), as connect(2)
             fails on Linux. The network has the loopback interface only: an IPv4
@@ -141,7 +140,7 @@ type Eio.Exn.Backend.t +=
         (** The code of the error raised for a Unix path of 108 bytes or more,
             which Linux's [sun_path] cannot hold with its NUL, where OCaml's
             [Unix] fails with [ENAMETOOLONG]: by [connect], [bind_to] and a
-            datagram [send]. [listen] and [datagram_socket] raise that one raw.
+            datagram [send]. [listen] and [datagram_socket] raise eio_posix's.
         *)
   | Invalid_address
         (** The code of the error a [connect] raises when its socket cannot bind
@@ -150,7 +149,7 @@ type Eio.Exn.Backend.t +=
             Linux, or binds a link-local IPv6 address, or a multicast one of
             interface or link scope, which needs a scope that Eio's addresses do
             not carry, or any IPv6 multicast one; [listen] and [datagram_socket]
-            raise those raw. It is also the code of the one a [connect] raises
+            raise eio_posix's. It is also the code of the one a [connect] raises
             at a link-local address or at the empty Unix path; and of the one a
             datagram [send] raises at an address its socket cannot send to,
             described in {!section-datagrams}. *)
@@ -498,19 +497,19 @@ val pair :
     does not exist, or that it may not write, where a real socket fails with
     [ENOENT] or [EACCES], since modelling them would need the file system the
     path names. A path with a NUL past its first byte names no file, as OCaml's
-    [Unix] refuses it: a [listen] or a [datagram_socket] there raises [ENOENT]
-    raw, a [connect], a [bind_to] or a datagram [send] [Eio.Fs.Not_found]. As on
-    eio_posix, the switch passed to such a [listen] then fails to remove its
-    file, with [ENOENT] too. A path of 108 bytes or more raises [ENAMETOOLONG],
-    or {!Name_too_long} ({!section-errors}).
+    [Unix] refuses it: [listen], [datagram_socket], [connect], [bind_to] and a
+    datagram [send] raise [Eio.Fs.Not_found]. A path of 108 bytes or more raises
+    [ENAMETOOLONG], or {!Name_too_long} ({!section-errors}).
 
     With [reuse_addr], a [listen] at a Unix-domain path, not at an abstract
     address, takes the path over, as Eio's backends remove the socket file there
     before they bind: the listener that held it stays open, and no [connect]
-    reaches it. A listener leaves its file until the switch passed to [listen]
-    finishes, as eio_linux removes it then, and until then a [connect] there is
-    refused and a [listen] there finds it in use; eio_posix keeps the file of a
-    listener closed by hand.
+    reaches it. A listener or a datagram socket removes its file as it closes,
+    by hand or with its switch, as Eio's backends do: a [connect] or a datagram
+    sent there then raises [Eio.Fs.Not_found], and a socket may bind the path
+    again. A listener whose path was taken over removes the new listener's file
+    as it closes, as unlink(2) removes whichever file is there, and no [connect]
+    reaches either.
 
     A listener, a datagram socket or a client bound with [bind_to] at the empty
     path binds an abstract address of its own, a NUL and five hexadecimal
@@ -521,11 +520,6 @@ val pair :
     per socket type, as on Linux: a stream socket and a datagram one may bind
     the same abstract address, and a [connect] or a datagram sent where no
     socket of its type binds raises {!No_listener}.
-
-    A closed Unix-domain datagram socket leaves its path behind, as Eio's
-    backends leave the file: a datagram sent there raises {!No_listener}, and a
-    socket bound there raises [EADDRINUSE], with [reuse_addr] or not, as
-    eio_posix does; eio_linux, given [reuse_addr], removes the file and binds.
 
     {1:resolution Host resolution}
 
@@ -624,7 +618,8 @@ val pair :
       reads it, and any other raises [Address_lookup_failed NONAME].
       inet_aton(3) reads a bare [0x] before the last part as 0. An IPv6 address
       takes any scope after a [%]. [getnameinfo] of a Unix address raises
-      [Not_found], as OCaml's [Unix] does when macOS's getnameinfo(3) fails.
+      [Address_lookup_failed UNKNOWN], as eio_posix does when macOS's
+      getnameinfo(3) fails.
 
     Where macOS's loopback delivers a segment asynchronously, the network
     delivers it at once, as if the next call came after it. *)

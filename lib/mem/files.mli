@@ -1,7 +1,7 @@
 (** The Unix-domain paths that hold a socket file, shared by stream and datagram
     sockets as a file system shares them. A socket's file stays once it closes,
-    as {!Stale}, as Eio's backends leave a datagram socket's file, until it is
-    removed. *)
+    as {!Stale}, as Eio's backends leave the file of a client bound with
+    [bind_to], until it is removed. *)
 
 (** What holds a path. *)
 type kind =
@@ -38,5 +38,6 @@ val bind : t -> ?take_over:bool -> string -> kind -> bool
 
 val leave : ?remove:bool -> t -> string -> kind -> unit
 (** [leave ~remove t path kind] closes the socket of [kind] at [path], which
-    leaves its file, or with [remove], or at an abstract address, takes it away.
+    leaves its file, or at an abstract address takes it away. With [remove] it
+    takes away the file at [path], whichever socket made it, as unlink(2) does.
 *)

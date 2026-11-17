@@ -42,11 +42,13 @@ let bind t ?(take_over = false) path kind =
     true
   end
 
+(* unlink(2) removes the file at a path, whichever socket made it. *)
 let leave ?(remove = false) t path kind =
   let k = key ~stream:(is_stream kind) path in
   Mutex.protect t.mutex @@ fun () ->
   match Hashtbl.find_opt t.files k with
+  | Some _ when remove -> Hashtbl.remove t.files k
   | Some k' when k' = kind ->
-      if remove || abstract path then Hashtbl.remove t.files k
+      if abstract path then Hashtbl.remove t.files k
       else Hashtbl.replace t.files k Stale
   | Some _ | None -> ()

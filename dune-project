@@ -23,8 +23,8 @@
  (tags (eio network framing test))
  (depends
   (hermetic (>= 0.1.0))
-  (ocaml (>= 5.3))
-  (eio (>= 1.6))
+  (ocaml (>= 5.4))
+  (eio (>= 1.7))
   (cstruct (>= 6.0.0))
   fmt
   logs
@@ -38,6 +38,6 @@
   (alcotest (and :with-test (>= 1.7.0)))
   (alcobar :with-test)
   (ohex :with-test)
-  (eio_main :with-test)
-  (eio_posix :with-test)
+  (eio_main (and :with-test (>= 1.7)))
+  (eio_posix (and :with-test (>= 1.7)))
   (mdx (and :with-test (>= 2.3.0)))))

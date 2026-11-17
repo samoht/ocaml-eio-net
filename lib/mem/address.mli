@@ -77,8 +77,8 @@ val unanswered : Eio.Net.Ipaddr.v4v6 -> bool
     and the broadcast one, which macOS's loopback does not take. *)
 
 val bind_fail : Eio.Exn.Backend.t -> 'a
-(** [bind_fail code] raises the raw [Unix.Unix_error] eio_posix raises from
-    [listen] and [datagram_socket] for a bind that fails with [code]. *)
+(** [bind_fail code] raises the error eio_posix raises from [listen] and
+    [datagram_socket] for a bind that fails with [code]. *)
 
 val check_local :
   os:os ->
@@ -90,14 +90,10 @@ val check_local :
     socket meets binding [ip], a TCP one if [tcp], if the loopback interface
     does not have it. [fail] defaults to {!Code.fail}. *)
 
-val embedded_nul : os:os -> string -> bool
-(** [embedded_nul ~os path] is [true] for a path with a NUL past its first byte,
-    or under macOS a NUL anywhere. *)
-
-val check_path : os:os -> ?raw:bool -> string -> unit
-(** [check_path ~os ~raw path] raises the error a socket meets at [path] if
-    [sun_path] cannot hold it, or it names no file: raw from a bind if [raw], an
-    {!Eio.Io} error otherwise. *)
+val check_path : os:os -> ?bind:bool -> string -> unit
+(** [check_path ~os ~bind path] raises the error a socket meets at [path] if
+    [sun_path] cannot hold it, or it names no file: eio_posix's from a bind if
+    [bind], the one marked by a code otherwise. *)
 
 val cross_family :
   os:os ->

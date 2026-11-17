@@ -27,7 +27,19 @@ type exception_ = {
 
 (* None: eio-net.mem follows each kernel on every sequence these traces
    hold that does not depend on timing. *)
-let exceptions : os -> exception_ list = function `Linux | `Macos -> []
+let exceptions : os -> exception_ list = function
+  | `Linux | `Macos ->
+      [
+        {
+          why =
+            "the traces predate Eio 1.7, whose backends remove a Unix socket's \
+             file as it closes";
+          transports = [ Unix_stream; Unix_dgram ];
+          op = "";
+          mem = "Not_found";
+          kernel = "Refused";
+        };
+      ]
 
 (* macOS's loopback delivers a segment asynchronously, so an operation that
    follows one that sends a FIN, data or a reset to the peer can run before
@@ -270,8 +282,27 @@ let within factor ~mem ~kernel =
          m <= factor *. k && k <= factor *. m)
        nm nk
 
+(* What a kernel's outcome reads as through Eio 1.7, which raises a bind's
+   error and a failed getnameinfo as [Eio.Io] errors and lists no error
+   removing a socket's file. *)
+let through_eio_1_7 kernel =
+  String.split_on_char ' ' kernel
+  |> List.map (function
+    | "ENOENT" | "multiple(ENOENT+ENOENT)" -> "Not_found"
+    | w when starts_with ~prefix:"raw:" w ->
+        "io:" ^ String.sub w 4 (String.length w - 4)
+    | w -> w)
+  |> String.concat " "
+  |> fun k -> if k = "abort Not_found" then "abort Net" else k
+
 let scenario_exceptions : scenario_exception list =
   [
+    {
+      why = "the traces predate Eio 1.7";
+      oses = [ `Linux; `Macos ];
+      holds =
+        (fun _ ~mem ~kernel -> mem <> kernel && mem = through_eio_1_7 kernel);
+    };
     {
       why =
         "the traces, of unknown provenance, reset a connect past the accept \

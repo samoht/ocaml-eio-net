@@ -1,1 +1,10 @@
 available: os != "win32"
+# Eio 1.7 (ocaml/opam-repository#31253) and the uring 2.15.1 its eio_linux
+# needs are not on opam yet.
+pin-depends: [
+  ["eio.1.7" "git+https://github.com/ocaml-multicore/eio.git#v1.7"]
+  ["eio_posix.1.7" "git+https://github.com/ocaml-multicore/eio.git#v1.7"]
+  ["eio_main.1.7" "git+https://github.com/ocaml-multicore/eio.git#v1.7"]
+  ["eio_linux.1.7" "git+https://github.com/ocaml-multicore/eio.git#v1.7"]
+  ["uring.2.15.1" "git+https://github.com/ocaml-multicore/ocaml-uring.git#v2.15.1"]
+]

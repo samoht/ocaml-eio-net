@@ -1,4 +1,4 @@
-(** The raw errors eio_posix raises. *)
+(** The errors eio_posix raises. *)
 
 val bind_error :
   [ `In_use
@@ -6,14 +6,12 @@ val bind_error :
   | `Invalid
   | `Family
   | `Name_too_long of string
-  | `No_file of string
-  | `Unlink of string ] ->
+  | `No_file of string ] ->
   exn
-(** [bind_error e] is the [Unix.Unix_error] eio_posix raises for [e]:
+(** [bind_error e] is the {!Eio.Io} error eio_posix raises for [e]:
     [EADDRINUSE], [EADDRNOTAVAIL], [EINVAL] or [EAFNOSUPPORT] from bind(2),
-    [ENAMETOOLONG] for a Unix path [sun_path] cannot hold, [ENOENT] for one with
-    a NUL past its first byte, and [ENOENT] from the unlink(2) of such a path.
-*)
+    [ENAMETOOLONG] for a Unix path [sun_path] cannot hold, and [ENOENT], as
+    [Eio.Fs.Not_found], for one with a NUL past its first byte. *)
 
 val timed_out : [ `Connect | `Read | `Write ] -> exn
 (** [timed_out op] is the [ETIMEDOUT] eio_posix raises for a connect whose
