@@ -1610,6 +1610,23 @@ let test_windows_network () =
   Alcotest.(check string) "Linux" "refused" (second `Linux);
   Alcotest.(check string) "Windows" "ok" (second `Windows)
 
+(* A seeded end's reads move one byte each under [~dribble:1], and the read
+   past [reset_after] bytes meets the reset; the other end meets nothing. *)
+let test_seeded () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let server = Chaos.seeded ~dribble:1 ~reset_after:3 7 in
+  let client, server =
+    Chaos.pair ~clock:env#clock (Chaos.by_side ~client:(fun _ -> None) ~server)
+  in
+  Eio.Flow.copy_string "abcdef" client;
+  let reads = List.init 3 (fun _ -> read1 server) in
+  Alcotest.(check (list string)) "a byte a read" [ "a"; "b"; "c" ] reads;
+  Alcotest.(check bool)
+    "then the reset" true
+    (match read1 server with
+    | _ -> false
+    | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> true)
+
 let suite =
   ( "eio_net_chaos",
     [
@@ -1617,6 +1634,7 @@ let suite =
         test_windows_network;
       Alcotest.test_case "Short cuts each read to its length" `Quick
         test_flow_short;
+      Alcotest.test_case "a seeded end" `Quick test_seeded;
       Alcotest.test_case "tiny buffers never raise macOS's AF_UNIX queue" `Quick
         test_tiny_buffers_macos_unix;
       Alcotest.test_case "a stalled read takes what several writes sent" `Quick
