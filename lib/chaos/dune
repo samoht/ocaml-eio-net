@@ -14,8 +14,10 @@
  (libraries
   hermetic
   eio
+  eio.mock
   eio.unix
   eio-chaos
+  eio-net.addr
   eio-net.mem
   eio_net_kernel
   cstruct

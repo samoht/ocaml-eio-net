@@ -701,6 +701,58 @@ val by_side :
     - a run still going after an hour of its clock fails as a hang: a poll that
       sleeps 1 ms or more between its tries and never ends. *)
 
+(** A listener as the peers it accepts see it: its connection bound, an accept
+    that fails, and peers that connect and stall. *)
+module Listener : sig
+  type net = [ `Generic ] Eio.Net.ty Eio.Resource.t
+
+  val accepted :
+    offered:int -> (net:net -> addr:Eio.Net.Sockaddr.stream -> unit) -> int
+  (** [accepted ~offered serve] runs [serve ~net ~addr] under
+      {!Eio_mock.Backend} on a network whose listener at [addr] has [offered]
+      connections waiting, each from a peer that opens it and never sends a
+      byte, and is how many of them [serve] accepted once every fiber is
+      blocked. A peer that sends nothing holds its connection for good, so the
+      count is what a listener lets that many silent peers make it hold. A
+      [serve] that returns fails the case: a listener serves until it is
+      stopped. *)
+
+  val failing :
+    addr:Eio.Net.Sockaddr.stream ->
+    (unit Eio.Promise.t * exn) list ->
+    [> [ `Generic ] Eio.Net.ty ] Eio.Resource.t ->
+    net
+  (** [failing ~addr failures net] is [net] whose listener at [addr] fails its
+      accepts with each exception of [failures] in turn, once that exception's
+      cue resolves, and otherwise accepts from [net]'s own listener, as a peer
+      that aborts its connection before the accept (ECONNABORTED) or a process
+      with no descriptor left (EMFILE) makes a real accept fail. An accept whose
+      cue is resolved already fails before it waits for a peer. Every other
+      listener, and every connect, is [net]'s. *)
+
+  val failing_unix :
+    addr:Eio.Net.Sockaddr.stream ->
+    (unit Eio.Promise.t * exn) list ->
+    [> [ `Generic | `Unix ] Eio.Net.ty ] Eio.Resource.t ->
+    [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  (** [failing_unix] is {!failing} over a network of the system, whose sockets
+      stay Unix sockets: a listener that reads its peer's credentials off one is
+      served over it. *)
+
+  val stall :
+    sw:Eio.Switch.t ->
+    _ Eio.Net.t ->
+    Eio.Net.Sockaddr.stream ->
+    string ->
+    on_end:(unit -> unit) ->
+    unit
+  (** [stall ~sw net addr data ~on_end] forks a peer under [sw] that connects to
+      [addr], sends [data] and then nothing, reads past whatever it is sent, and
+      calls [on_end ()] once its connection ends, shed or closed by the
+      listener. A peer that sends [""] is silent; one that sends part of a head
+      is stalled partway through it. *)
+end
+
 (**/**)
 
 (* For this package's tests: the allowances of [conformance], those a network's
