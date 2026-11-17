@@ -140,6 +140,21 @@ let test_connected_datagram_send_refused () =
   | exception Eio.Io _ -> ());
   Unix.close fa
 
+(* A datagram too large for the socket's send buffer is refused with
+   EMSGSIZE (send(2)), which no wait for room changes: the send raises it
+   instead of waiting for ever. *)
+let test_connected_datagram_send_too_large () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let fa, fb = Unix.socketpair Unix.PF_UNIX Unix.SOCK_DGRAM 0 in
+  Unix.setsockopt_int fa Unix.SO_SNDBUF 1024;
+  let a = Eio_net_unix.Frame.of_connected_datagram_fd ~sw fa in
+  (match Eio_net.Frame.send a [ Cstruct.of_string (String.make 60000 'x') ] with
+  | () -> Alcotest.fail "a datagram larger than the send buffer went through"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (EMSGSIZE, _, _)), _) -> ());
+  Unix.close fa;
+  Unix.close fb
+
 (* A channel is usable until its switch finishes: a send after that raises
    the error Eio raises for a closed descriptor, as a receive does, and
    nothing reaches the peer. *)
@@ -949,6 +964,8 @@ let suite =
         test_connected_datagram_concurrent_senders;
       Alcotest.test_case "connected datagram send refused" `Quick
         test_connected_datagram_send_refused;
+      Alcotest.test_case "connected datagram too large to send" `Quick
+        test_connected_datagram_send_too_large;
       Alcotest.test_case "connected datagram send after the switch" `Quick
         test_connected_datagram_send_after_switch;
       Alcotest.test_case "offloaded write refused" `Quick
