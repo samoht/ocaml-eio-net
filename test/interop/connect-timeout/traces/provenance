@@ -2,8 +2,8 @@
 # REGEN=1; test/provenance checks it.
 generator: test/interop/connect-timeout/scripts/generate.sh
 regenerate: REGEN=1 dune build @test/interop/connect-timeout/regen-traces
-revision: c84615f26f2e57bf5f012f1ef26cb3aefcb84147, with uncommitted changes to its inputs
-recorded: 2026-11-16T14:14:39Z
+revision: 81a2b8a7d4ad9b7073c3f007c31a49d43d6f0ce1
+recorded: 2026-11-17T00:44:01Z
 uid: 501
 host: Darwin 27.3.0 arm64
 macos: 27.3 (26C5035r)
@@ -43,4 +43,4 @@ linux.net.core.wmem_default: 229376
 linux.net.unix.max_dgram_qlen: 10
 input: scripts/generate.sh b95f6d3b82a0145d18540d0a0524626f
 input: scripts/measure.ml 3753cdaafc63f23aa8cc350516598e8a
-trace: traces/connect.csv cea35c052ccd89f1301eb695a7f7cff2
+trace: traces/connect.csv e320d31bde71009abc07580343924cbd
