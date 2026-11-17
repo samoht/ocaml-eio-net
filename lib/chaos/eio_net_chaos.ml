@@ -626,4 +626,5 @@ let device = Device.check
 module Private = struct
   let device_allowances = Device.allowances
   let device_allowed os net = (Device.replay os net).allowed
+  let device_in_loop = Device.check_in_loop
 end

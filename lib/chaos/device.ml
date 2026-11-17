@@ -380,6 +380,41 @@ let bounded ~timeout f =
 
 let generic net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t)
 
+(* How a sequence gets its network: [run g] is [g net] on a fresh one, or
+   [None] if its event loop hung after [g] began. *)
+type fresh = {
+  run : 'a. ([ `Generic ] Eio.Net.ty Eio.Resource.t -> 'a) -> 'a option;
+}
+
+(* Each sequence in an event loop of its own, on a simulated environment
+   whose network follows [os]. *)
+let simulated os f =
+  let run g =
+    let result = ref None in
+    (match
+       Quiet_mock.run ~effects:{ handle = Posix.systhread } ~limit:3600.
+       @@ fun clock mono_clock _ ->
+       Eio.Switch.run @@ fun sw ->
+       let out = Sim.output () in
+       Sim.with_process ~seed:[| 0 |] out @@ fun () ->
+       let net = lazy (Eio_net_mem.v ~os ~mono:mono_clock ~sw ()) in
+       let env = Sim.v ~net ~clock ~mono_clock ~seed:[| 0; 1 |] out in
+       result := Some (g (generic (f ~sw env)))
+     with
+    | () -> ()
+    | exception
+        Quiet_mock.(
+          Deadlock_detected _ | Time_limit | Busy | Too_long | Stopped) ->
+        ());
+    !result
+  in
+  { run }
+
+(* Each sequence in the caller's event loop, as the host's own sockets
+   need. *)
+let in_loop f =
+  { run = (fun g -> Some (Eio.Switch.run @@ fun sw -> g (generic (f ~sw)))) }
+
 type difference = {
   step : string;
   expected : string;
@@ -398,8 +433,9 @@ type summary = {
    those of [os], if they do. *)
 let sequence os fresh t ops row =
   let got =
-    fresh (fun net ->
+    fresh.run (fun net ->
         bounded ~timeout:[ "timeout" ] (fun () -> K.run net t ops))
+    |> Option.value ~default:[ "timeout" ]
   in
   let rec first i = function
     | [], [] -> None
@@ -424,7 +460,9 @@ let sequence os fresh t ops row =
    [os]. *)
 let scenario os fresh sc ~kernel =
   let given =
-    fresh (fun net -> bounded ~timeout:"timeout" (fun () -> K.scenario net sc))
+    fresh.run (fun net ->
+        bounded ~timeout:"timeout" (fun () -> K.scenario net sc))
+    |> Option.value ~default:"timeout"
   in
   let these = List.filter (fun a -> List.mem os a.oses && a.applies sc) table in
   if same ~expected:kernel given then `Passed
@@ -449,10 +487,9 @@ let out_of_date what ~held ~runs =
        date"
       name held what runs
 
-let replay os f =
+let replay_with os fresh =
   let differed = ref [] and passed = ref 0 in
   let skipped = Hashtbl.create 4 and allowed = Hashtbl.create 16 in
-  let fresh g = Eio.Switch.run @@ fun sw -> g (generic (f ~sw)) in
   let skip why =
     Hashtbl.replace skipped why
       (1 + Option.value ~default:0 (Hashtbl.find_opt skipped why))
@@ -530,11 +567,13 @@ let grouped differed =
 (* A report shows the first [shown_lines] lines, then counts the others. *)
 let shown_lines = 100
 
-let check ?os f =
-  let os : os =
-    match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux
-  in
-  let s = replay os f in
+let os_of : [< os ] option -> os = function
+  | Some `Macos -> `Macos
+  | Some `Linux | None -> `Linux
+
+(* The report of a replay, if anything differed: its first lines, then the
+   summary. *)
+let report os s =
   match s.differed with
   | [] -> ()
   | differed ->
@@ -560,3 +599,16 @@ let check ?os f =
           list ~sep:nop (fun ppf (why, k) ->
               pf ppf "; %a that %s" Text.pp_count k why))
         s.left_out
+
+let replay os f = replay_with os (simulated os f)
+
+(* The caller's Random goes on where it was, whatever the networks drew. *)
+let check ?os f =
+  let os = os_of os in
+  let random = Random.get_state () in
+  Fun.protect ~finally:(fun () -> Random.set_state random) @@ fun () ->
+  report os (replay os f)
+
+let check_in_loop ?os f =
+  let os = os_of os in
+  report os (replay_with os (in_loop f))

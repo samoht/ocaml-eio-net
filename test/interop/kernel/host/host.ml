@@ -11,7 +11,7 @@ let () =
   let os = os () in
   match
     Eio_main.run @@ fun env ->
-    Eio_net_chaos.device ~os (fun ~sw:_ -> Eio.Stdenv.net env)
+    Eio_net_chaos.Private.device_in_loop ~os (fun ~sw:_ -> Eio.Stdenv.net env)
   with
   | () -> print_endline "the host's network passes"
   | exception Failure report ->

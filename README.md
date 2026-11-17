@@ -95,8 +95,8 @@ fresh network and runs on it the sequences of socket operations that were
 recorded on a real Linux and a real macOS kernel:
 
 ```ocaml
-# Eio_mock.Backend.run_full @@ fun env ->
-  Eio_net_chaos.device (fun ~sw -> Eio_net_mem.v ~mono:env#mono_clock ~sw ());;
+# Eio_net_chaos.device (fun ~sw env ->
+      Eio_net_mem.v ~mono:env#mono_clock ~sw ());;
 - : unit = ()
 ```
 

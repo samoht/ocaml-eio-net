@@ -38,30 +38,25 @@ let test_rows () =
        regenerate them"
 
 (* eio-net.mem holds a closed connection's port only on a clock. *)
-let mem os mono ~sw = Eio_net_mem.v ~os ~mono ~sw ()
+let mem os ~sw (env : Eio_net_chaos.env) =
+  Eio_net_mem.v ~os ~mono:env#mono_clock ~sw ()
 
 (* eio-net.mem answers as the kernel it follows. *)
-let test_mem os () =
-  Eio_mock.Backend.run_full @@ fun env ->
-  Eio_net_chaos.device ~os (mem os env#mono_clock)
+let test_mem os () = Eio_net_chaos.device ~os (mem os)
 
 (* A wrapper that injects nothing answers as the network it wraps. *)
 let test_quiet_wrap os () =
-  Eio_mock.Backend.run_full @@ fun env ->
-  Eio_net_chaos.device ~os (fun ~sw ->
-      Eio_net_chaos.wrap ~os ~clock:env#clock
-        (fun _ -> None)
-        (mem os env#mono_clock ~sw))
+  Eio_net_chaos.device ~os (fun ~sw env ->
+      Eio_net_chaos.wrap ~os ~clock:env#clock (fun _ -> None) (mem os ~sw env))
 
 (* Each allowance of the check is one eio-net.mem needs. *)
 let test_allowances () =
   let used =
     List.concat_map
       (fun os ->
-        Eio_mock.Backend.run_full @@ fun env ->
         List.map
           (fun why -> (os, why))
-          (Eio_net_chaos.Private.device_allowed os (mem os env#mono_clock)))
+          (Eio_net_chaos.Private.device_allowed os (mem os)))
       oses
   in
   List.iter
@@ -80,12 +75,11 @@ let contains s sub =
   in
   go 0
 
+let reset (op : Eio_net_chaos.Op.t) =
+  if op.kind = `Connect then Some Eio_net_chaos.Fault.Reset else None
+
 let test_broken () =
-  Eio_mock.Backend.run_full @@ fun env ->
-  let reset (op : Eio_net_chaos.Op.t) =
-    if op.kind = `Connect then Some Eio_net_chaos.Fault.Reset else None
-  in
-  let net ~sw =
+  let net ~sw (env : Eio_net_chaos.env) =
     Eio_net_chaos.wrap ~clock:env#clock reset (Eio_net_mem.v ~sw ())
   in
   match Eio_net_chaos.device net with
@@ -132,11 +126,7 @@ let test_broken () =
    out with the scenarios that depend on timing: whether the reset that
    follows has arrived depends on when the operation runs. *)
 let test_macos_timing () =
-  Eio_mock.Backend.run_full @@ fun env ->
-  let reset (op : Eio_net_chaos.Op.t) =
-    if op.kind = `Connect then Some Eio_net_chaos.Fault.Reset else None
-  in
-  let net ~sw =
+  let net ~sw (env : Eio_net_chaos.env) =
     Eio_net_chaos.wrap ~os:`Macos ~clock:env#clock reset
       (Eio_net_mem.v ~os:`Macos ~sw ())
   in

@@ -154,17 +154,23 @@ val is_outage : < net : [ `Generic ] Eio.Net.ty Eio.Resource.t ; .. > -> bool
 (** {1:network Testing a network} *)
 
 val device :
-  ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
+  ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> env -> _ Eio.Net.t) -> unit
 (** [device ~os net] runs each sequence of socket operations recorded on the
-    kernel of [os] (defaults to [`Linux]) on a fresh network [net ~sw], and
+    kernel of [os] (defaults to [`Linux]) on a fresh network [net ~sw env], and
     compares each answer with the kernel's. [sw] ends with the sequence, so what
     [net] holds under it is released there.
 
+    Each sequence runs in an event loop of its own, as a run of {!run} does,
+    with a {!type-env} of its own whose devices are simulated: a network built
+    on capabilities, such as a userspace stack that needs a clock or entropy for
+    its ports and sequence numbers, takes them from it, and its answers are the
+    same on every run. Its [net] is an in-memory network that follows [os], for
+    a network that carries its traffic over another one, as a tunnel does.
+
     {[
     let check_mem () =
-      Eio_main.run @@ fun env ->
-      let mono = Eio.Stdenv.mono_clock env in
-      Eio_net_chaos.device (fun ~sw -> Eio_net_mem.v ~mono ~sw ())
+      Eio_net_chaos.device (fun ~sw env ->
+          Eio_net_mem.v ~mono:env#mono_clock ~sw ())
     ]}
 
     A network is a whole {!Eio.Net.t}: the two ends of each connection are made
@@ -192,13 +198,12 @@ val device :
     those that wait 60 seconds for a port to be free again, those that use up
     every port, and those that send off the loopback interface; and, under
     [`Macos], those whose answer depends on timing, of which the traces hold one
-    answer. It must be called from an Eio event loop. Unix paths are made in the
-    current directory.
+    answer. Unix paths are made in the current directory.
 
     An operation is "would wait" if it has not completed after 64 turns of the
     event loop, as the recorder took it, and a sequence that has not ended after
-    10,000 turns answers "timeout". A check is as fast as those turns are: under
-    [Eio_mock], eio-net.mem passes in a few seconds.
+    10,000 turns answers "timeout". Each turn takes 1 us of a simulated clock,
+    so eio-net.mem passes in about three seconds.
 
     @raise Failure
       if an answer is outside its set, with one line for each such sequence: its
@@ -586,7 +591,15 @@ module Private : sig
       applies to and why it holds. *)
 
   val device_allowed :
-    [ `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> string list
+    [ `Linux | `Macos ] ->
+    (sw:Eio.Switch.t -> env -> _ Eio.Net.t) ->
+    string list
   (** [device_allowed os net] is why each allowance the answers of [net] needed
       holds, as {!device} replays the traces of [os] on it. *)
+
+  val device_in_loop :
+    ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
+  (** [device_in_loop ~os net] is {!device} with each sequence in the caller's
+      event loop, for the host's own network, which only the host's event loop
+      drives. *)
 end
