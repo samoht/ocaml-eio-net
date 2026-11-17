@@ -1064,9 +1064,15 @@ module Network = struct
               ask_locked ctx Law.Connect ~socket ~side:`Client ~family ~offset
                 ~length:0 ))
       in
+      (* Eio.Net.connect adds the address to an error of the base, and
+         again at the wrapper: the base's context goes, so it appears once. *)
       let go () =
         let sock =
-          (Eio.Net.connect ?bind_to ~options ~sw t.net addr :> stream)
+          match Eio.Net.connect ?bind_to ~options ~sw t.net addr with
+          | sock -> (sock :> stream)
+          | exception Eio.Io (err, _) ->
+              let bt = Printexc.get_raw_backtrace () in
+              Printexc.raise_with_backtrace (Eio.Exn.create err) bt
         in
         let conn = client_conn ctx ~socket ~family sock in
         Flow.resource
