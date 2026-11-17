@@ -590,17 +590,18 @@ let test_local_listen_perm () =
 
 (* A message read to its peer's end of sending comes with the descriptors
    sent beside it, a pipe's write end here, which the reader then writes
-   through; past [max] bytes the read stops, too long. *)
-let test_local_receive () =
+   through; past [max] bytes the read stops, too long. [connect] makes the
+   sender's connection. *)
+let local_receive ~dir ~connect () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let fs = Eio.Stdenv.fs env in
-  let p = Filename.concat (Filename.temp_dir "receive" "") "s" in
+  let p = Filename.concat (dir ()) "s" in
   Eio.Switch.run @@ fun sw ->
   let listening = listen ~sw ~net ~fs p in
   let send message =
     let r, w = Unix.pipe ~cloexec:true () in
-    let flow = Eio.Net.connect ~sw net (`Unix p) in
+    let flow = connect ~sw ~net ~fs p in
     let fds = [ Eio_unix.Fd.of_unix ~sw ~close_unix:true w ] in
     Eio_unix.Net.send_msg flow ~fds [ Cstruct.of_string message ];
     Eio.Flow.shutdown flow `Send;
@@ -627,6 +628,22 @@ let test_local_receive () =
   | Error `Too_long -> ()
   | Ok _ -> Alcotest.fail "read past max");
   Unix.close r
+
+let test_local_receive =
+  local_receive
+    ~dir:(fun () -> Filename.temp_dir "receive" "")
+    ~connect:(fun ~sw ~net ~fs:_ p ->
+      (Eio.Net.connect ~sw net (`Unix p)
+        :> Eio_unix.Net.stream_socket_ty Eio.Resource.t))
+
+(* A connection [Local.connect_at] makes to a path no address holds passes
+   descriptors too. *)
+let test_local_receive_long =
+  local_receive
+    ~dir:(fun () -> deep 200)
+    ~connect:(fun ~sw ~net ~fs p ->
+      (Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / p)
+        :> Eio_unix.Net.stream_socket_ty Eio.Resource.t))
 
 (* A listener reports the path it was given, not the name it was bound by in
    its private directory: a client connects to the address it reports. *)
@@ -940,6 +957,8 @@ let suite =
         test_local_listening_addr;
       Alcotest.test_case "a message and its descriptors" `Quick
         test_local_receive;
+      Alcotest.test_case "descriptors through a long socket path" `Quick
+        test_local_receive_long;
       Alcotest.test_case "a local listener over an existing file" `Quick
         test_local_listen_existing;
       Alcotest.test_case "a local listener at a long path, and released" `Quick

@@ -28,7 +28,7 @@ val connect_at :
   sw:Eio.Switch.t ->
   net:[> [ `Generic | `Unix ] Eio.Net.ty ] Eio.Resource.t ->
   _ Eio.Path.t ->
-  [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
+  [ `Unix_fd | Eio_unix.Net.stream_socket_ty ] Eio.Resource.t
 (** [connect_at ~sw ~net path] connects to the Unix-domain stream socket at
     [path], whatever its length. The directory that holds it is opened through
     [path]'s own capability, which refuses a path that leaves a confined
@@ -55,7 +55,8 @@ val connect_at :
     does, with [Eio.Fs.Not_found]. Other systems refuse with [ENOSYS]. A failure
     is the {!Eio.Io} error {!Eio.Net.connect} raises: a missing socket or
     directory is [Eio.Fs.Not_found], a socket nobody listens on
-    [Eio.Net.Connection_failure (Refused _)].
+    [Eio.Net.Connection_failure (Refused _)]. The connection keeps the Unix
+    platform's type, so that it passes descriptors ({!Eio_unix.Net.send_msg}).
 
     While the listener's backlog is full, a connect on Linux waits for room,
     trying again after a pause of at most 0.1 seconds, and a cancellation, such

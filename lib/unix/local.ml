@@ -89,8 +89,7 @@ let connect_at ~sw ~net:_ path =
     in
     eio (fun () -> attempt 0.001)
   with
-  | () ->
-      (Eio_unix.Net.import_socket_stream ~sw ~close_unix:true sock :> stream)
+  | () -> Eio_unix.Net.import_socket_stream ~sw ~close_unix:true sock
   | exception e ->
       Unix.close sock;
       raise e
