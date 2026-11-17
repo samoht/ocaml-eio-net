@@ -22,9 +22,7 @@ REGEN=1 dune build @test/interop/kernel/regen-traces
 revision, date, user and host, the macOS version, the Linux kernel of Docker's
 VM, the settings the traces depend on (from
 [`scripts/probe.sh`](scripts/probe.sh)), and the MD5 of each trace and of
-`generate.sh` and `record.ml`. Regenerating rewrites it. The current traces
-predate it, so most of their values are unknown; the file says what git
-establishes.
+`generate.sh` and `record.ml`. Regenerating rewrites it.
 
 [`test/provenance`](../../provenance) fails when a trace or a pinned input
 differs from what the file records. The `seq` library is not pinned: the replay

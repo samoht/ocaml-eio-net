@@ -1,9 +1,9 @@
 ops,linux,macos
 three,123 EOF blk EOF x Reset Reset Reset EOF Refused 1 r1,123 EOF blk EOF x Reset Reset Reset EOF Refused 1 r1
 backlog 0,ok blk blk accepted=1 then ok,ok ok ok accepted=3 then ok
-backlog 1,ok ok blk blk accepted=2 then ok,ok Reset Reset Reset accepted=1 then ok
-backlog 2,ok ok ok blk blk accepted=3 then ok,ok ok Reset Reset Reset accepted=2 then ok
-backlog 5,ok ok ok ok ok ok blk blk accepted=6 then ok,ok ok ok ok ok Reset Reset Reset accepted=5 then ok
+backlog 1,ok ok blk blk accepted=2 then ok,ok blk blk blk accepted=1 then ok
+backlog 2,ok ok ok blk blk accepted=3 then ok,ok ok blk blk blk accepted=2 then ok
+backlog 5,ok ok ok ok ok ok blk blk accepted=6 then ok,ok ok ok ok ok blk blk blk accepted=5 then ok
 listen 127.0.0.1,ok,ok
 listen 0.0.0.0,ok,ok
 listen ::1,ok,ok
@@ -1115,9 +1115,9 @@ reuse client closes first,ok ok,EADDRINUSE ok
 reuse connection open,EADDRINUSE EADDRINUSE,EADDRINUSE ok
 reuse no connection,ok ok,ok ok
 reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok
-reuse bound server closes first,ok ok ok,EADDRINUSE EADDRINUSE ok
+reuse bound server closes first,ok ok ok,EADDRINUSE ok ok
 unix paths,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EINVAL,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EAFNOSUPPORT
-bind error shapes,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EINVAL raw:ENAMETOOLONG io:EADDRINUSE,raw:EADDRINUSE raw:EADDRINUSE raw:EADDRNOTAVAIL raw:EAFNOSUPPORT raw:ENAMETOOLONG io:EADDRINUSE
+bind error shapes,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EINVAL io:ENAMETOOLONG io:EADDRINUSE,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EAFNOSUPPORT io:ENAMETOOLONG io:EADDRINUSE
 autobind,abstract6 abstract6 distinct r2,abort EINVAL
 udp reuse two at 127.0.0.1,s0=blk s1=got,abort EADDRINUSE
 udp reuse 0.0.0.0 then 127.0.0.1,s0=blk s1=got,s0=blk s1=got
@@ -1204,14 +1204,14 @@ queued close: relisten with reuse_addr,ok Reset,ok Reset
 queued close: connect bound there,ok Reset,ok Reset
 abstract connect unbound,Refused,Not_found
 abstract send unbound,Refused,Not_found
-abstract send closed,ok Refused,ENOENT Not_found
-abstract connect closed,ok Refused,ENOENT Not_found
-abstract connect at datagram,Refused,ENOENT
-abstract send at listener,Refused,ENOENT
-abstract listen in use,EADDRINUSE EADDRINUSE,ENOENT
-abstract listen at datagram's,ok,ENOENT
-abstract datagram at listener's,ok,ENOENT
-abstract listen after close,ok ok,ENOENT ENOENT
+abstract send closed,ok Refused,Not_found Not_found
+abstract connect closed,ok Refused,Not_found Not_found
+abstract connect at datagram,Refused,Not_found
+abstract send at listener,Refused,Not_found
+abstract listen in use,EADDRINUSE EADDRINUSE,Not_found
+abstract listen at datagram's,ok,Not_found
+abstract datagram at listener's,ok,Not_found
+abstract listen after close,ok ok,Not_found Not_found
 empty path listen twice,abstract6 abstract6 distinct x,EINVAL
 empty path bind_to,abstract6,EINVAL
 empty path connect,EINVAL,EINVAL
@@ -1232,17 +1232,17 @@ getaddrinfo "127.0.0.1%lo" "80",NONAME,NONAME
 getnameinfo tcp ::ffff:127.0.0.1:80,localhost/http,localhost/http
 getnameinfo tcp ::ffff:10.1.2.3:80,::ffff:10.1.2.3/http,::ffff:10.1.2.3/http
 getnameinfo tcp 127.0.0.2:80,127.0.0.2/http,127.0.0.2/http
-getnameinfo unix x.sock,HOSTNAME/x.sock,abort Not_found
+getnameinfo unix x.sock,HOSTNAME/x.sock,abort Net
 getnameinfo tcp ::7f00:1:80,localhost/http,localhost/http
 getnameinfo tcp ::1:0:80,::0.1.0.0/http,::0.1.0.0/http
 getnameinfo tcp ::2:80,::2/http,::2/http
 getnameinfo tcp ::ffff:0:a01:203:80,::ffff:0:a01:203/http,::ffff:0:a01:203/http
-getnameinfo unix abstract,HOSTNAME/,abort Not_found
+getnameinfo unix abstract,HOSTNAME/,abort Net
 failed connect: tcp,Refused EADDRINUSE EADDRINUSE then ok,Refused Refused ok then ok
 failed connect: path,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE
-failed connect: abstract,Refused EADDRINUSE EADDRINUSE then ok,Not_found Not_found ENOENT then ENOENT
-failed connect: abstract to the empty path,EINVAL EADDRINUSE EADDRINUSE then ok,Not_found Not_found ENOENT then ENOENT
-unix path with a NUL,multiple(ENOENT+ENOENT) Not_found ENOENT Not_found Not_found,multiple(ENOENT+ENOENT) Not_found ENOENT Not_found Not_found
+failed connect: abstract,Refused EADDRINUSE EADDRINUSE then ok,Not_found Not_found Not_found then Not_found
+failed connect: abstract to the empty path,EINVAL EADDRINUSE EADDRINUSE then ok,Not_found Not_found Not_found then Not_found
+unix path with a NUL,Not_found Not_found Not_found Not_found Not_found,Not_found Not_found Not_found Not_found Not_found
 wildcard bind: bound at :: after listen 0.0.0.0,ok/EADDRINUSE,ok/ok
 wildcard bind: listen 0.0.0.0 after bound at ::,ok/EADDRINUSE,ok/ok
 wildcard bind: bound at :: after listen 127.0.0.1,ok/EADDRINUSE,ok/EADDRINUSE
@@ -1264,13 +1264,13 @@ dual-stack hold: listen :: client ::1 server closes first,::=EADDRINUSE ::1=EADD
 dual-stack hold: listen :: client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen :: client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
 dual-stack hold: listen :: client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
-dual-stack hold: listen :: client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen :: client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
 dual-stack hold: listen ::1 client ::1 open,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen ::1 client ::1 server closes first,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen ::1 client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen 0.0.0.0 client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
 dual-stack hold: listen 0.0.0.0 client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
-dual-stack hold: listen 0.0.0.0 client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
+dual-stack hold: listen 0.0.0.0 client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE
 unix dgram sndbuf: size=1,sent=299,sent=1920 then ENOBUFS
 unix dgram sndbuf: size=500,sent=180,sent=480 then ENOBUFS
 unix dgram sndbuf: size=1000,sent=100,sent=240 then ENOBUFS
@@ -2296,14 +2296,14 @@ sockopt value: tcp4 listener TCP_WINDOW_CLAMP=0,set=EINVAL get=0,set=Invalid_opt
 sockopt value: tcp4 listener TCP_WINDOW_CLAMP=100,set=ok get=1152,set=Invalid_option get=Invalid_option
 sockopt fill: tcp4 sndbuf=0 rcvbuf=2000,queued=2555846,queued=278528
 sockopt fill: tcp4 sndbuf=0 rcvbuf=10000,queued=2564038,queued=278528
-sockopt fill: tcp4 sndbuf=0 rcvbuf=100000,queued=2689536,queued=363520
+sockopt fill: tcp4 sndbuf=0 rcvbuf=100000,queued=2689536,queued=360448
 sockopt fill: tcp4 sndbuf=2000 rcvbuf=0,queued=89573,queued=17408
 sockopt fill: tcp4 sndbuf=2000 rcvbuf=2000,queued=34789,queued=17408
 sockopt fill: tcp4 sndbuf=2000 rcvbuf=10000,queued=42981,queued=17408
-sockopt fill: tcp4 sndbuf=2000 rcvbuf=100000,queued=130048,queued=82944
-sockopt fill: tcp4 sndbuf=10000 rcvbuf=0,queued=89573,queued=120832
+sockopt fill: tcp4 sndbuf=2000 rcvbuf=100000,queued=130048,queued=17408
+sockopt fill: tcp4 sndbuf=10000 rcvbuf=0,queued=89573,queued=25600
 sockopt fill: tcp4 sndbuf=10000 rcvbuf=2000,queued=34789,queued=25600
-sockopt fill: tcp4 sndbuf=10000 rcvbuf=10000,queued=42981,queued=49152
+sockopt fill: tcp4 sndbuf=10000 rcvbuf=10000,queued=42981,queued=25600
 sockopt fill: tcp4 sndbuf=10000 rcvbuf=100000,queued=130048,queued=25600
 sockopt fill: tcp4 sndbuf=100000 rcvbuf=0,queued=280576,queued=280576
 sockopt fill: tcp4 sndbuf=100000 rcvbuf=2000,queued=198494,queued=231424
@@ -2446,7 +2446,7 @@ off loopback: send ::ffff:10.0.0.1 from ::ffff:127.0.0.1,ENETUNREACH,not recorde
 timed: server closes first,EADDRINUSE ok,EADDRINUSE ok
 timed: server closes first and relisten with reuse_addr,EADDRINUSE ok,ok ok
 timed: server closes first with reuse_addr on both,ok ok,ok ok
-timed: client closes first,ok ok,EADDRINUSE ok
+timed: client closes first,ok ok,ok ok
 timed: server closes and client stays,EADDRINUSE ok,EADDRINUSE ok
 timed: reset by unread bytes,ok ok,ok ok
 timed: bound client closes first,EADDRINUSE/EADDRINUSE ok/ok,EADDRINUSE/EADDRINUSE ok/ok
