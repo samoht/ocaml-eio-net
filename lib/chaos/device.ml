@@ -298,7 +298,7 @@ let timing_dependent name =
 
 (* A TCP sequence that reads or writes after an end shut its receive side
    while bytes or an end of stream were on their way to it, or after bytes
-   went to an end that had shut it. macOS then sends a reset, and whether the
+   went to an end that had shut it or closed. macOS then sends a reset, and whether the
    operation sees it depends on when it runs. A close of the listener before
    the accept shuts the server's end. *)
 let racy ops =
@@ -321,6 +321,7 @@ let racy ops =
             go ~accepted ~shut rest
         | [ "close"; x ] ->
             let shut = shut || pending x in
+            Hashtbl.replace shut_down x ();
             sent x;
             go ~accepted ~shut rest
         | [ "close_listener" ] ->

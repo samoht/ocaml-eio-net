@@ -200,9 +200,9 @@ val device :
     [`Macos], those whose answer depends on timing, of which the traces hold one
     answer: 21 scenarios, and the TCP sequences that read or write after an end
     shut its receive side while bytes or an end of stream were on their way to
-    it, or after bytes went to an end that had shut it, as whether the reset
-    macOS then sends has arrived depends on when the operation runs. Unix paths
-    are made in the current directory.
+    it, or after bytes went to an end that had shut it or closed, as whether the
+    reset macOS then sends has arrived depends on when the operation runs. Unix
+    paths are made in the current directory.
 
     An operation is "would wait" if it has not completed after 64 turns of the
     event loop, as the recorder took it, and a sequence that has not ended after

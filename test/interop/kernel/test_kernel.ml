@@ -123,7 +123,7 @@ let test_broken () =
 
 (* Under macOS, the TCP sequences that read or write after an end shut its
    receive side with bytes or an end of stream on their way to it, or after
-   bytes went to an end that shut it, are left out with the scenarios that
+   bytes went to an end that shut it or closed, are left out with the scenarios that
    depend on timing: whether the reset that follows has arrived depends on
    when the operation runs. *)
 let test_macos_timing () =
