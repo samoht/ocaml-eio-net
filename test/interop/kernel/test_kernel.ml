@@ -139,7 +139,7 @@ let test_macos_timing () =
       if
         not
           (String.ends_with
-             ~suffix:"; 669 that have a macOS answer that depends on timing"
+             ~suffix:"; 733 that have a macOS answer that depends on timing"
              last)
       then Alcotest.failf "the summary is %S" last
 
