@@ -332,28 +332,60 @@ let three net =
   String.concat " "
     ([ order; s2_eof; s1_blk; c1_eof; s3_x ] @ c4s @ [ refused; s3_w; c3_r ])
 
-(* Connects that no accept takes: Linux queues one more than the backlog. *)
+(* Connects that no accept takes: Linux queues one more than the backlog. A
+   connect that waits is closed before the accepts, so that no retry of its
+   SYN reaches the queue they empty; one that connects stays open until the
+   end. *)
 let backlog n net =
   Eio.Switch.run @@ fun sw ->
   let l =
     Eio.Net.listen ~sw ~backlog:n net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
   in
   let addr = Eio.Net.listening_addr l in
+  let closes = ref [] in
   let connect () =
-    outcome (fun () ->
-        ignore (now (fun () -> Eio.Net.connect ~sw net addr));
-        "ok")
+    let result, resolve = Eio.Promise.create () in
+    let close, closed = Eio.Promise.create () in
+    closes := (close, closed) :: !closes;
+    Eio.Fiber.fork ~sw (fun () ->
+        Eio.Fiber.first
+          (fun () ->
+            Eio.Switch.run @@ fun sw ->
+            Eio.Promise.resolve resolve
+              (outcome (fun () ->
+                   ignore (Eio.Net.connect ~sw net addr);
+                   "ok"));
+            Eio.Promise.await close)
+          (fun () -> Eio.Promise.await close));
+    match now (fun () -> Eio.Promise.await result) with
+    | r -> r
+    | exception Blocked ->
+        Eio.Promise.resolve closed ();
+        "blk"
   in
   let connects = List.init (n + 3) (fun _ -> connect ()) in
+  for _ = 1 to 64 do
+    Eio.Fiber.yield ()
+  done;
   let rec drain k =
     match now (fun () -> Eio.Net.accept ~sw l) with
     | _ -> drain (k + 1)
     | exception Blocked -> k
   in
   let accepted = drain 0 in
-  Fmt.str "%s accepted=%d then %s"
-    (String.concat " " connects)
-    accepted (connect ())
+  let last = connect () in
+  List.iter
+    (fun (p, u) ->
+      if not (Eio.Promise.is_resolved p) then Eio.Promise.resolve u ())
+    !closes;
+  Fmt.str "%s accepted=%d then %s" (String.concat " " connects) accepted last
+
+(* A port no socket holds at any address, TIME_WAIT included, as a listen at
+   [::] binds them all: a scenario that uses it at several addresses meets no
+   socket an earlier one left. *)
+let free_port net =
+  Eio.Switch.run @@ fun sw ->
+  port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip "::", 0)))
 
 let listen_at ?(reuse_addr = false) net addr =
   outcome (fun () ->
@@ -547,10 +579,7 @@ let wildcard_bind what order net =
   Eio.Switch.run @@ fun sw ->
   let to6 = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (ip "::1", 0)) in
   let to4 = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (ip "127.0.0.1", 0)) in
-  let p =
-    Eio.Switch.run @@ fun sw ->
-    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip "127.0.0.1", 0)))
-  in
+  let p = free_port net in
   let bound () =
     outcome (fun () ->
         ignore
@@ -1380,12 +1409,7 @@ let unix_self_send net =
    one end first, once the listener closed: what a listen without
    [SO_REUSEADDR] at the listener's port finds at each address. *)
 let dual_hold lst cli which net =
-  (* A port no socket holds at any address, TIME_WAIT included, as a listen
-     at [::] binds them all. *)
-  let p =
-    Eio.Switch.run @@ fun sw ->
-    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip "::", 0)))
-  in
+  let p = free_port net in
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip lst, p)) in
   let c = Eio.Net.connect ~sw net (`Tcp (ip cli, p)) in
@@ -1542,14 +1566,14 @@ let untimed_scenarios : (string * (net -> string)) list =
               (fun (rx, ry) ->
                 ( Fmt.str "listen %s reuse=%b then %s reuse=%b" x rx y ry,
                   fun net ->
+                    let p = free_port net in
                     Eio.Switch.run @@ fun sw ->
                     match
                       Eio.Net.listen ~sw ~reuse_addr:rx ~backlog:1 net
-                        (`Tcp (ip x, 0))
+                        (`Tcp (ip x, p))
                     with
                     | exception e -> classify e
-                    | l -> listen_at ~reuse_addr:ry net (`Tcp (ip y, port_of l))
-                ))
+                    | _ -> listen_at ~reuse_addr:ry net (`Tcp (ip y, p)) ))
               [ (false, false); (true, true) ])
           [ "127.0.0.1"; "0.0.0.0"; "::1"; "::"; "127.0.0.2" ])
       [ "127.0.0.1"; "0.0.0.0"; "::1"; "::"; "127.0.0.2" ]
