@@ -21,30 +21,26 @@ let stagger = 0.7
 let settle = 0.5
 
 let outcome = function
-  | Unix.Unix_error (e, _, _) -> (
-      match e with
-      | ETIMEDOUT -> "ETIMEDOUT"
-      | EPIPE -> "EPIPE"
-      | ECONNRESET -> "ECONNRESET"
-      | e -> String.map (function ',' -> ' ' | c -> c) (Unix.error_message e))
-  | e ->
-      String.map (function ',' | '\n' -> ' ' | c -> c) (Printexc.to_string e)
+  | Unix.ETIMEDOUT -> "ETIMEDOUT"
+  | EPIPE -> "EPIPE"
+  | ECONNRESET -> "ECONNRESET"
+  | e -> String.map (function ',' -> ' ' | c -> c) (Unix.error_message e)
 
 let read c =
   match Unix.read c (Bytes.create 16) 0 16 with
   | 0 -> "eof"
   | _ -> "data"
-  | exception e -> outcome e
+  | exception Unix.Unix_error (e, _, _) -> outcome e
 
 let write c =
   match Unix.single_write_substring c "x" 0 1 with
   | _ -> "ok"
-  | exception e -> outcome e
+  | exception Unix.Unix_error (e, _, _) -> outcome e
 
 let rec fill c chunk =
   match Unix.single_write c chunk 0 (Bytes.length chunk) with
   | _ -> fill c chunk
-  | exception e -> outcome e
+  | exception Unix.Unix_error (e, _, _) -> outcome e
 
 (* A connection and its accepted end, which stays open until the run ends. *)
 let connection () =
@@ -80,7 +76,7 @@ let run case c =
   let r1 = read c in
   let w = write c in
   let r2 = read c in
-  Printf.sprintf "%s,%.3f,%s,%s,%s,%s" case seconds first r1 w r2
+  Fmt.str "%s,%.3f,%s,%s,%s,%s" case seconds first r1 w r2
 
 let () =
   match Sys.argv with
