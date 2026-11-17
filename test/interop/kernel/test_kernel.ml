@@ -37,21 +37,23 @@ let test_rows () =
       "the scenario traces hold other scenarios than Eio_net_kernel's: \
        regenerate them"
 
-let mem os ~sw = Eio_net_mem.v ~os ~sw ()
+(* eio-net.mem holds a closed connection's port only on a clock. *)
+let mem os mono ~sw = Eio_net_mem.v ~os ~mono ~sw ()
 
 (* eio-net.mem answers as the kernel it follows. *)
 let test_mem os () =
-  Eio_mock.Backend.run @@ fun () -> Eio_net_chaos.device ~os (mem os)
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio_net_chaos.device ~os (mem os env#mono_clock)
 
 (* Each allowance of the check is one eio-net.mem needs. *)
 let test_allowances () =
   let used =
     List.concat_map
       (fun os ->
-        Eio_mock.Backend.run @@ fun () ->
+        Eio_mock.Backend.run_full @@ fun env ->
         List.map
           (fun why -> (os, why))
-          (Eio_net_chaos.Private.device_allowed os (mem os)))
+          (Eio_net_chaos.Private.device_allowed os (mem os env#mono_clock)))
       oses
   in
   List.iter
@@ -83,7 +85,9 @@ let test_broken () =
         not
           (String.starts_with ~prefix:"Eio_net_chaos.device: " (List.hd lines))
       then Alcotest.failf "the report starts %S" (List.hd lines);
-      has "  tcp4 connect: expected one of {ok}, got Refused";
+      has
+        "  tcp4 accept; connect: expected one of {ok}, got Refused, in 306 \
+         sequences";
       let last = List.nth lines (List.length lines - 1) in
       if
         not

@@ -114,7 +114,7 @@ let explain (s : Plan.scenario) ~wrapped ~root ~waiting ~stopped failed =
 
 (* Where a run failed: in itself, in [inspect] after it, or in the restart
    that follows it, with what the run with a fault raised, if anything. *)
-type stage = In_run | In_inspect of exn option | In_restart of exn option
+type stage = Run | Inspect of exn option | Restart of exn option
 type failure = { stage : stage; error : string }
 
 (* What a check runs: [setup] before each run, [app], and [inspect] after a
@@ -137,6 +137,37 @@ let rec indeterminate = function
    fault, [inspect] and [app] again on the same network, healed: why it
    failed if it did. [observe] sees each operation of the run with the fault
    and the fault it met. *)
+(* How a run's own loop ended: why it failed, if it did, the fibers that
+   waited if it hung, and whether it stopped at a limit. *)
+type ended = {
+  failed : string option;
+  waiting : Eio.Private.Trace.id list option;
+  stopped : bool;
+}
+
+let in_loop main =
+  let failed ?waiting ?(stopped = false) msg =
+    { failed = Some msg; waiting; stopped }
+  in
+  match
+    Quiet_mock.run ~effects:{ handle = Posix.systhread } ~limit:3600. main
+  with
+  | () -> { failed = None; waiting = None; stopped = false }
+  | exception Quiet_mock.Deadlock_detected tids ->
+      failed ~waiting:tids
+        "the run hangs: every fiber waits and no timer is due"
+  | exception Quiet_mock.Time_limit ->
+      failed "the run hangs: it is still running after an hour of its clock"
+  | exception Quiet_mock.Busy ->
+      Fmt.kstr (failed ~stopped:true)
+        "the run woke %a times without waiting 1 ms or more: a busy loop" count
+        Quiet_mock.max_turns
+  | exception Quiet_mock.Too_long ->
+      Fmt.kstr (failed ~stopped:true)
+        "the run took %a turns, more than a check can repeat: %s" count
+        Quiet_mock.max_turns too_large
+  | exception x -> failed (Printexc.to_string x)
+
 let exec_with w ~observe (s : Plan.scenario) =
   let os = w.os in
   let faulty = s <> Plan.none in
@@ -146,9 +177,8 @@ let exec_with w ~observe (s : Plan.scenario) =
     observe op fault;
     fault
   in
-  let wrapped = ref None and stopped = ref false in
-  let root = ref None and waiting = ref None in
-  let stage = ref In_run and healed = ref false in
+  let wrapped = ref None and root = ref None in
+  let stage = ref Run and healed = ref false in
   (* Tiny buffers lower each connection's queue to 32 KiB, or keep the
      kernel's default for its family if that is smaller, until the network
      heals. *)
@@ -158,58 +188,38 @@ let exec_with w ~observe (s : Plan.scenario) =
         fun c -> if !healed then c else Int.min Plan.tiny_buffer c
     | _ -> Fun.id
   in
-  let failed =
-    match
-      Quiet_mock.run ~effects:{ handle = Posix.systhread } ~limit:3600.
-      @@ fun clock mono_clock charge ->
-      root :=
-        Some
-          (Eio.Private.Fiber_context.tid
-             (Effect.perform Eio.Private.Effects.Get_context));
-      Eio.Switch.run @@ fun sw ->
-      let base = Eio_net_mem.Private.v ~os ~capacity ~mono:mono_clock ~sw () in
-      let quiet () =
-        Wrapper.v ~os ~max_ops ~charge ~clock ~outage:false (fun _ -> None) base
-      in
-      w.setup (env (quiet ()) clock mono_clock);
-      let net =
-        Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
-          ~outage:(s.lasting = Some Outage) f base
-      in
+  let ended =
+    in_loop @@ fun clock mono_clock charge ->
+    root :=
+      Some
+        (Eio.Private.Fiber_context.tid
+           (Effect.perform Eio.Private.Effects.Get_context));
+    Eio.Switch.run @@ fun sw ->
+    let base = Eio_net_mem.Private.v ~os ~capacity ~mono:mono_clock ~sw () in
+    let quiet () =
+      Wrapper.v ~os ~max_ops ~charge ~clock ~outage:false (fun _ -> None) base
+    in
+    w.setup (env (quiet ()) clock mono_clock);
+    let net =
+      Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
+        ~outage:(s.lasting = Some Outage) f base
+    in
+    wrapped := Some net;
+    let restart ended =
+      healed := true;
+      let net = quiet () in
       wrapped := Some net;
-      let restart ended =
-        healed := true;
-        let net = quiet () in
-        wrapped := Some net;
-        stage := In_inspect ended;
-        w.inspect (env net clock mono_clock);
-        stage := In_restart ended;
-        w.app (env net clock mono_clock)
-      in
-      match w.app (env net clock mono_clock) with
-      | () -> if faulty then restart None
-      | exception x when faulty && indeterminate x -> restart (Some x)
-    with
-    | () -> None
-    | exception Quiet_mock.Deadlock_detected tids ->
-        waiting := Some tids;
-        Some "the run hangs: every fiber waits and no timer is due"
-    | exception Quiet_mock.Time_limit ->
-        Some "the run hangs: it is still running after an hour of its clock"
-    | exception Quiet_mock.Busy ->
-        stopped := true;
-        Fmt.kstr Option.some
-          "the run woke %a times without waiting 1 ms or more: a busy loop"
-          count Quiet_mock.max_turns
-    | exception Quiet_mock.Too_long ->
-        stopped := true;
-        Fmt.kstr Option.some
-          "the run took %a turns, more than a check can repeat: %s" count
-          Quiet_mock.max_turns too_large
-    | exception x -> Some (Printexc.to_string x)
+      stage := Inspect ended;
+      w.inspect (env net clock mono_clock);
+      stage := Restart ended;
+      w.app (env net clock mono_clock)
+    in
+    match w.app (env net clock mono_clock) with
+    | () -> if faulty then restart None
+    | exception x when faulty && indeterminate x -> restart (Some x)
   in
-  explain s ~wrapped:!wrapped ~root:!root ~waiting:!waiting ~stopped:!stopped
-    failed
+  explain s ~wrapped:!wrapped ~root:!root ~waiting:ended.waiting
+    ~stopped:ended.stopped ended.failed
   |> Option.map (fun error -> { stage = !stage; error })
 
 (* The operations of a run a report shows: all of them, or, for a lasting
@@ -401,9 +411,9 @@ let pp_trace rules ppf { head; left_out; tail } =
 let report ?matched ~hash s trace { stage; error } =
   let title, ended =
     match stage with
-    | In_run -> ("the workload failed under a fault", None)
-    | In_inspect e -> ("inspect rejected what the fault left", Some e)
-    | In_restart e ->
+    | Run -> ("the workload failed under a fault", None)
+    | Inspect e -> ("inspect rejected what the fault left", Some e)
+    | Restart e ->
         ( "the restart failed: the workload, run again with no fault on the \
            same network, did not return",
           Some e )
@@ -590,9 +600,9 @@ let run ?os ?(budget = 2_000) ?(seed = 0) ?replay ?(setup = ignore)
   | Some r -> replay_one w ~first ~linear ~hash ~attempt r
   | None -> explore ~budget ~seed ~first ~linear ~attempt
 
-let device ?os:_ _ = failwith "Eio_net_chaos.device: not implemented"
+let device = Device.check
 
 module Private = struct
-  let device_allowances = []
-  let device_allowed _ _ = []
+  let device_allowances = Device.allowances
+  let device_allowed os net = (Device.replay os net).allowed
 end

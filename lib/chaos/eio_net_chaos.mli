@@ -137,9 +137,10 @@ val device :
     [net] holds under it is released there.
 
     {[
-    let () =
-      Eio_main.run @@ fun _ ->
-      Eio_net_chaos.device (fun ~sw -> Eio_net_mem.v ~sw ())
+    let check_mem () =
+      Eio_main.run @@ fun env ->
+      let mono = Eio.Stdenv.mono_clock env in
+      Eio_net_chaos.device (fun ~sw -> Eio_net_mem.v ~mono ~sw ())
     ]}
 
     A network is a whole {!Eio.Net.t}: the two ends of each connection are made
@@ -158,10 +159,11 @@ val device :
     passes iff it is in the set. Errors compare by the class Eio gives them
     ([Connection_reset], [Connection_failure], [Not_found]), else by their
     errno, and an error of a backend that carries no errno is any error.
-    {!Eio_net_mem.v} passes for the [os] it is given.
+    {!Eio_net_mem.v} passes for the [os] it is given, on a [mono] clock, which
+    it needs to hold a closed connection's port.
 
-    [device] runs every sequence, whatever the earlier ones answered. In a
-    sequence it stops at the first answer outside its set, as the later ones
+    [device] runs every sequence, whatever the earlier ones answered. Of a
+    sequence it reports the first answer outside its set only, as the later ones
     depend on it. It leaves out the sequences only a prepared host can answer:
     those that wait 60 seconds for a port to be free again, those that use up
     every port, and those that send off the loopback interface; and, under
@@ -169,13 +171,19 @@ val device :
     answer. It must be called from an Eio event loop. Unix paths are made in the
     current directory.
 
+    An operation is "would wait" if it has not completed after 64 turns of the
+    event loop, as the recorder took it, and a sequence that has not ended after
+    10,000 turns answers "timeout". A check is as fast as those turns are: under
+    [Eio_mock], eio-net.mem passes in a few seconds.
+
     @raise Failure
       if an answer is outside its set, with one line for each such sequence: its
       operations up to the one that differs, the answers allowed and the one
       given, as
       [tcp4 connect; accept; close C; read S 1: expected one of {EOF}, got would
-       wait]; then how many passed, differed and were left out, and why. Past
-      the first hundred lines it gives the count alone. *)
+       wait], with how many sequences gave the same line; then how many passed,
+      differed and were left out, and why. Past the first hundred lines it gives
+      the count alone. *)
 
 (** {1:blocks Building blocks} *)
 
@@ -550,7 +558,11 @@ val pair :
    network's answers needed. *)
 module Private : sig
   val device_allowances : ([ `Linux | `Macos ] * string) list
+  (** [device_allowances] is each allowance of {!device}, by the kernel it
+      applies to and why it holds. *)
 
   val device_allowed :
     [ `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> string list
+  (** [device_allowed os net] is why each allowance the answers of [net] needed
+      holds, as {!device} replays the traces of [os] on it. *)
 end

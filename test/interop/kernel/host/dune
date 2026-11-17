@@ -1,0 +1,8 @@
+(executable
+ (name host)
+ (libraries eio-net.chaos eio eio_main unix))
+
+(rule
+ (alias host-device)
+ (action
+  (run %{exe:host.exe})))

@@ -1,13 +1,23 @@
 (library
  (name eio_net_chaos)
  (public_name eio-net.chaos)
- (private_modules op fault law wrapper plan quiet_mock posix)
+ (private_modules
+  op
+  fault
+  law
+  wrapper
+  plan
+  quiet_mock
+  posix
+  device
+  device_traces)
  (libraries
   hermetic
   eio
   eio.utils
   eio.unix
   eio-net.mem
+  eio_net_kernel
   cstruct
   fmt
   mtime
@@ -15,7 +25,22 @@
   domain-local-await
   unix))
 
+(rule
+ (target device_traces.ml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    %{exe:gen/gen.exe}
+    tcp4=%{dep:../../test/interop/kernel/traces/tcp4.csv}
+    tcp6=%{dep:../../test/interop/kernel/traces/tcp6.csv}
+    unix-stream=%{dep:../../test/interop/kernel/traces/unix-stream.csv}
+    udp4=%{dep:../../test/interop/kernel/traces/udp4.csv}
+    udp6=%{dep:../../test/interop/kernel/traces/udp6.csv}
+    unix-dgram=%{dep:../../test/interop/kernel/traces/unix-dgram.csv}
+    scenarios=%{dep:../../test/interop/kernel/traces/scenarios.csv}))))
+
 (mdx
  (package eio-net)
  (files eio_net_chaos.mli)
- (libraries eio-net.chaos))
+ (libraries eio eio.unix eio-net.chaos eio-net.mem eio_main))

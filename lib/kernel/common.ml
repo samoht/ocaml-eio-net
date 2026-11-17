@@ -46,9 +46,7 @@ let rec classify = function
   | Eio.Io (Eio.Fs.E _, _) -> "Fs"
   | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (e, _, _)), _) -> errno e
   | Eio.Io (Eio.Exn.X b, _) -> (
-      match mem_errno b with
-      | Some e -> e
-      | None -> Fmt.str "%a" Eio.Exn.Backend.pp b)
+      match mem_errno b with Some e -> e | None -> "error")
   | Unix.Unix_error (e, _, _) -> errno e
   | End_of_file -> "EOF"
   | Invalid_argument _ -> "Invalid_argument"

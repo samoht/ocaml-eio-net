@@ -9,7 +9,9 @@ val mem_errno : Eio.Exn.Backend.t -> string option
     for, or is [None] for a code of another backend. *)
 
 val classify : exn -> string
-(** [classify e] names the error [e], whichever backend raised it. *)
+(** [classify e] names the error [e], whichever backend raised it: by its class
+    in Eio, else by its errno, else as ["error"] for an error of a backend that
+    carries none. *)
 
 exception Blocked
 (** Raised by {!now} for an operation that would wait. *)

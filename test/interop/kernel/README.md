@@ -1,9 +1,16 @@
 # Kernel traces
 
 `traces/*.csv` hold what Linux and macOS answer to every operation sequence
-and scenario of [`Eio_net_kernel`](../../../lib/kernel/eio_net_kernel.mli), recorded through
-`eio_posix`: one row per sequence, a column per kernel. The test replays each
-row on `eio-net.mem` and compares.
+and scenario of [`Eio_net_kernel`](../../../lib/kernel/eio_net_kernel.mli),
+recorded through `eio_posix`: one row per sequence, a column per kernel.
+`eio-net.chaos` compiles them in, with
+[`lib/chaos/gen`](../../../lib/chaos/gen/gen.ml), and `Eio_net_chaos.device`
+replays them on any network. The test runs it on `eio-net.mem`, and
+[`host`](host) on the host's own network:
+
+```sh
+dune build @test/interop/kernel/host/host-device
+```
 
 [`scripts/generate.sh`](scripts/generate.sh) records them on a Mac: macOS
 natively, and Linux in Docker, in the `ocaml/opam` image it pins by digest,
