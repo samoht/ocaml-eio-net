@@ -66,7 +66,8 @@ let free clock net addr =
       Eio.Switch.run @@ fun sw -> Eio.Net.listen ~sw ~backlog:1 net addr
     with
     | _ -> Fmt.str "free at %.0f s" (secs clock)
-    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+    | exception
+        Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _) ->
         if secs clock >= 300. then "held"
         else (
           Eio.Time.Mono.sleep clock 1.;

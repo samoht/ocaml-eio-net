@@ -267,7 +267,9 @@ let test_listen_on_an_address_in_use () =
   let listener = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
   let in_use addr =
     match Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr with
-    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
+    | exception
+        Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _) ->
+        ()
     | _ -> Alcotest.failf "listened twice at %a" Eio.Net.Sockaddr.pp addr
   in
   in_use addr;
@@ -313,7 +315,9 @@ let test_listen_on_a_unix_path_in_use () =
   let addr = `Unix "/tmp/in-use.sock" in
   ignore (Eio.Net.listen ~sw ~backlog:1 net addr);
   (match Eio.Net.listen ~sw ~backlog:1 net addr with
-  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ()
   | _ -> Alcotest.fail "listened twice at a Unix path");
   let second = Eio.Net.listen ~sw ~backlog:1 ~reuse_addr:true net addr in
   Eio.Fiber.both
@@ -444,20 +448,25 @@ let test_client_port_is_free () =
   | _, `Tcp (_, 65535) -> Alcotest.fail "the peer holds the listener's port"
   | _ -> ()
 
-(* A Unix-domain listener closed by hand leaves its path until the switch it
-   listened under finishes, as eio_linux removes the file then; eio_posix
-   keeps it. *)
-let test_listener_path_freed_at_switch_end () =
+(* A Unix-domain listener closed by hand removes its file at once, as Eio's
+   backends do: a connect there finds no file, and a listen there binds. A
+   listener whose path another took over removes that one's file. *)
+let test_listener_path_freed_on_close () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio_net_mem.v ~sw () in
   let addr = `Unix "/tmp/hand.sock" in
-  Eio.Switch.run (fun lsw ->
-      Eio.Net.close (Eio.Net.listen ~sw:lsw ~backlog:1 net addr);
-      match Eio.Net.listen ~sw:lsw ~backlog:1 net addr with
-      | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
-      | _ -> Alcotest.fail "listened at a path whose file is still there");
-  ignore (Eio.Net.listen ~sw ~backlog:1 net addr)
+  let no_file () =
+    match Eio.Net.connect ~sw net addr with
+    | exception Eio.Io (Eio.Fs.E (Not_found _), _) -> ()
+    | _ -> Alcotest.fail "connected to a path whose file is gone"
+  in
+  Eio.Net.close (Eio.Net.listen ~sw ~backlog:1 net addr);
+  no_file ();
+  let first = Eio.Net.listen ~sw ~backlog:1 net addr in
+  ignore (Eio.Net.listen ~sw ~reuse_addr:true ~backlog:1 net addr);
+  Eio.Net.close first;
+  no_file ()
 
 (* A connect bound to a local address holds it: the listener sees that
    address as the peer's, with a port of the dynamic range for port 0. *)
@@ -903,9 +912,11 @@ let test_macos_unix () =
   let raised f =
     match f () with
     | _ -> "ok"
-    | exception Unix.Unix_error (e, _, _) -> Unix.error_message e
-    | exception Not_found -> "Not_found"
-    | exception Eio.Io _ -> "io"
+    | (exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (e, _, _)), _))
+    | (exception
+        Eio.Io (Eio.Fs.E (Not_found (Eio_unix.Unix_error (e, _, _))), _)) ->
+        Unix.error_message e
+    | exception Eio.Io (Eio.Net.E (Address_lookup_failed _), _) -> "lookup"
   in
   Alcotest.(check string)
     "abstract"
@@ -916,7 +927,59 @@ let test_macos_unix () =
     (Unix.error_message Unix.EINVAL)
     (raised (fun () -> Eio.Net.listen ~sw ~backlog:1 net (`Unix "")));
   Alcotest.(check string)
-    "getnameinfo" "Not_found"
+    "getnameinfo" "lookup"
+    (raised (fun () -> Eio.Net.getnameinfo net (`Unix "x.sock")))
+
+(* A bind that fails in [listen] or [datagram_socket] raises the [Eio.Io]
+   error eio_posix raises, as does a [getnameinfo] that macOS fails. *)
+let test_bind_errors () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let raised f =
+    match f () with
+    | _ -> "ok"
+    | exception Unix.Unix_error (e, call, _) ->
+        Fmt.str "raw %s %S" (Unix.error_message e) call
+    | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (e, call, _)), _) ->
+        Fmt.str "io %s %S" (Unix.error_message e) call
+    | exception Eio.Io (Eio.Fs.E (Not_found (Eio_unix.Unix_error (e, _, _))), _)
+      ->
+        Fmt.str "not found %s" (Unix.error_message e)
+    | exception Eio.Io (Eio.Net.E (Address_lookup_failed e), _) ->
+        Fmt.str "lookup %s" (Eio.Net.Getaddrinfo_error.to_tag e)
+  in
+  let message e = Unix.error_message e in
+  List.iter
+    (fun os ->
+      let net = Eio_net_mem.v ~os ~sw () in
+      let lo = Eio.Net.Ipaddr.V4.loopback in
+      let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 0)) in
+      let d = Eio.Net.datagram_socket ~sw net (`Udp (lo, 9400)) in
+      ignore d;
+      let in_switch f () = Eio.Switch.run (fun sw -> ignore (f sw)) in
+      Alcotest.(check (list string))
+        "bind errors"
+        [
+          Fmt.str "io %s \"bind\"" (message EADDRINUSE);
+          Fmt.str "io %s \"bind\"" (message EADDRINUSE);
+          Fmt.str "io %s \"\"" (message ENAMETOOLONG);
+          Fmt.str "not found %s" (message ENOENT);
+        ]
+        (List.map raised
+           [
+             in_switch (fun sw ->
+                 Eio.Net.listen ~sw ~backlog:1 net (Eio.Net.listening_addr l));
+             in_switch (fun sw ->
+                 Eio.Net.datagram_socket ~sw net (`Udp (lo, 9400)));
+             in_switch (fun sw ->
+                 Eio.Net.listen ~sw ~backlog:1 net (`Unix (String.make 120 'z')));
+             in_switch (fun sw ->
+                 Eio.Net.listen ~sw ~backlog:1 net (`Unix "a\000b"));
+           ]))
+    [ `Linux; `Macos ];
+  let net = Eio_net_mem.v ~os:`Macos ~sw () in
+  Alcotest.(check string)
+    "getnameinfo of a Unix address under macOS" "lookup UNKNOWN"
     (raised (fun () -> Eio.Net.getnameinfo net (`Unix "x.sock")))
 
 (* A read or a write wakes one waiter, not every one: 8000 writers blocked on
@@ -1119,7 +1182,8 @@ let contended ~port n f =
           (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)))
   with
   | _ -> ()
-  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
       Alcotest.failf "port %d is still held after %d cancelled fibers" port n
 
 (* A connect cancelled while it releases its bound port releases it all the
@@ -1705,6 +1769,8 @@ let suite =
       Alcotest.test_case "a silent connection's peer still waits" `Quick
         test_silent_peer_waits;
       Alcotest.test_case "macOS: Unix addresses" `Quick test_macos_unix;
+      Alcotest.test_case "a failed bind raises eio_posix's Eio.Io error" `Quick
+        test_bind_errors;
       Alcotest.test_case "a connection's queue is bounded by default" `Quick
         test_default_capacity;
       Alcotest.test_case "write after own shutdown" `Quick
@@ -1737,8 +1803,8 @@ let suite =
         test_cancelled_connect_frees_its_port;
       Alcotest.test_case "a cancelled close frees its port" `Quick
         test_cancelled_close_frees_its_port;
-      Alcotest.test_case "a listener's path freed at switch end" `Quick
-        test_listener_path_freed_at_switch_end;
+      Alcotest.test_case "a listener's file goes as it closes" `Quick
+        test_listener_path_freed_on_close;
       Alcotest.test_case "a client's port is free" `Quick
         test_client_port_is_free;
       Alcotest.test_case "a capacity serves writers first come first served"

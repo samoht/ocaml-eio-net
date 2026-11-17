@@ -7,7 +7,9 @@ let lo = Eio.Net.Ipaddr.V4.loopback
 let in_use net addr =
   Eio.Switch.run @@ fun sw ->
   match Eio.Net.listen ~sw ~backlog:1 net addr with
-  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> true
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      true
   | _ -> false
 
 let at clock secs =

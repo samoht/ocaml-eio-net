@@ -244,11 +244,11 @@ let unix_non_stream = "socket_unix_non_stream.cc"
 let unix_dgram_cases =
   List.concat
     [
-      (* WriteOneSideClosed: a send to a peer that has closed is refused. The
-         peer's file stays: Eio's POSIX backend removes no datagram socket's
-         path. *)
+      (* WriteOneSideClosed: a send to a peer that has closed finds no file,
+         as Eio's backends remove a datagram socket's path as it closes, where
+         gVisor's test, which keeps it, sees the send refused. *)
       per_dgram ~file:unix_dgram ~test:"WriteOneSideClosed" [ Unix_dgram ]
-        (fun _ -> expect "refused")
+        (fun _ -> expect "ENOENT")
         (fun ctx k ->
           let a, a_addr = dgram_socket ctx k in
           let b, _ = dgram_socket ctx k in

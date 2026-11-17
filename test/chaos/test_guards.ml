@@ -213,8 +213,8 @@ let test_restart () =
     not
       (String.starts_with
          ~prefix:
-           "Eio_net_chaos.check: the run with no fault failed: \
-            Unix.Unix_error(Unix.EADDRINUSE, \"bind\""
+           "Eio_net_chaos.check: the run with no fault failed: Eio.Io \
+            Unix_error (Address already in use, \"bind\""
          m)
   then Alcotest.failf "failed with %S" m
 
@@ -922,7 +922,9 @@ let relisten =
   fun () ->
     match Eio.Net.listen ~sw ~backlog:1 env#net port with
     | _ -> false
-    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> true
+    | exception
+        Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _) ->
+        true
 
 let udp_flood =
   never_waits @@ fun ~sw env ->

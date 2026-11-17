@@ -21,6 +21,7 @@
   eio-net.mem
   eio
   eio.mock
+  eio.unix
   cstruct
   mtime
   unix

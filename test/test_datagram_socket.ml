@@ -1,6 +1,5 @@
-(* A closed Unix-domain datagram socket leaves its file, as Eio's POSIX backend
-   removes none: a send there is refused, and a bind there finds the address
-   in use. *)
+(* A closed Unix-domain datagram socket removes its file, as Eio's backends
+   do: a send there finds no file, and a socket binds there again. *)
 let test_closed_datagram_path () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -10,14 +9,9 @@ let test_closed_datagram_path () =
       ignore (Eio.Net.datagram_socket ~sw:inner net path));
   let sock = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/sender.sock") in
   (match Eio.Net.send sock ~dst:path [ Cstruct.of_string "x" ] with
-  | exception
-      Eio.Io
-        (Eio.Net.E (Connection_failure (Refused Eio_net_mem.No_listener)), _) ->
-      ()
+  | exception Eio.Io (Eio.Fs.E (Not_found _), _) -> ()
   | () -> Alcotest.fail "sent to a closed socket's path");
-  match Eio.Net.datagram_socket ~sw net path with
-  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
-  | _ -> Alcotest.fail "bound a path whose file is still there"
+  ignore (Eio.Net.datagram_socket ~sw net path)
 
 (* A Unix-domain datagram socket bound at "" takes an abstract address of its
    own, as Linux autobinds it: "\000" and five hexadecimal digits, which a
@@ -110,7 +104,9 @@ let test_datagram_reuse_addr () =
     [ Cstruct.of_string "y" ];
   ignore (Eio.Net.recv first (Cstruct.create 1));
   match Eio.Net.datagram_socket ~sw net (`Udp (ip "127.0.0.1", 8185)) with
-  | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> ()
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ()
   | _ -> Alcotest.fail "bound without reuse_addr"
 
 (* A datagram's errors come in Linux's order: a Unix-domain socket refuses a
@@ -334,7 +330,9 @@ let test_datagram_address_in_use () =
   let net = Eio_net_mem.v ~sw () in
   let in_use addr =
     match Eio.Net.datagram_socket ~sw net addr with
-    | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) -> true
+    | exception
+        Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _) ->
+        true
     | (_ : _ Eio.Net.datagram_socket) -> false
   in
   ignore (Eio.Net.datagram_socket ~sw net (udp 9004));
@@ -480,7 +478,7 @@ let suite =
       Alcotest.test_case "a datagram too long" `Quick test_datagram_too_long;
       Alcotest.test_case "a datagram reaches as a kernel delivers it" `Quick
         test_datagram_reaches_like_a_kernel;
-      Alcotest.test_case "a closed datagram socket's path" `Quick
+      Alcotest.test_case "a closed datagram socket removes its file" `Quick
         test_closed_datagram_path;
       Alcotest.test_case "a UDP receive buffer drops past Linux's" `Quick
         test_udp_receive_buffer;

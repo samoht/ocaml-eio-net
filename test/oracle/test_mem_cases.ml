@@ -212,18 +212,18 @@ let cases =
                      (Eio.Net.listening_addr l));
                 "connected"));
       ];
-      (* A listener closed by hand leaves its file: a listen there finds it
-         in use, and a connect there is refused. *)
+      (* A listener closed by hand removes its file: a listen there binds,
+         and a connect there finds no file. *)
       [
         case ~file ~test:"ListenerClosedByHand" ~variant:"listen there"
-          (expect "EADDRINUSE") (fun ctx ->
+          (expect "listening") (fun ctx ->
             let addr = stream_addr ctx Unix_stream in
             Eio.Net.close (listen ctx addr);
             outcome (fun () ->
                 ignore (listen ctx addr);
                 "listening"));
         case ~file ~test:"ListenerClosedByHand" ~variant:"connect there"
-          (expect "refused") (fun ctx ->
+          (expect "ENOENT") (fun ctx ->
             let addr = stream_addr ctx Unix_stream in
             Eio.Net.close (listen ctx addr);
             outcome (fun () ->

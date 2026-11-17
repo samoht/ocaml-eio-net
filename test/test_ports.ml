@@ -1,24 +1,24 @@
-(* A bind in [listen] or [datagram_socket] raises the raw [Unix.Unix_error]
-   eio_posix raises there, and a connect an [Eio.Io] error marked by the code:
+(* A bind in [listen] or [datagram_socket] raises the [Eio.Io] error eio_posix
+   raises there, and a connect the one marked by the code:
    [fails error f] is [true] if [f] raises either form of [error], and any
    other exception, [Failure] included, fails the test. *)
 let fails error f =
   match f () with exception e when error e -> true | _ -> false
 
 let in_use = function
-  | Unix.Unix_error (Unix.EADDRINUSE, _, _)
+  | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
   | Eio.Io (Eio.Exn.X Eio_net_mem.Address_in_use, _) ->
       true
   | _ -> false
 
 let not_available = function
-  | Unix.Unix_error (Unix.EADDRNOTAVAIL, _, _)
+  | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRNOTAVAIL, _, _)), _)
   | Eio.Io (Eio.Exn.X Eio_net_mem.Address_not_available, _) ->
       true
   | _ -> false
 
 let name_too_long = function
-  | Unix.Unix_error (Unix.ENAMETOOLONG, _, _)
+  | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENAMETOOLONG, _, _)), _)
   | Eio.Io (Eio.Exn.X Eio_net_mem.Name_too_long, _) ->
       true
   | _ -> false
@@ -559,8 +559,13 @@ let test_edge_addresses () =
     match f () with
     | () -> "ok"
     | exception Eio.Io (Eio.Exn.X Eio_net_mem.Invalid_address, _) -> "EINVAL"
-    | exception Unix.Unix_error (Unix.EINVAL, "bind", _) -> "EINVAL"
-    | exception Unix.Unix_error (Unix.EADDRNOTAVAIL, "bind", _) ->
+    | exception
+        Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EINVAL, "bind", _)), _) ->
+        "EINVAL"
+    | exception
+        Eio.Io
+          (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRNOTAVAIL, "bind", _)), _)
+      ->
         "EADDRNOTAVAIL"
     | exception Eio.Io (Eio.Exn.X Eio_net_mem.Network_unreachable, _) ->
         "ENETUNREACH"

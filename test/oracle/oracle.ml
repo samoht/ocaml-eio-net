@@ -133,7 +133,7 @@ let unix_path ctx =
   (match ctx.backend with
   | Real -> (
       (try Unix.unlink path with Unix.Unix_error _ -> ());
-      (* Eio's POSIX backend leaves a datagram socket's file behind. *)
+      (* Eio's backends leave the file of a client bound with [bind_to]. *)
       Eio.Switch.on_release ctx.sw @@ fun () ->
       try Unix.unlink path with Unix.Unix_error _ -> ())
   | Mem -> ());
