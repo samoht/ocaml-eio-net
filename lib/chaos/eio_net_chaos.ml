@@ -126,9 +126,10 @@ type workload = {
   app : env -> unit;
 }
 
-(* An error the network gave, which a run with a fault may let escape. *)
+(* An error the network gave, or a timeout it made the program take, which a
+   run with a fault may let escape. *)
 let rec indeterminate = function
-  | Eio.Io _ | End_of_file -> true
+  | Eio.Io _ | End_of_file | Eio.Time.Timeout -> true
   | Eio.Exn.Multiple l ->
       l <> [] && List.for_all (fun (x, _) -> indeterminate x) l
   | _ -> false

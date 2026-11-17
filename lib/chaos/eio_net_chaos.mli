@@ -95,18 +95,19 @@ val run :
     {b When it passes.} [run] passes iff:
 
     - the first run returns;
-    - no run hangs or raises an exception other than [Eio.Io] and [End_of_file],
-      alone or together in an [Eio.Exn.Multiple], an assertion of [app]
-      included. A program with no timeout hangs on a silent peer;
+    - no run hangs or raises an exception other than [Eio.Io], [End_of_file] and
+      [Eio.Time.Timeout], alone or together in an [Eio.Exn.Multiple], an
+      assertion of [app] included. A program with no timeout hangs on a silent
+      peer;
     - after each fault, [inspect] (defaults to doing nothing), called on the
       healed network, returns;
     - each restart returns: the program can listen and connect again.
 
-    An [Eio.Io] error or an [End_of_file] that escapes a run with a fault
-    neither passes nor fails it: the network did fail, so what decides is
-    whether the program works again once the network does, which the restart
-    checks. A program that must succeed despite a fault says so with its own
-    assertion, and {!is_outage} tells it when it may give up.
+    An [Eio.Io] error, an [End_of_file] or an [Eio.Time.Timeout] that escapes a
+    run with a fault neither passes nor fails it: the network did fail, so what
+    decides is whether the program works again once the network does, which the
+    restart checks. A program that must succeed despite a fault says so with its
+    own assertion, and {!is_outage} tells it when it may give up.
 
     Under [`Macos] a connect that times out takes 75 seconds, TIME_WAIT lasts
     30, and a Unix-domain crash reads as end of file at both ends, as macOS

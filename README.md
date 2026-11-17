@@ -60,10 +60,10 @@ After each of those runs, the check starts the program again with no fault, on
 the same network. The network has healed, but it keeps what the first run
 left, such as a port that is still held after a close.
 
-The check fails if a run hangs, if it raises anything other than `Eio.Io` or
-`End_of_file`, or if the restart does not end normally. An `Eio.Io` error that
-escapes a run with a fault is not a failure in itself: the network did fail,
-so the restart decides. A program with no timeout hangs on a silent peer, and a
+The check fails if a run hangs, if it raises anything other than `Eio.Io`,
+`End_of_file` or `Eio.Time.Timeout`, or if the restart does not end normally.
+One of those three that escapes a run with a fault is not a failure in itself:
+the network did fail, so the restart decides. A program with no timeout hangs on a silent peer, and a
 server that listens without `~reuse_addr:true` cannot restart:
 
 ```ocaml
