@@ -45,6 +45,14 @@ let test_mem os () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio_net_chaos.device ~os (mem os env#mono_clock)
 
+(* A wrapper that injects nothing answers as the network it wraps. *)
+let test_quiet_wrap os () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio_net_chaos.device ~os (fun ~sw ->
+      Eio_net_chaos.wrap ~os ~clock:env#clock
+        (fun _ -> None)
+        (mem os env#mono_clock ~sw))
+
 (* Each allowance of the check is one eio-net.mem needs. *)
 let test_allowances () =
   let used =
@@ -110,4 +118,10 @@ let suite =
     @ List.map
         (fun os ->
           Alcotest.test_case ("eio-net.mem " ^ os_name os) `Quick (test_mem os))
+        oses
+    @ List.map
+        (fun os ->
+          Alcotest.test_case
+            ("eio-net.mem wrapped with no fault " ^ os_name os)
+            `Quick (test_quiet_wrap os))
         oses )
