@@ -233,6 +233,7 @@ let run ?stop ?(on_error = log_error) ?(pool = pool ()) ?(classify = classify)
   | None -> accept ()
   | Some stop ->
       let v = Eio.Fiber.first accept (fun () -> Eio.Promise.await stop) in
+      Eio.Resource.close listening;
       Atomic.set loop.stopping true;
       Seq_map.iter
         (fun _ c ->

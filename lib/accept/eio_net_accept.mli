@@ -125,8 +125,8 @@ val run :
     raises it: [~on_error:raise] makes every failed connection end it.
 
     Its connections end with it. Without [stop] it returns only by raising. Once
-    [stop] resolves it accepts no more, sheds each connection whose head is
-    incomplete, at once or when it next says {!reading}, and returns [stop]'s
-    value once the others have ended.
+    [stop] resolves it closes [socket], so a peer that connects then is refused,
+    sheds each connection whose head is incomplete, at once or when it next says
+    {!reading}, and returns [stop]'s value once the others have ended.
 
     @raise Invalid_argument if [max_connections] is less than [1]. *)
