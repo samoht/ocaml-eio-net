@@ -80,7 +80,7 @@ let replay_of report =
 let same_failure a b =
   List.iter
     (fun f -> Alcotest.(check string) f (Expect.field f a) (Expect.field f b))
-    [ "faults"; "tier"; "error"; "replay" ]
+    [ "faults"; "error"; "replay" ]
 
 (* A replay runs the scenario a failure named, and fails the same way; once
    the bug is fixed, it passes. *)
@@ -1219,7 +1219,7 @@ let suite =
       Alcotest.test_case "resume: correct" `Quick
         (Expect.passes (fun () -> resume ()));
       Alcotest.test_case "resume: stale offset, by the sampled tier" `Quick
-        (Expect.caught ~tier:"sampled" (fun () -> resume ~bug:`Stale ()));
+        (Expect.caught (fun () -> resume ~bug:`Stale ()));
       Alcotest.test_case "determinism" `Quick test_determinism;
       Alcotest.test_case "a cut lands at its byte" `Quick test_cut_positions;
       Alcotest.test_case "replay" `Quick test_replay;

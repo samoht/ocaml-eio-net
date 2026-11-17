@@ -13,12 +13,11 @@ let suite =
       Alcotest.test_case "server: correct, pinned stall" `Quick
         (Expect.passes (test_idle ~serve:(serve ?bug:None)));
       Alcotest.test_case "server: sequential, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear" (test ~serve:(serve ~bug:`Sequential)));
+        (Expect.caught (test ~serve:(serve ~bug:`Sequential)));
       Alcotest.test_case "server: sequential, by the pinned stall" `Quick
         (Expect.pinned (test_idle ~serve:(serve ~bug:`Sequential)));
       Alcotest.test_case "server: raise on error, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear"
-           (test ~serve:(serve ~bug:`Raise_on_error)));
+        (Expect.caught (test ~serve:(serve ~bug:`Raise_on_error)));
       Alcotest.test_case "server: raise on error, by the pinned stall" `Quick
         (Expect.pinned (test_idle ~serve:(serve ~bug:`Raise_on_error)));
       Alcotest.test_case "server: no idle timeout is equivalent" `Quick

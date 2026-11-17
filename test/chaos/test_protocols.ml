@@ -22,8 +22,7 @@ let suite =
         "reconnecting client: retries connection failures only, by the linear \
          tier"
         `Quick
-        (Expect.caught ~tier:"linear"
-           (check (connfail ~bug:`Connection_failure)));
+        (Expect.caught (check (connfail ~bug:`Connection_failure)));
       Alcotest.test_case "accept loop that spins on EMFILE" `Quick spins;
       Alcotest.test_case "Eio_net_accept.run recovers from EMFILE" `Quick
         (Expect.passes accept_loop);
@@ -34,12 +33,12 @@ let suite =
         (Expect.passes (check (shed ?bug:None)));
       Alcotest.test_case
         "load-shedding server: leaked count, by the sampled tier" `Quick
-        (Expect.caught ~tier:"sampled" (check (shed ~bug:`Leak)));
+        (Expect.caught (check (shed ~bug:`Leak)));
       Alcotest.test_case "framed requests: correct" `Quick
         (Expect.passes (check (rpc ?bug:None)));
       Alcotest.test_case
         "framed requests: truncated last frame taken, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear" (check (rpc ~bug:`Lenient)));
+        (Expect.caught (check (rpc ~bug:`Lenient)));
       Alcotest.test_case "large greetings both ways: correct" `Quick
         (Expect.passes (check greetings));
       Alcotest.test_case "Unix-domain stream ping-pong: correct" `Quick
@@ -51,7 +50,7 @@ let suite =
       Alcotest.test_case
         "leader lease: counted from the grant's arrival, by the linear tier"
         `Quick
-        (Expect.caught ~tier:"linear" (check (lease ~bug:`Receipt)));
+        (Expect.caught (check (lease ~bug:`Receipt)));
       Alcotest.test_case "pipelined batch: correct" `Quick
         (Expect.passes (check pipelined));
     ] )

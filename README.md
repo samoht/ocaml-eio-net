@@ -91,9 +91,8 @@ handshake is lost, and the workload's bound on latency fails:
 # match Eio_net_chaos.check (workload ~timeout:false) with
   | () -> print_endline "passed"
   | exception Failure report -> print_endline report;;
-Eio_net_chaos.check: the workload failed under a fault.
+Eio_net_chaos.check: the workload failed under a fault
   faults:   connect of 1c at 0 times out
-  tier:     linear
   error:    Failure("too slow")
   trace:
     #1 connect 1c @0  <- times out

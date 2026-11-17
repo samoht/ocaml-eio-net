@@ -6,9 +6,8 @@ val field : string -> string -> string
 val report : (unit -> unit) -> string
 (** [report f] is the failure report of the check [f], which must fail. *)
 
-val caught : tier:string -> (unit -> unit) -> unit -> unit
-(** [caught ~tier f ()] tests that the check [f] fails under a fault found by
-    [tier], ["linear"] or ["sampled"]. *)
+val caught : (unit -> unit) -> unit -> unit
+(** [caught f ()] tests that the check [f] fails under a fault. *)
 
 val pinned : (unit -> unit) -> unit -> unit
 (** [pinned f ()] tests that the pinned test [f] fails, with [Failure] or

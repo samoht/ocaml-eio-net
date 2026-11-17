@@ -16,8 +16,7 @@ let test_seed_replay () =
   Alcotest.(check string)
     "faults"
     (Expect.field "faults" found)
-    (Expect.field "faults" again);
-  Alcotest.(check string) "tier" "sampled" (Expect.field "tier" again)
+    (Expect.field "faults" again)
 
 let suite =
   ( "sampling",
@@ -28,7 +27,7 @@ let suite =
         "download: no timeout in the body, by the sampled tier, whatever the \
          period of its candidates"
         `Quick
-        (Expect.caught ~tier:"sampled" (check (download ~bug:`Body ~body:19)));
+        (Expect.caught (check (download ~bug:`Body ~body:19)));
       Alcotest.test_case "a failure found under seed 7 replays with no seed"
         `Quick test_seed_replay;
     ] )

@@ -10,5 +10,5 @@ let suite =
         (Expect.passes (check broadcast));
       Alcotest.test_case
         "broadcast: blocked on a silent subscriber, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear" (check (broadcast ~bug:`Sync)));
+        (Expect.caught (check (broadcast ~bug:`Sync)));
     ] )

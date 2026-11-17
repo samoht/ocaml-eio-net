@@ -15,11 +15,10 @@ let report f =
   | () -> Alcotest.fail "the check passed: it did not catch the bug"
   | exception Failure m -> m
 
-let caught ~tier f () =
+let caught f () =
   let m = report f in
   if not (String.starts_with ~prefix:"Eio_net_chaos.check: the workload" m) then
-    Alcotest.failf "the check failed for another reason: %s" m;
-  Alcotest.(check string) "tier" tier (field "tier" m)
+    Alcotest.failf "the check failed for another reason: %s" m
 
 let pinned f () =
   match f () with

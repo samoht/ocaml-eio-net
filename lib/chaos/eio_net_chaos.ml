@@ -355,16 +355,14 @@ let pp_trace rules ppf { head; left_out; tail } =
   in
   pp 0
 
-let report ?matched ~hash ~tier s trace error =
+let report ?matched ~hash s trace error =
   Fmt.failwith
-    "%s: the workload failed under a fault.@\n\
+    "%s: the workload failed under a fault@\n\
     \  faults:   %s@\n\
-    \  tier:     %s@\n\
      %a  error:    %s@\n\
     \  trace:@\n\
      %a  replay:   ~replay:\"net/%s/%s\""
     name (Plan.text s)
-    (match tier with `Linear -> "linear" | `Sampled -> "sampled")
     Fmt.(option (any "  matched:  " ++ string ++ any "@\n"))
     matched error (pp_trace s.rules) trace hash (Plan.key s)
 
@@ -413,11 +411,11 @@ let find k = List.find_opt (fun s -> Plan.key s = k)
 (* The scenario a replay names, if the check still has it. *)
 let scenario ~os run ~first ~linear k =
   match find k linear with
-  | Some s -> Some (s, `Linear)
-  | None when k = Plan.key Plan.none -> Some (Plan.none, `Linear)
+  | Some _ as s -> s
+  | None when k = Plan.key Plan.none -> Some Plan.none
   | None -> (
       match find k (Plan.others first) with
-      | Some s -> Some (s, `Sampled)
+      | Some _ as s -> s
       | None -> (
           match String.index_opt k '+' with
           | None -> None
@@ -425,9 +423,7 @@ let scenario ~os run ~first ~linear k =
               match find (String.sub k 0 i) linear with
               | Some ({ rules = [ r ]; _ } as s1) ->
                   let after, _ = exec ~os run s1 in
-                  Plan.seconds r ~first ~after
-                  |> find k
-                  |> Option.map (fun s -> (s, `Sampled))
+                  Plan.seconds r ~first ~after |> find k
               | _ -> None)))
 
 (* A failure of the run with no fault, with its operations and the replay
@@ -453,7 +449,7 @@ let replay_one ~os run ~first ~linear ~hash ~attempt (h, k) =
         "the replay named first run %s, and the workload's is now %s" h hash
   in
   match scenario ~os run ~first ~linear k with
-  | Some (s, tier) -> ignore (attempt ?matched tier s : Plan.trace)
+  | Some s -> ignore (attempt ?matched s : Plan.trace)
   | None when h = hash ->
       fail "the replay names %s, a scenario this check no longer has" k
   | None ->
@@ -486,7 +482,7 @@ let explore ~budget ~seed ~first ~linear ~attempt =
   let pairs =
     List.concat_map
       (fun (s : Plan.scenario) ->
-        let after = attempt `Linear s in
+        let after = attempt s in
         match s.rules with
         | [ r ] -> Plan.sample rng quota (Plan.seconds r ~first ~after)
         | _ -> [])
@@ -497,7 +493,7 @@ let explore ~budget ~seed ~first ~linear ~attempt =
   List.iter
     (fun c ->
       List.iter
-        (fun s -> ignore (attempt `Sampled s : Plan.trace))
+        (fun s -> ignore (attempt s : Plan.trace))
         (Plan.sample rng share c))
     classes
 
@@ -518,9 +514,9 @@ let check ?os ?(budget = 2_000) ?(seed = 0) ?replay run =
     (diverges ~os run first);
   let hash = digest first in
   let linear = Plan.linear first in
-  let attempt ?matched tier s =
+  let attempt ?matched s =
     let shown, failed = exec_shown ~os run s in
-    Option.iter (report ?matched ~hash ~tier s shown) failed;
+    Option.iter (report ?matched ~hash s shown) failed;
     shown.head
   in
   match replay with

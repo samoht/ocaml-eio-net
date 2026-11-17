@@ -16,11 +16,9 @@ let suite =
       Alcotest.test_case "frames: correct, pinned cut" `Quick
         (Expect.passes (test_cut ~read));
       Alcotest.test_case "frames: a single read, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear"
-           (test_frames ~read:(Frame.read ~bug:`Single_read)));
+        (Expect.caught (test_frames ~read:(Frame.read ~bug:`Single_read)));
       Alcotest.test_case "frames: no timeout, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear"
-           (test_frames ~read:(Frame.read ~bug:`No_timeout)));
+        (Expect.caught (test_frames ~read:(Frame.read ~bug:`No_timeout)));
       Alcotest.test_case "frames: any end is clean, passes the check" `Quick
         (Expect.passes (test_frames ~read:(Frame.read ~bug:`Eof_is_clean)));
       Alcotest.test_case "frames: any end is clean, by the pinned cut" `Quick
@@ -28,14 +26,11 @@ let suite =
       Alcotest.test_case "retries: correct" `Quick
         (Expect.passes (test_retries ~fetch));
       Alcotest.test_case "retries: no timeout, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear"
-           (test_retries ~fetch:(Client.fetch ~bug:`No_timeout)));
+        (Expect.caught (test_retries ~fetch:(Client.fetch ~bug:`No_timeout)));
       Alcotest.test_case "retries: refused only, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear"
-           (test_retries ~fetch:(Client.fetch ~bug:`Refused_only)));
+        (Expect.caught (test_retries ~fetch:(Client.fetch ~bug:`Refused_only)));
       Alcotest.test_case "datagrams: correct" `Quick
         (Expect.passes (test_datagrams ~call));
       Alcotest.test_case "datagrams: any reply, by the linear tier" `Quick
-        (Expect.caught ~tier:"linear"
-           (test_datagrams ~call:(Rpc.call ~bug:`Any_reply)));
+        (Expect.caught (test_datagrams ~call:(Rpc.call ~bug:`Any_reply)));
     ] )

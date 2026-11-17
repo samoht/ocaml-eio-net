@@ -391,12 +391,11 @@ val pair :
 (** {1:replay Failures and replay}
 
     A check is deterministic. A failure raises [Failure] with the scenario, the
-    tier that found it, the operations of the failing run, and the
-    [~replay:"..."] argument that runs that scenario alone; a failure of the run
-    with no fault, with its operations and the replay that runs it again. Each
-    operation shows the fault it met, and one cut short where a fault lands
-    names that fault. Repeated operations are folded and a long report is cut
-    around its first fault.
+    operations of the failing run, and the [~replay:"..."] argument that runs
+    that scenario alone; a failure of the run with no fault, with its operations
+    and the replay that runs it again. Each operation shows the fault it met,
+    and one cut short where a fault lands names that fault. Repeated operations
+    are folded and a long report is cut around its first fault.
 
     The scenario is found by its position and fault, so a replay still runs
     after a fix that changes the workload's first run, such as the size of its
