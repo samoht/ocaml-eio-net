@@ -249,7 +249,7 @@ let counted ~strict =
         let flow = Eio.Net.connect ~sw env#net addr in
         Eio.Buf_read.(parse_exn take_all) ~max_size:100 flow
       with
-      | "hello" -> ()
+      | got when String.starts_with ~prefix:got "hello" -> ()
       | got -> Fmt.failwith "got %S" got
       | exception (Eio.Io _ | Eio.Time.Timeout) when not strict -> ()
       | exception (Eio.Io _ | Eio.Time.Timeout) -> failwith "no answer"

@@ -9,6 +9,7 @@
   plan
   quiet_mock
   posix
+  sim
   device
   device_traces)
  (libraries

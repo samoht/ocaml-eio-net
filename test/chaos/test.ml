@@ -15,4 +15,5 @@ let () =
       Test_guards.suite;
       Test_sampling.suite;
       Test_restart.suite;
+      Test_sim.suite;
     ]

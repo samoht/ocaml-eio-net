@@ -1,18 +1,14 @@
 open! Hermetic
 
 type Eio.Exn.Backend.t += Injected_fault = Wrapper.Injected_fault
-
-type env =
-  < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
-  ; clock : float Eio.Time.clock_ty Eio.Resource.t
-  ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t >
+type env = Sim.env
 
 module Op = Op
 module Fault = Fault
 
 let wrap ?os ~clock f net = Wrapper.v ?os ~clock ~outage:false f net
 let pair = Wrapper.pair
-let is_outage (env : env) = Wrapper.is_outage env#net
+let is_outage env = Wrapper.is_outage env#net
 
 (* {1 Runner} *)
 
@@ -78,14 +74,6 @@ let waits_on net ~(root : Eio.Private.Trace.id) tids =
            (List.map fiber (List.filteri (fun i _ -> i < named) others)))
         (if n > named then Fmt.str "; and %d more" (n - named) else "")
 
-(* The environment a workload runs with: [net], on the clocks of its loop. *)
-let env net clock mono_clock : env =
-  object
-    method net = net
-    method clock = clock
-    method mono_clock = mono_clock
-  end
-
 (* The failure a run reports, from [failed] and its network [wrapped]: a
    limit of the wrapper's first, then, when [waiting] says the run hung, the
    fibers the workload's [root] waits on. *)
@@ -115,12 +103,14 @@ let explain (s : Plan.scenario) ~wrapped ~root ~waiting ~stopped failed =
 (* Where a run failed: in itself, in [inspect] after it, or in the restart
    that follows it, with what the run with a fault raised, if anything. *)
 type stage = Run | Inspect of exn option | Restart of exn option
-type failure = { stage : stage; error : string }
+type failure = { stage : stage; error : string; output : int * string }
 
 (* What a check runs: [setup] before each run, [app], and [inspect] after a
-   run with a fault, on a network that follows [os]. *)
+   run with a fault, on a network that follows [os], each process with
+   entropy and [Random] drawn from [seed]. *)
 type workload = {
   os : [ `Linux | `Macos ];
+  seed : int;
   setup : env -> unit;
   inspect : env -> unit;
   app : env -> unit;
@@ -169,6 +159,23 @@ let in_loop main =
         Quiet_mock.max_turns too_large
   | exception x -> failed (Printexc.to_string x)
 
+(* Setup, the run, inspect and the restart are each a process [k] of [w],
+   with entropy and Random of their own, drawn from its seed. *)
+let process w out ~clock ~mono_clock k f net =
+  Sim.with_process ~seed:[| w.seed; k |] out @@ fun () ->
+  f
+    (Sim.v ~net:(Lazy.from_val net) ~clock ~mono_clock ~seed:[| w.seed; k; 1 |]
+       out)
+
+(* Tiny buffers lower each connection's queue to 32 KiB, or keep the
+   kernel's default for its family if that is smaller, until the network
+   [healed]. *)
+let capacity (s : Plan.scenario) healed =
+  match s.lasting with
+  | Some Tiny_buffers ->
+      fun c -> if !healed then c else Int.min Plan.tiny_buffer c
+  | _ -> Fun.id
+
 let exec_with w ~observe (s : Plan.scenario) =
   let os = w.os in
   let faulty = s <> Plan.none in
@@ -177,18 +184,11 @@ let exec_with w ~observe (s : Plan.scenario) =
     let fault = faults op in
     observe op fault;
     fault
-  in
-  let wrapped = ref None and root = ref None in
+  and wrapped = ref None
+  and root = ref None in
   let stage = ref Run and healed = ref false in
-  (* Tiny buffers lower each connection's queue to 32 KiB, or keep the
-     kernel's default for its family if that is smaller, until the network
-     heals. *)
-  let capacity =
-    match s.lasting with
-    | Some Tiny_buffers ->
-        fun c -> if !healed then c else Int.min Plan.tiny_buffer c
-    | _ -> Fun.id
-  in
+  let out = Sim.output () in
+  let capacity = capacity s healed in
   let ended =
     in_loop @@ fun clock mono_clock charge ->
     root :=
@@ -200,7 +200,8 @@ let exec_with w ~observe (s : Plan.scenario) =
     let quiet () =
       Wrapper.v ~os ~max_ops ~charge ~clock ~outage:false (fun _ -> None) base
     in
-    w.setup (env (quiet ()) clock mono_clock);
+    let process = process w out ~clock ~mono_clock in
+    process 0 w.setup (quiet ());
     let net =
       Wrapper.v ~os ~max_ops ~split:(Plan.split s) ~charge ~clock
         ~outage:(s.lasting = Some Outage) f base
@@ -211,17 +212,18 @@ let exec_with w ~observe (s : Plan.scenario) =
       let net = quiet () in
       wrapped := Some net;
       stage := Inspect ended;
-      w.inspect (env net clock mono_clock);
+      process 2 w.inspect net;
       stage := Restart ended;
-      w.app (env net clock mono_clock)
+      process 3 w.app net
     in
-    match w.app (env net clock mono_clock) with
+    match process 1 w.app net with
     | () -> if faulty then restart None
     | exception x when faulty && indeterminate x -> restart (Some x)
   in
   explain s ~wrapped:!wrapped ~root:!root ~waiting:ended.waiting
     ~stopped:ended.stopped ended.failed
-  |> Option.map (fun error -> { stage = !stage; error })
+  |> Option.map (fun error ->
+      { stage = !stage; error; output = Sim.printed out })
 
 (* The operations of a run a report shows: all of them, or, for a lasting
    condition, which a one-byte one may multiply up to the limit on turns, the
@@ -411,8 +413,31 @@ let pp_trace rules ppf { head; left_out; tail } =
   if n > 0 then Fmt.pf ppf "  trace:@\n";
   pp 0
 
+(* What the failing run printed, if anything, a line of the report each. *)
+let pp_output ppf (dropped, printed) =
+  if printed <> "" then begin
+    Fmt.pf ppf "  output:@\n";
+    if dropped > 0 then
+      Fmt.pf ppf "    ... %a earlier byte%s, not kept@\n" count dropped
+        (plural dropped);
+    let printed =
+      if String.ends_with ~suffix:"\n" printed then
+        String.sub printed 0 (String.length printed - 1)
+      else printed
+    in
+    List.iter
+      (fun l -> Fmt.pf ppf "    %s@\n" l)
+      (String.split_on_char '\n' printed)
+  end
+
+(* The line that runs one scenario of a check of seed [seed] again. *)
+let pp_replay ppf (seed, hash, key) =
+  Fmt.pf ppf "  replay:   %s%s ~replay:\"net/%s/%s\" app" name
+    (if seed = 0 then "" else Fmt.str " ~seed:%d" seed)
+    hash key
+
 (* The report of a scenario whose run, [inspect] or restart failed. *)
-let report ?matched ~hash s trace { stage; error } =
+let report ?matched ?diverged ~seed ~hash s trace { stage; error; output } =
   let title, ended =
     match stage with
     | Run -> ("the workload failed under a fault", None)
@@ -429,16 +454,15 @@ let report ?matched ~hash s trace { stage; error } =
         | Some x -> "the faulty run raised " ^ Printexc.to_string x)
       ended
   in
-  Fmt.failwith
-    "%s: %s@\n\
-    \  faults:   %s@\n\
-     %a%a  error:    %s@\n\
-     %a  replay:   %s ~replay:\"net/%s/%s\" app"
-    name title (Plan.text s)
+  Fmt.failwith "%s: %s@\n  faults:   %s@\n%a%a%a  error:    %s@\n%a%a%a" name
+    title (Plan.text s)
     Fmt.(option (any "  ended:    " ++ string ++ any "@\n"))
     ended
     Fmt.(option (any "  matched:  " ++ string ++ any "@\n"))
-    matched error (pp_trace s.rules) trace name hash (Plan.key s)
+    matched
+    Fmt.(option (any "  diverged: " ++ string ++ any "@\n"))
+    diverged error pp_output output (pp_trace s.rules) trace pp_replay
+    (seed, hash, Plan.key s)
 
 let digest (trace : Plan.trace) =
   let ops = List.map fst trace in
@@ -503,13 +527,12 @@ let scenario w ~first ~linear k =
 
 (* A failure of the run with no fault, with its operations and the replay
    that runs it again. *)
-let first_failed ~hash trace error =
-  Fmt.failwith
-    "%s: the run with no fault failed: %s@\n\
-     %a  replay:   %s ~replay:\"net/%s/%s\" app"
-    name error (pp_trace [])
+let first_failed ~seed ~hash trace { error; output; _ } =
+  Fmt.failwith "%s: the run with no fault failed: %s@\n%a%a%a" name error
+    pp_output output (pp_trace [])
     { head = trace; left_out = 0; tail = [] }
-    name hash (Plan.key Plan.none)
+    pp_replay
+    (seed, hash, Plan.key Plan.none)
 
 (* The run a replay names: [(h, k)], the first run's hash and the
    scenario's key, against the check's first run, of hash [hash]. *)
@@ -579,23 +602,29 @@ let run ?os ?(budget = 2_000) ?(seed = 0) ?replay ?(setup = ignore)
   if budget < 1 then
     Fmt.invalid_arg "%s: budget is %d, it must be positive" name budget;
   let replay = Option.map parse_replay replay in
-  let w = { os; setup; inspect; app } in
+  let w = { os; seed; setup; inspect; app } in
+  (* The caller's Random goes on where it was, whatever the runs drew. *)
+  let random = Random.get_state () in
+  Fun.protect ~finally:(fun () -> Random.set_state random) @@ fun () ->
   let first, failed = exec w Plan.none in
-  Option.iter
-    (fun { error; _ } -> first_failed ~hash:(digest first) first error)
-    failed;
+  Option.iter (first_failed ~seed ~hash:(digest first) first) failed;
   if first = [] then
     fail "the workload makes no network operation, so it tests nothing";
-  Option.iter
-    (fail
-       "two runs with no fault made different operations (%s); the workload \
-        must be deterministic")
-    (diverges w first);
+  (* Runs with no fault differ only through what the check does not
+     control: the check goes on, and its failures say so. *)
+  let diverged =
+    Option.map
+      (Fmt.str
+         "two runs with no fault made different operations (%s), so the \
+          program reads something the check does not control, such as a clock, \
+          entropy or a file reached without env, or state kept across runs")
+      (diverges w first)
+  in
   let hash = digest first in
   let linear = Plan.linear first in
   let attempt ?matched s =
     let shown, failed = exec_shown w s in
-    Option.iter (report ?matched ~hash s shown) failed;
+    Option.iter (report ?matched ?diverged ~seed ~hash s shown) failed;
     shown.head
   in
   match replay with

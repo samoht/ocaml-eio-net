@@ -25,10 +25,33 @@
 type env =
   < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
-  ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t >
-(** The type for what a program runs with: an in-memory network of
-    {!Eio_net_mem}, and clocks on which a wait takes no time. A program written
-    against [Eio.Stdenv] fields of these names takes it unchanged.
+  ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t
+  ; secure_random : Eio.Flow.source_ty Eio.Resource.t
+  ; stdin : Eio.Flow.source_ty Eio.Resource.t
+  ; stdout : Eio.Flow.sink_ty Eio.Resource.t
+  ; stderr : Eio.Flow.sink_ty Eio.Resource.t
+  ; domain_mgr : Eio.Domain_manager.ty Eio.Resource.t
+  ; process_mgr : [ `Generic ] Eio.Process.mgr_ty Eio.Resource.t
+  ; debug : Eio.Debug.t
+  ; backend_id : string >
+(** The type for what a program runs with: the devices of [Eio.Stdenv], each
+    simulated, so a program written against [Eio.Stdenv]'s accessors takes it
+    unchanged.
+
+    - [net] is an in-memory network of {!Eio_net_mem}, the one that fails;
+    - [clock] and [mono_clock] start at [0.], and a wait takes no time
+      ({!section-runs});
+    - [secure_random] is drawn from the check's seed;
+    - [stdin] is empty, and [stdout], [stderr] and Eio's traces go to memory: a
+      report shows the last 2 KiB of the run that failed;
+    - [domain_mgr] runs the work in the calling fiber, on the run's own
+      scheduler;
+    - [process_mgr] refuses each process and pipe with [EPERM], and has no
+      environment variables;
+    - [backend_id] is ["mock"].
+
+    Each start of the program, its restart included, is a process of its own: it
+    draws its own entropy, and OCaml's [Random] is seeded afresh, from the seed.
     [Eio_fs_chaos.env] has the same shape, with [fs] and [cwd] in place of
     [net]. *)
 
@@ -124,7 +147,7 @@ val run :
       if [budget] is not positive, or [replay] is not a replay string of
       eio-net. *)
 
-val is_outage : env -> bool
+val is_outage : < net : [ `Generic ] Eio.Net.ty Eio.Resource.t ; .. > -> bool
 (** [is_outage env] is [true] iff [env] is that of the outage run of {!run}. A
     program that must succeed under any single fault may give up only then. *)
 

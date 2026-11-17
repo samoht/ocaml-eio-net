@@ -6,17 +6,17 @@ open Sampling
    reset the body. *)
 let check w () = Eio_net_chaos.run w
 
-(* A replay names its scenario, so one found under another seed runs again
-   with none. *)
+(* A replay names its scenario and the seed the program drew from, so one
+   found under another seed runs again under that seed. *)
 let test_seed_replay () =
   let w = download ~bug:`Body ~body:19 in
   let found = Expect.report (fun () -> Eio_net_chaos.run ~seed:7 w) in
   let replay =
     Scanf.sscanf
       (Expect.field "replay" found)
-      "Eio_net_chaos.run ~replay:%S app" Fun.id
+      "Eio_net_chaos.run ~seed:7 ~replay:%S app" Fun.id
   in
-  let again = Expect.report (fun () -> Eio_net_chaos.run ~replay w) in
+  let again = Expect.report (fun () -> Eio_net_chaos.run ~seed:7 ~replay w) in
   Alcotest.(check string)
     "faults"
     (Expect.field "faults" found)

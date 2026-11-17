@@ -10,6 +10,9 @@ let timeout () = error Unix.ETIMEDOUT "connect-in-progress"
 let unreachable () = error Unix.ENETUNREACH "connect"
 let emfile () = error Unix.EMFILE "accept"
 
+let refused name arg =
+  Eio.Exn.create (Eio.Exn.X (Eio_unix.Unix_error (Unix.EPERM, name, arg)))
+
 (* The pool is one no systhread starts in: [Eio_unix.run_in_systhread] adds
    its clean-up timer to the pool's queue, which nothing runs. *)
 let systhread : type a. a Effect.t -> (unit -> a) option = function
