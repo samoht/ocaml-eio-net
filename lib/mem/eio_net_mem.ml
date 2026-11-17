@@ -607,8 +607,8 @@ module Datagram_socket = struct
   let max_dgram_qlen = 10
 
   (* What a datagram of [n] bytes takes of a macOS receive buffer: its
-     length, and at least 128 bytes on a Unix path, which fits what one Mac
-     holds of 1, 500, 1000 and 2000 bytes. *)
+     length, and at least 128 bytes on a Unix path, which fits what the
+     kernel traces record for 1, 500, 1000 and 2000 bytes. *)
   let macos_size ~local n = if local then max n 128 else n
 
   (* A port of zero with none of the range free is bind(2)'s EADDRINUSE. *)

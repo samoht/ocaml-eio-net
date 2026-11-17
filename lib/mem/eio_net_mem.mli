@@ -559,8 +559,8 @@ val pair :
 
 (** {1:macos macOS}
 
-    Under [`Macos] the network follows macOS where it differs from Linux, as
-    measured through eio_posix on macOS 27:
+    Under [`Macos] the network follows macOS where it differs from Linux, as the
+    kernel traces record it through eio_posix on macOS 27.3:
 
     - Addresses. The loopback interface has 127.0.0.1 and [::1] only: a bind at
       another address of 127.0.0.0/8 raises [EADDRNOTAVAIL], a connect there is
@@ -607,10 +607,11 @@ val pair :
       one has no route. A socket bound at an IPv4-mapped address sees IPv4
       senders as IPv4. A receiver holds its receive buffer, by default 786,896
       bytes over UDP, each datagram counted by its length, and 4096 on a Unix
-      path, each counted as at least 128 bytes, which fits what one Mac holds of
-      datagrams of 1 to 2000 bytes. A datagram past that is lost over UDP, and
-      on a Unix path the send raises the [ENOBUFS] error eio_posix raises, where
-      Linux waits; a receive frees what it takes at once.
+      path, each counted as at least 128 bytes, which fits what the kernel
+      traces record for datagrams of 1 to 2000 bytes. A datagram past that is
+      lost over UDP, and on a Unix path the send raises the [ENOBUFS] error
+      eio_posix raises, where Linux waits; a receive frees what it takes at
+      once.
     - Unix paths. [sun_path] holds 103 bytes. There is no abstract namespace: a
       path with a NUL anywhere names no file, and the empty path binds nothing,
       with [EINVAL].
