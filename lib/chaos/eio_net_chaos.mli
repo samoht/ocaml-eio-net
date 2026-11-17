@@ -494,6 +494,36 @@ val pair :
     asks: [socket] is [1]. Its streams follow [os] (defaults to [`Linux]), as
     {!Eio_net_mem.pair} takes it. A fuzzer drives it from its input. *)
 
+val seeded :
+  ?dribble:int ->
+  ?stall:int ->
+  ?short_write:int ->
+  ?reset_after:int ->
+  ?reset_kind:[ `Reset | `Eof ] ->
+  ?fail_write_after:int ->
+  int ->
+  Op.t ->
+  Fault.t option
+(** [seeded ~dribble ~stall ~short_write ~reset_after ~reset_kind
+     ~fail_write_after seed] is a fault function for one end of a connection,
+    drawn from [seed], as a fuzzer whose input is a seed drives {!pair}: each
+    read moves at most [1..dribble] bytes (default: as many as it asks for) or,
+    one time in [stall + 1], first waits a {!Fault.Stall} of no time, which lets
+    the other fibers run; each write moves at most [1..short_write] bytes. A
+    read past [reset_after] bytes meets [reset_kind] ([`Reset] by default, or
+    [`Eof]), and a write past [fail_write_after] bytes a reset. Reads and writes
+    draw from [seed] apart, so the faults of each do not depend on how the two
+    interleave. Connects, accepts and receives meet none. *)
+
+val by_side :
+  client:(Op.t -> Fault.t option) ->
+  server:(Op.t -> Fault.t option) ->
+  Op.t ->
+  Fault.t option
+(** [by_side ~client ~server op] asks [client] about [op] when it is an
+    operation of the end that connected, and [server] when it is one of the end
+    that accepted. *)
+
 (** {1:exploration Exploration}
 
     A check runs the program once with no fault and records its operations: its
