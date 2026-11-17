@@ -27,6 +27,10 @@ static void invalid_batch(const char *fn, intnat offset, intnat count,
   caml_invalid_argument(msg);
 }
 
+/* Darwin's sendmsg_x and recvmsg_x move a batch of datagrams in one system
+   call. libsystem_kernel exports both since macOS 10.11 and no SDK header
+   declares them. They are imported strongly: Homebrew refuses a bottle with a
+   weak import, which marks a function newer than the deployment target. */
 #ifdef __APPLE__
 struct ocaml_msghdr_x {
   void *msg_name;
@@ -39,10 +43,9 @@ struct ocaml_msghdr_x {
   size_t msg_datalen;
 };
 
-extern ssize_t sendmsg_x(int, const struct ocaml_msghdr_x *, unsigned int, int)
-    __attribute__((weak_import));
-extern ssize_t recvmsg_x(int, struct ocaml_msghdr_x *, unsigned int, int)
-    __attribute__((weak_import));
+extern ssize_t sendmsg_x(int, const struct ocaml_msghdr_x *, unsigned int,
+                         int);
+extern ssize_t recvmsg_x(int, struct ocaml_msghdr_x *, unsigned int, int);
 #endif
 
 /* Sends the frames [offset, count) of [vbuffers], each [vlengths] long, one
@@ -77,28 +80,25 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
   ssize_t sent = 0;
   caml_enter_blocking_section();
 #ifdef __APPLE__
-  if (sendmsg_x != NULL) {
-    struct ocaml_msghdr_x messages[OCAML_EIO_NET_MAX_BATCH];
-    for (int i = 0; i < count; i++) {
-      messages[i] = (struct ocaml_msghdr_x){0};
-      messages[i].msg_iov = &iov[i];
-      messages[i].msg_iovlen = 1;
-    }
-    sent = sendmsg_x(fd, messages, (unsigned int)count, 0);
-  } else
-#endif
-  {
-    while (sent < count) {
-      ssize_t len = send(fd, iov[sent].iov_base, iov[sent].iov_len, 0);
-      if (len < 0) {
-        /* A failure after the first is reported by the next call, which
-           starts with the frame that failed. */
-        if (sent == 0) sent = -1;
-        break;
-      }
-      sent++;
-    }
+  struct ocaml_msghdr_x messages[OCAML_EIO_NET_MAX_BATCH];
+  for (int i = 0; i < count; i++) {
+    messages[i] = (struct ocaml_msghdr_x){0};
+    messages[i].msg_iov = &iov[i];
+    messages[i].msg_iovlen = 1;
   }
+  sent = sendmsg_x(fd, messages, (unsigned int)count, 0);
+#else
+  while (sent < count) {
+    ssize_t len = send(fd, iov[sent].iov_base, iov[sent].iov_len, 0);
+    if (len < 0) {
+      /* A failure after the first is reported by the next call, which starts
+         with the frame that failed. */
+      if (sent == 0) sent = -1;
+      break;
+    }
+    sent++;
+  }
+#endif
   int error = errno;
   caml_leave_blocking_section();
 
@@ -153,35 +153,32 @@ CAMLprim value caml_eio_net_recvmsg_batch(value vfd, value vbuffers,
   int error = 0;
   caml_enter_blocking_section();
 #ifdef __APPLE__
-  if (recvmsg_x != NULL) {
-    struct ocaml_msghdr_x messages[OCAML_EIO_NET_MAX_BATCH];
-    for (int i = offset; i < count; i++) {
-      messages[i - offset] = (struct ocaml_msghdr_x){0};
-      messages[i - offset].msg_iov = &iov[i];
-      messages[i - offset].msg_iovlen = 1;
-    }
-    received =
-        recvmsg_x(fd, messages, (unsigned int)(count - offset), MSG_DONTWAIT);
-    if (received < 0) {
-      error = errno;
-      received = 0;
-    }
-    for (int i = 0; i < received; i++)
-      lengths[offset + i] = messages[i].msg_datalen;
-  } else
-#endif
-  {
-    while (received < count - offset) {
-      ssize_t len = recv(fd, iov[offset + received].iov_base,
-                         iov[offset + received].iov_len, MSG_DONTWAIT);
-      if (len < 0) {
-        error = errno;
-        break;
-      }
-      lengths[offset + received] = (size_t)len;
-      received++;
-    }
+  struct ocaml_msghdr_x messages[OCAML_EIO_NET_MAX_BATCH];
+  for (int i = offset; i < count; i++) {
+    messages[i - offset] = (struct ocaml_msghdr_x){0};
+    messages[i - offset].msg_iov = &iov[i];
+    messages[i - offset].msg_iovlen = 1;
   }
+  received =
+      recvmsg_x(fd, messages, (unsigned int)(count - offset), MSG_DONTWAIT);
+  if (received < 0) {
+    error = errno;
+    received = 0;
+  }
+  for (int i = 0; i < received; i++)
+    lengths[offset + i] = messages[i].msg_datalen;
+#else
+  while (received < count - offset) {
+    ssize_t len = recv(fd, iov[offset + received].iov_base,
+                       iov[offset + received].iov_len, MSG_DONTWAIT);
+    if (len < 0) {
+      error = errno;
+      break;
+    }
+    lengths[offset + received] = (size_t)len;
+    received++;
+  }
+#endif
   caml_leave_blocking_section();
 
   for (int i = 0; i < received; i++)
