@@ -114,10 +114,6 @@ let rec indeterminate = function
       l <> [] && List.for_all (fun (x, _) -> indeterminate x) l
   | _ -> false
 
-(* A run of [s] on a fresh network that [setup] prepared, then, if [s] has a
-   fault, [inspect] and [app] again on the same network, healed: why it
-   failed if it did. [observe] sees each operation of the run with the fault
-   and the fault it met. *)
 (* How a run's own loop ended: why it failed, if it did, the fibers that
    waited if it hung, and whether it stopped at a limit. *)
 type ended = {
@@ -166,6 +162,10 @@ let capacity (s : Plan.scenario) healed =
       fun c -> if !healed then c else Int.min Plan.tiny_buffer c
   | _ -> Fun.id
 
+(* A run of [s] on a fresh network that [setup] prepared, then, if [s] has a
+   fault, [inspect] and [app] again on the same network, healed: why it
+   failed if it did. [observe] sees each operation of the run with the fault
+   and the fault it met. *)
 let exec_with w ~observe (s : Plan.scenario) =
   let os = w.os in
   let faulty = s <> Plan.none in

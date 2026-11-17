@@ -198,7 +198,10 @@ val device :
     those that wait 60 seconds for a port to be free again, those that use up
     every port, and those that send off the loopback interface; and, under
     [`Macos], those whose answer depends on timing, of which the traces hold one
-    answer. Unix paths are made in the current directory.
+    answer: 21 scenarios, and the TCP sequences that read or write after an end
+    shut its receive side while bytes or an end of stream were on their way to
+    it, as whether the reset macOS then sends has arrived depends on when the
+    operation runs. Unix paths are made in the current directory.
 
     An operation is "would wait" if it has not completed after 64 turns of the
     event loop, as the recorder took it, and a sequence that has not ended after
@@ -206,13 +209,15 @@ val device :
     so eio-net.mem passes in about three seconds.
 
     @raise Failure
-      if an answer is outside its set, with one line for each such sequence: its
-      operations up to the one that differs, the answers allowed and the one
-      given, as
-      [tcp4 connect; accept; close C; read S 1: expected one of {EOF}, got would
-       wait], with how many sequences gave the same line; then how many passed,
-      differed and were left out, and why. Past the first hundred lines it gives
-      the count alone. *)
+      if an answer is outside its set, with a line for each step and answers
+      that differ: the operation, the answer allowed, or the set of them, and
+      the one given, then how many sequences gave it and the first of them, its
+      operations up to the one that differs, as
+      [connect: expected ok, got Refused, in 21,361 sequences, e.g. tcp4 accept;
+       close S; close S; connect]; then how many passed, differed and were left
+      out, and why. Past the first hundred lines it gives the count alone. A
+      step names its end of the connection: [C] the one that connected, [S] the
+      one that accepted. *)
 
 (** {1:blocks Building blocks} *)
 
@@ -254,7 +259,10 @@ module Op : sig
   (** The type for operations. *)
 
   val pp : t Fmt.t
-  (** [pp] formats an operation for logs and reports. *)
+  (** [pp] formats an operation for logs and reports, as [#4 write 1s @0+5]: its
+      {!index}, its kind, its {!socket} and side, [c] for the end that connected
+      and [s] for the one that accepted, then [@] its {!offset} and, for a read
+      or a write, [+] its {!length}. *)
 end
 
 (** The faults a wrapper injects. *)
@@ -486,7 +494,8 @@ val pair :
     stream into a wrong answer.
 
     {b Let time pass between retries.} A program that reconnects at once, with
-    no sleep, spins under the outage, and fails as a hang ({!section-runs}).
+    no sleep, spins under the outage, and fails as a busy loop or a hang
+    ({!section-runs}).
 
     {b Ports are held as on Linux.} The end of a connection that closes first
     holds its port for 60 seconds of the run's clock, in TIME_WAIT. A server
@@ -513,13 +522,25 @@ val pair :
 
 (** {1:replay Failures and replay}
 
-    A check is deterministic. A failure raises [Failure] with the scenario, the
-    operations of the failing run, how it ended when its [inspect] or restart
-    failed, and the [Eio_net_chaos.run ~replay:"..." app] call that runs that
-    scenario alone; a failure of the run with no fault, with its operations and
-    the replay that runs it again. Each operation shows the fault it met, and
-    one cut short where a fault lands names that fault. Repeated operations are
+    A failure raises [Failure] with the scenario, the operations of the failing
+    run, how it ended when its [inspect] or restart failed, what it printed, and
+    the [Eio_net_chaos.run ~replay:"..." app] call that runs that scenario
+    alone; a failure of the run with no fault, with its operations and the
+    replay that runs it again. Each operation shows the fault it met, and one
+    cut short where a fault lands names that fault. Repeated operations are
     folded and a long report is cut around its first fault.
+
+    A program need not be deterministic: the check owns what makes runs differ.
+    The clocks, the scheduling, the entropy and OCaml's [Random] are simulated
+    or drawn from [~seed], and faults are aimed at operations by their place
+    among the connections and their bytes, never by an address, so a port or a
+    socket path the program draws does not move them. A program built with
+    {{:https://github.com/samoht/ocaml-hermetic}hermetic} ([open! Hermetic])
+    reaches the outside world only through {!type-env}: the compiler rejects
+    every other way, so every run replays exactly. Without it, a direct call,
+    such as [Unix.gettimeofday], [Random.self_init] or a file read, escapes the
+    check, and two runs with no fault may differ. The check then goes on, and a
+    failure says where they first differed, on its [diverged] line.
 
     The scenario is found by its position and fault, so a replay still runs
     after a fix that changes the program's first run, such as the size of its
@@ -530,8 +551,9 @@ val pair :
 
     The sampled tier draws its scenarios from a seed, the same one on every
     check unless [~seed] gives another, so a check meets the same faults each
-    time. A replay names its scenario, not the draw that found it, so it needs
-    no seed.
+    time. A replay names its scenario, not the draw that found it; the program
+    draws its entropy from the seed too, so the replay line passes [~seed] when
+    it is not [0].
 
     A check reads no environment variable and prints nothing. A test that wants
     a larger budget at night, or other faults in the sampled tier, reads its
