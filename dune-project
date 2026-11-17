@@ -18,8 +18,8 @@
  (description
   "\| Answers two questions, with one call each: does an Eio program cope
   "\| with a network that fails, and does an Eio network answer as Linux or
-  "\| macOS does? Both run on an in-memory network that follows either
-  "\| kernel.
+  "\| macOS does? The first runs on an in-memory network that follows either
+  "\| kernel and itself passes the second.
   )
  (tags (eio network framing test))
  (depends
