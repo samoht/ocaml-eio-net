@@ -707,6 +707,32 @@ let test_net_connect_refused () =
   | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> ()
   | _ -> Alcotest.fail "the connect went through"
 
+(* An error says once where a connect went, whether the network or the
+   wrapper raised it. *)
+let test_net_connect_context () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let contexts f =
+    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    match Eio.Net.connect ~sw net addr with
+    | _ -> Alcotest.fail "the connect went through"
+    | exception (Eio.Io _ as e) ->
+        let m = Printexc.to_string e in
+        let p = "connecting to" in
+        let rec count i n =
+          if i + String.length p > String.length m then n
+          else if String.sub m i (String.length p) = p then count (i + 1) (n + 1)
+          else count (i + 1) n
+        in
+        (count 0 0, m)
+  in
+  List.iter
+    (fun (what, f) ->
+      match contexts f with
+      | 1, _ -> ()
+      | n, m -> Alcotest.failf "%s: %d contexts in %S" what n m)
+    [ ("no listener", fun _ -> None); ("Refuse", nth `Connect 1 Fault.Refuse) ]
+
 let connect_timeout ~os =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -1596,6 +1622,8 @@ let suite =
         test_net_short_reads;
       Alcotest.test_case "Refuse fails a connect with Refused" `Quick
         test_net_connect_refused;
+      Alcotest.test_case "a connect's error names its address once" `Quick
+        test_net_connect_context;
       Alcotest.test_case
         "Timeout fails a connect after 133 s, or 75 s under macOS" `Quick
         test_net_connect_timeout;
