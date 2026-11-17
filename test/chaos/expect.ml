@@ -17,7 +17,7 @@ let report f =
 
 let caught f () =
   let m = report f in
-  if not (String.starts_with ~prefix:"Eio_net_chaos.check: the workload" m) then
+  if not (String.starts_with ~prefix:"Eio_net_chaos.run: the workload" m) then
     Alcotest.failf "the check failed for another reason: %s" m
 
 let pinned f () =

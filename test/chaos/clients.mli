@@ -11,7 +11,7 @@ val test_frames :
   unit ->
   unit
 (** [test_frames ~budget ~replay ~read ()] checks that [read] gets a prefix of
-    the frames a server sends, under {!Eio_net_chaos.check}. *)
+    the frames a server sends, under {!Eio_net_chaos.run}. *)
 
 val test_cut :
   read:

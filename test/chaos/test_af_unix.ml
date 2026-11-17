@@ -1,6 +1,6 @@
 open Af_unix
 
-let check w () = Eio_net_chaos.check w
+let check w () = Eio_net_chaos.run w
 
 (* A report collapses the runs of an operation it repeats: thousands of
    one-byte operations cost a few lines, and its replay still runs that
@@ -9,10 +9,13 @@ let bounded_report () =
   let m = Expect.report (check (echo ~bug:`Ignore_short)) in
   let lines = List.length (String.split_on_char '\n' m) in
   if lines > 200 then Alcotest.failf "the report has %d lines" lines;
-  let replay = Scanf.sscanf (Expect.field "replay" m) "~replay:%S" Fun.id in
+  let replay =
+    Scanf.sscanf (Expect.field "replay" m) "Eio_net_chaos.run ~replay:%S app"
+      Fun.id
+  in
   let again =
     Expect.report (fun () ->
-        Eio_net_chaos.check ~replay (echo ~bug:`Ignore_short))
+        Eio_net_chaos.run ~replay (echo ~bug:`Ignore_short))
   in
   Alcotest.(check string) "the replay fails the same way" m again
 

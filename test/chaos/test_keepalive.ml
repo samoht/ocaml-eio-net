@@ -1,6 +1,6 @@
 open Keepalive
 
-let check ?os w () = Eio_net_chaos.check ?os w
+let check ?os w () = Eio_net_chaos.run ?os w
 
 (* The check finds the run hangs. *)
 let hangs f () =

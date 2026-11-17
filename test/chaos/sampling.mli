@@ -1,4 +1,4 @@
-(** A workload whose bug only the sampled tier of {!Eio_net_chaos.check} can
+(** A workload whose bug only the sampled tier of {!Eio_net_chaos.run} can
     reach. *)
 
 val download : ?bug:[ `None | `Body ] -> body:int -> Eio_net_chaos.env -> unit

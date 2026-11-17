@@ -21,7 +21,7 @@ let refused_with prefix f () =
 (* A download whose client logs what it got before the end or an error,
    and when. *)
 let logged log () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -75,7 +75,9 @@ let test_cut_positions () =
     ]
 
 let replay_of report =
-  Scanf.sscanf (Expect.field "replay" report) "~replay:%S" Fun.id
+  Scanf.sscanf
+    (Expect.field "replay" report)
+    "Eio_net_chaos.run ~replay:%S app" Fun.id
 
 let same_failure a b =
   List.iter
@@ -98,7 +100,7 @@ let hash replay = List.nth (String.split_on_char '/' replay) 1
 (* A client that reads a message of ten bytes in reads of [size] bytes. With
    [bug] it takes a reset for the end of the message. *)
 let message ?replay ~size ~bug () =
-  Eio_net_chaos.check ?replay @@ fun env ->
+  Eio_net_chaos.run ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -150,21 +152,20 @@ let test_stale_replay () =
   let key = List.nth (String.split_on_char '/' replay) 2 in
   refused_with
     (Fmt.str
-       "Eio_net_chaos.check: the replay names %s, a scenario this check no \
+       "Eio_net_chaos.run: the replay names %s, a scenario this check no \
         longer has: its first run was %s and is now"
        key (hash replay))
-    (fun () -> Eio_net_chaos.check ~replay other)
+    (fun () -> Eio_net_chaos.run ~replay other)
     ()
 
 let test_unknown_replay () =
   let replay = replay_of (Expect.report (fun () -> mutant ())) in
-  refused_with
-    "Eio_net_chaos.check: the replay names read9c@0.reset, a scenario"
+  refused_with "Eio_net_chaos.run: the replay names read9c@0.reset, a scenario"
     (fun () ->
       mutant ~replay:(Fmt.str "net/%s/read9c@0.reset" (hash replay)) ())
     ();
   refused_with
-    "Eio_net_chaos.check: ~replay:\"fs/x/y\" is not a replay of eio-net"
+    "Eio_net_chaos.run: ~replay:\"fs/x/y\" is not a replay of eio-net"
     (fun () -> mutant ~replay:"fs/x/y" ())
     ()
 
@@ -182,7 +183,7 @@ let test_budget () =
    its port. Its closed end holds the port in TIME_WAIT for 60 s, so the
    second listen needs [reuse_addr], as on Linux. *)
 let restart ~reuse_addr () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   let serve_once () =
     Eio.Switch.run @@ fun sw ->
     let l = Eio.Net.listen ~reuse_addr ~sw ~backlog:1 env#net addr in
@@ -213,14 +214,14 @@ let test_restart () =
     not
       (String.starts_with
          ~prefix:
-           "Eio_net_chaos.check: the run with no fault failed: Eio.Io \
-            Unix_error (Address already in use, \"bind\""
+           "Eio_net_chaos.run: the run with no fault failed: Eio.Io Unix_error \
+            (Address already in use, \"bind\""
          m)
   then Alcotest.failf "failed with %S" m
 
 let test_nothing () =
-  refused_with "Eio_net_chaos.check: the workload makes no network operation"
-    (fun () -> Eio_net_chaos.check ignore)
+  refused_with "Eio_net_chaos.run: the workload makes no network operation"
+    (fun () -> Eio_net_chaos.run ignore)
     ()
 
 let test_nondeterministic () =
@@ -233,19 +234,18 @@ let test_nondeterministic () =
     done
   in
   refused_with
-    "Eio_net_chaos.check: two runs with no fault made different operations"
-    (fun () -> Eio_net_chaos.check run)
+    "Eio_net_chaos.run: two runs with no fault made different operations"
+    (fun () -> Eio_net_chaos.run run)
     ()
 
 (* A run with no fault that fails is reported with its operations and the
    replay that runs it again. *)
 let test_first_run_fails () =
   let run ?replay () =
-    Eio_net_chaos.check ?replay (fun env ->
+    Eio_net_chaos.run ?replay (fun env ->
         Eio.Switch.run @@ fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
   in
-  refused_with "Eio_net_chaos.check: the run with no fault failed: Eio.Io" run
-    ();
+  refused_with "Eio_net_chaos.run: the run with no fault failed: Eio.Io" run ();
   let report = Expect.report run in
   Alcotest.(check string) "trace" "" (Expect.field "trace" report);
   if not (List.mem "    #1 connect 1c @0" (String.split_on_char '\n' report))
@@ -263,7 +263,7 @@ let test_nested () =
 (* A client that retries a refused connect at once spins in the outage,
    where every connect is refused and no time passes. *)
 let spin () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -285,7 +285,7 @@ let spin () =
    fault: an end of file is no failure, but the run makes more network
    operations than a check plans from. *)
 let reconnect () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -309,7 +309,7 @@ let reconnect () =
    a new connection, an answer and no failure, so the run with no fault
    passes, and only the budget stops the check. *)
 let batch () =
-  Eio_net_chaos.check ~budget:1 @@ fun env ->
+  Eio_net_chaos.run ~budget:1 @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -331,7 +331,7 @@ let batch () =
    no failure counts, which makes more network operations than a check plans
    from. *)
 let broken_server () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   let broken = ref false in
@@ -364,7 +364,7 @@ let broken_server () =
    still, is not a spin: the check's first run passes, and only the budget
    stops it. *)
 let scan () =
-  Eio_net_chaos.check ~budget:1 @@ fun env ->
+  Eio_net_chaos.run ~budget:1 @@ fun env ->
   for port = 30000 to 40500 do
     match
       Eio.Switch.run (fun sw ->
@@ -382,7 +382,7 @@ let scan () =
    held back 50 ms arrives, though the peer takes a ping on every poll, and
    in the outage, where each is lost, a patient client gives up. *)
 let poll ?patience () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
   let client = Eio.Net.datagram_socket ~sw env#net (udp 5000) in
@@ -420,7 +420,7 @@ let poll ?patience () =
    client that waits 30 s for it. A real server takes a few milliseconds
    for that, so the client's timeout never fires. *)
 let compute () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -457,7 +457,7 @@ let compute () =
    that reads 1 MiB and leaves. The server's writes wait while its socket's
    buffer is full, as on Linux, so the client runs and its close ends them. *)
 let stream () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   let unbounded = ref false in
@@ -502,7 +502,7 @@ let trace_lines report =
    last of them. *)
 let test_report_collapses_by_shape () =
   let run () =
-    Eio_net_chaos.check @@ fun env ->
+    Eio_net_chaos.run @@ fun env ->
     for _ = 1 to 1200 do
       try Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
       with Eio.Io _ -> ()
@@ -518,7 +518,7 @@ let test_report_collapses_by_shape () =
    comes before the reset. *)
 let test_report_names_the_cut () =
   let run ?replay () =
-    Eio_net_chaos.check ?replay @@ fun env ->
+    Eio_net_chaos.run ?replay @@ fun env ->
     Eio.Switch.run @@ fun sw ->
     let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
     Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -545,7 +545,7 @@ let test_malformed_replay () =
   List.iter
     (fun replay ->
       refused_with
-        (Fmt.str "Eio_net_chaos.check: ~replay:%S is not a replay of eio-net"
+        (Fmt.str "Eio_net_chaos.run: ~replay:%S is not a replay of eio-net"
            replay)
         (fun () -> mutant ~replay ())
         ())
@@ -555,7 +555,7 @@ let test_malformed_replay () =
    failure: the report says the workload looks like a busy loop. *)
 let test_loop_named () =
   let run () =
-    Eio_net_chaos.check @@ fun env ->
+    Eio_net_chaos.run @@ fun env ->
     Eio.Switch.run @@ fun sw ->
     let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
     Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -582,7 +582,7 @@ let touch (env : Eio_net_chaos.env) =
    for its result with [Fiber.yield], under a 50 ms deadline: a few
    milliseconds of work on eio_posix. *)
 let deadline_compute () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   touch env;
   let flag = ref false in
   Eio.Time.with_timeout_exn env#clock 0.05 @@ fun () ->
@@ -605,7 +605,7 @@ let handshake () =
       Eio.Fiber.yield ()
     done
   in
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -641,7 +641,7 @@ let handshake () =
 (* Two ends that ping-pong one byte over a connection until a 10 ms timer
    says stop: a few thousand round trips on eio_posix. *)
 let pingpong () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -678,7 +678,7 @@ let pingpong () =
    scenario of the linear tier, so the default budget covers a hundred round
    trips. *)
 let udp_pingpong () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
   let a = Eio.Net.datagram_socket ~sw env#net (udp 5010) in
@@ -708,7 +708,7 @@ let udp_pingpong () =
 
 (* A loop that sleeps 1 us until a flag no one sets. *)
 let tiny_sleeps () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   touch env;
   (* Its own bound, past the turns a run may take: without it, a run with no
      limit on its turns sleeps until its clock reaches the hour. *)
@@ -722,7 +722,7 @@ let tiny_sleeps () =
 (* A loop that yields 9,900,000 times, then sleeps 1 ms, for ever: each
    sleep is a wait, but its turns are nearly all of its clock. *)
 let bursts () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   touch env;
   (* Its own bound, past the turns a run may take: without it, a run with no
      limit on its turns yields until its clock reaches the hour. *)
@@ -739,7 +739,7 @@ let bursts () =
 (* A worker that does [n] jobs, each 1000 yields of work, and sleeps 1 ms
    between two jobs: 1001 turns a job. *)
 let jobs ?budget n () =
-  Eio_net_chaos.check ?budget @@ fun env ->
+  Eio_net_chaos.run ?budget @@ fun env ->
   touch env;
   for _ = 1 to n do
     for _ = 1 to 1000 do
@@ -750,7 +750,7 @@ let jobs ?budget n () =
 
 (* A poll with [Fiber.yield] for a flag no one sets. *)
 let yield_poll () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   touch env;
   let flag = ref false in
   while not !flag do
@@ -762,7 +762,7 @@ let yield_poll () =
 let test_tiny_budget () =
   let report =
     Expect.report @@ fun () ->
-    Eio_net_chaos.check ~budget:1 @@ fun env ->
+    Eio_net_chaos.run ~budget:1 @@ fun env ->
     touch env;
     touch env
   in
@@ -778,7 +778,7 @@ let test_tiny_budget () =
 let test_linear_memory () =
   let runs = ref 0 and first = ref 0 and most = ref 0 in
   let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
-  Eio_net_chaos.check (fun env ->
+  Eio_net_chaos.run (fun env ->
       incr runs;
       ( Eio.Switch.run @@ fun sw ->
         let sink = Eio.Net.datagram_socket ~sw env#net (udp 5020) in
@@ -806,7 +806,7 @@ let test_linear_memory () =
 let test_report_shows_three () =
   let report =
     Expect.report @@ fun () ->
-    Eio_net_chaos.check @@ fun env ->
+    Eio_net_chaos.run @@ fun env ->
     for _ = 1 to 3 do
       touch env
     done;
@@ -827,7 +827,7 @@ let test_malformed_scenario () =
     (fun k ->
       let replay = Fmt.str "net/%s/%s" h k in
       refused_with
-        (Fmt.str "Eio_net_chaos.check: ~replay:%S is not a replay of eio-net"
+        (Fmt.str "Eio_net_chaos.run: ~replay:%S is not a replay of eio-net"
            replay)
         (fun () -> mutant ~replay ())
         ())
@@ -864,7 +864,7 @@ let test_replay_case () =
   Alcotest.(check string) "report" report report'
 
 let first_fails error =
-  refused_with ("Eio_net_chaos.check: the run with no fault failed: " ^ error)
+  refused_with ("Eio_net_chaos.run: the run with no fault failed: " ^ error)
 
 let busy =
   "the run woke 10,000,000 times without waiting 1 ms or more: a busy loop"
@@ -880,7 +880,7 @@ let ops =
 (* 200 fibers on a 20 ms heartbeat for 600 s of the clock: six million
    turns, each heartbeat a wait. *)
 let heartbeats () =
-  Eio_net_chaos.check ~budget:2 @@ fun env ->
+  Eio_net_chaos.run ~budget:2 @@ fun env ->
   touch env;
   Eio.Fiber.all
     (List.init 200 (fun _ () ->
@@ -893,7 +893,7 @@ let heartbeats () =
    stands still over a thousand of them would spin for ever, so it stops
    there. *)
 let never_waits start () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   touch env;
   Eio.Switch.run @@ fun sw ->
   let step = start ~sw env in
@@ -951,7 +951,7 @@ let lookups =
    Under one-byte reads or writes each 4 KiB takes about 4096 operations
    each way. *)
 let echo ?(size = 4096) n () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:128 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -980,7 +980,7 @@ let echo ?(size = 4096) n () =
 (* A client that sends 400 numbered queries over UDP, one at a time, and
    sends each again after 100 ms without its answer, up to three times. *)
 let queries () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let udp port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
   let server = Eio.Net.datagram_socket ~sw env#net (udp 5300) in
@@ -1014,7 +1014,7 @@ let queries () =
 (* A client that reads a reply of 4 KiB, and polls with yields for ever if
    that took more than 100 reads. *)
 let slow_reply () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -1043,7 +1043,7 @@ let slow_reply () =
 (* A workload that runs work in a systhread, as an Eio program offloads a
    blocking call, and gets its result or its exception. *)
 let systhread () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   touch env;
   if Eio_unix.run_in_systhread (fun () -> 6 * 7) <> 42 then
     failwith "a wrong result";
@@ -1057,7 +1057,7 @@ let systhread () =
 let test_forgotten_server () =
   let report =
     Expect.report @@ fun () ->
-    Eio_net_chaos.check @@ fun env ->
+    Eio_net_chaos.run @@ fun env ->
     Eio.Switch.run @@ fun sw ->
     let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
     Eio.Fiber.fork ~sw (fun () ->
@@ -1089,7 +1089,7 @@ let test_busy_memory () =
   in
   let report =
     Expect.report @@ fun () ->
-    Eio_net_chaos.check @@ fun env ->
+    Eio_net_chaos.run @@ fun env ->
     first := None;
     Eio.Switch.run @@ fun sw ->
     let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
@@ -1142,7 +1142,7 @@ let suite =
       Alcotest.test_case "lookups in a loop that never waits are a busy loop"
         `Quick (first_fails busy lookups);
       Alcotest.test_case "a batch of jobs ended by the server is no spin" `Quick
-        (refused_with "Eio_net_chaos.check: the linear tier needs" batch);
+        (refused_with "Eio_net_chaos.run: the linear tier needs" batch);
       Alcotest.test_case "a client of a server a fault broke spins" `Quick
         (error_is ops broken_server);
       Alcotest.test_case "a client that polls with a deadline" `Quick
@@ -1166,13 +1166,13 @@ let suite =
         `Quick
         (first_fails too_large bursts);
       Alcotest.test_case "9000 jobs between 1 ms sleeps are no busy loop" `Quick
-        (refused_with "Eio_net_chaos.check: the linear tier needs"
+        (refused_with "Eio_net_chaos.run: the linear tier needs"
            (jobs ~budget:2 9000));
       Alcotest.test_case "20000 jobs between 1 ms sleeps are too large" `Quick
         (first_fails too_large (jobs ~budget:2 20_000));
       Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
       Alcotest.test_case "many fibers on a heartbeat are no busy loop" `Quick
-        (refused_with "Eio_net_chaos.check: the linear tier needs" heartbeats);
+        (refused_with "Eio_net_chaos.run: the linear tier needs" heartbeats);
       Alcotest.test_case "a busy loop's trace is bounded" `Quick
         test_busy_memory;
       Alcotest.test_case "a check keeps no run's operations" `Quick
@@ -1199,7 +1199,7 @@ let suite =
         test_malformed_replay;
       Alcotest.test_case "a report names a loop" `Quick test_loop_named;
       Alcotest.test_case "a scan of closed ports is not a spin" `Quick
-        (refused_with "Eio_net_chaos.check: the linear tier needs" scan);
+        (refused_with "Eio_net_chaos.run: the linear tier needs" scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
         (Expect.passes (transfer 25 4096));
       Alcotest.test_case "80 clients of an echo fit the default budget" `Quick
@@ -1215,7 +1215,7 @@ let suite =
            slow_reply);
       Alcotest.test_case "a linear tier past the budget fails" `Quick
         (refused_with
-           "Eio_net_chaos.check: the linear tier needs 69 runs, more than the \
+           "Eio_net_chaos.run: the linear tier needs 69 runs, more than the \
             budget of 20"
            (transfer ~budget:20 25 4096));
       Alcotest.test_case "resume: correct" `Quick

@@ -7,13 +7,13 @@ val test_kv :
   unit ->
   unit
 (** [test_kv ~bug ~lenient ()] checks that four requests get their values, or
-    give up in the outage, under {!Eio_net_chaos.check}. [lenient] makes the
+    give up in the outage, under {!Eio_net_chaos.run}. [lenient] makes the
     server take an unterminated last line for a whole one. *)
 
 val test_pubsub :
   ?bug:[ `Fanout_dies | `Hol | `None | `Single_read ] -> unit -> unit
 (** [test_pubsub ~bug ()] checks that one of three fast subscribers gets every
-    message within a second, beside a slow one, under {!Eio_net_chaos.check}. *)
+    message within a second, beside a slow one, under {!Eio_net_chaos.run}. *)
 
 val pinned : ?bug:[ `Fanout_dies | `Hol | `None | `Single_read ] -> unit -> unit
 (** [pinned ~bug ()] runs the broker's scenario once, with no fault, on

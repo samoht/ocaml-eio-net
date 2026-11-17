@@ -736,7 +736,7 @@ let test_net_connect_timeout () =
    the queue to 32 KiB and never raise it. *)
 let test_tiny_buffers_macos_unix () =
   let path = `Unix "tiny.sock" in
-  Chaos.check ~os:`Macos @@ fun env ->
+  Chaos.run ~os:`Macos @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   match Eio.Net.listen ~sw ~reuse_addr:true ~backlog:1 env#net path with
   | exception Eio.Io _ -> ()

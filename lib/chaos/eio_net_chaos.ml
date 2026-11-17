@@ -16,7 +16,7 @@ let is_outage (env : env) = Wrapper.is_outage env#net
 
 (* {1 Runner} *)
 
-let name = "Eio_net_chaos.check"
+let name = "Eio_net_chaos.run"
 let fail fmt = Fmt.failwith ("%s: " ^^ fmt) name
 let plural n = if n = 1 then "" else "s"
 
@@ -361,10 +361,10 @@ let report ?matched ~hash s trace error =
     \  faults:   %s@\n\
      %a  error:    %s@\n\
     \  trace:@\n\
-     %a  replay:   ~replay:\"net/%s/%s\""
+     %a  replay:   %s ~replay:\"net/%s/%s\" app"
     name (Plan.text s)
     Fmt.(option (any "  matched:  " ++ string ++ any "@\n"))
-    matched error (pp_trace s.rules) trace hash (Plan.key s)
+    matched error (pp_trace s.rules) trace name hash (Plan.key s)
 
 let digest (trace : Plan.trace) =
   let ops = List.map fst trace in
@@ -432,10 +432,10 @@ let first_failed ~hash trace error =
   Fmt.failwith
     "%s: the run with no fault failed: %s@\n\
     \  trace:@\n\
-     %a  replay:   ~replay:\"net/%s/%s\""
+     %a  replay:   %s ~replay:\"net/%s/%s\" app"
     name error (pp_trace [])
     { head = trace; left_out = 0; tail = [] }
-    hash (Plan.key Plan.none)
+    name hash (Plan.key Plan.none)
 
 (* The run a replay names: [(h, k)], the first run's hash and the
    scenario's key, against the check's first run, of hash [hash]. *)
@@ -497,14 +497,14 @@ let explore ~budget ~seed ~first ~linear ~attempt =
         (Plan.sample rng share c))
     classes
 
-let check ?os ?(budget = 2_000) ?(seed = 0) ?replay run =
+let run ?os ?(budget = 2_000) ?(seed = 0) ?replay app =
   let os =
     match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux
   in
   if budget < 1 then
     Fmt.invalid_arg "%s: budget is %d, it must be positive" name budget;
   let replay = Option.map parse_replay replay in
-  let first, failed = exec ~os run Plan.none in
+  let first, failed = exec ~os app Plan.none in
   Option.iter (first_failed ~hash:(digest first) first) failed;
   if first = [] then
     fail "the workload makes no network operation, so it tests nothing";
@@ -512,14 +512,14 @@ let check ?os ?(budget = 2_000) ?(seed = 0) ?replay run =
     (fail
        "two runs with no fault made different operations (%s); the workload \
         must be deterministic")
-    (diverges ~os run first);
+    (diverges ~os app first);
   let hash = digest first in
   let linear = Plan.linear first in
   let attempt ?matched s =
-    let shown, failed = exec_shown ~os run s in
+    let shown, failed = exec_shown ~os app s in
     Option.iter (report ?matched ~hash s shown) failed;
     shown.head
   in
   match replay with
-  | Some r -> replay_one ~os run ~first ~linear ~hash ~attempt r
+  | Some r -> replay_one ~os app ~first ~linear ~hash ~attempt r
   | None -> explore ~budget ~seed ~first ~linear ~attempt

@@ -9,7 +9,7 @@ val test :
   unit ->
   unit
 (** [test ~serve ()] checks that at least three of five clients are served,
-    under {!Eio_net_chaos.check}. *)
+    under {!Eio_net_chaos.run}. *)
 
 val test_idle :
   serve:

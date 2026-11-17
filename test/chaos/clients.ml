@@ -10,7 +10,7 @@ let rec is_prefix p l =
   | _ -> false
 
 let test_frames ?budget ?replay ~read () =
-  Eio_net_chaos.check ?budget ?replay @@ fun env ->
+  Eio_net_chaos.run ?budget ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
@@ -60,7 +60,7 @@ let test_cut ~read () =
   | _ -> failwith "an end mid-frame must raise Truncated"
 
 let test_retries ~fetch () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
@@ -76,7 +76,7 @@ let test_retries ~fetch () =
   | Error `Unreachable, false -> failwith "gave up"
 
 let test_datagrams ~call () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
   let server = Eio.Net.datagram_socket ~sw env#net (addr 9000) in

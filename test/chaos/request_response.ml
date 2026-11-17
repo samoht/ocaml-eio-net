@@ -5,7 +5,7 @@ let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)
 let n = 5
 
 let test ~serve () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:n env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () -> serve ~clock:env#clock l);

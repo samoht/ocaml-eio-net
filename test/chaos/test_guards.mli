@@ -1,4 +1,4 @@
-(** Tests of the guards of [Eio_net_chaos.check]. *)
+(** Tests of the guards of [Eio_net_chaos.run]. *)
 
 val suite : string * unit Alcotest.test_case list
 (** [suite] covers the hang and time limit reports, the budget, determinism,

@@ -1,6 +1,6 @@
 open Protocols
 
-let check w () = Eio_net_chaos.check w
+let check w () = Eio_net_chaos.run w
 
 (* The wrapper stops the spin of a loop that retries a failed accept at once:
    the accept raises [Failure] instead. *)

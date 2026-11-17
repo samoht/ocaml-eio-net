@@ -1,7 +1,7 @@
 open Dead_peer
 
 (* macOS queues 1 MiB over TCP, so a broadcast of 1.25 MiB fills it. *)
-let check w () = Eio_net_chaos.check ~os:`Macos w
+let check w () = Eio_net_chaos.run ~os:`Macos w
 
 let suite =
   ( "dead_peer",

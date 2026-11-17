@@ -6,7 +6,7 @@ open Kv
 let keys = [ "a"; "bb"; "ccc"; "dddd" ]
 
 let test_kv ?bug ?lenient () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
@@ -67,7 +67,7 @@ let scenario ?bug env =
               Fmt.failwith "a fast subscriber waited %gs" (last -. t0))
           full
 
-let test_pubsub ?bug () = Eio_net_chaos.check (scenario ?bug)
+let test_pubsub ?bug () = Eio_net_chaos.run (scenario ?bug)
 
 (* The same scenario on a network whose connections queue 8 bytes, so a
    subscriber that does not read blocks its writer at once. *)

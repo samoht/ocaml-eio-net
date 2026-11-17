@@ -1,7 +1,7 @@
 (** Network faults, for tests of Eio programs.
 
-    {!check} runs a workload on an in-memory network that fails in a different
-    way on each run: a read returns one byte or several messages at once, a
+    {!run} runs a workload on an in-memory network that fails in a different way
+    on each run: a read returns one byte or several messages at once, a
     connection is reset, ends midway or goes silent, a send buffer fills, a
     connect is refused or times out, a datagram is lost, duplicated, reordered
     or replaced with noise. It chooses the scenarios from what the workload
@@ -22,14 +22,14 @@ type env =
 
 (** {1:checks Checks} *)
 
-val check :
+val run :
   ?os:[< `Linux | `Macos ] ->
   ?budget:int ->
   ?seed:int ->
   ?replay:string ->
   (env -> unit) ->
   unit
-(** [check ~os ~budget ~seed ~replay run] calls [run] many times, each with a
+(** [run ~os ~budget ~seed ~replay app] calls [app] many times, each with a
     fresh in-memory network of {!Eio_net_mem}. The first run has no fault.
 
     The linear tier ({!section-exploration}) tries each of these alone:
@@ -56,7 +56,7 @@ val check :
       their minimum, Linux holds as little as about 4 KiB each way over TCP and
       2 KiB over AF_UNIX, so 32 KiB blocks no writer it could not;
     - the outage: every connect is refused and every datagram lost, for the
-      whole run. {!is_outage} is then [true], so [run] checks what its program
+      whole run. {!is_outage} is then [true], so [app] checks what its program
       does when it gives up.
 
     {!Fault.No_descriptor} is not among them: {!Eio.Net.run_server} stops on it,
@@ -73,7 +73,7 @@ val check :
     takes. No datagram is lost, duplicated, reordered or garbled, and the outage
     refuses connects only.
 
-    A run passes if [run] returns. [run] catches the errors its program may
+    A run passes if [app] returns. [app] catches the errors its program may
     raise and checks the results itself ({!section-contracts}): any exception
     that escapes it fails the check, an injected [Eio.Io] included. So does a
     hang ({!section-runs}), a first run that makes no network operation, and two
@@ -93,8 +93,7 @@ val check :
     @raise Invalid_argument if [budget] is less than [1]. *)
 
 val is_outage : env -> bool
-(** [is_outage env] is [true] iff [env] is that of the outage run of {!check}.
-*)
+(** [is_outage env] is [true] iff [env] is that of the outage run of {!run}. *)
 
 (** {1:blocks Building blocks} *)
 
@@ -171,17 +170,17 @@ module Fault : sig
             [TCP_USER_TIMEOUT], or for 948.6 s on Linux and 18 s on macOS
             ({!Eio_net_mem.v}). An end with no keepalive and nothing
             unacknowledged waits for ever, so a program with no timeout of its
-            own hangs. {!check} silences a connection at a read. On a network
+            own hangs. {!run} silences a connection at a read. On a network
             other than {!Eio_net_mem}, where the wrapper does not see the peer,
             only this end's reads go silent.
 
             On a connect, an accept or a receive, the operation waits until a
-            cancel ends it; a connect never does in {!check}, as the kernel
-            gives up on it. It holds that one operation: a datagram taken by a
-            receive that hangs goes to the next receive, and a connection taken
-            by an accept that hangs to the next accept. A receive on a
-            Unix-domain datagram socket does not hang: the datagram it took was
-            queued when its send returned. *)
+            cancel ends it; a connect never does in {!run}, as the kernel gives
+            up on it. It holds that one operation: a datagram taken by a receive
+            that hangs goes to the next receive, and a connection taken by an
+            accept that hangs to the next accept. A receive on a Unix-domain
+            datagram socket does not hang: the datagram it took was queued when
+            its send returned. *)
     | Reset
         (** Over IP, the connection is reset at both ends, and the bytes not yet
             read are lost. At each end the first read or write that follows
@@ -236,8 +235,8 @@ module Fault : sig
             every accept on the network fails the same way until the program
             frees a descriptor, by closing a connection, socket or listener of
             the network, or by ending the switch that holds one. The next accept
-            then returns that connection, with its data. {!check} does not try
-            it, as {!Eio.Net.run_server} stops on it. *)
+            then returns that connection, with its data. {!run} does not try it,
+            as {!Eio.Net.run_server} stops on it. *)
     | Drop  (** The datagram is lost; the receive waits for the next one. *)
     | Dup  (** The datagram arrives now and again on the next receive. *)
     | Reorder  (** The datagram arrives after the next one. *)
@@ -260,7 +259,7 @@ val wrap :
     meets the fault [f] answers; [clock] times stalls and timeouts. [f] may also
     act: count or log. [getaddrinfo], [getnameinfo] and datagram sends pass
     through. [os] (defaults to [`Linux]) is the kernel whose rules the faults
-    follow, as {!check} says: pass the one [net] follows.
+    follow, as {!run} says: pass the one [net] follows.
 
     The network, its connections and its datagram sockets may be used from
     several domains at once. [f] is called by one of them at a time, in the
@@ -351,7 +350,7 @@ val pair :
 (** {1:contracts Contracts}
 
     {b At most two faults per run.} A program that tries three times always
-    succeeds, so [run] may demand success. A broker that fans a message out to
+    succeeds, so [app] may demand success. A broker that fans a message out to
     three subscribers may demand that one of them gets everything: two faults
     reach two subscribers at most. The second fault of a pair may be a mild one,
     a read or a write that moves one byte, or a connect or a datagram held back
@@ -414,10 +413,10 @@ val pair :
     a larger budget at night, or other faults in the sampled tier, reads its
     own:
     {[
-    let check run =
+    let run app =
       let int name = Option.map int_of_string (Sys.getenv_opt name) in
-      Eio_net_chaos.check ?budget:(int "CHAOS_BUDGET") ?seed:(int "CHAOS_SEED")
-        run
+      Eio_net_chaos.run ?budget:(int "CHAOS_BUDGET") ?seed:(int "CHAOS_SEED")
+        app
     ]} *)
 
 (** {1:runs Runs}

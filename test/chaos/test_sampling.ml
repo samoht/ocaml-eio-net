@@ -4,15 +4,19 @@ open Sampling
    them. Each position of a read carries a reset, an end of stream and a
    silence, in that order, so taking every third candidate would only ever
    reset the body. *)
-let check w () = Eio_net_chaos.check w
+let check w () = Eio_net_chaos.run w
 
 (* A replay names its scenario, so one found under another seed runs again
    with none. *)
 let test_seed_replay () =
   let w = download ~bug:`Body ~body:19 in
-  let found = Expect.report (fun () -> Eio_net_chaos.check ~seed:7 w) in
-  let replay = Scanf.sscanf (Expect.field "replay" found) "~replay:%S" Fun.id in
-  let again = Expect.report (fun () -> Eio_net_chaos.check ~replay w) in
+  let found = Expect.report (fun () -> Eio_net_chaos.run ~seed:7 w) in
+  let replay =
+    Scanf.sscanf
+      (Expect.field "replay" found)
+      "Eio_net_chaos.run ~replay:%S app" Fun.id
+  in
+  let again = Expect.report (fun () -> Eio_net_chaos.run ~replay w) in
   Alcotest.(check string)
     "faults"
     (Expect.field "faults" found)

@@ -3,7 +3,7 @@
 Network channels and test networks for
 [Eio](https://github.com/ocaml-multicore/eio).
 
-- `Eio_net_chaos.check` runs a workload on an in-memory network under the
+- `Eio_net_chaos.run` runs a workload on an in-memory network under the
   faults of a real one.
 - On a frame channel, each receive returns one frame, over a datagram socket,
   a length-prefixed byte stream or an in-memory pair.
@@ -27,7 +27,7 @@ that depend on it stay hidden:
 - a connect is refused or slow;
 - a datagram is lost, duplicated or reordered.
 
-`Eio_net_chaos.check` runs a workload on an in-memory network many times. Each
+`Eio_net_chaos.run` runs a workload on an in-memory network many times. Each
 run meets a different fault, chosen from what the workload does.
 
 In this example a client asks a server for a line. It has a timeout and tries
@@ -80,7 +80,7 @@ val get : timeout:bool -> Eio_net_chaos.env -> string option = <fun>
     | Some line, _ -> Fmt.failwith "got %S" line
     | None, false -> failwith "gave up";;
 val workload : timeout:bool -> Eio_net_chaos.env -> unit = <fun>
-# Eio_net_chaos.check (workload ~timeout:true);;
+# Eio_net_chaos.run (workload ~timeout:true);;
 - : unit = ()
 ```
 
@@ -88,10 +88,10 @@ Without its timeout, the client waits 133 seconds for a connect whose
 handshake is lost, and the workload's bound on latency fails:
 
 ```ocaml
-# match Eio_net_chaos.check (workload ~timeout:false) with
+# match Eio_net_chaos.run (workload ~timeout:false) with
   | () -> print_endline "passed"
   | exception Failure report -> print_endline report;;
-Eio_net_chaos.check: the workload failed under a fault
+Eio_net_chaos.run: the workload failed under a fault
   faults:   connect of 1c at 0 times out
   error:    Failure("too slow")
   trace:
@@ -102,7 +102,7 @@ Eio_net_chaos.check: the workload failed under a fault
     #5 accept 2s @0
     #6 read 2s @0+64
     #7 write 2s @0+6
-  replay:   ~replay:"net/85d85f49/connect1c@0.timeout"
+  replay:   Eio_net_chaos.run ~replay:"net/85d85f49/connect1c@0.timeout" app
 - : unit = ()
 ```
 

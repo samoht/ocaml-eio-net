@@ -1,5 +1,5 @@
 (** A broadcaster whose subscriber goes silent. Each is a workload for
-    {!Eio_net_chaos.check}. *)
+    {!Eio_net_chaos.run}. *)
 
 val broadcast : ?bug:[ `None | `Sync ] -> Eio_net_chaos.env -> unit
 (** [broadcast ~bug env] streams 1.25 MiB to each of three subscribers over TCP,

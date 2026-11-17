@@ -6,7 +6,7 @@ let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080)
 (* A workload whose daemon ticks every second, and whose client reads with
    no timeout: a stalled peer would spin the clock for ever. *)
 let ticking () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Eio.Fiber.fork_daemon ~sw (fun () ->
       while true do
@@ -29,7 +29,7 @@ let ticking () =
 (* [transfer ~budget n size] downloads [n] writes of [size] bytes. *)
 let transfer ?budget n size () =
   let big = String.init size (fun i -> Char.chr (65 + (i mod 26))) in
-  Eio_net_chaos.check ?budget @@ fun env ->
+  Eio_net_chaos.run ?budget @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:1 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -58,7 +58,7 @@ let transfer ?budget n size () =
       then failwith "the transfer is corrupt"
 
 let resume ?replay ?bug () =
-  Eio_net_chaos.check ?replay @@ fun env ->
+  Eio_net_chaos.run ?replay @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->

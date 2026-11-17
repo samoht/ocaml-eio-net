@@ -38,7 +38,7 @@ let client ~sw env set_done () =
    the test waits for the server's handlers to end. On TCP the handler of
    that connection reads the reset at once. *)
 let one_sided () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   let done_, set_done = Eio.Promise.create () in
@@ -66,7 +66,7 @@ let one_sided () =
    request per read and drops what follows. The client pipelines two
    requests, with a pause between them. *)
 let coalesce ?(bug = true) () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -106,7 +106,7 @@ let coalesce ?(bug = true) () =
 
 (* The budget: a download of [n] chunks of 100 bytes. *)
 let stream n () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -130,7 +130,7 @@ let stream n () =
 (* The same server, with a client that retries on a new connection
    and so may demand success under at most two faults. *)
 let coalesce_retry ?(bug = true) () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -182,7 +182,7 @@ let coalesce_retry ?(bug = true) () =
 
 (* The one-sided probe with an idle timeout in the handler. *)
 let one_sided_timeout () =
-  Eio_net_chaos.check @@ fun env ->
+  Eio_net_chaos.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:5 env#net addr in
   let done_, set_done = Eio.Promise.create () in

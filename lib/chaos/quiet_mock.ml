@@ -3,7 +3,7 @@ open! Hermetic
 (* A silent copy of Eio_mock's scheduler and clock.
 
    Copied from eio 1.6, lib_eio/mock/backend.ml and lib_eio/mock/clock.ml,
-   trimmed to what Eio_net_chaos.check needs, with these changes:
+   trimmed to what Eio_net_chaos.run needs, with these changes:
    - moving the clock prints nothing. Eio_mock's clock calls [traceln] from
      the scheduler, where no fiber binding reaches, so a check built on it
      cannot keep stderr clean;

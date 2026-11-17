@@ -1,5 +1,5 @@
 (** A client that counts on TCP to notice a server gone silent. Each is a
-    workload for {!Eio_net_chaos.check}: three requests, each on a connection of
+    workload for {!Eio_net_chaos.run}: three requests, each on a connection of
     its own, tried three times. *)
 
 val probes : Eio_net_chaos.env -> unit
