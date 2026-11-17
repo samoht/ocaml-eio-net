@@ -127,6 +127,31 @@ let test_broken () =
              last)
       then Alcotest.failf "the summary is %S" last
 
+(* Under macOS, the TCP sequences that read or write after an end shut its
+   receive side with bytes or an end of stream on their way to it are left
+   out with the scenarios that depend on timing: whether the reset that
+   follows has arrived depends on when the operation runs. *)
+let test_macos_timing () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  let reset (op : Eio_net_chaos.Op.t) =
+    if op.kind = `Connect then Some Eio_net_chaos.Fault.Reset else None
+  in
+  let net ~sw =
+    Eio_net_chaos.wrap ~os:`Macos ~clock:env#clock reset
+      (Eio_net_mem.v ~os:`Macos ~sw ())
+  in
+  match Eio_net_chaos.device ~os:`Macos net with
+  | () -> Alcotest.fail "a network that resets every connect passed"
+  | exception Failure m ->
+      let lines = String.split_on_char '\n' m in
+      let last = List.nth lines (List.length lines - 1) in
+      if
+        not
+          (String.ends_with
+             ~suffix:"; 541 that have a macOS answer that depends on timing"
+             last)
+      then Alcotest.failf "the summary is %S" last
+
 let suite =
   ( "kernel",
     [
@@ -134,6 +159,8 @@ let suite =
       Alcotest.test_case "a broken network fails, with a report" `Quick
         test_broken;
       Alcotest.test_case "every allowance is needed" `Quick test_allowances;
+      Alcotest.test_case "macOS leaves out what depends on timing" `Quick
+        test_macos_timing;
     ]
     @ List.map
         (fun os ->
