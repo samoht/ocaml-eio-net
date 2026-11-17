@@ -20,9 +20,13 @@ work="$(mktemp -d /tmp/kernel-traces.XXXXXX)"
 trap 'rm -rf "$work"' EXIT
 mkdir "$work/sock"
 
+# macOS's loopback delivers a TCP segment asynchronously: each operation
+# that can send one waits for the peer's answer, a reset, before the next.
 # A loaded Mac takes more than 2 s for the longer datagram scenarios.
 for t in $traces; do
-  KERNEL_TIMEOUT=10 KERNEL_DIR="$work/sock" "$record" "$t" >"$work/$t.macos"
+  case $t in tcp4 | tcp6) settle=0.02 ;; *) settle=0 ;; esac
+  KERNEL_SETTLE=$settle KERNEL_TIMEOUT=10 KERNEL_DIR="$work/sock" \
+    "$record" "$t" >"$work/$t.macos"
 done
 
 docker run --rm -v "$src:/src:ro" -v "$work:/out" "$image" bash -euc "
@@ -34,13 +38,14 @@ docker run --rm -v "$src:/src:ro" -v "$work:/out" "$image" bash -euc "
     opam exec -- dune build ./test/interop/kernel/scripts/record.exe
     cp ./_build/default/test/interop/kernel/scripts/record.exe /out/record.linux"
 
+# A getnameinfo that asks Docker's name server takes more than 2 s.
 docker run --rm \
   --sysctl net.ipv6.conf.all.disable_ipv6=0 \
   --sysctl net.ipv6.conf.lo.disable_ipv6=0 \
   -v "$work:/out" "$image" bash -euc "
     mkdir -p /tmp/sock
     for t in $traces; do
-      KERNEL_DIR=/tmp/sock /out/record.linux \$t >/out/\$t.linux
+      KERNEL_TIMEOUT=10 KERNEL_DIR=/tmp/sock /out/record.linux \$t >/out/\$t.linux
     done"
 
 # The scenarios off the loopback interface, with no network, so that the

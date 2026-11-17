@@ -1,6 +1,3 @@
-(* The operations and their notation follow the exhaustive sequences of the
-   review that found eio-net.mem's divergences from Linux. *)
-
 open Common
 
 type transport = Tcp4 | Tcp6 | Unix_stream | Udp4 | Udp6 | Unix_dgram
@@ -126,7 +123,14 @@ let shutdown_cmd op =
   | "recv" :: _ -> `Receive
   | _ -> `All
 
-let run_stream net t ops =
+(* An operation that can send a segment: the peer's answer, a reset, may
+   come after it returns. *)
+let sends op =
+  match words op with
+  | ("connect" | "close_listener" | "write" | "shutdown" | "close") :: _ -> true
+  | _ -> false
+
+let run_stream ~settle net t ops =
   let path = "s.sock" in
   unlink path;
   let addr : Eio.Net.Sockaddr.stream =
@@ -176,6 +180,7 @@ let run_stream net t ops =
                "ok"
            | _ -> invalid_arg op
          in
+         if sends op then settle ();
          out := r :: !out)
        ops
    with e -> out := ("abort " ^ classify e) :: !out);
@@ -250,8 +255,8 @@ let run_dgram net t ops =
   unlink pb;
   List.rev !out
 
-let run net t ops =
-  if is_stream t then run_stream net t ops else run_dgram net t ops
+let run ?(settle = ignore) net t ops =
+  if is_stream t then run_stream ~settle net t ops else run_dgram net t ops
 
 (* Scenarios: the address, backlog, reuse and resolution cases the
    sequences above do not reach, each run on a fresh network and printed as
@@ -1375,9 +1380,11 @@ let unix_self_send net =
    one end first, once the listener closed: what a listen without
    [SO_REUSEADDR] at the listener's port finds at each address. *)
 let dual_hold lst cli which net =
+  (* A port no socket holds at any address, TIME_WAIT included, as a listen
+     at [::] binds them all. *)
   let p =
     Eio.Switch.run @@ fun sw ->
-    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip lst, 0)))
+    port_of (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip "::", 0)))
   in
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (ip lst, p)) in

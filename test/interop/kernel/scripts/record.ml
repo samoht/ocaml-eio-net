@@ -3,7 +3,9 @@
    separated by "|".
 
    record TRANSPORT         records to stdout, with Unix sockets in $KERNEL_DIR
-                            (or the current directory)
+                            (or the current directory), waiting
+                            $KERNEL_SETTLE seconds (none by default) after
+                            each operation that can send a segment
    record scenarios         records the scenarios in the same way, one row each:
                             those off the loopback interface only, when
                             $KERNEL_LOOPBACK_ONLY is set on a host with no
@@ -19,10 +21,15 @@ let run t =
   Option.iter Sys.chdir (Sys.getenv_opt "KERNEL_DIR");
   Eio_posix.run @@ fun env ->
   let net = Eio.Stdenv.net env in
+  let settle =
+    Option.map
+      (fun s () -> Eio.Time.sleep env#clock (float_of_string s))
+      (Sys.getenv_opt "KERNEL_SETTLE")
+  in
   print_endline "ops,outcomes";
   List.iter
     (fun ops ->
-      let outcomes = Kernel_seq.run net t ops in
+      let outcomes = Kernel_seq.run ?settle net t ops in
       Fmt.pr "%s,%s@." (String.concat ";" ops) (String.concat "|" outcomes))
     (Kernel_seq.sequences t)
 

@@ -25,11 +25,18 @@ val dgram_shutdown :
 (** [dgram_shutdown sock cmd] shuts [sock] down, which Eio's datagram socket
     type does not offer. *)
 
-val run : _ Eio.Net.t -> transport -> string list -> string list
-(** [run net t ops] runs [ops] on a fresh listener or pair of datagram sockets
-    of [t] and is the outcome of each operation: a result, ["blk"] for one that
-    would wait, or the error it raised. Unix paths are relative to the current
-    directory. *)
+val run :
+  ?settle:(unit -> unit) ->
+  _ Eio.Net.t ->
+  transport ->
+  string list ->
+  string list
+(** [run ~settle net t ops] runs [ops] on a fresh listener or pair of datagram
+    sockets of [t] and is the outcome of each operation: a result, ["blk"] for
+    one that would wait, or the error it raised. On a stream, [settle] runs
+    after each operation that can send a segment, so that the peer's answer
+    arrives before the next one; it does nothing by default. Unix paths are
+    relative to the current directory. *)
 
 val scenarios : string list
 (** [scenarios] names the scenarios the traces hold, in a fixed order: three
