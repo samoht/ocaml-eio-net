@@ -296,13 +296,52 @@ let timing_dependent name =
     ]
   || starts_with ~prefix:"sockopt fill: tcp4" name
 
+(* A TCP sequence that reads or writes after an end shut its receive side
+   while bytes or an end of stream were on their way to it. macOS then sends
+   a reset, and whether the operation sees it depends on when it runs. A
+   close of the listener before the accept shuts the server's end. *)
+let racy ops =
+  let other = function "C" -> "S" | _ -> "C" in
+  let towards = Hashtbl.create 2 in
+  let sent x = Hashtbl.replace towards (other x) () in
+  let pending x = Hashtbl.mem towards x in
+  let rec go ~accepted ~shut = function
+    | [] -> false
+    | op :: rest -> (
+        match String.split_on_char ' ' op with
+        | ("read" | "write") :: _ when shut -> true
+        | "write" :: x :: _ ->
+            sent x;
+            go ~accepted ~shut rest
+        | [ "shutdown"; x; how ] ->
+            let shut = shut || (how <> "send" && pending x) in
+            if how <> "recv" then sent x;
+            go ~accepted ~shut rest
+        | [ "close"; x ] ->
+            let shut = shut || pending x in
+            sent x;
+            go ~accepted ~shut rest
+        | [ "close_listener" ] ->
+            go ~accepted ~shut:(shut || ((not accepted) && pending "S")) rest
+        | [ "accept" ] -> go ~accepted:true ~shut rest
+        | _ -> go ~accepted ~shut rest)
+  in
+  go ~accepted:false ~shut:false ops
+
+let timing = "have a macOS answer that depends on timing"
+
+(* Why a sequence of [t] is left out under [os], if it is. *)
+let sequence_left_out os t ops =
+  match (os, t) with
+  | `Macos, (K.Tcp4 | K.Tcp6) when racy ops -> Some timing
+  | _ -> None
+
 (* Why a scenario is left out under [os], if it is. *)
 let left_out os name =
   if K.timed name then Some "wait 60 seconds for a port to be free again"
   else if K.narrow_ports name then Some "use up every port"
   else if K.off_loopback name then Some "send off the loopback interface"
-  else if os = `Macos && timing_dependent name then
-    Some "have a macOS answer that depends on timing"
+  else if os = `Macos && timing_dependent name then Some timing
   else None
 
 let reasons =
@@ -310,7 +349,7 @@ let reasons =
     "wait 60 seconds for a port to be free again";
     "use up every port";
     "send off the loopback interface";
-    "have a macOS answer that depends on timing";
+    timing;
   ]
 
 (* {1 Replay} *)
@@ -414,6 +453,10 @@ let replay os f =
   let differed = ref [] and passed = ref 0 in
   let skipped = Hashtbl.create 4 and allowed = Hashtbl.create 16 in
   let fresh g = Eio.Switch.run @@ fun sw -> g (generic (f ~sw)) in
+  let skip why =
+    Hashtbl.replace skipped why
+      (1 + Option.value ~default:0 (Hashtbl.find_opt skipped why))
+  in
   List.iter
     (fun t ->
       let rows = sequence_rows t and sequences = K.sequences t in
@@ -422,9 +465,12 @@ let replay os f =
         ~held:(List.length rows) ~runs:(List.length sequences);
       List.iter2
         (fun ops row ->
-          match sequence os fresh t ops row with
-          | None -> incr passed
-          | Some d -> differed := d :: !differed)
+          match sequence_left_out os t ops with
+          | Some why -> skip why
+          | None -> (
+              match sequence os fresh t ops row with
+              | None -> incr passed
+              | Some d -> differed := d :: !differed))
         sequences rows)
     K.transports;
   let rows = Device_traces.scenarios in
@@ -433,9 +479,7 @@ let replay os f =
   List.iteri
     (fun i sc ->
       match left_out os sc with
-      | Some why ->
-          Hashtbl.replace skipped why
-            (1 + Option.value ~default:0 (Hashtbl.find_opt skipped why))
+      | Some why -> skip why
       | None -> (
           match scenario os fresh sc ~kernel:(column os rows.(i)) with
           | `Passed -> incr passed
