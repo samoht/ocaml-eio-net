@@ -324,14 +324,14 @@ let write_silent t ~turn bufs n =
    waiters it wakes. *)
 let write_step t ~turn bufs n =
   let leave = leave t ~turn in
-  (* An empty write sends nothing, so on Linux it meets no shutdown or
-     closed peer; on macOS it fails where a write would. *)
-  if n = 0 && t.os = Linux then leave (`Done 0)
-  else if t.shut then leave `Shut
+  (* An empty write fails where a write would, as eio_posix sends it with
+     sendmsg(2). *)
+  if t.shut then leave `Shut
   else if Option.is_some t.silent then write_silent t ~turn bufs n
   else if t.refused then leave `Refused
   else if n = 0 then
-    if t.local && t.reader = Gone then leave (`Raise (reset_exn ()))
+    if t.local && (t.reader = Gone || (receive_shut t && t.os = Linux)) then
+      leave (`Raise (reset_exn ()))
     else leave (`Done 0)
   else if t.reader = Gone then begin
     t.refused <- true;

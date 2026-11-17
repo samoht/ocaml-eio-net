@@ -27,19 +27,32 @@ type exception_ = {
 
 (* None: eio-net.mem follows each kernel on every sequence these traces
    hold that does not depend on timing. *)
+let predate_1_7 =
+  {
+    why =
+      "the traces predate Eio 1.7, whose backends remove a Unix socket's file \
+       as it closes";
+    transports = [ Unix_stream; Unix_dgram ];
+    op = "";
+    mem = "Not_found";
+    kernel = "Refused";
+  }
+
 let exceptions : os -> exception_ list = function
-  | `Linux | `Macos ->
+  | `Linux ->
       [
+        predate_1_7;
         {
           why =
-            "the traces predate Eio 1.7, whose backends remove a Unix socket's \
-             file as it closes";
-          transports = [ Unix_stream; Unix_dgram ];
-          op = "";
-          mem = "Not_found";
-          kernel = "Refused";
+            "the traces predate Eio 1.7, whose eio_posix sends an empty write \
+             with sendmsg(2)";
+          transports = [ Tcp4; Tcp6; Unix_stream ];
+          op = "write";
+          mem = "Reset";
+          kernel = "0";
         };
       ]
+  | `Macos -> [ predate_1_7 ]
 
 (* macOS's loopback delivers a segment asynchronously, so an operation that
    follows one that sends a FIN, data or a reset to the peer can run before

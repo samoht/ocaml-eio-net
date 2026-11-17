@@ -24,10 +24,9 @@ type Eio.Exn.Backend.t +=
   | Closed
         (** The backend code carried by the connection reset a mem flow raises,
             where a TCP socket raises one:
-            - A write after this end shut its send. An empty write returns 0
-              instead, as on Linux; under [`Macos] it fails as a write does. On
-              TCP the write reports a pending reset, so a read after it returns
-              end of file.
+            - A write after this end shut its send, an empty one included, as
+              eio_posix sends it with sendmsg(2). On TCP the write reports a
+              pending reset, so a read after it returns end of file.
             - A write after the peer closed: the first is lost and answered with
               a reset, which every later write raises; reads keep returning end
               of file, which came first. On a Unix-domain connection the first
