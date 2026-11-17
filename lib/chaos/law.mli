@@ -88,9 +88,5 @@ val pp : _ t Fmt.t
 val class_ : 'c t -> 'c class_
 (** [class_ op] is how the wrapper treats [op]. *)
 
-val doc : _ t -> string
-(** [doc op] says, in whole sentences, what the wrapper adds to [op] or why it
-    differs from the base, or is empty. *)
-
 val kind : intercepted t -> Op.kind
 (** [kind op] is the kind of the operations a wrapper asks about for [op]. *)
