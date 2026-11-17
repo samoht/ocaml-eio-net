@@ -27,38 +27,6 @@ let vectors input =
 
 module Framing = Eio_net_framing
 
-(* A source that hands out its chunks one at a time, so the reader sees the
-   prefix before any payload byte. *)
-module Chunked = struct
-  type t = string list ref
-
-  let read_methods = []
-
-  let single_read t dst =
-    match !t with
-    | [] -> raise End_of_file
-    | chunk :: rest ->
-        let length = min (Cstruct.length dst) (String.length chunk) in
-        Cstruct.blit_from_string chunk 0 dst 0 length;
-        t :=
-          if length = String.length chunk then rest
-          else String.sub chunk length (String.length chunk - length) :: rest;
-        length
-
-  let reader config chunks =
-    Eio.Buf_read.of_flow
-      ~max_size:(Framing.Config.buffer_size config)
-      (Eio.Resource.T
-         ( ref (List.filter (( <> ) "") chunks),
-           Eio.Flow.Pi.source
-             (module struct
-               type nonrec t = t
-
-               let read_methods = read_methods
-               let single_read = single_read
-             end) ))
-end
-
 let assert_frame config prefix payload =
   let r = Chunked.reader config [ prefix; payload ] in
   Alcotest.(check string)

@@ -3,47 +3,11 @@ module Framing = Eio_net_framing
 
 let field sixteen = if sixteen then Framing.Uint16_be else Framing.Uint32_be
 
-(* A source that hands out its chunks one at a time, so the reader sees the
-   input split exactly at the chunk boundaries. *)
-module Chunked = struct
-  type t = string list ref
-
-  let single_read t dst =
-    match !t with
-    | [] -> raise End_of_file
-    | chunk :: rest ->
-        let length = min (Cstruct.length dst) (String.length chunk) in
-        Cstruct.blit_from_string chunk 0 dst 0 length;
-        t :=
-          if length = String.length chunk then rest
-          else String.sub chunk length (String.length chunk - length) :: rest;
-        length
-
-  let handler =
-    Eio.Flow.Pi.source
-      (module struct
-        type nonrec t = t
-
-        let read_methods = []
-        let single_read = single_read
-      end)
-
-  (* [reader config sizes wire] reads [wire] in chunks whose lengths cycle
-     through [sizes]. *)
-  let reader config sizes wire =
-    let sizes = List.map (fun size -> 1 + (size mod 64)) (1 :: sizes) in
-    let rec split offset acc = function
-      | [] -> split offset acc sizes
-      | size :: rest ->
-          if offset >= String.length wire then List.rev acc
-          else
-            let length = min size (String.length wire - offset) in
-            split (offset + length) (String.sub wire offset length :: acc) rest
-    in
-    Eio.Buf_read.of_flow
-      ~max_size:(Framing.Config.buffer_size config)
-      (Eio.Resource.T (ref (split 0 [] sizes), handler))
-end
+(* [reader config sizes wire] reads [wire] in chunks whose lengths cycle
+   through [sizes]. *)
+let reader config sizes wire =
+  let sizes = List.map (fun size -> 1 + (size mod 64)) (1 :: sizes) in
+  Chunked.reader config (Chunked.split sizes wire)
 
 let assert_bound config r =
   if Eio.Buf_read.buffered_bytes r > Framing.Config.buffer_size config then
@@ -91,7 +55,7 @@ let round_trip sixteen sizes batches =
             failf "an admissible batch was refused: %a" Framing.pp_error e)
       batches
   in
-  let r = Chunked.reader config sizes (Buffer.contents buffer) in
+  let r = reader config sizes (Buffer.contents buffer) in
   let rec drain acc =
     match Framing.read config r with
     | frame ->
@@ -107,7 +71,7 @@ let round_trip sixteen sizes batches =
    bound. *)
 let arbitrary_wire sixteen sizes bytes =
   let maximum, config = config sixteen sizes in
-  let r = Chunked.reader config sizes bytes in
+  let r = reader config sizes bytes in
   let limit = (String.length bytes / Framing.Config.prefix_length config) + 1 in
   let rec go reads =
     if reads > limit then fail "a read consumed no frame";

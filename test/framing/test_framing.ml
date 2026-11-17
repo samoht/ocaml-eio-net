@@ -1,52 +1,6 @@
 module Framing = Eio_net_framing
 
 let error = Alcotest.testable Framing.pp_error Framing.equal_error
-
-(* A source that hands out its chunks one at a time, so a reader sees the
-   input split exactly at the chunk boundaries. *)
-module Chunked = struct
-  type t = string list ref
-
-  let read_methods = []
-
-  let single_read t dst =
-    match !t with
-    | [] -> raise End_of_file
-    | chunk :: rest ->
-        let length = min (Cstruct.length dst) (String.length chunk) in
-        Cstruct.blit_from_string chunk 0 dst 0 length;
-        t :=
-          if length = String.length chunk then rest
-          else String.sub chunk length (String.length chunk - length) :: rest;
-        length
-
-  let handler =
-    Eio.Flow.Pi.source
-      (module struct
-        type nonrec t = t
-
-        let read_methods = read_methods
-        let single_read = single_read
-      end)
-
-  let reader config chunks =
-    Eio.Buf_read.of_flow
-      ~max_size:(Framing.Config.buffer_size config)
-      (Eio.Resource.T (ref (List.filter (( <> ) "") chunks), handler))
-end
-
-(* [split sizes s] cuts [s] into chunks whose lengths cycle through [sizes]. *)
-let split sizes s =
-  let rec go offset acc = function
-    | [] -> go offset acc sizes
-    | size :: rest ->
-        if offset >= String.length s then List.rev acc
-        else
-          let length = min size (String.length s - offset) in
-          go (offset + length) (String.sub s offset length :: acc) rest
-  in
-  go 0 [] sizes
-
 let payloads strings = List.map (fun s -> [ Cstruct.of_string s ]) strings
 
 let encoded config strings =
@@ -150,7 +104,7 @@ let test_fragmented () =
           Alcotest.(check (list string))
             (Fmt.str "FIFO drain of chunks %a" Fmt.(Dump.list int) sizes)
             frames
-            (read_all config (Chunked.reader config (split sizes wire))))
+            (read_all config (Chunked.reader config (Chunked.split sizes wire))))
         [ [ 1 ]; [ 2 ]; [ 3; 1; 4; 1; 5 ]; [ 7; 100 ]; [ String.length wire ] ];
       Alcotest.(check (list string))
         "a whole string" frames
@@ -230,7 +184,7 @@ let test_uint16_boundaries () =
   Alcotest.(check int) "largest uint16 frame" 65537 (String.length wire);
   Alcotest.(check (list string))
     "largest uint16 payload reads back" [ payload ]
-    (read_all config (Chunked.reader config (split [ 4096 ] wire)));
+    (read_all config (Chunked.reader config (Chunked.split [ 4096 ] wire)));
   Alcotest.(check (result unit error))
     "uint16 does not wrap"
     (Error
