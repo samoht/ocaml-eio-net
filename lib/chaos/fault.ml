@@ -16,7 +16,9 @@ type t =
   | Garble of int
 
 let pp ppf = function
-  | Short n -> Fmt.pf ppf "moves %d byte(s)" (max 1 n)
+  | Short n ->
+      let n = max 1 n in
+      Fmt.pf ppf "moves %d byte%s" n (Text.plural n)
   | Stall d -> Fmt.pf ppf "stalls %gs" d
   | Hang -> Fmt.string ppf "hangs"
   | Reset -> Fmt.string ppf "is reset"

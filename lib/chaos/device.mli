@@ -3,10 +3,20 @@
 type os = [ `Linux | `Macos ]
 (** The type for the kernels the traces hold. *)
 
+type difference = {
+  step : string;  (** The operation, or the scenario, that answered. *)
+  expected : string;  (** The answers allowed, as a report names them. *)
+  got : string;  (** The answer given, as a report names it. *)
+  sequence : string option;
+      (** The sequence up to that operation, with its transport, as
+          [tcp4 accept; connect]; [None] for a scenario. *)
+}
+(** The type for an answer outside its set. *)
+
 type summary = {
-  differed : string list;
-      (** A line for each sequence or scenario whose answer is outside its set,
-          in order. *)
+  differed : difference list;
+      (** The first answer outside its set of each sequence or scenario, in
+          order. *)
   passed : int;
   left_out : (string * int) list;
       (** How many were left out, by why, in the order of the report. *)

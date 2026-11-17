@@ -10,6 +10,7 @@
   quiet_mock
   posix
   sim
+  text
   device
   device_traces)
  (libraries

@@ -14,26 +14,16 @@ let is_outage env = Wrapper.is_outage env#net
 
 let name = "Eio_net_chaos.run"
 let fail fmt = Fmt.failwith ("%s: " ^^ fmt) name
-let plural n = if n = 1 then "" else "s"
+let plural = Text.plural
 
 (* A run that makes more operations is a busy loop or too large to check; the
    limit also bounds the trace a run keeps. *)
 let max_ops = 100_000
 let too_large = "a busy loop, or a workload too large for a check"
 
-(* [count] formats [n] in groups of three digits, as prose writes it. *)
-let count ppf n =
-  let s = string_of_int n in
-  let len = String.length s in
-  String.iteri
-    (fun i c ->
-      if i > 0 && (len - i) mod 3 = 0 then Fmt.char ppf ',';
-      Fmt.char ppf c)
-    s
-
 let ops_message =
   Fmt.str "the run made %a network operations, more than a check plans from: %s"
-    count max_ops too_large
+    Text.pp_count max_ops too_large
 
 let in_kind = function
   | `Connect -> "a connect"
@@ -151,11 +141,11 @@ let in_loop main =
       failed "the run hangs: it is still running after an hour of its clock"
   | exception Quiet_mock.Busy ->
       Fmt.kstr (failed ~stopped:true)
-        "the run woke %a times without waiting 1 ms or more: a busy loop" count
-        Quiet_mock.max_turns
+        "the run woke %a times without waiting 1 ms or more: a busy loop"
+        Text.pp_count Quiet_mock.max_turns
   | exception Quiet_mock.Too_long ->
       Fmt.kstr (failed ~stopped:true)
-        "the run took %a turns, more than a check can repeat: %s" count
+        "the run took %a turns, more than a check can repeat: %s" Text.pp_count
         Quiet_mock.max_turns too_large
   | exception x -> failed (Printexc.to_string x)
 
@@ -418,7 +408,7 @@ let pp_output ppf (dropped, printed) =
   if printed <> "" then begin
     Fmt.pf ppf "  output:@\n";
     if dropped > 0 then
-      Fmt.pf ppf "    ... %a earlier byte%s, not kept@\n" count dropped
+      Fmt.pf ppf "    ... %a earlier byte%s, not kept@\n" Text.pp_count dropped
         (plural dropped);
     let printed =
       if String.ends_with ~suffix:"\n" printed then

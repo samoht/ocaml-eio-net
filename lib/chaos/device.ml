@@ -85,6 +85,37 @@ let without_ipv6 name given =
 
 let is_number s = s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s
 
+(* A word of an answer as a report names it: the traces write [blk] for an
+   operation that would wait, [rN] or [rN:ADDR] for a read of N bytes, and
+   [Fs] or [Net] for an Eio error of that class. *)
+let rec word w =
+  match split_last '=' w with
+  | key, value when value <> "" && not (String.contains key ':') ->
+      key ^ "=" ^ word value
+  | _ -> (
+      match w with
+      | "blk" -> "would wait"
+      | "Fs" -> "an Eio.Fs error"
+      | "Net" -> "an Eio.Net error"
+      | "error" -> "an error"
+      | _ when String.length w > 1 && w.[0] = 'r' -> (
+          let rest = String.sub w 1 (String.length w - 1) in
+          let n, from =
+            match String.index_opt rest ':' with
+            | Some i ->
+                ( String.sub rest 0 i,
+                  " from " ^ String.sub rest (i + 1) (String.length rest - i - 1)
+                )
+            | None -> (rest, "")
+          in
+          match int_of_string_opt n with
+          | Some k when is_number n ->
+              Fmt.str "%d byte%s%s" k (Text.plural k) from
+          | _ -> w)
+      | _ -> w)
+
+let shown answer = String.concat " " (List.map word (split ' ' answer))
+
 (* The text of [s] with each number cut out, and the numbers. *)
 let numbers s =
   let text = Buffer.create 16 and ns = ref [] and n = Buffer.create 8 in
@@ -297,8 +328,6 @@ let sequence_rows t =
       in
       (split '|' linux, split '|' macos))
 
-let shown = function "blk" -> "would wait" | a -> a
-
 (* A scenario that does not end within that many turns of the event loop
    answers "timeout", as the recorder gave up on it. *)
 let max_yields = 10_000
@@ -312,15 +341,22 @@ let bounded ~timeout f =
 
 let generic net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t)
 
+type difference = {
+  step : string;
+  expected : string;
+  got : string;
+  sequence : string option;
+}
+
 type summary = {
-  differed : string list;
+  differed : difference list;
   passed : int;
   left_out : (string * int) list;
   allowed : string list;
 }
 
-(* A sequence of [t] on a network [fresh] makes: the line that says where
-   its answers leave those of [os], if they do. *)
+(* A sequence of [t] on a network [fresh] makes: where its answers leave
+   those of [os], if they do. *)
 let sequence os fresh t ops row =
   let got =
     fresh (fun net ->
@@ -333,8 +369,15 @@ let sequence os fresh t ops row =
         let op = List.nth_opt ops i |> Option.value ~default:"end" in
         let upto = List.filteri (fun j _ -> j < i) ops @ [ op ] in
         let one = function [] -> "nothing" | x :: _ -> shown x in
-        Fmt.kstr Option.some "%s %s: expected one of {%s}, got %s"
-          (K.transport_name t) (String.concat "; " upto) (one es) (one gs)
+        Some
+          {
+            step = op;
+            expected = one es;
+            got = one gs;
+            sequence =
+              Fmt.kstr Option.some "%s %s" (K.transport_name t)
+                (String.concat "; " upto);
+          }
   in
   first 0 (column os row, got)
 
@@ -350,10 +393,15 @@ let scenario os fresh sc ~kernel =
     match List.find_opt (fun a -> a.holds sc ~kernel given) these with
     | Some a -> `Allowed a.why
     | None ->
-        `Differs
-          (Fmt.str "%s: expected one of {%s}, got %s" sc
-             (String.concat ", " (kernel :: List.map (fun a -> a.label) these))
-             given)
+        let expected =
+          match these with
+          | [] -> shown kernel
+          | _ ->
+              Fmt.str "one of {%s}"
+                (String.concat ", "
+                   (shown kernel :: List.map (fun a -> a.label) these))
+        in
+        `Differs { step = sc; expected; got = shown given; sequence = None }
 
 let out_of_date what ~held ~runs =
   if held <> runs then
@@ -376,7 +424,7 @@ let replay os f =
         (fun ops row ->
           match sequence os fresh t ops row with
           | None -> incr passed
-          | Some line -> differed := line :: !differed)
+          | Some d -> differed := d :: !differed)
         sequences rows)
     K.transports;
   let rows = Device_traces.scenarios in
@@ -394,7 +442,7 @@ let replay os f =
           | `Allowed why ->
               Hashtbl.replace allowed why ();
               incr passed
-          | `Differs line -> differed := line :: !differed))
+          | `Differs d -> differed := d :: !differed))
     K.scenarios;
   {
     differed = List.rev !differed;
@@ -407,23 +455,33 @@ let replay os f =
     allowed = List.of_seq (Hashtbl.to_seq_keys allowed);
   }
 
-(* The lines of a report: each line once, in the order it first came, with
-   how many sequences gave it. *)
-let grouped lines =
+(* The lines of a report: the differences at the same step with the same
+   answers once, in the order the first came, with how many sequences gave
+   them and the first as an example. *)
+let grouped differed =
+  let key d = (d.step, d.expected, d.got) in
   let counts = Hashtbl.create 64 in
   List.iter
-    (fun l ->
-      Hashtbl.replace counts l
-        (1 + Option.value ~default:0 (Hashtbl.find_opt counts l)))
-    lines;
+    (fun d ->
+      Hashtbl.replace counts (key d)
+        (1 + Option.value ~default:0 (Hashtbl.find_opt counts (key d))))
+    differed;
   List.filter_map
-    (fun l ->
-      match Hashtbl.find_opt counts l with
+    (fun d ->
+      match Hashtbl.find_opt counts (key d) with
       | None -> None
       | Some k ->
-          Hashtbl.remove counts l;
-          Some (if k = 1 then l else Fmt.str "%s, in %d sequences" l k))
-    lines
+          Hashtbl.remove counts (key d);
+          let what =
+            Fmt.str "%s: expected %s, got %s" d.step d.expected d.got
+          in
+          Some
+            (match d.sequence with
+            | None -> what
+            | Some sq when k = 1 -> Fmt.str "%s, in %s" what sq
+            | Some sq ->
+                Fmt.str "%s, in %a sequences, e.g. %s" what Text.pp_count k sq))
+    differed
 
 (* A report shows the first [shown_lines] lines, then counts the others. *)
 let shown_lines = 100
@@ -448,11 +506,13 @@ let check ?os f =
         else []
       in
       Fmt.failwith
-        "%s: %d of %d sequences differ from %s@\n\
+        "%s: %a of %a sequences differ from %s@\n\
          %a@\n\
-        \  %d passed, %d differed, %d left out%a"
-        name n (s.passed + n) (os_name os)
+        \  %a passed, %a differed, %a left out%a"
+        name Text.pp_count n Text.pp_count (s.passed + n) (os_name os)
         Fmt.(list ~sep:(any "@\n") (any "  " ++ string))
-        lines s.passed n left
-        Fmt.(list ~sep:nop (fun ppf (why, k) -> pf ppf "; %d that %s" k why))
+        lines Text.pp_count s.passed Text.pp_count n Text.pp_count left
+        Fmt.(
+          list ~sep:nop (fun ppf (why, k) ->
+              pf ppf "; %a that %s" Text.pp_count k why))
         s.left_out
