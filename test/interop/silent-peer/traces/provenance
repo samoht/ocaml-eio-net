@@ -1,0 +1,47 @@
+# Where the traces beside this file come from. write.sh rewrites it on
+# REGEN=1; test/provenance checks it.
+generator: test/interop/silent-peer/scripts/generate.sh
+regenerate: REGEN=1 dune build @test/interop/silent-peer/regen-traces
+revision: 289e7de17bc2f958ae1be6c6d6705d41277707d8
+recorded: 2026-11-17T01:01:54Z
+uid: 501
+host: Darwin 27.3.0 arm64
+macos: 27.3 (26C5035r)
+macos.kern.ipc.somaxconn: 128
+macos.net.inet.tcp.keepinit: 75000
+macos.net.inet.tcp.keepidle: 7200000
+macos.net.inet.tcp.keepintvl: 75000
+macos.net.inet.tcp.keepcnt: 8
+macos.net.inet.tcp.msl: 15000
+macos.net.inet.tcp.sendspace: 131072
+macos.net.inet.tcp.recvspace: 131072
+macos.net.inet.udp.recvspace: 786896
+macos.net.inet.udp.maxdgram: 9216
+macos.net.inet.ip.portrange.first: 49152
+macos.net.inet.ip.portrange.last: 65535
+macos.net.local.stream.sendspace: 8192
+macos.net.local.stream.recvspace: 8192
+macos.net.local.dgram.maxdgram: 2048
+macos.net.local.dgram.recvspace: 4096
+docker: 29.8.2
+linux.image: ocaml/opam@sha256:d161f099e5d053fe198accc09fda214c6275289570847fd906f9c65f862bf460
+linux: Linux 7.2.12-orbstack-00394-gbecdd6130068 #1 SMP PREEMPT Thu Oct 22 22:17:17 UTC 2026 aarch64
+linux.net.ipv4.tcp_syn_retries: 6
+linux.net.ipv4.tcp_syn_linear_timeouts: 4
+linux.net.ipv4.tcp_synack_retries: 5
+linux.net.ipv4.tcp_retries2: 15
+linux.net.ipv4.tcp_keepalive_time: 7200
+linux.net.ipv4.tcp_keepalive_intvl: 75
+linux.net.ipv4.tcp_keepalive_probes: 9
+linux.net.ipv4.tcp_fin_timeout: 60
+linux.net.ipv4.tcp_rmem: 4096 131072 33554432
+linux.net.ipv4.tcp_wmem: 4096 16384 4194304
+linux.net.ipv4.ip_local_port_range: 32768 60999
+linux.net.core.somaxconn: 4096
+linux.net.core.rmem_default: 229376
+linux.net.core.wmem_default: 229376
+linux.net.unix.max_dgram_qlen: 10
+input: scripts/generate.sh 2eba020959efd91ad0cb1328b68ee5d7
+input: scripts/measure.ml 56ee424086d196d97cca86fd750e5839
+input: scripts/silence_stubs.c a25dce85ba5c41cac95a5771540cfe7d
+trace: traces/silent.csv 67618974133894e06176d71f06c09b2a

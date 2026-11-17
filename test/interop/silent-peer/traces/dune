@@ -1,0 +1,25 @@
+(rule
+ (alias regen)
+ (mode promote)
+ (enabled_if
+  (= %{env:REGEN=0} 1))
+ (targets silent.csv provenance)
+ (deps
+  ../scripts/measure.exe
+  (source_tree ../scripts)
+  ../../kernel/scripts/generate.sh
+  ../../kernel/scripts/probe.sh
+  ../../../provenance/write.sh)
+ (action
+  (progn
+   (run bash ../scripts/generate.sh . ../scripts/measure.exe)
+   (run
+    bash
+    ../../../provenance/write.sh
+    test/interop/silent-peer
+    ../kernel/scripts/probe.sh
+    scripts/generate.sh
+    scripts/measure.ml
+    scripts/silence_stubs.c
+    --
+    %{targets}))))

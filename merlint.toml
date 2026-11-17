@@ -105,3 +105,9 @@ exclude = ["E005"]
 [[rules]]
 files = ["test/quiet_mock/*"]
 exclude = ["E606"]
+
+# The silent connections are an unquoted table the generator writes, read
+# with String.split_on_char, as for the connect timeouts.
+[[rules]]
+files = ["test/interop/silent-peer/*"]
+exclude = ["E825"]

@@ -46,5 +46,7 @@ records:
   6.12 and 7.2, gives 131 s for six retries after four linear timeouts, and
   its connects fail after 133.0 to 136.5 s.
 - A connection whose bytes go unacknowledged fails after 948.6 s on Linux
-  (`tcp_retries2` = 15) and 18 s on macOS, "measured over loopback" (5408fac);
-  nothing records those measurements either.
+  (`tcp_retries2` = 15) and 18 s on macOS. The
+  [silent-peer traces](../silent-peer) record it, on both kernels: Linux's
+  connections fail after 947.8 to 951.9 s, and macOS's after 17.94 to
+  18.05 s.
