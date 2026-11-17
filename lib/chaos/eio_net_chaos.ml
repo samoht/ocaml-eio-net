@@ -363,6 +363,8 @@ let collapse trace =
 let keep = 100
 let context = 10
 
+(* The trace of a report, under its heading, if the run made any
+   operation. *)
 let pp_trace rules ppf { head; left_out; tail } =
   let lines =
     Array.of_list
@@ -406,6 +408,7 @@ let pp_trace rules ppf { head; left_out; tail } =
         Fmt.pf ppf "    ... %d more line%s@\n" (j - i) (plural (j - i));
         pp j)
   in
+  if n > 0 then Fmt.pf ppf "  trace:@\n";
   pp 0
 
 (* The report of a scenario whose run, [inspect] or restart failed. *)
@@ -430,7 +433,6 @@ let report ?matched ~hash s trace { stage; error } =
     "%s: %s@\n\
     \  faults:   %s@\n\
      %a%a  error:    %s@\n\
-    \  trace:@\n\
      %a  replay:   %s ~replay:\"net/%s/%s\" app"
     name title (Plan.text s)
     Fmt.(option (any "  ended:    " ++ string ++ any "@\n"))
@@ -504,7 +506,6 @@ let scenario w ~first ~linear k =
 let first_failed ~hash trace error =
   Fmt.failwith
     "%s: the run with no fault failed: %s@\n\
-    \  trace:@\n\
      %a  replay:   %s ~replay:\"net/%s/%s\" app"
     name error (pp_trace [])
     { head = trace; left_out = 0; tail = [] }
