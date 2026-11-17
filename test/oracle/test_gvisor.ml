@@ -274,7 +274,7 @@ let unix_dgram_cases =
           let a, a_addr = dgram_socket ctx k in
           let b, _ = dgram_socket ctx k in
           send b ~dst:a_addr "abc";
-          dgram_shutdown b `Send;
+          Kernel_seq.dgram_shutdown b `Send;
           let again =
             outcome (fun () ->
                 send b ~dst:a_addr "abc";
@@ -465,7 +465,7 @@ let udp_cases =
             (List.map
                (fun cmd ->
                  outcome (fun () ->
-                     dgram_shutdown a cmd;
+                     Kernel_seq.dgram_shutdown a cmd;
                      "ok"))
                [ `Receive; `Send; `All ]));
       (* WriteShutdownNotConnected: so does shutting down an unbound one. *)
@@ -476,7 +476,7 @@ let udp_cases =
             Eio.Net.datagram_socket ~sw:ctx.sw ctx.net (unbound k)
           in
           outcome (fun () ->
-              dgram_shutdown s `Send;
+              Kernel_seq.dgram_shutdown s `Send;
               "ok"));
       (* ReadShutdown, up to its connect: a receive waits before and after a
          read shutdown that fails with ENOTCONN. *)
@@ -487,7 +487,7 @@ let udp_cases =
           let before = outcome_now (fun () -> recv a 512) in
           let shut =
             outcome (fun () ->
-                dgram_shutdown a `Receive;
+                Kernel_seq.dgram_shutdown a `Receive;
                 "ok")
           in
           let after = outcome_now (fun () -> recv a 512) in
@@ -499,7 +499,7 @@ let udp_cases =
         (fun ctx k ->
           let a, _ = dgram_socket ctx k in
           outcome (fun () ->
-              dgram_shutdown a `Send;
+              Kernel_seq.dgram_shutdown a `Send;
               "ok"));
     ]
 

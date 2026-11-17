@@ -340,13 +340,6 @@ let test_cases c =
 
 let suite name cases = (name, List.concat_map test_cases cases)
 
-(* Eio has no shutdown for a datagram socket's type, though each backend
-   implements one. *)
-let dgram_shutdown (sock : dgram) cmd =
-  let (Eio.Resource.T (t, ops)) = sock in
-  let module S = (val Eio.Resource.get ops Eio.Flow.Pi.Shutdown) in
-  S.shutdown t cmd
-
 (* Waits until [n] bytes are queued to be read on [flow], peeking at a real
    socket's queue: gVisor sleeps instead. An in-memory flow queues a write
    before it returns. *)

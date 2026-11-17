@@ -100,10 +100,6 @@ val datagram_socket :
 val dgram_socket : ctx -> dgram_kind -> dgram * Eio.Net.Sockaddr.datagram
 (** [dgram_socket ctx k] is a socket bound on loopback or at a fresh path. *)
 
-val dgram_shutdown : dgram -> Eio.Flow.shutdown_command -> unit
-(** [dgram_shutdown sock cmd] shuts [sock] down, which Eio's datagram socket
-    type does not offer. *)
-
 val send : dgram -> dst:Eio.Net.Sockaddr.datagram -> string -> unit
 (** [send sock ~dst s] sends [s] as one datagram to [dst]. *)
 

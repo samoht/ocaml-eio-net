@@ -20,6 +20,11 @@ val sequences : transport -> string list list
     three more after a connect and an accept, using each endpoint only once it
     exists; on datagram sockets, every sequence of up to three operations. *)
 
+val dgram_shutdown :
+  _ Eio.Net.datagram_socket -> Eio.Flow.shutdown_command -> unit
+(** [dgram_shutdown sock cmd] shuts [sock] down, which Eio's datagram socket
+    type does not offer. *)
+
 val run : _ Eio.Net.t -> transport -> string list -> string list
 (** [run net t ops] runs [ops] on a fresh listener or pair of datagram sockets
     of [t] and is the outcome of each operation: a result, ["blk"] for one that
