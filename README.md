@@ -241,8 +241,9 @@ truncated.
 `Eio_net_accept.run` serves at most `max_connections` connections, and one
 more accepted connection waits unserved. A connection's head is what its peer
 sends before it is served. When the loop is full and another peer connects, it
-drops the connection whose head is incomplete and has made the least progress. An exception one connection raises
-ends that connection alone and goes to `?on_error`.
+sheds the connection whose head is incomplete and has made the least progress:
+it shuts that connection's socket down, with no answer. An exception one
+connection raises ends that connection alone and goes to `?on_error`.
 
 Some protocols read the head through a layer of their own, such as TLS during
 its handshake. Wrap the socket with `Eio_net_accept.reading_flow` so that the

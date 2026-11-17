@@ -216,8 +216,9 @@ module Fault : sig
             reads what is queued to it first. *)
     | Refuse  (** A connect fails with [Connection_failure (Refused _)]. *)
     | Timeout
-        (** A connect fails after 133 seconds of the clock, as a lost handshake
-            does on Linux, with the error eio_posix raises then:
+        (** A connect fails after 133 seconds of the clock, or 75 under
+            [`Macos], as a lost handshake does, with the error eio_posix raises
+            then:
             [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (ETIMEDOUT,
              "connect-in-progress", "")), _)]. Eio does not classify it as a
             [Connection_failure]. *)
