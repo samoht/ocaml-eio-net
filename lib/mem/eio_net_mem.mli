@@ -158,7 +158,8 @@ type Eio.Exn.Backend.t +=
             [send] raises at 127.255.255.255, the broadcast address of
             loopback's network, or at 255.255.255.255 from a socket bound at a
             loopback address, where Linux fails it with [EACCES] as the socket
-            has no [SO_BROADCAST]. *)
+            has no [SO_BROADCAST]. The network refuses it whatever
+            [SO_BROADCAST] says. *)
   | Host_unreachable
         (** The code of the error raised under [`Macos] where macOS finds no
             route to a host, with [EHOSTUNREACH]: a [connect] to a link-local
