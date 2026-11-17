@@ -23,6 +23,22 @@ let download ?(reuse_addr = true) (env : Eio_net_chaos.env) =
         Fmt.failwith "got %S" got
   | Error `Timeout -> ()
 
+(* The same download, through with_timeout_exn: a silent connection lets
+   Eio.Time.Timeout escape. *)
+let download_exn (env : Eio_net_chaos.env) =
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~reuse_addr:true ~backlog:5 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          Eio.Flow.copy_string "hello" flow));
+  let got =
+    Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net addr in
+    Eio.Buf_read.(parse_exn take_all) ~max_size:100 flow
+  in
+  if not (String.starts_with ~prefix:got "hello") then Fmt.failwith "got %S" got
+
 let report f =
   match f () with
   | () -> Alcotest.fail "the check passed"
@@ -36,6 +52,10 @@ let starts prefix f () =
 (* A connect that is refused, or a read that is reset, raises Eio.Io out of
    the program: its restart works, so the check passes. *)
 let escaped_io () = Eio_net_chaos.run download
+
+(* An escaped Eio.Time.Timeout is a failure the program reports: the restart
+   decides too. *)
+let escaped_timeout () = Eio_net_chaos.run download_exn
 
 (* A server that listens without ~reuse_addr cannot restart while its
    closed connections hold the port. *)
@@ -76,6 +96,8 @@ let suite =
     [
       Alcotest.test_case "an escaped Eio.Io passes when the restart does" `Quick
         escaped_io;
+      Alcotest.test_case "an escaped Timeout passes when the restart does"
+        `Quick escaped_timeout;
       Alcotest.test_case "a listen without ~reuse_addr cannot restart" `Quick
         (starts "Eio_net_chaos.run: the restart failed" no_reuse);
       Alcotest.test_case "the report says how the faulty run ended" `Quick
