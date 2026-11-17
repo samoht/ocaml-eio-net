@@ -324,8 +324,8 @@ let test_connected_datagram_rejects_excessive_batch () =
     (fun () ->
       Alcotest.check_raises "bounded native batch"
         (Invalid_argument
-           "Eio_net_unix.Frame.of_connected_datagram_fd: max_batch is 65, more \
-            than 64") (fun () ->
+           "Eio_net_unix.Frame.of_connected_datagram_fd: max_batch is 65, it \
+            must be at most 64") (fun () ->
           ignore
             (Eio_net_unix.Frame.of_connected_datagram_fd ~sw ~max_batch:65 fa)))
 

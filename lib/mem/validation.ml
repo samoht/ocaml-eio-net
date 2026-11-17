@@ -50,24 +50,23 @@ let level : type a. a O.t -> level = function
   | _ -> Socket
 
 let socket_level opt = level opt = Socket
+let refuse fmt = Fmt.kstr Option.some ("Eio.Net.setsockopt: " ^^ fmt)
 
 let non_negative name v =
-  if v < 0 then Fmt.kstr Option.some "Eio_net_mem: %s is %d, negative" name v
-  else None
+  if v < 0 then refuse "%s is %d, it must not be negative" name v else None
 
 let port_range (lower, upper) =
   if lower < 0 || lower > 65535 then
-    Fmt.kstr Option.some
-      "Eio_net_mem: IP_LOCAL_PORT_RANGE lower bound is %d, outside 0-65535"
-      lower
+    refuse "IP_LOCAL_PORT_RANGE lower bound is %d, it must be 0-65535" lower
   else if upper < 0 || upper > 65535 then
-    Fmt.kstr Option.some
-      "Eio_net_mem: IP_LOCAL_PORT_RANGE upper bound is %d, outside 0-65535"
-      upper
+    refuse "IP_LOCAL_PORT_RANGE upper bound is %d, it must be 0-65535" upper
   else if lower <> 0 && upper <> 0 && lower > upper then
-    Fmt.kstr Option.some
-      "Eio_net_mem: IP_LOCAL_PORT_RANGE is %d-%d, lower above upper" lower upper
+    refuse "IP_LOCAL_PORT_RANGE is %d-%d, its lower bound is above its upper"
+      lower upper
   else None
+
+let between name v =
+  if v < 1 || v > 255 then refuse "%s is %d, it must be 1-255" name v else None
 
 (* The checks Eio makes before it calls setsockopt(2), whatever the
    kernel. *)
@@ -81,21 +80,12 @@ let eio_check : type a. a O.t -> a -> string option =
   | O.TCP_MAXSEG -> non_negative "TCP_MAXSEG" v
   | O.TCP_LINGER2 -> Option.bind v (non_negative "TCP_LINGER2")
   | O.TCP_DEFER_ACCEPT -> non_negative "TCP_DEFER_ACCEPT" v
-  | O.TCP_SYNCNT ->
-      if v < 1 || v > 255 then
-        Fmt.kstr Option.some "Eio_net_mem: TCP_SYNCNT is %d, outside 1-255" v
-      else None
+  | O.TCP_SYNCNT -> between "TCP_SYNCNT" v
   | O.TCP_WINDOW_CLAMP -> non_negative "TCP_WINDOW_CLAMP" v
-  | O.TCP_FASTOPEN ->
-      if v < 0 then
-        Fmt.kstr Option.some "Eio_net_mem: TCP_FASTOPEN is %d, negative" v
-      else None
+  | O.TCP_FASTOPEN -> non_negative "TCP_FASTOPEN" v
   | O.IP_LOCAL_PORT_RANGE -> port_range v
-  | O.IP_TTL ->
-      if v < 1 || v > 255 then
-        Fmt.kstr Option.some "Eio_net_mem: IP_TTL is %d, outside 1-255" v
-      else None
-  | O.IP_MTU -> Some "Eio_net_mem: IP_MTU is read-only"
+  | O.IP_TTL -> between "IP_TTL" v
+  | O.IP_MTU -> refuse "IP_MTU is read-only"
   | _ -> None
 
 let errno e = Some (Errno e)

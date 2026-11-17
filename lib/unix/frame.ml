@@ -145,10 +145,11 @@ let of_connected_datagram_fd ?(max_length = 65536) ?(max_batch = 32) ~sw fd =
   let fail fmt =
     Fmt.invalid_arg ("Eio_net_unix.Frame.of_connected_datagram_fd: " ^^ fmt)
   in
-  if max_length <= 0 then fail "max_length is %d, not positive" max_length;
-  if max_batch <= 0 then fail "max_batch is %d, not positive" max_batch;
+  if max_length <= 0 then
+    fail "max_length is %d, it must be positive" max_length;
+  if max_batch <= 0 then fail "max_batch is %d, it must be positive" max_batch;
   if max_batch > max_batch_limit then
-    fail "max_batch is %d, more than %d" max_batch max_batch_limit;
+    fail "max_batch is %d, it must be at most %d" max_batch max_batch_limit;
   (* Eio waits for a descriptor to be ready only when an operation on it would
      block; a blocking one would stall every fiber of the domain instead. *)
   eio Unix.set_nonblock fd;

@@ -26,7 +26,8 @@ let pp ppf t =
 
 let of_socket ?(max_length = 65536) ?dst socket =
   if max_length <= 0 then
-    Fmt.invalid_arg "Eio_net.Datagram.of_socket: max_length is %d, not positive"
+    Fmt.invalid_arg
+      "Eio_net.Datagram.of_socket: max_length is %d, it must be positive"
       max_length;
   (* One byte of headroom tells a datagram longer than [max_length] from one
      exactly [max_length] long. *)

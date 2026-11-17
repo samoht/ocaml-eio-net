@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stdio.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -11,6 +12,20 @@
 #include <caml/unixsupport.h>
 
 #define OCAML_EIO_NET_MAX_BATCH 64
+
+/* Raises [Invalid_argument] for a batch [offset, count) that is not within
+   [vbuffers] and [vlengths]. */
+static void invalid_batch(const char *fn, intnat offset, intnat count,
+                          value vbuffers, value vlengths) {
+  char msg[128];
+  intnat size = Wosize_val(vbuffers);
+  if ((intnat)Wosize_val(vlengths) < size) size = Wosize_val(vlengths);
+  if (size > OCAML_EIO_NET_MAX_BATCH) size = OCAML_EIO_NET_MAX_BATCH;
+  snprintf(msg, sizeof msg,
+           "%s: offset is %ld and count is %ld, outside a batch of %ld", fn,
+           (long)offset, (long)count, (long)size);
+  caml_invalid_argument(msg);
+}
 
 #ifdef __APPLE__
 struct ocaml_msghdr_x {
@@ -46,7 +61,8 @@ CAMLprim value caml_eio_net_sendmsg_batch(value vfd, value vbuffers,
       offset_arg > count_arg ||
       count_arg > (intnat)Wosize_val(vbuffers) ||
       count_arg > (intnat)Wosize_val(vlengths))
-    caml_invalid_argument("Eio_net_unix.Frame: invalid send batch");
+    invalid_batch("Eio_net.Frame.send_batch", offset_arg, count_arg, vbuffers,
+                  vlengths);
   int count = (int)(count_arg - offset_arg);
   if (count <= 0) CAMLreturn(Val_int(0));
 
@@ -117,7 +133,8 @@ CAMLprim value caml_eio_net_recvmsg_batch(value vfd, value vbuffers,
       count_arg > OCAML_EIO_NET_MAX_BATCH || offset_arg > count_arg ||
       count_arg > (intnat)Wosize_val(vbuffers) ||
       count_arg > (intnat)Wosize_val(vlengths))
-    caml_invalid_argument("Eio_net_unix.Frame: invalid receive batch");
+    invalid_batch("Eio_net.Frame.recv_batch", offset_arg, count_arg, vbuffers,
+                  vlengths);
   int offset = (int)offset_arg;
   int count = (int)count_arg;
   if (offset >= count) CAMLreturn(Val_int(0));

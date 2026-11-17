@@ -124,7 +124,7 @@ module Flow = struct
       Mutex.protect t.lock (fun () ->
           match Life.enter t.life with
           | Some life -> t.life <- life
-          | None -> Fmt.invalid_arg "Eio_net_mem.%s: the flow is closed" op);
+          | None -> Fmt.invalid_arg "%s: the flow is closed" op);
       match f () with
       | v ->
           leave t;
@@ -135,7 +135,7 @@ module Flow = struct
           Printexc.raise_with_backtrace e bt
 
     let single_write t bufs =
-      use t "single_write" @@ fun () ->
+      use t "Eio.Flow.single_write" @@ fun () ->
       watched t `Write @@ fun until ->
       Pipe.write ?until t.to_peer ~back:t.from_peer bufs
 
@@ -144,14 +144,14 @@ module Flow = struct
     (* An empty read is end-of-file, as Eio's backends report the 0 that
        read(2) returns for it. *)
     let single_read t buf =
-      use t "single_read" @@ fun () ->
+      use t "Eio.Flow.single_read" @@ fun () ->
       if Cstruct.length buf = 0 then raise End_of_file
       else watched t `Read @@ fun until -> Pipe.read ?until t.from_peer buf
 
     (* macOS refuses to shut down the receive side of a socket that reads
        end-of-file, and Eio ignores the ENOTCONN: nothing is shut down. *)
     let shutdown t cmd =
-      use t "shutdown" @@ fun () ->
+      use t "Eio.Flow.shutdown" @@ fun () ->
       (* An end that gave up is closed: Eio ignores the ENOTCONN. *)
       if Mutex.protect t.lock (fun () -> t.given_up = `No) then
         match cmd with
@@ -197,7 +197,7 @@ module Flow = struct
 
     (* An option set on a silent end moves when it gives up. *)
     let setsockopt t opt v =
-      use t "setsockopt" @@ fun () ->
+      use t "Eio.Net.setsockopt" @@ fun () ->
       Sockopt.set t.opts opt v;
       if Option.is_some (Pipe.timing t.from_peer) then begin
         Pipe.wake t.from_peer;
@@ -205,7 +205,7 @@ module Flow = struct
       end
 
     let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
-     fun t opt -> use t "getsockopt" @@ fun () -> Sockopt.get t.opts opt
+     fun t opt -> use t "Eio.Net.getsockopt" @@ fun () -> Sockopt.get t.opts opt
   end
 
   type (_, _, _) Eio.Resource.pi +=
@@ -462,7 +462,7 @@ module Listening_socket = struct
     Mutex.protect t.lock (fun () ->
         match Life.enter t.life with
         | Some life -> t.life <- life
-        | None -> invalid_arg "Eio_net_mem.accept: the listener is closed");
+        | None -> invalid_arg "Eio.Net.accept: the listener is closed");
     match
       Eio.Condition.loop_no_mutex t.acceptable @@ fun () ->
       Mutex.protect t.lock (fun () -> Queue.take_opt t.incoming)
@@ -509,18 +509,18 @@ module Listening_socket = struct
   (* As Eio's own sockets refuse a descriptor used after close. *)
   let listening_addr t =
     if Mutex.protect t.lock (fun () -> not (Life.is_open t.life)) then
-      invalid_arg "Eio_net_mem.listening_addr: the listener is closed";
+      invalid_arg "Eio.Net.listening_addr: the listener is closed";
     t.addr
 
   let open_opts fn t =
     if Mutex.protect t.lock (fun () -> not (Life.is_open t.life)) then
-      Fmt.invalid_arg "Eio_net_mem.%s: the listener is closed" fn;
+      Fmt.invalid_arg "%s: the listener is closed" fn;
     t.opts
 
-  let setsockopt t opt v = Sockopt.set (open_opts "setsockopt" t) opt v
+  let setsockopt t opt v = Sockopt.set (open_opts "Eio.Net.setsockopt" t) opt v
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
-   fun t opt -> Sockopt.get (open_opts "getsockopt" t) opt
+   fun t opt -> Sockopt.get (open_opts "Eio.Net.getsockopt" t) opt
 end
 
 (* A datagram socket bound at [addr]: the datagrams sent to it and not yet
@@ -911,8 +911,7 @@ module Datagram_socket = struct
      receive side; Linux checks a Unix-domain socket's shutdown before its
      destination, and a UDP socket's after. *)
   let send t ?dst bufs =
-    if t.closed then
-      invalid_arg "Eio_net_mem.send: the datagram socket is closed";
+    if t.closed then invalid_arg "Eio.Net.send: the datagram socket is closed";
     let os = t.hub.os in
     (match dst with Some (`Unix path) -> check_path ~os path | _ -> ());
     let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
@@ -962,8 +961,7 @@ module Datagram_socket = struct
     let got =
       Eio.Condition.loop_no_mutex t.readable @@ fun () ->
       Mutex.protect t.lock @@ fun () ->
-      if t.closed then
-        invalid_arg "Eio_net_mem.recv: the datagram socket is closed"
+      if t.closed then invalid_arg "Eio.Net.recv: the datagram socket is closed"
       else if t.batch = 0 then t.batch <- Queue.length t.queued;
       match Queue.take_opt t.queued with
       | None -> None
@@ -1013,7 +1011,7 @@ module Datagram_socket = struct
   let shutdown t cmd =
     ( Mutex.protect t.lock @@ fun () ->
       if t.closed then
-        invalid_arg "Eio_net_mem.shutdown: the datagram socket is closed";
+        invalid_arg "Eio.Flow.shutdown: the datagram socket is closed";
       match cmd with
       | (`Send | `Receive | `All) when t.hub.os = Macos -> ()
       | `Send -> t.send_shut <- true
@@ -1025,13 +1023,13 @@ module Datagram_socket = struct
 
   let open_opts fn t =
     if Mutex.protect t.lock (fun () -> t.closed) then
-      Fmt.invalid_arg "Eio_net_mem.%s: the datagram socket is closed" fn;
+      Fmt.invalid_arg "%s: the datagram socket is closed" fn;
     t.opts
 
-  let setsockopt t opt v = Sockopt.set (open_opts "setsockopt" t) opt v
+  let setsockopt t opt v = Sockopt.set (open_opts "Eio.Net.setsockopt" t) opt v
 
   let getsockopt : type a. t -> a Eio.Net.Sockopt.t -> a =
-   fun t opt -> Sockopt.get (open_opts "getsockopt" t) opt
+   fun t opt -> Sockopt.get (open_opts "Eio.Net.getsockopt" t) opt
 end
 
 (* The two ends of a TCP connection, and when each lets go of its address.
@@ -1156,8 +1154,7 @@ module Network = struct
   let listen t ~reuse_addr ~reuse_port ~backlog ~sw addr =
     if reuse_port then
       invalid_arg
-        "Eio_net_mem.listen: reuse_port is true, which the network does not \
-         support";
+        "Eio.Net.listen: reuse_port is true, which Eio_net_mem does not support";
     Eio.Switch.check sw;
     (* eio_posix removes a listener's file when [sw] finishes, and fails to
        for a path with a NUL, as there is none. *)
@@ -1540,13 +1537,11 @@ module Network = struct
 
   let datagram_handler = Eio.Net.Pi.datagram_socket (module Datagram_socket)
 
-  (* One socket per address: there is no kernel to spread datagrams across
-     several, so [reuse_port] is refused. *)
   let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
     if reuse_port then
       invalid_arg
-        "Eio_net_mem.datagram_socket: reuse_port is true, which the network \
-         does not support";
+        "Eio.Net.datagram_socket: reuse_port is true, which Eio_net_mem does \
+         not support";
     let datagram = Datagram_socket.v t.datagrams ~reuse:reuse_addr addr in
     let socket = Eio.Resource.T (datagram, datagram_handler) in
     datagram.release <-
@@ -1627,7 +1622,7 @@ let capacity_rule fn = function
   | None -> Fun.id
   | Some c when c >= 1 -> Fun.const c
   | Some c ->
-      Fmt.invalid_arg "Eio_net_mem.%s: capacity is %d, not positive" fn c
+      Fmt.invalid_arg "Eio_net_mem.%s: capacity is %d, it must be positive" fn c
 
 let pair ?os ?capacity () =
   let os = Kernel.of_arg os in

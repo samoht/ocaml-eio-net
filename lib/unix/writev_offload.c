@@ -6,6 +6,7 @@
 #include <caml/threads.h>
 #include <caml/unixsupport.h>
 #include <errno.h>
+#include <stdio.h>
 #include <sys/uio.h>
 
 #define EIO_NET_IOV_MAX 256
@@ -20,8 +21,14 @@ CAMLprim value caml_eio_net_writev(value v_fd, value v_bufs)
     CAMLparam2(v_fd, v_bufs);
     struct iovec iov[EIO_NET_IOV_MAX];
     int count = (int)Wosize_val(v_bufs);
-    if (count <= 0 || count > EIO_NET_IOV_MAX)
-        caml_invalid_argument("caml_eio_net_writev: iovec count");
+    if (count <= 0 || count > EIO_NET_IOV_MAX) {
+        char msg[96];
+        snprintf(msg, sizeof msg,
+                 "Eio_net_unix.Stream.offload_single_write: the iovec count "
+                 "is %d, it must be 1-%d",
+                 count, EIO_NET_IOV_MAX);
+        caml_invalid_argument(msg);
+    }
     for (int i = 0; i < count; i++) {
         value triple = Field(v_bufs, i);
         iov[i].iov_base = (char *)Caml_ba_data_val(Field(triple, 0))
