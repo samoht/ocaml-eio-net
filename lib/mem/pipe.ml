@@ -126,24 +126,10 @@ end
    reported once, by a read or by a write that [refused] fails, as a socket
    clears its pending error; reads then return end-of-file.
 
-   [reader] is the reader's end. [Gone] once it has closed: the first write
-   to it is lost and answered with a reset, which [refused] then makes every
-   later write raise; on a Unix-domain connection, [local], the first write
-   raises it, as EPIPE. Once it shut its receive side it reads what is
-   queued, then end-of-file, and as Linux then sends no window update, what
-   it reads frees no room: [unacked] counts it. Once it has also shut its
-   send side, data reaching a TCP reader resets the connection, as Linux
-   resets it in FIN-WAIT; a write to a Unix-domain reader that shut its
-   receive side raises the reset, as EPIPE.
-
-   [silent] says nothing crosses any more, as on a partition: the reader
-   reads the [n] bytes of [Some n], then waits until it shuts its receive
-   side; the writer fills the queue, then waits until its own [shut]. What
-   the reader reads frees no room, and neither end's close or shutdown
-   reaches the other. A TCP pipe with a [timer] keeps when its writer last sent a byte
-   while the connection was live, [last], when it went silent, [silenced],
-   and when the oldest byte sent since then, or lost then, was written,
-   [oldest]: when each end gives up follows. *)
+   [reader] is the reader's end, [Gone] once it has closed ([leave]).
+   [unacked] counts what it read that frees no room for the writer.
+   [silent] is set once nothing crosses ([silence]), and [last], [silenced]
+   and [oldest] time a silent TCP pipe with a [timer] ([timing]). *)
 type side = Open | Shut
 type reader = Live of { receive : side; send : side } | Gone
 

@@ -162,12 +162,11 @@ CAMLprim value caml_eio_net_interface_watch(value v_unit)
     return Val_int(fd);
 }
 
-/* Read every message queued on the watch socket [v_fd]; true when one reports
- * an address added or removed, or when the kernel dropped messages
- * (ENOBUFS), which may have. On Linux a datagram counts only from the kernel
- * (port 0): a process with CAP_NET_ADMIN can send one to the watch's port. A
- * message is read whole into a buffer that only its header needs: the rest
- * of one longer than the buffer is discarded. */
+/* Reads every message queued on the watch socket [v_fd] and returns true if
+ * one reports an address added or removed, or if the kernel dropped some
+ * (ENOBUFS). On Linux only messages from the kernel (port 0) count. Only a
+ * message's header is needed, so the rest of one longer than the buffer is
+ * discarded. */
 CAMLprim value caml_eio_net_interface_drain(value v_fd)
 {
     int fd = Int_val(v_fd), changed = 0;

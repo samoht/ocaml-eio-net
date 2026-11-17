@@ -1,5 +1,6 @@
-(* The processor time of one Interface.addresses, the getifaddrs(3) read a
-   gateway without an address watch makes before it opens a flow. *)
+(* The processor time of one Interface.addresses call, one getifaddrs(3): what
+   a program pays when it reads the addresses before each connection instead
+   of following them with Interface.watch. *)
 let run count =
   let entries = List.length (Eio_net_unix.Interface.addresses ()) in
   let start = Unix.times () in

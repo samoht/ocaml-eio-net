@@ -8,7 +8,7 @@ let strict_line r =
   Eio.Buf_read.char '\n' r;
   l
 
-(* (d) A length-prefixed protocol: [len:4][payload]. *)
+(* A length-prefixed protocol: [len:4][payload]. *)
 module Frame = struct
   let write flow msg =
     let b = Bytes.create (4 + String.length msg) in
@@ -50,7 +50,7 @@ module Frame = struct
     if bug = `No_timeout then go () else Eio.Time.with_timeout_exn clock 1.0 go
 end
 
-(* (e) A client that retries. The server answers one frame. *)
+(* A client that retries. The server answers one frame. *)
 module Client = struct
   let fetch ?(bug = `None) ~clock net addr =
     let once () =
@@ -80,7 +80,7 @@ module Client = struct
     attempt 1
 end
 
-(* (f) UDP request/response with retransmission. A message is "id:body". *)
+(* UDP request/response with retransmission. A message is "id:body". *)
 module Rpc = struct
   let split s =
     match String.index_opt s ':' with

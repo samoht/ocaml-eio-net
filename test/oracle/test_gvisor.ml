@@ -1,7 +1,6 @@
 (* Socket behaviour that gVisor's syscall tests pin, adapted from
    https://github.com/google/gvisor/tree/6782e66bb04ba41de7da417da53406c2525ac9f1/test/syscalls/linux
-   (Apache License 2.0), run against eio-net.mem and real sockets. README.md
-   says how the revision was established.
+   (Apache License 2.0), run against eio-net.mem and real sockets.
 
    Each case keeps the name and file of the gVisor test it adapts. A gVisor
    test states Linux's behaviour; where the kernel's own answer is wrapped by

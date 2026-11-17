@@ -1071,10 +1071,7 @@ module Network = struct
       in
       match fault with
       | Some (Fault.Refuse | Reset) -> raise (refused_exn ())
-      | Some (Timeout | Unreachable) when family = `Unix ->
-          (* A Unix-domain connect has no handshake to lose and no route to
-             miss. *)
-          go ()
+      | Some (Timeout | Unreachable) when family = `Unix -> go ()
       | Some Timeout ->
           (* Linux gives up 64 s after its tenth SYN retransmission
              (tcp_syn_retries 6 plus tcp_syn_linear_timeouts 4), macOS after

@@ -127,7 +127,7 @@ let stream n () =
   | body -> if String.length body <> n * 100 then failwith "short body"
   | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout | Failure _) -> ()
 
-(* Added: the same server, with a client that retries on a new connection
+(* The same server, with a client that retries on a new connection
    and so may demand success under at most two faults. *)
 let coalesce_retry ?(bug = true) () =
   Eio_net_chaos.check @@ fun env ->
@@ -180,7 +180,7 @@ let coalesce_retry ?(bug = true) () =
   | Some (x, y), _ -> Fmt.failwith "got %S %S" x y
   | None, false -> failwith "gave up"
 
-(* Added: the one-sided probe with an idle timeout in the handler. *)
+(* The one-sided probe with an idle timeout in the handler. *)
 let one_sided_timeout () =
   Eio_net_chaos.check @@ fun env ->
   Eio.Switch.run @@ fun sw ->

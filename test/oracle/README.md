@@ -30,4 +30,4 @@ What a case changes from its gVisor test:
 
 [`test_mem_cases.ml`](test_mem_cases.ml) holds cases of `eio-net.mem` that no
 gVisor test covers, measured on Linux and macOS. No kernel version is
-recorded; one comment names Linux 7.2 (76af812, 2026-11-10).
+recorded, except Linux 7.2 for a TCP connect to a Unix path.

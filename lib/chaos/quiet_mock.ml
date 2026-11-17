@@ -6,8 +6,7 @@ open! Hermetic
    trimmed to what Eio_net_chaos.check needs, with these changes:
    - moving the clock prints nothing. Eio_mock's clock calls [traceln] from
      the scheduler, where no fiber binding reaches, so a check built on it
-     cannot keep stderr clean. A quiet mock clock belongs upstream; this copy
-     stands in until then;
+     cannot keep stderr clean;
    - the scheduler stops instead of moving the clock past [limit], so a run
      that every fiber waits in reports as a hang, and one that keeps a timer
      going reports as a run past its time limit;

@@ -20,8 +20,8 @@ let name = "Eio_net_chaos.check"
 let fail fmt = Fmt.failwith ("%s: " ^^ fmt) name
 let plural n = if n = 1 then "" else "s"
 
-(* The operations a run may make: a run that makes more spins, or is more
-   than a check plans from, and the trace it keeps stays bounded. *)
+(* A run that makes more operations is a busy loop or too large to check; the
+   limit also bounds the trace a run keeps. *)
 let max_ops = 100_000
 let too_large = "a busy loop, or a workload too large for a check"
 
