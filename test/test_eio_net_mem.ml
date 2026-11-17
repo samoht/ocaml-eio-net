@@ -1560,6 +1560,36 @@ let test_backlog () =
         (backlog + 2) !connected)
     [ 0; 1; 2; 5 ]
 
+(* Under [`Macos] a connect past a full accept queue waits for an accept to
+   make room, as on Linux, so an accept loop serves every client of a
+   listener with a backlog of 1. *)
+let test_macos_backlog () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~os:`Macos ~sw () in
+  let l =
+    Eio.Net.listen ~sw ~backlog:1 net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let addr = Eio.Net.listening_addr l in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      while true do
+        ignore (Eio.Net.accept ~sw l)
+      done;
+      `Stop_daemon);
+  let clients = 4 in
+  let outcomes =
+    Eio.Fiber.List.map
+      (fun () ->
+        match Eio.Net.connect ~sw net addr with
+        | _ -> "connected"
+        | exception Eio.Io _ -> "failed")
+      (List.init clients (fun _ -> ()))
+  in
+  Alcotest.(check (list string))
+    "every client connects"
+    (List.init clients (fun _ -> "connected"))
+    outcomes
+
 (* A listener's close defers to the accept waiting on it, as Eio defers a
    descriptor's close to its users: the listener takes connections until
    that accept returns one, and only then closes, so a later accept raises
@@ -1731,6 +1761,8 @@ let suite =
       Alcotest.test_case "a closed listener refuses connects" `Quick
         test_a_closed_listener_refuses_connects;
       Alcotest.test_case "a listener's backlog" `Quick test_backlog;
+      Alcotest.test_case "macOS: a full accept queue makes a connect wait"
+        `Quick test_macos_backlog;
       Alcotest.test_case "a close defers to an accept" `Quick
         test_close_defers_to_an_accept;
       Alcotest.test_case "a connect under a finished switch" `Quick
