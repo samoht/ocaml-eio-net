@@ -745,9 +745,9 @@ let test_macos_connect () =
 (* A TCP connection that goes silent [after] seconds past its last byte, its
    client set up by [setup]: how the client's [op] ends, and when, in seconds
    past that byte, then what a read, a write and a read do. The times are
-   those measured on Linux, with a peer whose socket filter drops every
-   segment, and on macOS, with a peer that sends through a source route no
-   host answers. *)
+   those test/interop/silent-peer measures over loopback: on Linux with a
+   peer that sends through a source route the client drops, and on macOS
+   with a peer that sends through an interface that is down. *)
 let silent ?(os = `Linux) ?(after = 0.5) ?(setup = ignore) op =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
