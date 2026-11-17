@@ -48,5 +48,5 @@ records:
 - A connection whose bytes go unacknowledged fails after 948.6 s on Linux
   (`tcp_retries2` = 15) and 18 s on macOS. The
   [silent-peer traces](../silent-peer) record it, on both kernels: Linux's
-  connections fail after 947.8 to 951.9 s, and macOS's after 17.94 to
-  18.05 s.
+  connections fail after 948.3 to 951.7 s, and macOS's after 17.95 to
+  18.06 s.
