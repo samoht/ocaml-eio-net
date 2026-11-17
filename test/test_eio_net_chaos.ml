@@ -1627,6 +1627,32 @@ let test_seeded () =
     | _ -> false
     | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> true)
 
+(* A failing listener fails its first accept with the cued exception, then
+   accepts from the network's own listener; a stalled peer connects and sends
+   what it was given, then nothing. *)
+let test_listener_failing_then_stall () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
+  let cue, ready = Eio.Promise.create () in
+  Eio.Promise.resolve ready ();
+  let net =
+    Chaos.Listener.failing ~addr
+      [ (cue, Failure "the cued failure") ]
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
+  let listening = Eio.Net.listen ~sw ~backlog:4 net addr in
+  Alcotest.(check bool)
+    "the first accept fails as cued" true
+    (match Eio.Net.accept ~sw listening with
+    | _ -> false
+    | exception Failure m -> String.equal m "the cued failure");
+  Chaos.Listener.stall ~sw net addr "GET" ~on_end:ignore;
+  let flow, _ = Eio.Net.accept ~sw listening in
+  Alcotest.(check string) "the stalled peer's bytes" "GET" (read1 flow);
+  (* The peer drains until its connection ends, so the case ends it. *)
+  Eio.Flow.close flow
+
 let suite =
   ( "eio_net_chaos",
     [
@@ -1635,6 +1661,8 @@ let suite =
       Alcotest.test_case "Short cuts each read to its length" `Quick
         test_flow_short;
       Alcotest.test_case "a seeded end" `Quick test_seeded;
+      Alcotest.test_case "a failing listener, then a stalled peer" `Quick
+        test_listener_failing_then_stall;
       Alcotest.test_case "tiny buffers never raise macOS's AF_UNIX queue" `Quick
         test_tiny_buffers_macos_unix;
       Alcotest.test_case "a stalled read takes what several writes sent" `Quick
