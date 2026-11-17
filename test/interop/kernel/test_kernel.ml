@@ -274,6 +274,21 @@ let scenario_exceptions : scenario_exception list =
   [
     {
       why =
+        "the traces, of unknown provenance, reset a connect past the accept \
+         queue, where macOS 27.3 makes it wait, as mem does";
+      oses = [ `Macos ];
+      holds =
+        (fun name ~mem ~kernel ->
+          starts_with ~prefix:"backlog " name
+          && String.equal
+               (String.concat " "
+                  (List.map
+                     (function "Reset" -> "blk" | w -> w)
+                     (String.split_on_char ' ' kernel)))
+               mem);
+    };
+    {
+      why =
         "a stream queues what mem works out from the buffers set, within 15% \
          of what Linux holds in writes of 1 KiB, as the overhead of each \
          segment and write is Linux's own";

@@ -347,7 +347,8 @@ module Listening_socket = struct
 
   (* Linux's accept queue takes one connection more than the backlog, which
      it caps at [net.core.somaxconn], 4096 by default, as it takes a negative
-     one. *)
+     one; macOS's takes the backlog, 128 ([kern.ipc.somaxconn]) for one of 0
+     or less or past that. *)
   let queue_length ~os backlog =
     match os with
     | Linux -> if backlog < 0 || backlog > 4096 then 4097 else backlog + 1
@@ -476,8 +477,7 @@ module Listening_socket = struct
         leave t;
         Printexc.raise_with_backtrace e bt
 
-  (* Queues a connection, waiting while [backlog] do on Linux; macOS resets
-     it at once. *)
+  (* Queues a connection, waiting while the queue is full. *)
   let offer t conn =
     let queued =
       Eio.Condition.loop_no_mutex t.room @@ fun () ->
@@ -487,7 +487,6 @@ module Listening_socket = struct
         Queue.push conn t.incoming;
         Some `Queued
       end
-      else if Ports.os t.hub.ports = Macos then Some `Full
       else None
     in
     if queued = `Queued then Eio.Condition.broadcast t.acceptable;
@@ -1435,9 +1434,6 @@ module Network = struct
         (* The listener closed while the connection waited for room. *)
         fail ();
         refused ()
-    | `Full ->
-        fail ();
-        raise (Eio.Net.err (Connection_reset No_listener))
     | exception e ->
         fail ();
         raise e

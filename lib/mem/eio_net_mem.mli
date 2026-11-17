@@ -590,7 +590,7 @@ val pair :
       once.
     - Listeners. The accept queue takes [backlog] connections, 128 for a
       [backlog] of 0 or less or past [kern.ipc.somaxconn]; a [connect] past it
-      raises [Connection_reset] at once.
+      waits, as on Linux.
     - Connections. A receive shutdown drops what is queued, which still fills
       the queue, and bytes that reach a TCP end after it reset the connection. A
       shutdown of the receive side of an end that reads end-of-file does
