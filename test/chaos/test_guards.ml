@@ -231,19 +231,57 @@ let test_nothing () =
     (fun () -> Eio_net_chaos.run ignore)
     ()
 
-let test_nondeterministic () =
+(* A program whose operations depend on a counter it keeps across runs
+   differs from one run to the next: the check runs it all the same. *)
+let counted ~strict =
   let calls = ref 0 in
-  let run env =
+  fun (env : Eio_net_chaos.env) ->
     incr calls;
     Eio.Switch.run @@ fun sw ->
+    let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+        Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+            Eio.Flow.copy_string "hello" flow));
     for _ = 1 to 1 + (!calls mod 2) do
-      try ignore (Eio.Net.connect ~sw env#net addr) with Eio.Io _ -> ()
+      match
+        Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+        Eio.Switch.run @@ fun sw ->
+        let flow = Eio.Net.connect ~sw env#net addr in
+        Eio.Buf_read.(parse_exn take_all) ~max_size:100 flow
+      with
+      | "hello" -> ()
+      | got -> Fmt.failwith "got %S" got
+      | exception (Eio.Io _ | Eio.Time.Timeout) when not strict -> ()
+      | exception (Eio.Io _ | Eio.Time.Timeout) -> failwith "no answer"
     done
+
+let test_nondeterministic () = Eio_net_chaos.run (counted ~strict:false)
+
+(* A failure of such a program says where two runs with no fault
+   differed. *)
+let test_diverged () =
+  let report =
+    Expect.report (fun () -> Eio_net_chaos.run (counted ~strict:true))
   in
-  refused_with
-    "Eio_net_chaos.run: two runs with no fault made different operations"
-    (fun () -> Eio_net_chaos.run run)
-    ()
+  if Expect.field "diverged" report = "" then
+    Alcotest.failf "the report does not say the runs differed: %s" report
+
+(* A program that draws the length of its answer from Random draws the same
+   length in every run. *)
+let test_random () =
+  Eio_net_chaos.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let answer = String.make (1 + Random.int 1000) 'x' in
+  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+      Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
+          Eio.Flow.copy_string answer flow));
+  try
+    Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let flow = Eio.Net.connect ~sw env#net addr in
+    ignore (Eio.Flow.read_all flow : string)
+  with Eio.Io _ | Eio.Time.Timeout -> ()
 
 (* A run with no fault that fails is reported with its operations and the
    replay that runs it again. *)
@@ -1256,8 +1294,11 @@ let suite =
         test_restart;
       Alcotest.test_case "a workload with no operation is refused" `Quick
         test_nothing;
-      Alcotest.test_case "a nondeterministic workload is refused" `Quick
+      Alcotest.test_case "a program that differs between runs is checked" `Quick
         test_nondeterministic;
+      Alcotest.test_case "a report says where two runs differed" `Quick
+        test_diverged;
+      Alcotest.test_case "Random draws the same in every run" `Quick test_random;
       Alcotest.test_case "a first run that fails is refused" `Quick
         test_first_run_fails;
       Alcotest.test_case "a run that fails at once shows no trace" `Quick
