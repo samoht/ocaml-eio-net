@@ -261,6 +261,15 @@ let test_first_run_fails () =
   Alcotest.(check bool) "replay" true (String.ends_with ~suffix:"/none" replay);
   Alcotest.(check string) "replayed" report (Expect.report (run ~replay))
 
+(* A run with no fault that fails before any operation has no trace to
+   show. *)
+let test_first_run_fails_at_once () =
+  let report =
+    Expect.report (fun () -> Eio_net_chaos.run (fun _ -> failwith "no"))
+  in
+  if List.mem "  trace:" (String.split_on_char '\n' report) then
+    Alcotest.failf "an empty trace in %S" report
+
 (* A check runs inside another event loop as it does outside one. *)
 let test_nested () =
   Eio_mock.Backend.run @@ fun () ->
@@ -1251,5 +1260,7 @@ let suite =
         test_nondeterministic;
       Alcotest.test_case "a first run that fails is refused" `Quick
         test_first_run_fails;
+      Alcotest.test_case "a run that fails at once shows no trace" `Quick
+        test_first_run_fails_at_once;
       Alcotest.test_case "a check inside another loop" `Quick test_nested;
     ] )
