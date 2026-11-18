@@ -1,5 +1,5 @@
 available: os != "win32"
 # eio-chaos is not on opam yet: drop its pin once it is released.
 pin-depends: [
-  ["eio-chaos.0.1.0" "git+https://github.com/samoht/ocaml-eio-chaos.git#f2eef79d8433ae73a79a0641dad52db5a6bb2999"]
+  ["eio-chaos.0.1.0" "git+https://github.com/samoht/ocaml-eio-chaos.git#82ba81cbe81206cbbd087c260d847c83ef459631"]
 ]
