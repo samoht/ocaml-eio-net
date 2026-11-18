@@ -1,14 +1,16 @@
 # eio-net
 
-Network tests and channels for [Eio](https://github.com/ocaml-multicore/eio).
+An in-memory network for [Eio](https://github.com/ocaml-multicore/eio),
+to test code under network faults, and frame channels to build programs on.
 
-`eio-net.chaos` has two checks, one call each. `Eio_net_chaos.run` checks
-that an Eio program copes with a network that fails, and
-`Eio_net_chaos.device` checks that an Eio network answers as Linux or macOS
-does ([How it works](#how-it-works)). `run` uses `eio-net.mem`, an in-memory
-network that follows either kernel and itself passes `device`. The package
-also has frame channels, in which one receive is one frame, and an accept
-loop, for programs to build on.
+Each test gets a fresh network of its own, used through the ordinary
+`Eio.Net` API, so the code under test does not change.
+`Eio_net_chaos.run` is chaos engineering on one machine: it runs a program
+again and again, each time with a different network fault, and checks that
+it starts again on the network the fault left
+([How it works](#how-it-works)). `Eio_net_chaos.device` checks that an Eio
+network answers as Linux or macOS does. The frame channels, in which one
+receive is one frame, come with an accept loop and a relay.
 
 ## Installation
 
@@ -17,12 +19,31 @@ loop, for programs to build on.
 opam install eio-net
 ```
 
+## An in-memory network
+
+`Eio_net_mem.v ~sw ()` is a new network with a loopback interface. Two calls
+share no socket.
+
+```ocaml
+# Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~sw () in
+  let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
+  let l = Eio.Net.listen ~sw ~backlog:1 net addr in
+  let c = Eio.Net.connect ~sw net addr in
+  let s, _ = Eio.Net.accept ~sw l in
+  Eio.Flow.copy_string "world" c;
+  Eio.Flow.shutdown c `Send;
+  Eio.Flow.read_all s;;
+- : string = "world"
+```
+
 ## Testing a program
 
-`Eio_net_chaos.run` checks how a program copes when the network fails. It
-takes the program as a function of its environment and runs it many times on
-a network in memory, so the program needs no change. A client is tested
-together with a server to talk to, and a server with a client:
+`Eio_net_chaos.run` checks how a program that talks through `Eio.Net` copes
+when the network fails. It takes the program as a function of its
+environment and runs it many times in memory. A client is tested together
+with a server to talk to, and a server with a client:
 
 ```ocaml
 # let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080);;
@@ -48,6 +69,15 @@ val app : reuse_addr:bool -> Eio_net_chaos.env -> unit = <fun>
 # Eio_net_chaos.run (app ~reuse_addr:true);;
 - : unit = ()
 ```
+
+The `env` has the capabilities of `Eio.Stdenv`, each simulated
+([How it works](#how-it-works)), so a `main` written against `Eio.Stdenv`
+runs unchanged. `Eio_net_chaos.network ()` is the same network as a part of
+[eio-chaos](https://github.com/samoht/ocaml-eio-chaos), to test a program on
+it and other simulated devices at once. A program that also writes files is
+tested on the disk of [eio-fs](https://github.com/samoht/ocaml-eio-fs) in the
+same check, whose runs fail the disk, the network, or both:
+`Eio_chaos.run [ Eio_fs_chaos.disk (); Eio_net_chaos.network () ] app`.
 
 The first run has no fault. Each later run meets one fault:
 
@@ -99,13 +129,6 @@ which `Eio_net_chaos.is_outage env` names.
 [`eio_net_chaos.mli`](lib/chaos/eio_net_chaos.mli) says how the faults are
 picked and what a program may and may not do.
 
-The network is a part of [eio-chaos](https://github.com/samoht/ocaml-eio-chaos),
-`Eio_net_chaos.network ()`, and `Eio_net_chaos.run app` is
-`Eio_chaos.run [ Eio_net_chaos.network () ] app`. A program that also writes
-files is tested on the disk of [eio-fs](https://github.com/samoht/ocaml-eio-fs)
-in the same check, `Eio_chaos.run [ Eio_fs_chaos.disk (); Eio_net_chaos.network () ] app`,
-whose runs fail either part, or both.
-
 ## Testing a network
 
 `Eio_net_chaos.device` checks that an Eio network of your own, such as a
@@ -136,8 +159,8 @@ as in this line, where `C` is the end that connected and `S` the one that
 accepted:
 
 `connect: expected ok, got Refused, in 21,361 sequences, e.g. tcp4 accept; close S; close S; connect`
- Pass ``~os:`Macos`` to compare with
-macOS.
+
+Pass ``~os:`Macos`` to compare with macOS.
 
 A network built over another one, such as a tunnel, is checked over a faulty
 one too with `~under:[ Eio_net_chaos.network () ]`: on a healthy network its
@@ -169,25 +192,28 @@ a pass means. On the network:
 
 ### What is simulated
 
-The program receives the device as an Eio capability (`env#net`). The package
-replaces that capability with a simulated one; the program is not changed.
+The program receives each device as an Eio capability, through `env`. The
+package replaces each capability with a simulated one; the program is not
+changed.
 
-The network is a host with a loopback interface only, with the kernel's
-socket behaviour (buffers, backlogs, TIME_WAIT, timeouts, Unix socket files).
-No packets exist: nothing below the sockets API is modelled.
+- The network is a host with a loopback interface only, with the kernel's
+  socket behaviour (buffers, backlogs, TIME_WAIT, timeouts, Unix socket
+  files). No packets exist: nothing below the sockets API is modelled.
+- The clocks jump to the next timer, `secure_random` and `Random` are
+  seeded, the standard streams are in memory, a domain manager runs its work
+  on the run's own scheduler, and no process starts.
 
-The other devices of `Eio.Stdenv` are simulated too: the clocks, the entropy,
-the standard streams, and the domain and process managers. A program under
-`run` and a network under `device` both receive everything through `env`.
-Built with [hermetic](https://github.com/samoht/ocaml-hermetic)
-(`open! Hermetic`), neither can reach the machine any other way, as the
-compiler rejects it, so every run replays exactly. Without hermetic, a direct
-call, such as `Unix.gettimeofday`, escapes the check, and a report says
-where two runs with no fault differed.
+A program built with [hermetic](https://github.com/samoht/ocaml-hermetic)
+(`open! Hermetic`) cannot escape the check: the compiler rejects direct
+`Unix`, standard-library I/O, entropy, domains and processes, so each run
+replays exactly, unless the program keeps state in memory from one run to the
+next. Without hermetic, a direct call escapes the check, and when it makes
+two runs differ, the report names the first difference and its likely
+cause. The same holds for a network under `device`.
 
 ### What is guaranteed
 
-1. With no fault, the simulated device answers each call as Linux or macOS
+1. With no fault, the simulated network answers each call as Linux or macOS
    does through Eio, as recorded on real kernels; the Limitations list the
    known differences.
 2. Only faults the real kernel can return at that call are injected. So
@@ -201,28 +227,33 @@ on the wire.
 
 ## Libraries
 
-- `eio-net.chaos`: `run` and `device`, and the fault wrapper they use.
-- `eio-net.mem`: the in-memory network. [MODEL.md](MODEL.md) says how
-  closely it follows each kernel.
-- `eio-net`: frame channels over datagram sockets and byte streams, a relay,
-  and a guard that ends a transfer that moves too few bytes a second.
-- `eio-net.framing`: the length-prefix codec of a frame channel.
-- `eio-net.accept`: an accept loop that holds at most a given number of
+- `eio-net` has `Eio_net`: frame channels over datagram sockets and byte
+  streams, a relay, and a guard that ends a transfer that moves too few
+  bytes a second.
+- `eio-net.mem` has `Eio_net_mem`, the in-memory network.
+  [MODEL.md](MODEL.md) says how closely it follows each kernel.
+- `eio-net.chaos` has `Eio_net_chaos`, the two checks above and the faults
+  they are made of, so a program that uses only the network links none of
+  it.
+- `eio-net.framing` has the length-prefix codec of a frame channel.
+- `eio-net.accept` has an accept loop that holds at most a given number of
   connections.
-- `eio-net.connect`: classifies failed connects.
-- `eio-net.addr`: converts [Ipaddr](https://github.com/mirage/ocaml-ipaddr)
+- `eio-net.connect` classifies failed connects.
+- `eio-net.addr` converts [Ipaddr](https://github.com/mirage/ocaml-ipaddr)
   addresses to Eio's and back.
-- `eio-net.unix`: batched datagrams, Unix-domain sockets and the host's
+- `eio-net.unix` binds batched datagrams, Unix-domain sockets and the host's
   interfaces.
 
 Each library documents itself in its `.mli`, under [`lib/`](lib/).
 
 ## Limitations
 
-- `eio-net.mem` follows one kernel at a time. Run a check under each `?os` you
-  ship on.
+- The network follows one kernel at a time, Linux, or macOS with
+  ``~os:`Macos``: code that runs on both needs a check under each
+  ([`Eio_net_mem`](lib/mem/eio_net_mem.mli)).
 - Under macOS, a TCP answer over loopback can depend on timing, and the traces
-  hold one recording of each, so `device` leaves those sequences out.
+  hold one recording of each, so `device` leaves those sequences out
+  ([`Eio_net_chaos.device`](lib/chaos/eio_net_chaos.mli)).
 
 ## Related work
 
