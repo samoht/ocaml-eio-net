@@ -1981,3 +1981,5 @@ let scenario ?(wait = fun _ -> ()) net name =
   let f = List.assoc name scenario_list in
   let r = try f ~wait net with e -> "abort " ^ classify e in
   String.map (function ',' | '\n' | '\r' -> ';' | '\000' -> '0' | c -> c) r
+
+let float_value = Common.float_value

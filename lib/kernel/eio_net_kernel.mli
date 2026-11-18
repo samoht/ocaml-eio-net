@@ -83,3 +83,7 @@ val scenario :
 (** [scenario ~wait net name] runs the scenario [name] on [net] and is its
     outcome, on one line without commas. [wait d] lets [d] seconds pass: a timed
     scenario calls it. Unix paths are relative to the current directory. *)
+
+val float_value : float -> string
+(** [float_value x] is [x] as the traces print a value, [%g] with a two-digit
+    exponent on every host. *)

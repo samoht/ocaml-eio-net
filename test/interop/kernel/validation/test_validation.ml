@@ -14,7 +14,7 @@ type opt =
 
 let bool = (string_of_bool, bool_of_string)
 let int = (string_of_int, int_of_string)
-let float = (Fmt.str "%g", float_of_string)
+let float = (Eio_net_kernel.float_value, float_of_string)
 let str = (Fun.id, Fun.id)
 
 let optint =

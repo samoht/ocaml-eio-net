@@ -21,15 +21,26 @@ let errno : Unix.error -> string = function
   | ESHUTDOWN -> "ESHUTDOWN"
   | EWOULDBLOCK -> "EWOULDBLOCK"
   | EUNKNOWNERR n -> "EUNKNOWNERR" ^ string_of_int n
+  (* As the traces spell it: Linux's and macOS's message, whatever the
+     host's C library says. *)
+  | EHOSTUNREACH -> "No route to host"
   (* Windows' messages end with CRLF. *)
   | e -> String.trim (Unix.error_message e)
+
+(* %g writes a three-digit exponent on Windows: the traces have two. *)
+let float_value x =
+  let s = Fmt.str "%g" x in
+  match String.index_opt s 'e' with
+  | Some i when String.length s - i = 5 && s.[i + 2] = '0' ->
+      String.sub s 0 (i + 2) ^ String.sub s (i + 3) 2
+  | _ -> s
 
 (* eio-net.mem's codes, named by the system error each stands for. *)
 let mem_errno : Eio.Exn.Backend.t -> string option = function
   | Eio_net_mem.Address_in_use -> Some "EADDRINUSE"
   | Eio_net_mem.No_destination -> Some "EDESTADDRREQ"
   | Eio_net_mem.Not_connected -> Some "ENOTCONN"
-  | Eio_net_mem.Host_unreachable -> Some (Unix.error_message Unix.EHOSTUNREACH)
+  | Eio_net_mem.Host_unreachable -> Some (errno Unix.EHOSTUNREACH)
   | Eio_net_mem.Message_too_long -> Some "EMSGSIZE"
   | Eio_net_mem.Invalid_port -> Some "EINVAL"
   | Eio_net_mem.Network_unreachable -> Some "ENETUNREACH"

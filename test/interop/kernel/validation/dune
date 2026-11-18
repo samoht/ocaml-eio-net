@@ -4,6 +4,6 @@
 (test
  (name test)
  (package eio-net)
- (libraries hermetic eio eio.unix unix fmt alcotest)
+ (libraries hermetic eio eio.unix eio_net_kernel unix fmt alcotest)
  (deps
   (file ../traces/scenarios.csv)))

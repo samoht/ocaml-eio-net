@@ -71,7 +71,7 @@ type opt = Opt : string * 'a Eio.Net.Sockopt.t * 'a * ('a -> string) -> opt
 let b = string_of_bool
 let i = string_of_int
 let oi = function None -> "none" | Some n -> string_of_int n
-let f = Fmt.str "%g"
+let f = Common.float_value
 
 let mtu_discover = function
   | `Want -> "want"

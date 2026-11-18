@@ -4,6 +4,10 @@
 val errno : Unix.error -> string
 (** [errno e] names [e] as the system calls it, such as ["EADDRINUSE"]. *)
 
+val float_value : float -> string
+(** [float_value x] is [x] as the traces print it, [%g] with a two-digit
+    exponent. *)
+
 val mem_errno : Eio.Exn.Backend.t -> string option
 (** [mem_errno code] names eio-net.mem's [code] by the system error it stands
     for, or is [None] for a code of another backend. *)
