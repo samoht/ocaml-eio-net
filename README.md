@@ -2,12 +2,13 @@
 
 Network tests and channels for [Eio](https://github.com/ocaml-multicore/eio).
 
-`eio-net.chaos` answers two questions, with one call each: does an Eio
-program cope with a network that fails, and does an Eio network answer as
-Linux or macOS does? `run` uses `eio-net.mem`, an in-memory network that
-follows either kernel and itself passes `device`. The package also has frame
-channels, in which one receive is one frame, and an accept loop, for programs
-to build on.
+`eio-net.chaos` has two checks, one call each. `Eio_net_chaos.run` checks
+that an Eio program copes with a network that fails, and
+`Eio_net_chaos.device` checks that an Eio network answers as Linux or macOS
+does ([How it works](#how-it-works)). `run` uses `eio-net.mem`, an in-memory
+network that follows either kernel and itself passes `device`. The package
+also has frame channels, in which one receive is one frame, and an accept
+loop, for programs to build on.
 
 ## Installation
 
@@ -71,7 +72,7 @@ restart:
 # match Eio_net_chaos.run (app ~reuse_addr:false) with
   | () -> print_endline "passed"
   | exception Failure report -> print_endline report;;
-Eio_net_chaos.run: the restart failed: the program, run again with no fault on what the faulty run left, did not return
+Eio_net_chaos.run: the restart failed: the program, run again with no fault on what the faulty run left, raised Eio.Io Unix_error (Address already in use, "bind", "")
   faults:   #2 read 1c @0+64 ends
   ended:    the faulty run raised End_of_file
   error:    Eio.Io Unix_error (Address already in use, "bind", "")
@@ -83,8 +84,8 @@ Eio_net_chaos.run: the restart failed: the program, run again with no fault on w
 - : unit = ()
 ```
 
-A failure report gives the fault, the operations of the run, what the program
-printed, if anything, and one line to paste, which runs that case alone. An
+A report gives the fault, the operations of the run, what the program printed,
+if anything, and one line to paste, which runs that case alone. An
 operation reads `#3 accept 1s @0`: the third of the run, an accept on socket
 1, at the end that accepted (`c` is the end that connected), after 0 earlier
 accepts; a read or a write adds the bytes it asks for or offers, as in
@@ -130,9 +131,12 @@ The check compares the answers of socket calls over loopback as `Eio.Net`
 returns them (a result, an operation that would wait, an error class or an
 errno), not the segments on the wire. Each step has the set of answers that
 the kernel allows. The check runs every sequence, then reports each step
-whose answer is outside its set, once for all the sequences that gave it, as `connect: expected ok, got Refused, in 21,361 sequences,
-e.g. tcp4 accept; close S; close S; connect`, where `C` is the end that
-connected and `S` the one that accepted. Pass ``~os:`Macos`` to compare with
+whose answer is outside its set, once for all the sequences that gave it,
+as in this line, where `C` is the end that connected and `S` the one that
+accepted:
+
+`connect: expected ok, got Refused, in 21,361 sequences, e.g. tcp4 accept; close S; close S; connect`
+ Pass ``~os:`Macos`` to compare with
 macOS.
 
 A network built over another one, such as a tunnel, is checked over a faulty
@@ -151,15 +155,16 @@ when a reset arrives.
 
 ### Chaos engineering, on one machine
 
-Chaos engineering runs a system, injects the failures the real world
-produces, and tries to disprove a hypothesis about its steady state. `run`
-does this in one process, deterministically:
+`Eio_net_chaos.run` is the check of
+[eio-chaos](https://github.com/samoht/ocaml-eio-chaos#chaos-engineering-on-one-machine)
+on the network alone, and its README says how the faults are picked and what
+a pass means. On the network:
 
-- **steady state:** the program returns, and when it is restarted on what a
-  failure left, it starts and works again;
-- **failures:** each failure the real kernel can produce at each call the
+- **steady state:** the program returns, and when it is restarted on the
+  network a fault left, healed, it starts and works again;
+- **faults:** each fault the real kernel can produce at each socket call the
   program made, and an outage;
-- **result:** either the hypothesis held for every failure tried, or the first
+- **result:** either the hypothesis held for every fault tried, or the first
   counter-example and one line that replays it.
 
 ### What is simulated
@@ -177,16 +182,16 @@ the standard streams, and the domain and process managers. A program under
 Built with [hermetic](https://github.com/samoht/ocaml-hermetic)
 (`open! Hermetic`), neither can reach the machine any other way, as the
 compiler rejects it, so every run replays exactly. Without hermetic, a direct
-call, such as `Unix.gettimeofday`, escapes the check, and a failure report
-says where two runs with no fault differed.
+call, such as `Unix.gettimeofday`, escapes the check, and a report says
+where two runs with no fault differed.
 
 ### What is guaranteed
 
 1. With no fault, the simulated device answers each call as Linux or macOS
    does through Eio, as recorded on real kernels; the Limitations list the
    known differences.
-2. Only failures the real kernel can return at that call are injected. So
-   every failure reported can happen on a real machine.
+2. Only faults the real kernel can return at that call are injected. So
+   every fault reported can happen on a real machine.
 3. Completeness is not guaranteed. Faults fall only on the calls the program
    made, at most two per run. A pass means no counter-example was found there.
 
@@ -219,7 +224,7 @@ Each library documents itself in its `.mli`, under [`lib/`](lib/).
 - Under macOS, a TCP answer over loopback can depend on timing, and the traces
   hold one recording of each, so `device` leaves those sequences out.
 
-## Prior art
+## Related work
 
 The kernel traces follow the idea of
 [Netsem](https://www.cl.cam.ac.uk/~pes20/Netsem/), which checked a
