@@ -1,17 +1,7 @@
 (library
  (name eio_net_unix)
  (public_name eio-net.unix)
- (libraries
-  eio-net
-  eio-net.connect
-  eio
-  eio.unix
-  cstruct
-  bytesrw
-  fpath
-  ipaddr
-  fmt
-  unix)
+ (libraries eio-net eio eio.unix cstruct bytesrw fpath ipaddr fmt unix)
  (foreign_stubs
   (language c)
   (names

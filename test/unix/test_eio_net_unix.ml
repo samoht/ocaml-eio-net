@@ -838,7 +838,7 @@ let test_classify_connect () =
       Alcotest.(check string)
         (Unix.error_message e ^ ", portably")
         portable
-        (answer (Eio_net_connect.classify exn)))
+        (answer (Eio_net.Connect.classify exn)))
     [
       (Unix.ECONNREFUSED, "refused", "refused");
       (Unix.ENETUNREACH, "unreachable", "none");

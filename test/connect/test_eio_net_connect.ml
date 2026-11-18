@@ -15,13 +15,13 @@ let answer =
 let test_portable () =
   Alcotest.(check (option answer))
     "a refusal" (Some `Refused)
-    (Eio_net_connect.classify refused);
+    (Eio_net.Connect.classify refused);
   Alcotest.(check (option answer))
     "an unreachable network is a backend error" None
-    (Eio_net_connect.classify unreachable);
+    (Eio_net.Connect.classify unreachable);
   Alcotest.(check (option answer))
     "a timeout carries no answer" None
-    (Eio_net_connect.classify Eio.Time.Timeout)
+    (Eio_net.Connect.classify Eio.Time.Timeout)
 
 let suite =
   ( "eio_net_connect",

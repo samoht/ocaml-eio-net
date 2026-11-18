@@ -13,7 +13,7 @@ module Local = Local
 module Interface = Interface
 (** Interface addresses and their changes. *)
 
-val classify_connect : exn -> Eio_net_connect.answer option
+val classify_connect : exn -> Eio_net.Connect.answer option
 (** [classify_connect exn] is the answer a failed {!Eio.Net.connect} raising
     [exn] carries from the network, or [None] when it carries none, such as a
     timeout or a local error:
@@ -26,7 +26,7 @@ val classify_connect : exn -> Eio_net_connect.answer option
       section 4.2.3.9 makes it a hard error for an attempt in SYN-SENT.
 
     It is the classifier to hand a connection library that connects over a Unix
-    network, in place of the portable {!Eio_net_connect.classify}. *)
+    network, in place of the portable {!Eio_net.Connect.classify}. *)
 
 val classify_accept : exn -> Eio_net.Accept.answer option
 (** [classify_accept exn] is the answer a failed {!Eio.Net.accept} raising [exn]

@@ -5,7 +5,6 @@
   eio-net
   bytesrw
   eio-net.unix
-  eio-net.connect
   eio-net.mem
   eio
   eio.unix

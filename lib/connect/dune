@@ -1,4 +1,0 @@
-(library
- (name eio_net_connect)
- (public_name eio-net.connect)
- (libraries hermetic eio fmt))

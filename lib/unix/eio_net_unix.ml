@@ -8,7 +8,7 @@ let classify_connect = function
       (Eio.Exn.X (Eio_unix.Unix_error ((ENETUNREACH | EHOSTUNREACH), _, _)), _)
     ->
       Some `Unreachable
-  | e -> Eio_net_connect.classify e
+  | e -> Eio_net.Connect.classify e
 
 external pending_accept_errors : unit -> Unix.error list
   = "caml_eio_net_pending_accept_errors"
