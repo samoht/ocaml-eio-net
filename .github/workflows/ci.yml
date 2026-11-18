@@ -55,7 +55,8 @@ jobs:
       - run: Remove-Item C:\Strawberry\perl\bin\pkg-config*
 
       - run: opam install . --deps-only --with-test
-      - run: opam exec -- dune build @install @runtest
+      # Quoted: PowerShell reads a bare @install as an empty splat.
+      - run: opam exec -- dune build '@install' '@runtest'
 
   release:
     name: Release build
