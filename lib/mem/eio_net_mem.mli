@@ -1,12 +1,15 @@
 (** In-memory {!Eio.Net} network.
 
     For hermetic tests: client and server code talk through {!Eio.Net} without
-    binding OS sockets, over stream and datagram sockets.
+    binding OS sockets, over stream and datagram sockets. Each call to {!v}
+    makes a network of its own: two of them share no socket. The library
+    [eio-net.chaos] tests programs and networks with it.
 
-    Where Linux and macOS differ, the network follows one kernel, chosen by
-    [?os]: [`Linux], the default, or [`Macos]. The choice comes from the
-    argument, never from the host, so a test sees the same network on every
-    machine. {!section-macos} lists what [`Macos] changes. *)
+    Where Linux and macOS differ, the network follows one, chosen by [?os]:
+    [`Linux], the default, or [`Macos]. The choice comes from the argument,
+    never from the host, so a test sees the same network on every machine.
+    {!section-macos} lists what [`Macos] changes. Its answers are those recorded
+    on Linux and macOS, and [Eio_net_chaos.device] checks them. *)
 
 (** {1:errors Errors}
 
@@ -661,3 +664,5 @@ module Private : sig
       that sees both ends, such as a fault injector, pairs them with it. For
       eio-net.chaos; it may change at any release. *)
 end
+
+(**/**)

@@ -21,35 +21,52 @@
     kernel's timings the faults follow. The choice comes from the argument,
     never from the host, so a test checks the same thing on every machine.
 
-    How {!run} picks its {{!exploration}faults}, the {{!contracts}contracts} a
+    {!device} replays two kinds of recording: {e sequences}, each an order of a
+    few socket operations, and {e scenarios}, longer programs written by hand,
+    such as the reuse of a port or a name lookup. A report of {!run} names its
+    runs as scenarios too: a fault at a place of the first run.
+
+    How a check picks its {{!exploration}faults}, the {{!contracts}contracts} a
     program meets, its {{!replay}reports and replay} and its {{!runs}runs} come
     after. *)
 
 type env = Eio_chaos.env
-(** The type for what a program runs with: the devices of [Eio.Stdenv], each
-    simulated, so a program written against [Eio.Stdenv]'s accessors takes it
-    unchanged. {!Eio_chaos.type-env} says what each is.
+(** The type for what a program or a network under test runs with: the
+    capabilities of [Eio.Stdenv], each simulated, so code written against the
+    accessors of [Eio.Stdenv] takes it unchanged. {!Eio_chaos.type-env} says
+    what each is.
 
-    - [net] is an in-memory network of {!Eio_net_mem}, the one that fails;
-    - [fs] and [cwd] refuse each operation, unless another part gives them, as
+    - [net] is an in-memory network of {!Eio_net_mem}, the one that fails, and
+      [fs] and [cwd] refuse each operation, unless another part gives them, as
       the disk of eio-fs does;
     - [clock] and [mono_clock] start at [0.], and a wait takes no time
-      ({!section-runs});
-    - [secure_random] and OCaml's [Random] draw from a fixed seed, whatever
-      [~seed]: each run draws the same, and its restart, a process of its own,
-      draws others;
-    - [stdin] is empty, and [stdout], [stderr] and Eio's traces go to memory: a
-      report shows the last 2 KiB the program printed;
-    - [domain_mgr] runs the work in the calling fiber, on the run's own
+      ({{!runs}runs});
+    - [secure_random] and the default [Random] state draw from a fixed seed,
+      whatever [~seed]: the first run and each run with a fault draw the same,
+      and a restart draws others, as a new process does;
+    - [stdin] is empty, and [stdout], [stderr] and [Eio.traceln] are kept in
+      memory: a report shows the last 2 KiB the program printed;
+    - [domain_mgr] runs its work in the calling fiber, on the run's own
       scheduler;
-    - [process_mgr] starts nothing: each process and pipe raises [Eio.Io] with
+    - [process_mgr] starts nothing: [spawn] and [pipe] raise [Eio.Io] with
       [Not_available];
-    - [backend_id] is ["chaos"], and [chaos] is the run's {!Eio_chaos.t}. *)
+    - [debug] is Eio's, [backend_id] is ["chaos"], and [chaos] is the run's
+      {!Eio_chaos.t}, for a device the program builds itself.
+
+    A program that reaches the system other than through [env], by [Unix], the
+    standard library's channels, [Random.self_init], [Domain.spawn] or
+    [Sys.command], escapes the check. Built with
+    {{:https://github.com/samoht/ocaml-hermetic}hermetic} ([open! Hermetic]),
+    such a call does not compile, so what differs between two runs can only be
+    state the program kept in memory from an earlier one. Without it, a direct
+    call escapes, and when it makes two runs with no fault differ in the kinds
+    of operation they make, the check fails with a report that names the first
+    difference and its likely causes. *)
 
 (** {1:program Testing a program} *)
 
 val run :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   ?budget:int ->
   ?seed:int ->
   ?replay:string ->
@@ -134,9 +151,12 @@ val run :
 
     @raise Failure
       with a report of the first failing run: the fault, the operations of the
-      run, the error, and the line to paste that runs it alone, as
+      run, the error, what the program printed, and the line to paste that runs
+      that case again, as
       [Eio_net_chaos.run ~replay:"net/85d85f49/connect:1.timeout" app]. [replay]
       reruns that one case, and its restart, whatever the [seed] that found it.
+      To find it, a replay may first run [app] a few times, so the failing run
+      is the last one.
     @raise Invalid_argument
       if [budget] is not positive, or [replay] is not a replay string of [run].
 *)
@@ -155,10 +175,10 @@ val is_outage : env -> bool
     is [false] in every other run, in a restart, in [inspect], and for an [env]
     no run of {!run} made. *)
 
-(** {1:network Testing a network} *)
+(** {1:device Testing a network} *)
 
 val device :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   ?under:Eio_chaos.part list ->
   ?budget:int ->
   ?seed:int ->
@@ -175,7 +195,9 @@ val device :
     on capabilities, such as a userspace stack that needs a clock or entropy for
     its ports and sequence numbers, takes them from it, and its answers are the
     same on every run. Its [net] is an in-memory network that follows [os], for
-    a network that carries its traffic over another one, as a tunnel does.
+    a network that carries its traffic over another one, as a tunnel does. The
+    host's own network does not pass through [device]: only the host's event
+    loop drives it.
 
     {[
     let check_mem () =
@@ -259,8 +281,8 @@ type Eio.Exn.Backend.t +=
 (** The operations a wrapper sees. *)
 module Op : sig
   type kind =
-    [ `Connect
-    | `Accept
+    [ `Connect  (** A connect, a refused one included. *)
+    | `Accept  (** An accept of a connection. *)
     | `Read  (** A read from a connection. *)
     | `Write  (** A write to a connection. *)
     | `Recv  (** A datagram taken by a receive. *) ]
@@ -405,7 +427,7 @@ module Fault : sig
 end
 
 val wrap :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   _ Eio.Net.t ->
@@ -450,7 +472,7 @@ val wrap :
     each operation does what it does on [net], but for that guard. *)
 
 val pair :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
@@ -540,6 +562,14 @@ val pair :
     memory. They share the run's event loop, its clock and its limits
     ({!section-runs}).
 
+    {b Each run makes the same kinds of operation.} A check aims a fault at an
+    operation by its kind and its rank among the operations of that kind, never
+    by an address, so the ports and socket paths a program draws may change from
+    run to run, and a report says where two runs with no fault used other
+    connections, on its [diverged] line. Two runs with no fault that differ in
+    the kinds of operation they make, or in their order, fail the check:
+    {!type-env} says what can make them differ.
+
     {b Assert latency to catch a missing timeout.} A connect that times out
     takes 133 seconds, as on Linux, and then fails: a program without a connect
     timeout waits for it and still succeeds. A test that bounds its program's
@@ -563,20 +593,6 @@ val pair :
     Repeated operations are folded and a long report is cut around its first
     fault.
 
-    A program need not be deterministic: the check owns what makes runs differ.
-    The clocks, the scheduling, the entropy and OCaml's [Random] are simulated
-    or drawn from a fixed seed, and faults are aimed at operations by their kind
-    and their rank among the operations of that kind, never by an address, so a
-    port or a socket path the program draws does not move them. A program built
-    with {{:https://github.com/samoht/ocaml-hermetic}hermetic}
-    ([open! Hermetic]) reaches the outside world only through {!type-env}: the
-    compiler rejects every other way, so every run replays exactly. Without it,
-    a direct call, such as [Unix.gettimeofday], [Random.self_init] or a file
-    read, escapes the check, and two runs with no fault may differ. Where they
-    make other kinds of operation, or in another order, the check fails, as it
-    cannot aim its faults; where only their connections differ, it goes on, and
-    a report says where they first differed, on its [diverged] line.
-
     The scenario is found by the operation it names and its fault, so a replay
     still runs after a fix that changes the program's first run: its report then
     says the scenario was re-matched, and a re-matched replay that passes
@@ -594,7 +610,7 @@ val pair :
     a larger budget at night, or other faults in the sampled tier, reads its
     own:
     {[
-    let run app =
+    let check app =
       let int name = Option.map int_of_string (Sys.getenv_opt name) in
       Eio_net_chaos.run ?budget:(int "CHAOS_BUDGET") ?seed:(int "CHAOS_SEED")
         app
@@ -606,41 +622,40 @@ val pair :
     another one. A check runs to its end before it returns, so it blocks the
     event loop it is called from: the other fibers of that loop wait for it.
 
-    Its clocks start at [0.]. Each turn of a fiber, resumed by a yield, an I/O
-    completion or a timer, moves them by 1 us, as a program's work takes time,
-    and so does each network operation, one that never waits included: a listen,
-    a send, a lookup or a close. When every fiber waits they move to the next
-    timer, so a timeout of an hour takes no time. A call of
+    Each run's clocks start at [0.] and move to the next timer when every fiber
+    waits, so a wait takes no time. Each turn, a fiber resumed by a yield, an
+    I/O completion or a timer, also moves them by 1 us, as CPU time passes
+    between two, and so does each network operation, one that never waits
+    included: a listen, a send, a lookup or a close. A call of
     [Eio_unix.run_in_systhread] runs its function at once, in the run's own
-    thread, so the run stays deterministic.
+    thread, so the run stays deterministic. Five guards stop a run that does not
+    end:
 
-    A run hangs, and fails, when every fiber waits and no timer is due, when it
-    is still running after an hour of its clock, and when the same network
-    operation fails 10,000 times on the same target while its clock stands
-    still, as a loop that retries at once with no wait in between makes them: a
-    connect to one address, or a read or a write on one accepted connection or
-    on any of the connections a client made to one address. Faults on distinct
-    targets, as a scan of many ports makes, do not count together, and an end of
-    file is an answer: it counts only against the connection it ended. When
-    every fiber waits and the program's own fiber is in no network operation, as
-    a switch whose body returned waits on the fibers it forked, the report names
-    up to five of the others by the operation each waits in and the last one it
-    made.
-
-    A run also stops, and fails, after 10,000,000 turns. A check repeats a run
-    hundreds of times, so it cannot check a larger one, and the limit bounds the
-    CPU time of each run. If the run took 10,000,000 turns in a row with no wait
-    of 1 ms or more, the report calls it a busy loop; otherwise, a busy loop or
-    a program too large for a check. A run fails the same way after 100,000
-    connects, accepts, reads, writes and receives, as a check plans from each of
-    them, so that the operations it keeps stay bounded. The reads and writes a
-    one-byte condition splits do not count: a report of a run stopped while they
-    ran says how many there were. *)
+    - a run in which every fiber waits and no timer is due fails as a hang. When
+      the program's own fiber is in no network operation, as a switch whose body
+      returned waits on the fibers it forked, the report names up to five of the
+      others by the operation each waits in and the last one it made;
+    - a retry that never waits meets the spin guard: a run fails as a hang when
+      the same network operation fails 10,000 times on the same target while its
+      clock stands still, as a loop that retries at once makes them: a connect
+      to one address, or a read or a write on one accepted connection or on any
+      of the connections a client made to one address. Faults on distinct
+      targets, as a scan of many ports makes, do not count together, and an end
+      of file is an answer: it counts only against the connection it ended;
+    - a run that makes 100,000 connects, accepts, reads, writes and receives
+      fails as a busy loop, or as too large for a check, so a run's operations
+      stay bounded. The reads and writes a one-byte condition splits do not
+      count: a report of a run stopped while they ran says how many there were;
+    - a run stops at 10,000,000 turns. If no fiber waited 1 ms or more for a
+      timer in the last 10,000,000, it fails as a busy loop. Otherwise it fails
+      as a busy loop or as too large for a check: a check repeats the run
+      hundreds of times, so it refuses a longer one;
+    - a run still going after an hour of its clock fails as a hang. *)
 
 (**/**)
 
-(* For this package's tests: the allowances of [device], and those a
-   network's answers needed. *)
+(* For this package's tests: the allowances of [device], those a network's
+   answers needed, and [device] on the host's own network. *)
 module Private : sig
   val device_allowances : ([ `Linux | `Macos ] * string) list
   (** [device_allowances] is each allowance of {!device}, by the kernel it
@@ -654,8 +669,10 @@ module Private : sig
       holds, as {!device} replays the traces of [os] on it. *)
 
   val device_in_loop :
-    ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
+    ?os:[< Eio_chaos.os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
   (** [device_in_loop ~os net] is {!device} with each sequence in the caller's
       event loop, for the host's own network, which only the host's event loop
-      drives. *)
+      drives: the test of the kernel's traces runs it there. *)
 end
+
+(**/**)
