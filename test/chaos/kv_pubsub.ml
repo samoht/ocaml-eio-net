@@ -31,7 +31,7 @@ let test_kv ?bug ?lenient () =
 
 open Pubsub
 
-let scenario ?bug env =
+let scenario ?bug ~outage env =
   Eio.Switch.run @@ fun sw ->
   let clock = env#clock and net = env#net in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 7000) in
@@ -64,7 +64,7 @@ let scenario ?bug env =
         Fmt.failwith "got %a" Fmt.Dump.(list string) got)
     fast;
   (* At most two faults hit a run, so one of three fast subscribers is untouched. *)
-  if not (Eio_net_chaos.is_outage env) then
+  if not outage then
     match List.filter (fun (got, _) -> got = msgs) fast with
     | [] -> failwith "no fast subscriber got every message"
     | full ->
@@ -74,7 +74,9 @@ let scenario ?bug env =
               Fmt.failwith "a fast subscriber waited %gs" (last -. t0))
           full
 
-let test_pubsub ?bug () = Eio_net_chaos.run (scenario ?bug)
+let test_pubsub ?bug () =
+  Eio_net_chaos.run @@ fun env ->
+  scenario ?bug ~outage:(Eio_net_chaos.is_outage env) env
 
 (* The same scenario on a network whose connections queue 8 bytes, so a
    subscriber that does not read blocks its writer at once. *)
@@ -93,4 +95,4 @@ let pinned ?bug () =
       method mono_clock = (e#mono_clock :> Eio.Time.Mono.ty Eio.Resource.t)
     end
   in
-  scenario ?bug env
+  scenario ?bug ~outage:false env

@@ -149,9 +149,11 @@ val network : unit -> Eio_chaos.part
     which another part may bring, keeps nothing. [run app] is
     [Eio_chaos.run [ network () ] app], but for the name its reports give. *)
 
-val is_outage : < net : [ `Generic ] Eio.Net.ty Eio.Resource.t ; .. > -> bool
+val is_outage : env -> bool
 (** [is_outage env] is [true] iff [env] is that of the outage run of {!run}. A
-    program that must succeed under any single fault may give up only then. *)
+    program that must succeed under any single fault may give up only then. It
+    is [false] in every other run, in a restart, in [inspect], and for an [env]
+    no run of {!run} made. *)
 
 (** {1:network Testing a network} *)
 
