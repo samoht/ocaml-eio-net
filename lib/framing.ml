@@ -177,9 +177,3 @@ let encode ?prefixes config batch =
         | Some _ | None -> Cstruct.create_unsafe size
       in
       Ok (layout config prefixes 0 batch)
-
-let write ?prefixes config sink batch =
-  match encode ?prefixes config batch with
-  | Error e -> raise (Error e)
-  | Ok [] -> ()
-  | Ok buffers -> Eio.Flow.write sink buffers

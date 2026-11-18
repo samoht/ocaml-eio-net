@@ -40,18 +40,16 @@ let round_trip sixteen sizes batches =
         let admissible =
           List.for_all (fun payload -> String.length payload <= maximum) batch
         in
-        let before = Buffer.length buffer in
         match
-          Framing.write config sink
+          Framing.encode config
             (List.map (fun s -> [ Cstruct.of_string s ]) batch)
         with
-        | () when admissible -> batch
-        | () -> fail "an oversized batch reached the stream"
-        | exception Framing.Error (Invalid_length _) when not admissible ->
-            if Buffer.length buffer <> before then
-              fail "a refused batch wrote bytes";
-            []
-        | exception Framing.Error e ->
+        | Ok buffers when admissible ->
+            Eio.Flow.write sink buffers;
+            batch
+        | Ok _ -> fail "an oversized batch was encoded"
+        | Error (Invalid_length _) when not admissible -> []
+        | Error e ->
             failf "an admissible batch was refused: %a" Framing.pp_error e)
       batches
   in

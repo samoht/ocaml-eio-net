@@ -3,15 +3,12 @@ module Framing = Eio_net.Framing
 let error = Alcotest.testable Framing.pp_error Framing.equal_error
 let payloads strings = List.map (fun s -> [ Cstruct.of_string s ]) strings
 
-let encoded config strings =
-  match Framing.encode config (payloads strings) with
+let framed config batch =
+  match Framing.encode config batch with
   | Ok buffers -> Cstruct.copyv buffers
   | Error e -> Alcotest.failf "%a" Framing.pp_error e
 
-let written config batch =
-  let buffer = Buffer.create 64 in
-  Framing.write config (Eio.Flow.buffer_sink buffer) batch;
-  Buffer.contents buffer
+let encoded config strings = framed config (payloads strings)
 
 (* Every frame until [End_of_file], checking after each read that the reader
    holds no more than the configuration's bound. *)
@@ -64,17 +61,13 @@ let test_batch () =
         (encoded config [ ""; "abc"; "xyz" ]);
       Alcotest.(check string)
         "a payload's buffers make one frame" (prefix ^ "abc")
-        (written config [ [ Cstruct.of_string "a"; Cstruct.of_string "bc" ] ]);
+        (framed config [ [ Cstruct.of_string "a"; Cstruct.of_string "bc" ] ]);
       Alcotest.(check string)
-        "the empty payload is its prefix alone" empty (written config [ [] ]);
-      Alcotest.(check string)
-        "write is encode" wire
-        (written config (payloads [ ""; "abc"; "xyz" ]));
+        "the empty payload is its prefix alone" empty (framed config [ [] ]);
       Alcotest.(check (result (list string) error))
         "the empty batch is no buffer" (Ok [])
         (Result.map (List.map Cstruct.to_string) (Framing.encode config []));
-      Alcotest.(check string)
-        "the empty batch writes nothing" "" (written config []))
+      Alcotest.(check string) "the empty batch is no byte" "" (framed config []))
     fields
 
 let test_no_copy () =
@@ -222,22 +215,7 @@ let test_oversized_in_batch () =
             min_length = 0;
             max_length = maximum;
           }))
-    (Result.map ignore (Framing.encode config batch));
-  let buffer = Buffer.create 64 in
-  let sink = Eio.Flow.buffer_sink buffer in
-  Alcotest.check_raises "write refuses the batch"
-    (Framing.Error
-       (Invalid_length
-          {
-            length = Int64.of_int (maximum + 1);
-            min_length = 0;
-            max_length = maximum;
-          }))
-    (fun () -> Framing.write config sink batch);
-  Alcotest.(check string) "nothing is written" "" (Buffer.contents buffer);
-  Framing.write config sink (payloads [ "next" ]);
-  Alcotest.(check string)
-    "a later batch is written" "\000\000\000\004next" (Buffer.contents buffer)
+    (Result.map ignore (Framing.encode config batch))
 
 let test_config () =
   let config = Framing.Config.v () in

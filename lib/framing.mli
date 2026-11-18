@@ -13,8 +13,9 @@
     bytes, whatever length a peer declares. {!read} takes one frame from an
     {!Eio.Buf_read.t}, which reads its flow until the frame is whole. {!encode}
     lays out a batch of frames for one vectored write without copying the
-    payloads, and {!write} writes it. [Eio_net.Frame.of_length_prefixed_flow]
-    adds the serialisation and the failure state a stream needs. *)
+    payloads, which {!Eio.Flow.write} then writes.
+    [Eio_net.Frame.of_length_prefixed_flow] adds the serialisation and the
+    failure state a stream needs. *)
 
 (** {1:errors Length fields and errors} *)
 
@@ -52,7 +53,8 @@ val equal_error : error -> error -> bool
     same lengths. *)
 
 exception Error of error
-(** The exception for the errors raised by {!read} and {!write}. *)
+(** The exception for the errors {!read} raises, as a frame channel over a flow
+    ([Eio_net.Frame.of_length_prefixed_flow]) does. *)
 
 (** {1:config Configurations} *)
 
@@ -156,20 +158,3 @@ val encode :
     This is [Error (Invalid_length _)] for the first payload of [batch] whose
     length is outside the range of [c], and then no frame of [batch] is encoded.
 *)
-
-val write :
-  ?prefixes:Cstruct.t ->
-  Config.t ->
-  _ Eio.Flow.sink ->
-  Cstruct.t list list ->
-  unit
-(** [write ~prefixes c sink batch] writes the frames of
-    [encode ~prefixes c batch] to [sink] with one {!Eio.Flow.write}. The empty
-    batch writes nothing.
-
-    An exception from [sink] propagates, and part of the batch may then have
-    been written.
-
-    @raise Error
-      with [Invalid_length _] before writing anything if [encode c batch] is an
-      error. *)
