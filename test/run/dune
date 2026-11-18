@@ -1,7 +1,7 @@
 (test
  (name test)
  (package eio-net)
- (enabled_if
+ (build_if
   (= %{os_type} Unix))
  (libraries
   eio-net
