@@ -50,6 +50,10 @@ jobs:
         with:
           ocaml-compiler: '5.4'
 
+      # Strawberry Perl's pkg-config comes first in the runner's PATH and
+      # answers for a zlib that bytesrw then cannot build against.
+      - run: Remove-Item C:\Strawberry\perl\bin\pkg-config*
+
       - run: opam install . --deps-only --with-test
       - run: opam exec -- dune build @install @runtest
 
