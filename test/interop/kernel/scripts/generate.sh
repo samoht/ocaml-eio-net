@@ -12,6 +12,8 @@ out="$(cd "$1" && pwd)"
 record="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 src="${DUNE_SOURCEROOT:?run through dune: REGEN=1 dune build @regen-traces}"
 image="ocaml/opam@sha256:d161f099e5d053fe198accc09fda214c6275289570847fd906f9c65f862bf460"
+# The image's own opam-repository predates Eio 1.7.
+repo="https://github.com/ocaml/opam-repository/archive/1c93acbc4176695001cc3356717dcfe90f89ce44.tar.gz"
 transports="tcp4 tcp6 unix-stream udp4 udp6 unix-dgram"
 traces="$transports scenarios"
 
@@ -32,9 +34,9 @@ done
 docker run --rm -v "$src:/src:ro" -v "$work:/out" "$image" bash -euc "
     mkdir ~/src && tar -C /src --exclude=_build --exclude=.git -cf - . | tar -C ~/src -xf -
     cd ~/src
-    opam update -y >/dev/null
-    opam install -y . --deps-only >/dev/null
-    opam install -y eio_posix >/dev/null
+    mkdir ~/repo && curl -fsSL $repo | tar -C ~/repo --strip-components 1 -xzf -
+    opam repo set-url default ~/repo >/dev/null
+    opam install -y eio.1.7 eio_posix.1.7 hermetic cstruct fmt mtime ipaddr >/dev/null
     opam exec -- dune build ./test/interop/kernel/scripts/record.exe
     cp ./_build/default/test/interop/kernel/scripts/record.exe /out/record.linux"
 
