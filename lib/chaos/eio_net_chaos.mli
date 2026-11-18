@@ -178,7 +178,7 @@ val device :
     {[
     let check_mem () =
       Eio_net_chaos.device (fun ~sw env ->
-          Eio_net_mem.v ~mono:env#mono_clock ~sw ())
+          Eio_net_mem.v ~mono_clock:env#mono_clock ~sw ())
     ]}
 
     A network is a whole {!Eio.Net.t}: the two ends of each connection are made
@@ -197,7 +197,7 @@ val device :
     passes iff it is in the set. Errors compare by the class Eio gives them
     ([Connection_reset], [Connection_failure], [Not_found]), else by their
     errno, and an error of a backend that carries no errno is any error.
-    {!Eio_net_mem.v} passes for the [os] it is given, on a [mono] clock, which
+    {!Eio_net_mem.v} passes for the [os] it is given, on a [mono_clock], which
     it needs to hold a closed connection's port.
 
     [device] runs every sequence, whatever the earlier ones answered. Of a

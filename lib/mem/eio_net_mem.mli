@@ -169,11 +169,11 @@ type Eio.Exn.Backend.t +=
 val v :
   ?os:[< `Linux | `Macos ] ->
   ?capacity:int ->
-  ?mono:_ Eio.Time.Mono.t ->
+  ?mono_clock:_ Eio.Time.Mono.t ->
   sw:Eio.Switch.t ->
   unit ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
-(** [v ~os ~capacity ~mono ~sw ()] is a network following the kernel [os]
+(** [v ~os ~capacity ~mono_clock ~sw ()] is a network following the kernel [os]
     (defaults to [`Linux]) whose [listen] and [connect] operations are paired in
     memory, and whose datagram sockets deliver to each other.
     {!section-streams}, {!section-datagrams} and {!section-paths} say how its
@@ -192,22 +192,22 @@ val v :
     TCP and over a Unix path, above the default too, and it bounds what a
     socket's send and receive buffers give ({!section-options}).
 
-    On [mono], the end of a TCP connection whose FIN went first holds its
+    On [mono_clock], the end of a TCP connection whose FIN went first holds its
     address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
     or 30 seconds under [`Macos]. Without a clock there is no TIME_WAIT: an
     address is free once both ends close.
 
-    On [mono], each end of a TCP connection gone silent ({!Private.silence})
-    gives up on its peer as Linux does, measured over loopback. With
-    [SO_KEEPALIVE] and no byte unacknowledged, it probes once [TCP_KEEPIDLE] has
-    passed since the last segment it received. Its probes go [TCP_KEEPINTVL]
-    apart, and it gives up one interval after the [TCP_KEEPCNT]th, or with
-    [TCP_USER_TIMEOUT] at the first probe that long after that segment. A byte
-    it sent unacknowledged stops the probes, and ends the connection
-    [TCP_USER_TIMEOUT] later, or 948.6 seconds later, as [tcp_retries2] at 15
-    does. The first read or write then raises [ETIMEDOUT]; later reads return
-    end-of-file and writes raise [EPIPE]. With no keepalive and nothing
-    unacknowledged, or without a clock, a wait on it lasts for ever.
+    On [mono_clock], each end of a TCP connection gone silent
+    ({!Private.silence}) gives up on its peer as Linux does, measured over
+    loopback. With [SO_KEEPALIVE] and no byte unacknowledged, it probes once
+    [TCP_KEEPIDLE] has passed since the last segment it received. Its probes go
+    [TCP_KEEPINTVL] apart, and it gives up one interval after the
+    [TCP_KEEPCNT]th, or with [TCP_USER_TIMEOUT] at the first probe that long
+    after that segment. A byte it sent unacknowledged stops the probes, and ends
+    the connection [TCP_USER_TIMEOUT] later, or 948.6 seconds later, as
+    [tcp_retries2] at 15 does. The first read or write then raises [ETIMEDOUT];
+    later reads return end-of-file and writes raise [EPIPE]. With no keepalive
+    and nothing unacknowledged, or without a clock, a wait on it lasts for ever.
 
     @raise Invalid_argument if [capacity] is not positive. *)
 
@@ -564,13 +564,13 @@ val pair :
 
     - Addresses. The loopback interface has 127.0.0.1 and [::1] only: a bind at
       another address of 127.0.0.0/8 raises [EADDRNOTAVAIL], a connect there is
-      never answered and fails after 75 seconds on [mono], with the [ETIMEDOUT]
-      error eio_posix raises (it waits for ever without one), and a datagram
-      sent there is lost. A TCP socket binds no multicast or broadcast address,
-      and a [connect] reaches none: it raises {!Address_family}; a link-local
-      address raises [EADDRNOTAVAIL] from a bind and {!Host_unreachable} from a
-      [connect]. A [connect] bound at its own destination raises
-      {!Invalid_address}.
+      never answered and fails after 75 seconds on [mono_clock], with the
+      [ETIMEDOUT] error eio_posix raises (it waits for ever without one), and a
+      datagram sent there is lost. A TCP socket binds no multicast or broadcast
+      address, and a [connect] reaches none: it raises {!Address_family}; a
+      link-local address raises [EADDRNOTAVAIL] from a bind and
+      {!Host_unreachable} from a [connect]. A [connect] bound at its own
+      destination raises {!Invalid_address}.
     - Ports. A TCP port of [0] takes the next free port of the range, counting
       up from the last one taken, for listeners and clients alike. A [connect]
       without [bind_to] takes one too: macOS shares no port between
@@ -631,7 +631,7 @@ module Private : sig
   val v :
     ?os:[< `Linux | `Macos ] ->
     capacity:(int -> int) ->
-    ?mono:_ Eio.Time.Mono.t ->
+    ?mono_clock:_ Eio.Time.Mono.t ->
     sw:Eio.Switch.t ->
     unit ->
     [ `Generic ] Eio.Net.ty Eio.Resource.t
