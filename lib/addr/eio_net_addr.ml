@@ -26,18 +26,6 @@ let equal_datagram (a : Eio.Net.Sockaddr.datagram)
   | `Unix a, `Unix b -> String.equal a b
   | `Udp _, `Unix _ | `Unix _, `Udp _ -> false
 
-let resolve ~net ~host ~port =
-  match Ipaddr.of_string host with
-  | Ok ip -> Ok [ tcp ip port ]
-  | Error _ -> (
-      match
-        Eio.Net.getaddrinfo_stream ~service:(string_of_int port) net host
-      with
-      | [] -> Fmt.error_msg "Eio_net_addr.resolve: %S has no address" host
-      | addrs -> Ok addrs
-      | exception (Eio.Io _ as e) ->
-          Fmt.error_msg "Eio_net_addr.resolve: %S: %a" host Eio.Exn.pp e)
-
 let of_stream = function
   | `Tcp (a, port) -> Some (ipaddr a, port)
   | `Unix _ -> None

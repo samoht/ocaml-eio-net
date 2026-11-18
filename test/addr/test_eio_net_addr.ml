@@ -66,51 +66,6 @@ let test_equal_datagram () =
   check "the same path" true (`Unix "/tmp/a") (`Unix "/tmp/a");
   check "a path and a port" false (Eio_net_addr.udp a 9000) (`Unix "/tmp/a")
 
-let resolve net ~host ~port =
-  match Eio_net_addr.resolve ~net ~host ~port with
-  | Ok addrs -> List.filter_map Eio_net_addr.of_stream addrs
-  | Error (`Msg msg) -> Alcotest.fail msg
-
-let test_resolve_literal () =
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  let a = Ipaddr.of_string_exn "192.0.2.7" in
-  Alcotest.(check (list (pair ip int)))
-    "a literal IPv4 host"
-    [ (a, 9997) ]
-    (resolve net ~host:"192.0.2.7" ~port:9997);
-  let a6 = Ipaddr.of_string_exn "2001:db8::1" in
-  Alcotest.(check (list (pair ip int)))
-    "a literal IPv6 host"
-    [ (a6, 9998) ]
-    (resolve net ~host:"2001:db8::1" ~port:9998)
-
-(* A name gives every address it resolves to, in the resolver's order, for a
-   client to try in turn. *)
-let test_resolve_every_address () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
-  Alcotest.(check (list (pair ip int)))
-    "localhost"
-    [ (Ipaddr.of_string_exn "::1", 80); (Ipaddr.of_string_exn "127.0.0.1", 80) ]
-    (resolve net ~host:"localhost" ~port:80)
-
-(* RFC 6761 sec 6.4: the ".invalid" TLD is reserved and does not resolve. *)
-let test_resolve_unresolvable () =
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  match Eio_net_addr.resolve ~net ~host:"flatsat-1.invalid" ~port:9997 with
-  | Ok addrs ->
-      Alcotest.failf "an unresolvable host produced addresses: %a"
-        Fmt.(Dump.list Eio.Net.Sockaddr.pp)
-        addrs
-  | Error (`Msg msg) ->
-      Alcotest.(check bool)
-        "the error names the host" true
-        (String.starts_with
-           ~prefix:"Eio_net_addr.resolve: \"flatsat-1.invalid\"" msg)
-
 let suite =
   ( "eio_net_addr",
     [
@@ -119,9 +74,4 @@ let suite =
       Alcotest.test_case "sockaddr" `Quick test_sockaddr;
       Alcotest.test_case "stream equality" `Quick test_equal_stream;
       Alcotest.test_case "datagram equality" `Quick test_equal_datagram;
-      Alcotest.test_case "resolve: a literal host" `Quick test_resolve_literal;
-      Alcotest.test_case "resolve: every address of a name" `Quick
-        test_resolve_every_address;
-      Alcotest.test_case "resolve: an unresolvable host" `Quick
-        test_resolve_unresolvable;
     ] )
