@@ -2,8 +2,8 @@
 # REGEN=1; test/provenance checks it.
 generator: test/interop/kernel/scripts/generate.sh
 regenerate: REGEN=1 dune build @test/interop/kernel/regen-traces
-revision: 9afaade66587e2807460a255e2faab53a7c3bd25
-recorded: 2026-11-17T16:05:04Z
+revision: 7fcdd274c3132321729e1af6e400534fb50105a4
+recorded: 2026-11-18T23:49:26Z
 uid: 501
 host: Darwin 27.3.0 arm64
 macos: 27.3 (26C5035r)
@@ -41,12 +41,29 @@ linux.net.core.somaxconn: 4096
 linux.net.core.rmem_default: 229376
 linux.net.core.wmem_default: 229376
 linux.net.unix.max_dgram_qlen: 10
-input: scripts/generate.sh 0182d4db62e5d6e332089c4caafff143
-input: scripts/record.ml 68ad5f11f1b94b806105cbac3ee58910
-trace: traces/tcp4.csv 89526ff4b6eddc72032c4e8e557889ac
-trace: traces/tcp6.csv 748fc9e1966bf0128fc0edcce9003c64
-trace: traces/unix-stream.csv 6a1efe73eeb8e03e1eea1043d6c6d048
-trace: traces/udp4.csv c371c7734e468c55f758553d11587647
-trace: traces/udp6.csv 2cc49f0840916f44043075b97d20899d
-trace: traces/unix-dgram.csv 3a176cf75befad4cccacd5be74006ca3
-trace: traces/scenarios.csv 8621dbf5ebba82397ec008d8e0c30a69
+windows.revision: 7fcdd274c3132321729e1af6e400534fb50105a4
+windows.recorded: 2026-11-18T22:56:23Z
+windows.input: scripts/generate-windows.sh 33284c8567cb2f7ce110a8c4faaca8e1
+windows.input: scripts/record.ml 1fdd9fe2456088fbe380566b08bc9918
+windows.input: scripts/backend.windows.ml 18326013ab88affa9e2f8f1be82e7e65
+eio_windows: 1.7
+windows: Microsoft Windows Server 2025 Datacenter 10.0.26100
+windows.image: win25-vs2026 20261103.298.1
+windows.tcpip.TcpTimedWaitDelay: absent
+windows.tcpip.MaxUserPort: absent
+windows.tcpip.TcpMaxDataRetransmissions: absent
+windows.tcpip.TcpMaxConnectRetransmissions: absent
+windows.tcpip.KeepAliveTime: absent
+windows.tcpip.KeepAliveInterval: absent
+windows.dynamicport.tcp: 49152 16384
+windows.dynamicport.udp: 49152 16384
+input: scripts/generate.sh 33e1c4a5a8ab73604449fb72f090f4c4
+input: scripts/record.ml 1fdd9fe2456088fbe380566b08bc9918
+input: scripts/backend.posix.ml 6738ef28f5f9b522d77fb2e65944f0b4
+trace: traces/tcp4.csv e3b0783e648efa3581994a1d2a773c7f
+trace: traces/tcp6.csv a9675fb234b36700ef994853856d1c50
+trace: traces/unix-stream.csv 1be2264863994e9bc7a060ac529b5c0f
+trace: traces/udp4.csv 7fb7fc932132fb29153c9b0a47d277fd
+trace: traces/udp6.csv bbbf9567cf2fc8d3464396760be41d42
+trace: traces/unix-dgram.csv 8f3694fbeb349fdea29f3d03214b5d92
+trace: traces/scenarios.csv c60ea2e02f5cd079ce33aaf9edaea897
