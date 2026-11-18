@@ -91,6 +91,29 @@ let inspected () =
 let inspect_fails () =
   Eio_net_chaos.run ~inspect:(fun _ -> failwith "no") download
 
+(* [is_outage] holds in the outage run alone: not in the first run, the
+   other runs with a fault, the restarts, inspect, or outside a check. *)
+let outage_alone () =
+  let seen = ref [] in
+  let probe where (env : Eio_net_chaos.env) =
+    seen := (where, Eio_net_chaos.is_outage env) :: !seen
+  in
+  Eio_net_chaos.run ~inspect:(probe "inspect") (fun env ->
+      probe (if Eio_chaos.Private.restarted env then "restart" else "run") env;
+      download env);
+  let outage where = List.mem (where, true) !seen in
+  if not (outage "run") then Alcotest.fail "no run was the outage";
+  if outage "restart" then Alcotest.fail "a restart was the outage";
+  if outage "inspect" then Alcotest.fail "inspect was the outage";
+  match
+    Eio_chaos.Private.within
+      [ Eio_net_chaos.network () ]
+      Eio_net_chaos.is_outage
+  with
+  | Ok false -> ()
+  | Ok true -> Alcotest.fail "an env outside a check is the outage"
+  | Error e -> Alcotest.fail e
+
 let suite =
   ( "restart",
     [
@@ -109,4 +132,6 @@ let suite =
       Alcotest.test_case "inspect that raises fails the check" `Quick
         (starts "Eio_net_chaos.run: inspect rejected what the fault left"
            inspect_fails);
+      Alcotest.test_case "is_outage holds in the outage run alone" `Quick
+        outage_alone;
     ] )
