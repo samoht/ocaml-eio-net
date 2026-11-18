@@ -1163,7 +1163,7 @@ let test_hang_times_out_writer () =
       if op.kind = `Read && op.side = `Server then Some Fault.Hang else None
     in
     let clock = if clock = Some () then Some env#mono_clock else None in
-    let mem = Eio_net_mem.v ~os ~capacity:4096 ?mono_clock:clock ~sw () in
+    let mem = Eio_net_mem.v ~os ~capacity:4096 ?clock ~sw () in
     let net = Chaos.wrap ~os ~clock:env#clock f mem in
     let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in

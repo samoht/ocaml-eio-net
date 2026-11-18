@@ -63,7 +63,7 @@ let mem_macos () =
     Eio_mock.Backend.run_full @@ fun env ->
     Eio.Switch.run @@ fun sw ->
     let clock = env#mono_clock in
-    let net = Eio_net_mem.v ~os:`Macos ~mono_clock:clock ~sw () in
+    let net = Eio_net_mem.v ~os:`Macos ~clock ~sw () in
     let ip = Eio.Net.Ipaddr.of_raw "\127\000\000\002" in
     let t0 = Eio.Time.Mono.now clock in
     timed_out (fun () -> Eio.Net.connect ~sw net (`Tcp (ip, 9)));

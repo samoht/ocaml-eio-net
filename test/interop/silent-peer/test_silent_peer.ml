@@ -25,7 +25,7 @@ let model os case =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let clock = env#mono_clock in
-  let net = Eio_net_mem.v ~os ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~os ~clock ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
   let l = Eio.Net.listen ~sw ~backlog:1 net addr in
   let c = Eio.Net.connect ~sw net addr in

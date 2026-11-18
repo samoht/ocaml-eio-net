@@ -63,7 +63,7 @@ let test_time_wait () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.Mono.make () in
-  let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   let wait secs =
     Eio_mock.Clock.Mono.set_time clock
@@ -417,7 +417,7 @@ let test_ports_per_destination () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.Mono.make () in
-  let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   let a = `Tcp (lo, 8172) and b = `Tcp (lo, 8173) in
   let la = Eio.Net.listen ~sw ~backlog:1 net a in
@@ -447,7 +447,7 @@ let test_time_wait_reuse () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.Mono.make () in
-  let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let wait n =
     Eio_mock.Clock.Mono.set_time clock
       (Mtime.add_span (Eio.Time.Mono.now clock) Mtime.Span.(n * ms)
@@ -488,7 +488,7 @@ let test_time_wait_follows_the_first_fin () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.Mono.make () in
-  let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   let case port first second =
     let addr = `Tcp (lo, port) in
@@ -520,7 +520,7 @@ let test_fin_wait2_times_out () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let clock = Eio_mock.Clock.Mono.make () in
-  let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   let at secs =
     Eio_mock.Clock.Mono.set_time clock
@@ -641,7 +641,7 @@ let test_self_connect () =
   | exception End_of_file -> ()
   | n -> Alcotest.failf "read %d after its own FIN" n);
   let clock = Eio_mock.Clock.Mono.make () in
-  let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   Eio.Switch.run (fun sw -> ignore (Eio.Net.connect ~sw ~bind_to:addr net addr));
   Alcotest.(check bool)
     "TIME_WAIT once closed" true

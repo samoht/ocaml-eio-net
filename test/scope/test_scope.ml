@@ -81,7 +81,7 @@ let session ~os l probe =
   Eio_mock.Backend.run_full @@ fun env ->
   let clock = env#mono_clock in
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~os ~mono_clock:clock ~sw () in
+  let net = Eio_net_mem.v ~os ~clock ~sw () in
   let addr = addr l in
   let listener = Eio.Net.listen ~sw ~backlog:1 net addr in
   List.iter
