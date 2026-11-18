@@ -87,24 +87,27 @@ let split l (op : Op.t) =
   | Outage, `Recv -> true
   | _ -> false
 
-let generic (op : Op.t) : Eio_chaos.Op.t =
-  {
-    device = "net";
-    kind = Op.kind_name op.kind;
-    target = Fmt.str "%d%s" op.socket (Op.side_name op.side);
-    instance = (match op.kind with `Recv -> "" | _ -> string_of_int op.socket);
-    offset = op.offset;
-    length = op.length;
-    detail = (match op.family with `Unix -> "unix" | `Inet -> "");
-    structure = (match op.kind with `Connect | `Accept -> Every | _ -> Thin);
-    changes = Never;
-  }
+let name = "net"
 
-let pp_op ppf (op : Eio_chaos.Op.t) =
-  match op.kind with
-  | "read" | "write" | "recv" ->
-      Fmt.pf ppf "%s %s @%d+%d" op.kind op.target op.offset op.length
-  | k -> Fmt.pf ppf "%s %s @%d" k op.target op.offset
+let generic (op : Op.t) =
+  let instance =
+    match op.kind with `Recv -> "" | _ -> string_of_int op.socket
+  in
+  let detail = match op.family with `Unix -> "unix" | `Inet -> "" in
+  let structure : Eio_chaos.Op.structure =
+    match op.kind with `Connect | `Accept -> Every | _ -> Thin
+  in
+  Fmt.kstr
+    (Eio_chaos.Op.v ~instance ~offset:op.offset ~length:op.length ~detail
+       ~structure ~device:name ~kind:(Op.kind_name op.kind) ~changes:Never)
+    "%d%s" op.socket (Op.side_name op.side)
+
+let pp_op ppf op =
+  let module O = Eio_chaos.Op in
+  match O.kind op with
+  | ("read" | "write" | "recv") as k ->
+      Fmt.pf ppf "%s %s @%d+%d" k (O.target op) (O.offset op) (O.length op)
+  | k -> Fmt.pf ppf "%s %s @%d" k (O.target op) (O.offset op)
 
 (* {1 The part} *)
 
@@ -223,7 +226,7 @@ let indeterminate = function
 module Part = Eio_chaos.Part (struct
   type nonrec t = t
 
-  let name = "net"
+  let name = name
   let noun = noun
   let start = start
   let run = run
