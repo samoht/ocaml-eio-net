@@ -2,15 +2,17 @@
 opam-version: "2.0"
 synopsis: "Network tests and channels for Eio"
 description: """
-Answers two questions, with one call each: does an Eio program cope
-with a network that fails, and does an Eio network answer as Linux or
-macOS does? The first runs on an in-memory network that follows either
-kernel and itself passes the second.
-"""
+eio-net tests Eio code against a network, and gives programs frame
+channels to build on. Eio_net_chaos.run runs a program again and again on an
+in-memory network, each time with a different fault, and restarts it on what
+the fault left. Eio_net_chaos.device checks that an Eio network answers as
+Linux or macOS does; the in-memory network follows either kernel and passes
+it. The frame channels run over datagram sockets and byte streams, in which
+one receive is one frame, beside an accept loop and a relay."""
 maintainer: ["Thomas Gazagnaire <thomas@gazagnaire.org>"]
 authors: ["Thomas Gazagnaire <thomas@gazagnaire.org>"]
 license: "ISC"
-tags: ["eio" "network" "framing" "test"]
+tags: ["eio" "test" "chaos" "network" "framing"]
 homepage: "https://github.com/samoht/ocaml-eio-net"
 bug-reports: "https://github.com/samoht/ocaml-eio-net/issues"
 depends: [
@@ -18,12 +20,12 @@ depends: [
   "hermetic" {>= "0.1.0"}
   "ocaml" {>= "5.4"}
   "eio" {>= "1.7"}
-  "cstruct" {>= "6.0.0"}
+  "cstruct" {>= "6.2.0"}
   "fmt"
   "logs"
   "bytesrw" {>= "0.2.0"}
   "mtime" {>= "2.0.0"}
-  "eio-chaos"
+  "eio-chaos" {>= "0.1.0" & < "0.2.0"}
   "ipaddr" {>= "5.3.0"}
   "fpath"
   "conf-linux-libc-dev" {os = "linux"}
@@ -54,5 +56,5 @@ x-maintenance-intent: ["(latest)"]
 available: os != "win32"
 # eio-chaos is not on opam yet: drop once eio-chaos is released.
 pin-depends: [
-  ["eio-chaos.dev" "git+https://github.com/samoht/ocaml-eio-chaos.git#6c07eac4a94475334d8afb21d5e4d05de8676dbf"]
+  ["eio-chaos.0.1.0" "git+https://github.com/samoht/ocaml-eio-chaos.git#b6b7c5cbb2e9c82e487a33eef553f3506211ae5d"]
 ]
