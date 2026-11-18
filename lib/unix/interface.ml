@@ -23,10 +23,8 @@ module Address = struct
   let pp ppf a = Fmt.pf ppf "%s %a" a.interface Ipaddr.Prefix.pp a.prefix
 end
 
-type address = Address.t
-
 module type S = sig
-  val addresses : unit -> address list
+  val addresses : unit -> Address.t list
 
   type watch
 

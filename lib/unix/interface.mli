@@ -28,13 +28,10 @@ module Address : sig
       [lo0 127.0.0.1/8]. *)
 end
 
-type address = Address.t
-(** See {!Address.t}. *)
-
 (** The type for a host's interface addresses and their changes: this module's,
     or a stand-in's. *)
 module type S = sig
-  val addresses : unit -> address list
+  val addresses : unit -> Address.t list
   (** [addresses ()] is every IPv4 and IPv6 address of the host's interfaces, up
       or down, in the order getifaddrs(3) lists them. An IPv6 link-local address
       is the one the interface's link sees, with no scope embedded in it as a
