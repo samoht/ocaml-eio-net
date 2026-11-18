@@ -139,7 +139,7 @@ operations that were recorded on a real Linux and a real macOS kernel:
 
 ```ocaml
 # Eio_net_chaos.device (fun ~sw env ->
-      Eio_net_mem.v ~mono_clock:env#mono_clock ~sw ());;
+      Eio_net_mem.v ~clock:env#mono_clock ~sw ());;
 - : unit = ()
 ```
 

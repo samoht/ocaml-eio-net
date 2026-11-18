@@ -185,8 +185,8 @@ let capacity t c =
 let fresh t =
   t.base <-
     Some
-      (Eio_net_mem.Private.v ~os:t.os ~capacity:(capacity t)
-         ~mono_clock:(get t.mono) ~sw:(get t.sw) ())
+      (Eio_net_mem.Private.v ~os:t.os ~capacity:(capacity t) ~clock:(get t.mono)
+         ~sw:(get t.sw) ())
 
 let start t ~os ~sw ~clock ~mono_clock chaos =
   t.os <- os;

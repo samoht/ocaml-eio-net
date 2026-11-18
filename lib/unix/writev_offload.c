@@ -25,7 +25,7 @@ CAMLprim value caml_eio_net_writev(value v_fd, value v_bufs)
         char msg[96];
         snprintf(msg, sizeof msg,
                  "Eio_net_unix.Stream.offload_single_write: the iovec count "
-                 "is %d, it must be 1-%d",
+                 "is %d, must be 1-%d",
                  count, EIO_NET_IOV_MAX);
         caml_invalid_argument(msg);
     }

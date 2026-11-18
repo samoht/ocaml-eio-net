@@ -148,7 +148,7 @@ let of_connected_datagram_fd ?(max_length = 65536) ?(max_batch = 32) ~sw fd =
   if max_length <= 0 then fail "max_length is %d, must be positive" max_length;
   if max_batch <= 0 then fail "max_batch is %d, must be positive" max_batch;
   if max_batch > max_batch_limit then
-    fail "max_batch is %d, it must be at most %d" max_batch max_batch_limit;
+    fail "max_batch is %d, must be at most %d" max_batch max_batch_limit;
   (* Eio waits for a descriptor to be ready only when an operation on it would
      block; a blocking one would stall every fiber of the domain instead. *)
   eio Unix.set_nonblock fd;

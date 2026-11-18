@@ -55,8 +55,7 @@ let of_datagram_socket ?max_length ?dst socket =
     (fun n ->
       if n <= 0 then
         Fmt.invalid_arg
-          "Eio_net.Frame.of_datagram_socket: max_length is %d, it must be \
-           positive"
+          "Eio_net.Frame.of_datagram_socket: max_length is %d, must be positive"
           n)
     max_length;
   let datagrams = Datagram.of_socket ?max_length ?dst socket in

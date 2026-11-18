@@ -53,20 +53,20 @@ let socket_level opt = level opt = Socket
 let refuse fmt = Fmt.kstr Option.some ("Eio.Net.setsockopt: " ^^ fmt)
 
 let non_negative name v =
-  if v < 0 then refuse "%s is %d, it must not be negative" name v else None
+  if v < 0 then refuse "%s is %d, must not be negative" name v else None
 
 let port_range (lower, upper) =
   if lower < 0 || lower > 65535 then
-    refuse "IP_LOCAL_PORT_RANGE lower bound is %d, it must be 0-65535" lower
+    refuse "IP_LOCAL_PORT_RANGE lower bound is %d, must be 0-65535" lower
   else if upper < 0 || upper > 65535 then
-    refuse "IP_LOCAL_PORT_RANGE upper bound is %d, it must be 0-65535" upper
+    refuse "IP_LOCAL_PORT_RANGE upper bound is %d, must be 0-65535" upper
   else if lower <> 0 && upper <> 0 && lower > upper then
     refuse "IP_LOCAL_PORT_RANGE is %d-%d, its lower bound is above its upper"
       lower upper
   else None
 
 let between name v =
-  if v < 1 || v > 255 then refuse "%s is %d, it must be 1-255" name v else None
+  if v < 1 || v > 255 then refuse "%s is %d, must be 1-255" name v else None
 
 (* The checks Eio makes before it calls setsockopt(2), whatever the
    kernel. *)
