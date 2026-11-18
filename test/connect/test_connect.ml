@@ -24,5 +24,4 @@ let test_portable () =
     (Eio_net.Connect.classify Eio.Time.Timeout)
 
 let suite =
-  ( "eio_net_connect",
-    [ Alcotest.test_case "the portable answers" `Quick test_portable ] )
+  ("connect", [ Alcotest.test_case "the portable answers" `Quick test_portable ])

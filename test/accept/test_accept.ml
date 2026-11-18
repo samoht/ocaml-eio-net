@@ -22,5 +22,4 @@ let test_portable () =
     (Eio_net.Accept.classify Exit)
 
 let suite =
-  ( "eio_net_accept",
-    [ Alcotest.test_case "the portable answers" `Quick test_portable ] )
+  ("accept", [ Alcotest.test_case "the portable answers" `Quick test_portable ])
