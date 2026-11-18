@@ -16,8 +16,8 @@ let is_outage env = Wrapper.is_outage env#net
 let network = Network.part
 
 let run ?os ?budget ?seed ?replay ?setup ?inspect app =
-  Eio_chaos.Private.run ~name:"Eio_net_chaos.run" ?os ?budget ?seed ?replay
-    ?setup ?inspect
+  Eio_chaos.run ~name:"Eio_net_chaos.run" ?os ?budget ?seed ?replay ?setup
+    ?inspect
     [ network () ]
     app
 

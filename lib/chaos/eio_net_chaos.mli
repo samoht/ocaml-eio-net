@@ -1,14 +1,14 @@
 (** Network faults, for tests of Eio programs and of Eio networks.
 
-    [Eio_net_chaos] answers two questions, with one function each:
+    [Eio_net_chaos] has two checks, one function each:
 
-    - {!run}: does this Eio program cope with a network that fails? It runs the
-      program many times on in-memory networks that fail, and after each failure
-      starts it again on the same network, healed, as a machine restarts a
+    - {!run} checks that an Eio program copes with a network that fails. It runs
+      the program many times on in-memory networks that fail, and after each
+      fault starts it again on the same network, healed, as a machine restarts a
       service.
-    - {!device}: does this Eio network answer as Linux or macOS does?
+    - {!device} checks that an Eio network answers as Linux or macOS does.
 
-    Both raise [Failure] with a report when the answer is no, as an assertion
+    Both raise [Failure] with a report when the check fails, as an assertion
     does, so they are the body of a test in any test runner. {!run} is
     {!Eio_chaos.run} on one part, {!val-network}: a program that also needs a
     disk is tested with [Eio_chaos.run [ Eio_fs_chaos.disk (); network () ]]. A
@@ -22,7 +22,7 @@
     never from the host, so a test checks the same thing on every machine.
 
     How {!run} picks its {{!exploration}faults}, the {{!contracts}contracts} a
-    program meets, its {{!replay}failures and replay} and its {{!runs}runs} come
+    program meets, its {{!replay}reports and replay} and its {{!runs}runs} come
     after. *)
 
 type env = Eio_chaos.env
@@ -112,7 +112,7 @@ val run :
 
     - the first run returns, and a second run with no fault makes the same kinds
       of operation in the same order. Where only their connections differ, the
-      check goes on, and a failure report says where;
+      check goes on, and a report says where;
     - no run hangs or raises an exception other than [Eio.Io], [End_of_file] and
       [Eio.Time.Timeout], alone or together in an [Eio.Exn.Multiple], an
       assertion of [app] included. A program with no timeout hangs on a silent
@@ -225,15 +225,15 @@ val device :
     {!Eio_chaos.run} of a program that runs 32 of the scenarios, drawn from
     [seed] (defaults to [0]), in one event loop, as the sequences and scenarios
     are too many to replay at each of its runs, with [budget] and [replay] as
-    {!run} takes them, and the failures the parts of [under] allow. It passes
-    iff each run does: until a part fails, every answer is the kernel's; once
-    one failed ({!Eio_chaos.faulted}), an answer may differ, as the faults
-    eio-net injects also lose, duplicate, reorder and garble datagrams and
-    silence peers, but it names no error a network does not give, such as
-    [Not_found] or [Invalid_argument], and the run does not hang. The restart
-    replays nothing, as a network keeps its ports across it and the scenarios
-    name fixed ports. This checks less than with no fault: a network that loses
-    what it was given passes there.
+    {!run} takes them, and the faults the parts of [under] allow. It passes iff
+    each run does: until a part fails, every answer is the kernel's; once one
+    failed ({!Eio_chaos.faulted}), an answer may differ, as the faults eio-net
+    injects also lose, duplicate, reorder and garble datagrams and silence
+    peers, but it names no error a network does not give, such as [Not_found] or
+    [Invalid_argument], and the run does not hang. The restart replays nothing,
+    as a network keeps its ports across it and the scenarios name fixed ports.
+    This checks less than with no fault: a network that loses what it was given
+    passes there.
 
     @raise Failure
       if an answer is outside its set, with a line for each step and answers
@@ -550,15 +550,16 @@ val pair :
     checks how each ended. A garbled datagram is random bytes, so a parser that
     rejects most noise but accepts some may pass. *)
 
-(** {1:replay Failures and replay}
+(** {1:replay Reports and replay}
 
-    A failure raises [Failure] with the fault, the operations of the failing
+    A failing run raises [Failure] with the fault, the operations of the failing
     run, how it ended when its [inspect] or restart failed, what it printed, and
     the [Eio_net_chaos.run ~replay:"..." app] call that runs that scenario
-    alone; a failure of the run with no fault, with its operations. Each
-    operation shows the fault it met, and a fault inside a read or a write says
-    after how many of its bytes it fell. Repeated operations are folded and a
-    long report is cut around its first fault.
+    alone, which passes [~os:`Macos] for a check under macOS; a failing run with
+    no fault, with its operations. Each operation shows the fault it met, and a
+    fault inside a read or a write says after how many of its bytes it fell.
+    Repeated operations are folded and a long report is cut around its first
+    fault.
 
     A program need not be deterministic: the check owns what makes runs differ.
     The clocks, the scheduling, the entropy and OCaml's [Random] are simulated
@@ -572,14 +573,14 @@ val pair :
     read, escapes the check, and two runs with no fault may differ. Where they
     make other kinds of operation, or in another order, the check fails, as it
     cannot aim its faults; where only their connections differ, it goes on, and
-    a failure says where they first differed, on its [diverged] line.
+    a report says where they first differed, on its [diverged] line.
 
     The scenario is found by the operation it names and its fault, so a replay
-    still runs after a fix that changes the program's first run: a failure then
+    still runs after a fix that changes the program's first run: its report then
     says the scenario was re-matched, and a re-matched replay that passes
     returns as any passing check does, saying nothing. A replay whose scenario
     the check no longer has fails, and one whose scenario is not of the form a
-    failure names is refused.
+    report names is refused.
 
     The sampled tier draws its scenarios from a seed, the same one on every
     check unless [~seed] gives another, so a check meets the same faults each
@@ -616,7 +617,7 @@ val pair :
     operation fails 10,000 times on the same target while its clock stands
     still, as a loop that retries at once with no wait in between makes them: a
     connect to one address, or a read or a write on one accepted connection or
-    on any of the connections a client made to one address. Failures on distinct
+    on any of the connections a client made to one address. Faults on distinct
     targets, as a scan of many ports makes, do not count together, and an end of
     file is an answer: it counts only against the connection it ended. When
     every fiber waits and the program's own fiber is in no network operation, as
