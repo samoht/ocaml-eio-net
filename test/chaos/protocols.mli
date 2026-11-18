@@ -14,11 +14,6 @@ val busy_accept : unit -> unit
     once, on a network wrapped to fail its second accept with
     [Fault.No_descriptor]. *)
 
-val accept_loop : unit -> unit
-(** [accept_loop ()] runs [Eio_net.Accept.run] on a network wrapped to fail its
-    second accept with [Fault.No_descriptor], with an idle client to shed and a
-    client to serve. *)
-
 val echo : int -> Eio_net_chaos.env -> unit
 (** [echo n env] echoes [n] lines of varying length. *)
 

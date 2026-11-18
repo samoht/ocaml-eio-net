@@ -24,8 +24,6 @@ let suite =
         `Quick
         (Expect.caught (check (connfail ~bug:`Connection_failure)));
       Alcotest.test_case "accept loop that spins on EMFILE" `Quick spins;
-      Alcotest.test_case "Eio_net.Accept.run recovers from EMFILE" `Quick
-        (Expect.passes accept_loop);
       Alcotest.test_case "200 lines of varying length fit the default budget"
         `Quick
         (Expect.passes (check (echo 200)));

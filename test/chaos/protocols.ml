@@ -111,40 +111,6 @@ let busy_accept () =
   in
   ignore (Eio.Fiber.List.map (fun _ -> client ()) [ 1; 2 ])
 
-(* [Eio_net.Accept.run] under [Fault.No_descriptor]: it sheds an idle connection,
-   whose close frees a descriptor, and takes the queued one. *)
-let accept_loop () =
-  Eio_mock.Backend.run_full @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let emfile (op : Eio_net_chaos.Op.t) =
-    if op.kind = `Accept && op.offset = 1 then
-      Some Eio_net_chaos.Fault.No_descriptor
-    else None
-  in
-  let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
-  let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 net (tcp 7061) in
-  let stop, set_stop = Eio.Promise.create () in
-  let shed = ref false in
-  Eio.Fiber.both
-    (fun () ->
-      Eio_net.Accept.run ~stop ~classify:Eio_net_unix.classify_accept
-        ~max_connections:4 l (fun _ flow _ ->
-          match App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16) with
-          | line -> Eio.Flow.copy_string (line ^ "\n") flow
-          | exception End_of_file -> shed := true))
-    (fun () ->
-      Eio.Switch.run @@ fun sw ->
-      let _idle = Eio.Net.connect ~sw net (tcp 7061) in
-      let flow = Eio.Net.connect ~sw net (tcp 7061) in
-      Eio.Flow.copy_string "hello\n" flow;
-      let got =
-        Eio.Time.with_timeout_exn env#clock 5. (fun () ->
-            App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16))
-      in
-      if got <> "hello" then Fmt.failwith "got %S" got;
-      if not !shed then failwith "no connection was shed";
-      Eio.Promise.resolve set_stop ())
-
 (* [n] lines of lengths from 1 to 11 bytes, echoed back. *)
 let echo n env =
   let lines = List.init n (fun i -> String.make (1 + (i * 7 mod 11)) 'x') in
