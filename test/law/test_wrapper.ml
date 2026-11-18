@@ -275,7 +275,7 @@ let run ~os ~family ~spy ?f steps =
   Eio_mock.Backend.run_full @@ fun env ->
   let clock = env#clock in
   Eio.Switch.run @@ fun sw ->
-  let mem = Eio_net_mem.v ~os ~mono:env#mono_clock ~sw () in
+  let mem = Eio_net_mem.v ~os ~mono_clock:env#mono_clock ~sw () in
   let spy, base =
     if spy then
       let s, n = Spy.v mem in

@@ -39,7 +39,7 @@ let test_rows () =
 
 (* eio-net.mem holds a closed connection's port only on a clock. *)
 let mem os ~sw (env : Eio_net_chaos.env) =
-  Eio_net_mem.v ~os ~mono:env#mono_clock ~sw ()
+  Eio_net_mem.v ~os ~mono_clock:env#mono_clock ~sw ()
 
 (* eio-net.mem answers as the kernel it follows. *)
 let test_mem os () = Eio_net_chaos.device ~os (mem os)

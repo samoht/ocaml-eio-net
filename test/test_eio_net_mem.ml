@@ -729,7 +729,7 @@ let test_macos_connect () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let clock = env#mono_clock in
-  let net = Eio_net_mem.v ~os:`Macos ~mono:clock ~sw () in
+  let net = Eio_net_mem.v ~os:`Macos ~mono_clock:clock ~sw () in
   let port l =
     match Eio.Net.listening_addr l with `Tcp (_, p) -> p | `Unix _ -> 0
   in
@@ -761,7 +761,7 @@ let silent ?(os = `Linux) ?(after = 0.5) ?(setup = ignore) op =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let clock = env#mono_clock in
-  let net = Eio_net_mem.v ~os ~capacity:4096 ~mono:clock ~sw () in
+  let net = Eio_net_mem.v ~os ~capacity:4096 ~mono_clock:clock ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
   let l = Eio.Net.listen ~sw ~backlog:1 net addr in
   let c = Eio.Net.connect ~sw net addr in
@@ -883,7 +883,7 @@ let test_silent_peer_waits () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let clock = env#mono_clock in
-  let net = Eio_net_mem.v ~mono:clock ~sw () in
+  let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
   let l = Eio.Net.listen ~sw ~backlog:1 net addr in
   let c = Eio.Net.connect ~sw net addr in
@@ -1071,7 +1071,7 @@ let test_time_wait_scales () =
     ( Eio_mock.Backend.run @@ fun () ->
       Eio.Switch.run @@ fun sw ->
       let clock = Eio_mock.Clock.Mono.make () in
-      let net = Eio_net_mem.v ~mono:clock ~sw () in
+      let net = Eio_net_mem.v ~mono_clock:clock ~sw () in
       let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
       let l = Eio.Net.listen ~sw ~backlog:5 net addr in
       Eio.Fiber.fork_daemon ~sw (fun () ->
