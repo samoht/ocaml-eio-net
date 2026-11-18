@@ -1,7 +1,0 @@
-(copy_files#
- (files ../../../lib/chaos/{text,op,fault,plan}.{ml,mli}))
-
-(test
- (name test)
- (package eio-net)
- (libraries hermetic eio fmt alcotest))
