@@ -1,6 +1,8 @@
 (library
  (name eio_net_unix)
  (public_name eio-net.unix)
+ (enabled_if
+  (= %{os_type} Unix))
  (libraries eio-net eio eio.unix cstruct bytesrw ipaddr fmt unix)
  (foreign_stubs
   (language c)

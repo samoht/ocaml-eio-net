@@ -1,0 +1,9 @@
+(library
+ (name posix)
+ (libraries
+  eio.unix
+  (select
+   posix.ml
+   from
+   (eio_posix -> posix.eio_posix.ml)
+   (-> posix.none.ml))))

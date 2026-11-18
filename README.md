@@ -19,6 +19,9 @@ receive is one frame, come with an accept loop and a relay.
 opam install eio-net
 ```
 
+`eio-net.unix` is POSIX-only: its C stubs are not built on Windows, where the
+other libraries are.
+
 ## An in-memory network
 
 `Eio_net_mem.v ~sw ()` is a new network with a loopback interface. Two calls

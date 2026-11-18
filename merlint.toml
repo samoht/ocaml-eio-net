@@ -93,3 +93,8 @@ exclude = ["E105", "E005"]
 [[rules]]
 files = ["lib/chaos/device.ml"]
 exclude = ["E005"]
+
+# Dune's select picks one of these as posix.ml, which posix.mli describes.
+[[rules]]
+files = ["test/posix/posix.eio_posix.ml", "test/posix/posix.none.ml"]
+exclude = ["E505"]

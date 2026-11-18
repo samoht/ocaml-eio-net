@@ -11,7 +11,7 @@
   eio.mock
   eio.unix
   eio_main
-  eio_posix
+  posix
   cstruct
   bytesrw
   unix

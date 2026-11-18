@@ -39,10 +39,15 @@ let test_source_round_trip () =
     "reply comes from the responder" true
     (Eio_net_addr.equal_sockaddr reply_source addr_b)
 
+(* eio_posix, which Windows lacks: there the test is skipped. *)
+let eio_posix f =
+  match Posix.run with Some run -> run f | None -> Alcotest.skip ()
+
 (* On eio_posix: eio_linux refuses a send to a Unix-domain address with EINVAL
    until ocaml-uring sets msg_namelen to the size of the address it is given
    (ocaml-multicore/eio#963). *)
 let test_unix_source_round_trip () =
+  eio_posix @@ fun env ->
   (* Under /tmp, not $TMPDIR, which may be too long for sun_path. *)
   let dir = Filename.temp_dir ~temp_dir:"/tmp" "eio-net" "" in
   let path_a = Filename.concat dir "a" and path_b = Filename.concat dir "b" in
@@ -52,7 +57,6 @@ let test_unix_source_round_trip () =
         [ path_a; path_b ];
       Sys.rmdir dir)
   @@ fun () ->
-  Eio_posix.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let bind path = Eio.Net.datagram_socket ~sw env#net (`Unix path) in
   let a = Eio_net.Datagram.of_socket (bind path_a) in
