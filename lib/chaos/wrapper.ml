@@ -33,7 +33,9 @@ type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
    itself. [sent] is indexed by the writing side, the bytes its base writes
    queued; [taken] by the reading side, the bytes its reads returned.
    [reset_to] is the end of an AF_UNIX connection whose peer crashed with
-   bytes unread: it reads ECONNRESET once its queue is empty. *)
+   bytes unread: it reads ECONNRESET once its queue is empty. [write_ends]
+   is indexed by the writing side too: where each write that a run numbered
+   ends, and its number, for the places of the reads that return its bytes. *)
 type conn = {
   lock : Mutex.t;
   os : [ `Linux | `Macos ];
@@ -44,6 +46,7 @@ type conn = {
   sent : int array;
   taken : int array;
   mutable reset_to : Op.side option;
+  write_ends : (int * int) Dynarray.t array;
 }
 
 let conn ~os ~paired family =
@@ -57,6 +60,7 @@ let conn ~os ~paired family =
     sent = [| 0; 0 |];
     taken = [| 0; 0 |];
     reset_to = None;
+    write_ends = [| Dynarray.create (); Dynarray.create () |];
   }
 
 let ix : Op.side -> int = function `Client -> 0 | `Server -> 1
@@ -144,28 +148,19 @@ type target =
   | Recv of int
   | Ended of int * Op.side
 
-(* What a fiber did on the network: the operation it waits in, if any, and
-   the last one [f] was asked about. *)
-type activity = { mutable inside : Op.kind option; mutable last : Op.t option }
-
 (* What the wrappers of one network share. [lock] guards the counters and
    [pending], and runs [f], so [f] sees one operation at a time, in the order
-   of [index]. [ops] counts the operations [f] is asked about but those
-   [split] holds of, which [splits] counts, and past [max_ops] of them
-   [overrun] holds. [charge] takes a turn of the run's clock for every network
-   operation, and [charges] counts those turns. With [charge], [fibers] keeps
-   what each fiber did, by its trace id, for the report of a hang. *)
+   of [index]. [f] answers a fault and the bytes of the operation before it.
+   In a run, [chaos] takes a turn of the run's clock for every network
+   operation, and [charges] counts those turns. *)
 type ctx = {
-  f : Op.t -> Fault.t option;
-  split : Op.t -> bool;
-  mutable splits : int;
+  f : Op.t -> (Fault.t * int) option;
+  chaos : Eio_chaos.t option;
   os : [ `Linux | `Macos ];
   clock : float Eio.Time.clock_ty Eio.Resource.t;
-  charge : (unit -> unit) option;
   outage : bool;
   lock : Mutex.t;
   mutable index : int;
-  mutable ops : int;
   mutable charges : int;
   mutable sockets : int;
   mutable connects : int;
@@ -175,26 +170,18 @@ type ctx = {
   streaks : (target, int) Hashtbl.t;
   mutable streak_at : float;
   mutable streak_charges : int;
-  livelocked : bool Atomic.t;
   pending : (int, pending) Hashtbl.t;
-  fibers : (Eio.Private.Trace.id, activity) Hashtbl.t;
-  max_ops : int;
-  overrun : bool Atomic.t;
 }
 
-let ctx ?(max_ops = max_int) ?os ?(split = fun _ -> false) ?charge ~clock
-    ~outage f =
+let ctx ?os ?chaos ~clock ~outage f =
   {
     f;
-    split;
-    splits = 0;
+    chaos;
     os = (match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux);
     clock :> float Eio.Time.clock_ty Eio.Resource.t;
-    charge;
     outage;
     lock = Mutex.create ();
     index = 0;
-    ops = 0;
     charges = 0;
     sockets = 0;
     connects = 0;
@@ -204,25 +191,8 @@ let ctx ?(max_ops = max_int) ?os ?(split = fun _ -> false) ?charge ~clock
     streaks = Hashtbl.create 7;
     streak_at = 0.;
     streak_charges = 0;
-    livelocked = Atomic.make false;
     pending = Hashtbl.create 7;
-    fibers = Hashtbl.create 7;
-    max_ops;
-    overrun = Atomic.make false;
   }
-
-(* Under [ctx.lock]. What the calling fiber did. *)
-let activity ctx =
-  let tid =
-    Eio.Private.Fiber_context.tid
-      (Effect.perform Eio.Private.Effects.Get_context)
-  in
-  match Hashtbl.find_opt ctx.fibers tid with
-  | Some a -> a
-  | None ->
-      let a = { inside = None; last = None } in
-      Hashtbl.replace ctx.fibers tid a;
-      a
 
 (* Under [ctx.lock]. *)
 let ask_locked ctx law ~socket ~side ~family ~offset ~length =
@@ -238,11 +208,14 @@ let ask_locked ctx law ~socket ~side ~family ~offset ~length =
       length;
     }
   in
-  if Option.is_some ctx.charge then (activity ctx).last <- Some op;
-  if ctx.split op then ctx.splits <- ctx.splits + 1 else ctx.ops <- ctx.ops + 1;
   ctx.f op
 
 let locked (ctx : ctx) f = Mutex.protect ctx.lock f
+
+(* The number the run gave the operation [f] was last asked about, [0] out
+   of a run. *)
+let numbered ctx =
+  match ctx.chaos with Some c -> Eio_chaos.index c | None -> 0
 
 (* A program that retries a failed operation at once, with no time passing,
    spins for ever: an outage refuses each connect at once. The clock stands
@@ -250,8 +223,8 @@ let locked (ctx : ctx) f = Mutex.protect ctx.lock f
    [threshold] failures of one operation on one target while the clock stands
    still, with no success there in between, the operation raises [Failure]
    instead, and after twice as many it waits for ever, as nothing the program
-   does can get it out. Failures on distinct targets, as a scan of many ports
-   makes, do not add up. *)
+   does can get it out; in a run, the run stops there as a hang. Failures on
+   distinct targets, as a scan of many ports makes, do not add up. *)
 let threshold = 10_000
 
 let livelock_message =
@@ -260,7 +233,7 @@ let livelock_message =
      clock stood still"
     threshold
 
-(* A network past its operations stops: each operation then waits for ever. *)
+(* An operation that waits for ever. *)
 let stop () =
   Eio.Cancel.protect (fun () -> Eio.Promise.await (fst (Eio.Promise.create ())))
 
@@ -281,7 +254,7 @@ let failed ctx law target =
         n)
   in
   if n >= threshold then begin
-    Atomic.set ctx.livelocked true;
+    Option.iter (fun c -> Eio_chaos.hangs c livelock_message) ctx.chaos;
     if n >= 2 * threshold then stop ();
     Fmt.failwith "%s: %s" (Law.name law) livelock_message
   end
@@ -291,42 +264,29 @@ let failed ctx law target =
    and meets the run's limit on turns. *)
 let charge ctx =
   Option.iter
-    (fun charge ->
-      charge ();
+    (fun c ->
+      Eio_chaos.turn c;
       locked ctx (fun () -> ctx.charges <- ctx.charges + 1))
-    ctx.charge
-
-(* The start of an operation [f] is asked about: past [max_ops], it stops. *)
-let tick ctx =
-  charge ctx;
-  if Atomic.get ctx.overrun || locked ctx (fun () -> ctx.ops >= ctx.max_ops)
-  then begin
-    Atomic.set ctx.overrun true;
-    stop ()
-  end
+    ctx.chaos
 
 (* An end of file is an answer, not a failure, so it counts only against
    [eof], the connection it ended: a program that reads it again and again
    spins, one that reconnects after each does not. *)
 let guard ?eof ctx law target f =
-  tick ctx;
-  let inside k =
-    if Option.is_some ctx.charge then
-      locked ctx (fun () -> (activity ctx).inside <- k)
+  charge ctx;
+  let inside f =
+    match ctx.chaos with
+    | Some c -> Eio_chaos.inside c (Op.kind_name (Law.kind law)) f
+    | None -> f ()
   in
-  inside (Some (Law.kind law));
-  match f () with
+  match inside f with
   | v ->
-      inside None;
       locked ctx (fun () ->
           if Hashtbl.length ctx.streaks > 0 then
             Hashtbl.remove ctx.streaks target);
       v
-  | exception (Eio.Cancel.Cancelled _ as e) ->
-      inside None;
-      raise e
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
   | exception e ->
-      inside None;
       let bt = Printexc.get_raw_backtrace () in
       (match (e, eof) with
       | End_of_file, Some eof -> failed ctx law eof
@@ -384,7 +344,12 @@ module Flow = struct
      treats as the base does. [lock] guards [closed], which a close in another
      domain changes while a read runs, and the counts of bytes, which readers
      and writers in several domains share. It is never held across a read or a
-     write of the base socket. *)
+     write of the base socket. A fault that lands inside a read or a write
+     cuts it short there and waits, in [pending_read] or [pending_write], at
+     the byte where it lands, for the next one of this end. [cursor] is the
+     first of the peer's write ends this end's reads have not passed, and
+     [last_write] this end's last write in a run, by its number, offset and
+     length. *)
   type t = {
     ctx : ctx;
     socket : int;
@@ -401,7 +366,93 @@ module Flow = struct
     mutable wrote_after_end : bool;
     mutable cut_short : bool;
     mutable release : Eio.Switch.hook;
+    mutable pending_read : (int * Fault.t) option;
+    mutable pending_write : (int * Fault.t) option;
+    mutable cursor : int;
+    mutable last_write : (int * int * int) option;
   }
+
+  (* Under [t.lock]. The fault an operation at [offset] of [length] bytes
+     meets, from [asked] and what [pending] holds: one that waits for this
+     byte falls here, one past it cuts the operation short, and one asked to
+     land after [k] bytes cuts it short there and waits. *)
+  let landing ~pending ~set ~offset ~length asked =
+    match pending with
+    | Some (p, f) when p = offset ->
+        set None;
+        Some f
+    | Some (p, _) when offset < p && p < offset + length ->
+        Some (Fault.Short (p - offset))
+    | Some _ | None -> (
+        match asked with
+        | Some (f, k) when k > 0 ->
+            set (Some (offset + k, f));
+            Some (Fault.Short k)
+        | Some (f, _) -> Some f
+        | None -> None)
+
+  let near family e =
+    match family with `Inet -> [ e - 1; e; e + 1 ] | `Unix -> [ e ]
+
+  (* Under [t.lock]. The places of the read numbered [index] that returned
+     [got] bytes at [offset]: the bytes either side of the end of each write
+     of the peer they hold, over IP, as TCP splits and joins segments, or the
+     end itself on AF_UNIX; its own start if a write ended there. *)
+  let read_places t ~index ~offset ~got =
+    match t.ctx.chaos with
+    | Some c when index > 0 && t.conn.paired ->
+        let hi = offset + max got 1 in
+        let ends =
+          Mutex.protect t.conn.lock (fun () ->
+              let w = t.conn.write_ends.(ix (Op.other t.side)) in
+              let n = Dynarray.length w in
+              while
+                t.cursor < n && fst (Dynarray.get w t.cursor) + 1 < offset
+              do
+                t.cursor <- t.cursor + 1
+              done;
+              let rec take i acc =
+                if i < n && fst (Dynarray.get w i) - 1 < hi then
+                  take (i + 1) (Dynarray.get w i :: acc)
+                else acc
+              in
+              take t.cursor [])
+        in
+        Eio_chaos.places c index
+          (List.concat_map
+             (fun (e, j) ->
+               List.filter_map
+                 (fun b ->
+                   if offset <= b && b < hi then Some (b - offset, j) else None)
+                 (near t.family e))
+             ends)
+    | Some _ | None -> ()
+
+  (* Under [t.lock]. The places of the write numbered [index] of [length]
+     bytes at [offset]: over IP the byte after its start and the byte before
+     its end, where a writer that closes cuts its last message, and the byte
+     before its start, in the write before. Its end is a place of the reads
+     of the peer. *)
+  let write_places t ~index ~offset ~length =
+    match t.ctx.chaos with
+    | Some c when index > 0 ->
+        if t.conn.paired then
+          Mutex.protect t.conn.lock (fun () ->
+              Dynarray.add_last
+                t.conn.write_ends.(ix t.side)
+                (offset + length, index));
+        if t.family = `Inet then begin
+          Eio_chaos.places c index
+            (List.filter_map
+               (fun k -> if 0 < k && k < length then Some (k, index) else None)
+               (List.sort_uniq Int.compare [ 1; length - 1 ]));
+          match t.last_write with
+          | Some (i, o, l) when o + l = offset && l > 1 ->
+              Eio_chaos.places c i [ (l - 1, index) ]
+          | _ -> ()
+        end;
+        t.last_write <- Some (index, offset, length)
+    | Some _ | None -> ()
 
   (* Under [t.lock]. The end of a broken connection's reads: a reset is
      reported once, by the first read or write that meets it, and later reads
@@ -533,17 +584,35 @@ module Flow = struct
     type nonrec t = t
 
     let single_read_ t dst =
-      let fault =
+      let length = Cstruct.length dst in
+      let fault, index, offset =
         Mutex.protect t.lock (fun () ->
             check_read t;
-            if Cstruct.length dst = 0 then None
+            if length = 0 then (None, 0, 0)
             else
-              muted t
-                (ask t.ctx Law.Single_read ~socket:t.socket ~side:t.side
-                   ~family:t.family ~offset:t.delivered
-                   ~length:(Cstruct.length dst)))
+              let offset = t.delivered in
+              let asked =
+                ask t.ctx Law.Single_read ~socket:t.socket ~side:t.side
+                  ~family:t.family ~offset ~length
+              in
+              let index = numbered t.ctx in
+              let fault =
+                landing ~pending:t.pending_read
+                  ~set:(fun p -> t.pending_read <- p)
+                  ~offset ~length asked
+              in
+              (muted t fault, index, offset))
       in
-      if Cstruct.length dst = 0 then 0
+      let deliver t dst ~cap =
+        match deliver t dst ~cap with
+        | got ->
+            Mutex.protect t.lock (fun () -> read_places t ~index ~offset ~got);
+            got
+        | exception End_of_file ->
+            Mutex.protect t.lock (fun () -> read_places t ~index ~offset ~got:0);
+            raise End_of_file
+      in
+      if length = 0 then 0
       else
         match fault with
         | Some (Fault.Short n) -> deliver t dst ~cap:(max 1 n)
@@ -587,10 +656,17 @@ module Flow = struct
         | `Lost -> (None, -1)
         | `Write when total = 0 -> (None, 0)
         | `Write ->
+            let offset = t.written in
+            let asked =
+              ask t.ctx Law.Single_write ~socket:t.socket ~side:t.side
+                ~family:t.family ~offset ~length:total
+            in
+            write_places t ~index:(numbered t.ctx) ~offset ~length:total;
             let fault =
               muted t
-                (ask t.ctx Law.Single_write ~socket:t.socket ~side:t.side
-                   ~family:t.family ~offset:t.written ~length:total)
+                (landing ~pending:t.pending_write
+                   ~set:(fun p -> t.pending_write <- p)
+                   ~offset ~length:total asked)
             in
             let n =
               match fault with
@@ -698,6 +774,10 @@ module Flow = struct
         wrote_after_end = false;
         cut_short = false;
         release = Eio.Switch.null_hook;
+        pending_read = None;
+        pending_write = None;
+        cursor = 0;
+        last_write = None;
       }
     in
     Option.iter
@@ -808,7 +888,7 @@ module Datagram = struct
                       ~family:t.family ~offset
                       ~length:(String.length (snd d))
                   with
-                  | fault -> fault
+                  | fault -> Option.map fst fault
                   | exception e ->
                       t.ready <- d :: t.ready;
                       raise e
@@ -975,7 +1055,7 @@ module Listener = struct
               ask_locked ctx Law.Accept ~socket ~side:`Server ~family ~offset
                 ~length:0)
         with
-        | fault -> fault
+        | fault -> Option.map fst fault
         | exception e ->
             let bt = Printexc.get_raw_backtrace () in
             hold t (flow, peer);
@@ -1036,14 +1116,6 @@ end
 
 type (_, _, _) Eio.Resource.pi +=
   | Outage : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
-  | Livelocked : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
-  | Overrun : ('t, 't -> bool, [> `Generic ]) Eio.Resource.pi
-  | Splits : ('t, 't -> int, [> `Generic ]) Eio.Resource.pi
-  | Activity :
-      ( 't,
-        't -> Eio.Private.Trace.id -> Op.kind option * Op.t option,
-        [> `Generic ] )
-      Eio.Resource.pi
 
 module Network = struct
   type t = { ctx : ctx; net : [ `Generic ] Eio.Net.ty Eio.Resource.t }
@@ -1061,8 +1133,9 @@ module Network = struct
             ctx.connects <- offset + 1;
             let socket = next_socket ctx in
             ( socket,
-              ask_locked ctx Law.Connect ~socket ~side:`Client ~family ~offset
-                ~length:0 ))
+              Option.map fst
+                (ask_locked ctx Law.Connect ~socket ~side:`Client ~family
+                   ~offset ~length:0) ))
       in
       (* Eio.Net.connect adds the address to an error of the base, and
          again at the wrapper: the base's context goes, so it appears once. *)
@@ -1143,30 +1216,22 @@ module Network = struct
   let handler =
     Eio.Resource.handler
       (H (Outage, fun t -> t.ctx.outage)
-      :: H (Livelocked, fun t -> Atomic.get t.ctx.livelocked)
-      :: H (Overrun, fun t -> Atomic.get t.ctx.overrun)
-      :: H (Splits, fun t -> locked t.ctx (fun () -> t.ctx.splits))
-      :: H
-           ( Activity,
-             fun t tid ->
-               locked t.ctx (fun () ->
-                   match Hashtbl.find_opt t.ctx.fibers tid with
-                   | Some a -> (a.inside, a.last)
-                   | None -> (None, None)) )
       :: Eio.Resource.bindings (Eio.Net.Pi.network (module Impl)))
 end
 
-let v ?max_ops ?os ?split ?charge ~clock ~outage f (net : _ Eio.Net.t) :
+let v ?os ?chaos ~clock ~outage f (net : _ Eio.Net.t) :
     [ `Generic ] Eio.Net.ty Eio.Resource.t =
   Eio.Resource.T
     ( {
-        Network.ctx = ctx ?max_ops ?os ?split ?charge ~clock ~outage f;
+        Network.ctx = ctx ?os ?chaos ~clock ~outage f;
         net :> [ `Generic ] Eio.Net.ty Eio.Resource.t;
       },
       Network.handler )
 
 let pair ?os ~clock f =
-  let ctx = ctx ?os ~clock ~outage:false f in
+  let ctx =
+    ctx ?os ~clock ~outage:false (fun op -> Option.map (fun f -> (f, 0)) (f op))
+  in
   let c, s = Eio_net_mem.pair ?os () in
   let socket = locked ctx (fun () -> next_socket ctx) in
   let conn = conn ~os:ctx.os ~paired:true `Inet in
@@ -1178,21 +1243,3 @@ let pair ?os ~clock f =
 let is_outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
   match Eio.Resource.get_opt ops Outage with Some f -> f t | None -> false
-
-let livelocked (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
-  let (Eio.Resource.T (t, ops)) = net in
-  match Eio.Resource.get_opt ops Livelocked with Some f -> f t | None -> false
-
-let overrun (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
-  let (Eio.Resource.T (t, ops)) = net in
-  match Eio.Resource.get_opt ops Overrun with Some f -> f t | None -> false
-
-let splits (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
-  let (Eio.Resource.T (t, ops)) = net in
-  match Eio.Resource.get_opt ops Splits with Some f -> f t | None -> 0
-
-let activity (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) tid =
-  let (Eio.Resource.T (t, ops)) = net in
-  match Eio.Resource.get_opt ops Activity with
-  | Some f -> f t tid
-  | None -> (None, None)

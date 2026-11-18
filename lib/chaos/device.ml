@@ -393,23 +393,13 @@ type fresh = {
    whose network follows [os]. *)
 let simulated os f =
   let run g =
-    let result = ref None in
-    (match
-       Quiet_mock.run ~effects:{ handle = Posix.systhread } ~limit:3600.
-       @@ fun clock mono_clock _ ->
-       Eio.Switch.run @@ fun sw ->
-       let out = Sim.output () in
-       Sim.with_process ~seed:[| 0 |] out @@ fun () ->
-       let net = lazy (Eio_net_mem.v ~os ~mono:mono_clock ~sw ()) in
-       let env = Sim.v ~net ~clock ~mono_clock ~seed:[| 0; 1 |] out in
-       result := Some (g (generic (f ~sw env)))
-     with
-    | () -> ()
-    | exception
-        Quiet_mock.(
-          Deadlock_detected _ | Time_limit | Busy | Too_long | Stopped) ->
-        ());
-    !result
+    match
+      Eio_chaos.Private.within ~os
+        [ Eio_chaos.quiet (Network.part ()) ]
+        (fun env -> Eio.Switch.run @@ fun sw -> g (generic (f ~sw env)))
+    with
+    | Ok v -> Some v
+    | Error _ -> None
   in
   { run }
 

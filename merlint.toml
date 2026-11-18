@@ -39,17 +39,6 @@ exclude = ["E825", "E105", "E610"]
 files = ["test/interop/connect-timeout/*"]
 exclude = ["E825"]
 
-# A copy of Eio_mock's scheduler, kept as close to it as the changes allow.
-[[rules]]
-files = ["lib/chaos/quiet_mock.ml"]
-exclude = ["E005"]
-
-# A check reports whatever its workload raises as the failure of a run: any
-# exception that escapes the workload fails the check.
-[[rules]]
-files = ["lib/chaos/eio_net_chaos.ml"]
-exclude = ["E105"]
-
 # The chaos check's tests, with the programs and mutants they run: they test check as a whole rather than one library module.
 [[rules]]
 files = ["test/chaos/*"]
@@ -60,12 +49,6 @@ exclude = ["E610"]
 [[rules]]
 files = ["lib/chaos/posix.ml"]
 exclude = ["E605"]
-
-# The cost test compiles copies of the check's private modules, which open
-# the Hermetic prelude: the compiler records no import of it.
-[[rules]]
-files = ["test/chaos/plan/dune"]
-exclude = ["E956"]
 
 # The provenance test checks the committed traces and their generators, not a
 # library module.
@@ -92,12 +75,6 @@ exclude = ["E606"]
 [[rules]]
 files = ["lib/mem/scope.ml"]
 exclude = ["E005"]
-
-# The quiet loop's test compiles a copy of the chaos check's private
-# Quiet_mock, as eio-fs's copy is tested: it links no chaos library.
-[[rules]]
-files = ["test/quiet_mock/*"]
-exclude = ["E606"]
 
 # The silent connections are an unquoted table the generator writes, read
 # with String.split_on_char, as for the connect timeouts.

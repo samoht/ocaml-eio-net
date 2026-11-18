@@ -40,10 +40,6 @@ type _ t =
   | Getaddrinfo : forwarded t
   | Getnameinfo : forwarded t
   | Outage : synthesized t
-  | Livelocked : synthesized t
-  | Overrun : synthesized t
-  | Splits : synthesized t
-  | Activity : synthesized t
   | Accept : intercepted t
   | Listening_addr : forwarded t
   | Listener_setsockopt : forwarded t

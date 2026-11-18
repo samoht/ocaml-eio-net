@@ -31,8 +31,7 @@
   logs
   (bytesrw (>= 0.2.0))
   (mtime (>= 2.0.0))
-  (psq (>= 0.2.0))
-  (domain-local-await (>= 0.1.0))
+  eio-chaos
   (ipaddr (>= 5.3.0))
   fpath
   (conf-linux-libc-dev (= :os linux))

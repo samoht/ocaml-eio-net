@@ -25,12 +25,13 @@ type summary = {
 }
 (** The type for what a replay of the traces found. *)
 
-val replay : os -> (sw:Eio.Switch.t -> Sim.env -> _ Eio.Net.t) -> summary
+val replay : os -> (sw:Eio.Switch.t -> Eio_chaos.env -> _ Eio.Net.t) -> summary
 (** [replay os net] runs each sequence and scenario of the traces of [os] on a
     fresh [net ~sw env], each in an event loop of its own with a simulated
     [env]. *)
 
-val check : ?os:[< os ] -> (sw:Eio.Switch.t -> Sim.env -> _ Eio.Net.t) -> unit
+val check :
+  ?os:[< os ] -> (sw:Eio.Switch.t -> Eio_chaos.env -> _ Eio.Net.t) -> unit
 (** See {!Eio_net_chaos.device}. *)
 
 val check_in_loop : ?os:[< os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit

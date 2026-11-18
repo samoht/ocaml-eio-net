@@ -26,10 +26,6 @@ type _ t =
   | Getaddrinfo : forwarded t
   | Getnameinfo : forwarded t
   | Outage : synthesized t
-  | Livelocked : synthesized t
-  | Overrun : synthesized t
-  | Splits : synthesized t
-  | Activity : synthesized t
   | Accept : intercepted t
   | Listening_addr : forwarded t
   | Listener_setsockopt : forwarded t
@@ -65,10 +61,6 @@ let all =
     Op Getaddrinfo;
     Op Getnameinfo;
     Op Outage;
-    Op Livelocked;
-    Op Overrun;
-    Op Splits;
-    Op Activity;
     Op Accept;
     Op Listening_addr;
     Op Listener_setsockopt;
@@ -96,8 +88,7 @@ let all =
   ]
 
 let interface : type c. c t -> interface = function
-  | Connect | Listen | Datagram_socket | Getaddrinfo | Getnameinfo | Outage
-  | Livelocked | Overrun | Splits | Activity ->
+  | Connect | Listen | Datagram_socket | Getaddrinfo | Getnameinfo | Outage ->
       `Network
   | Accept | Listening_addr | Listener_setsockopt | Listener_getsockopt
   | Listener_close | Listener_fd ->
@@ -116,10 +107,6 @@ let name : type c. c t -> string = function
   | Getaddrinfo -> "Eio.Net.getaddrinfo"
   | Getnameinfo -> "Eio.Net.getnameinfo"
   | Outage -> "Wrapper.is_outage"
-  | Livelocked -> "Wrapper.livelocked"
-  | Overrun -> "Wrapper.overrun"
-  | Splits -> "Wrapper.splits"
-  | Activity -> "Wrapper.activity"
   | Accept -> "Eio.Net.accept"
   | Listening_addr -> "Eio.Net.listening_addr"
   | Listener_setsockopt | Setsockopt | Datagram_setsockopt ->
@@ -188,10 +175,6 @@ let class_ : type c. c t -> c class_ = function
   | Datagram_getsockopt -> Forwarded
   | Datagram_close -> Forwarded
   | Outage -> Synthesized
-  | Livelocked -> Synthesized
-  | Overrun -> Synthesized
-  | Splits -> Synthesized
-  | Activity -> Synthesized
   | Read_methods -> Synthesized
   | Copy -> Synthesized
   | Listener_fd -> Unsupported

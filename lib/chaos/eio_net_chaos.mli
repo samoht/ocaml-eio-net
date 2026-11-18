@@ -9,9 +9,12 @@
     - {!device}: does this Eio network answer as Linux or macOS does?
 
     Both raise [Failure] with a report when the answer is no, as an assertion
-    does, so they are the body of a test in any test runner. A test that wants
-    one fault at one place builds it from the {{!blocks}building blocks}:
-    {!wrap} for a network, {!pair} for two connected streams.
+    does, so they are the body of a test in any test runner. {!run} is
+    {!Eio_chaos.run} on one part, {!network}: a program that also needs a disk
+    is tested with [Eio_chaos.run [ Eio_fs_chaos.disk (); network () ]]. A test
+    that wants one fault at one place builds it from the
+    {{!blocks}building blocks}: {!wrap} for a network, {!pair} for two connected
+    streams.
 
     {!run}, {!device} and {!wrap} take [?os], as {!Eio_net_mem.v} does:
     [`Linux], the default, or [`Macos]. It picks the answers expected and the
@@ -22,38 +25,26 @@
     program meets, its {{!replay}failures and replay} and its {{!runs}runs} come
     after. *)
 
-type env =
-  < net : [ `Generic ] Eio.Net.ty Eio.Resource.t
-  ; clock : float Eio.Time.clock_ty Eio.Resource.t
-  ; mono_clock : Eio.Time.Mono.ty Eio.Resource.t
-  ; secure_random : Eio.Flow.source_ty Eio.Resource.t
-  ; stdin : Eio.Flow.source_ty Eio.Resource.t
-  ; stdout : Eio.Flow.sink_ty Eio.Resource.t
-  ; stderr : Eio.Flow.sink_ty Eio.Resource.t
-  ; domain_mgr : Eio.Domain_manager.ty Eio.Resource.t
-  ; process_mgr : [ `Generic ] Eio.Process.mgr_ty Eio.Resource.t
-  ; debug : Eio.Debug.t
-  ; backend_id : string >
+type env = Eio_chaos.env
 (** The type for what a program runs with: the devices of [Eio.Stdenv], each
     simulated, so a program written against [Eio.Stdenv]'s accessors takes it
-    unchanged.
+    unchanged. {!Eio_chaos.type-env} says what each is.
 
     - [net] is an in-memory network of {!Eio_net_mem}, the one that fails;
+    - [fs] and [cwd] refuse each operation, unless another part gives them, as
+      the disk of eio-fs does;
     - [clock] and [mono_clock] start at [0.], and a wait takes no time
       ({!section-runs});
-    - [secure_random] is drawn from the check's seed;
+    - [secure_random] and OCaml's [Random] draw from a fixed seed, whatever
+      [~seed]: each run draws the same, and its restart, a process of its own,
+      draws others;
     - [stdin] is empty, and [stdout], [stderr] and Eio's traces go to memory: a
-      report shows the last 2 KiB of the run that failed;
+      report shows the last 2 KiB the program printed;
     - [domain_mgr] runs the work in the calling fiber, on the run's own
       scheduler;
-    - [process_mgr] refuses each process and pipe with [EPERM], and has no
-      environment variables;
-    - [backend_id] is ["mock"].
-
-    Each start of the program, its restart included, is a process of its own: it
-    draws its own entropy, and OCaml's [Random] is seeded afresh, from the seed.
-    [Eio_fs_chaos.env] has the same shape, with [fs] and [cwd] in place of
-    [net]. *)
+    - [process_mgr] starts nothing: each process and pipe raises [Eio.Io] with
+      [Not_available];
+    - [backend_id] is ["chaos"], and [chaos] is the run's {!Eio_chaos.t}. *)
 
 (** {1:program Testing a program} *)
 
@@ -103,12 +94,14 @@ val run :
 
     {b How the faults are picked.} [run] learns the operations of [app] from its
     first run. It tries every fault above at every operation of that run, but
-    for the many reads, writes and datagrams of one connection or socket, of
-    which it takes the first three, the last and one of each size. Then it
-    spends the rest of [budget] (defaults to [2_000]) runs, at most half as many
-    as it has run and at least 200, on runs drawn at random from [seed]
-    (defaults to [0]): the other reads, writes and datagrams, and two faults in
-    a run, the second on the path the first one opened, such as the second
+    for the many connections alike, of which it takes the first three, the last
+    and one of each shape, and the many reads, writes and datagrams of one end,
+    of which it takes the first three, the last and one of each size. A cut in
+    the middle of a stream falls where the peer's writes end. Then it spends a
+    fortieth of [budget] (defaults to [20_000]), or half as many runs as it has
+    run if that is more, on runs drawn at random from [seed] (defaults to [0]):
+    the other connections, reads, writes and datagrams, and two faults in a run,
+    the second anywhere in the run the first one changed, such as the second
     connection after a reset. Another [seed] draws other runs.
     {!section-exploration} says more.
 
@@ -117,7 +110,9 @@ val run :
 
     {b When it passes.} [run] passes iff:
 
-    - the first run returns;
+    - the first run returns, and a second run with no fault makes the same kinds
+      of operation in the same order. Where only their connections differ, the
+      check goes on, and a failure report says where;
     - no run hangs or raises an exception other than [Eio.Io], [End_of_file] and
       [Eio.Time.Timeout], alone or together in an [Eio.Exn.Multiple], an
       assertion of [app] included. A program with no timeout hangs on a silent
@@ -140,12 +135,19 @@ val run :
     @raise Failure
       with a report of the first failing run: the fault, the operations of the
       run, the error, and the line to paste that runs it alone, as
-      [Eio_net_chaos.run ~replay:"net/85d85f49/connect1c@0.timeout" app].
-      [replay] reruns that one case, and its restart, whatever the [seed] that
-      found it.
+      [Eio_net_chaos.run ~replay:"net/85d85f49/connect:1.timeout" app]. [replay]
+      reruns that one case, and its restart, whatever the [seed] that found it.
     @raise Invalid_argument
-      if [budget] is not positive, or [replay] is not a replay string of
-      eio-net. *)
+      if [budget] is not positive, or [replay] is not a replay string of [run].
+*)
+
+val network : unit -> Eio_chaos.part
+(** [network ()] is the network of {!run} as a part of {!Eio_chaos.run}, to test
+    a program on it and other simulated devices at once: an in-memory host with
+    a loopback interface that answers as the [~os] of the check does, with the
+    faults above. A restart keeps the ports held in TIME_WAIT; a power cut,
+    which another part may bring, keeps nothing. [run app] is
+    [Eio_chaos.run [ network () ] app], but for the name its reports give. *)
 
 val is_outage : < net : [ `Generic ] Eio.Net.ty Eio.Resource.t ; .. > -> bool
 (** [is_outage env] is [true] iff [env] is that of the outage run of {!run}. A
@@ -434,43 +436,46 @@ val pair :
 
 (** {1:exploration Exploration}
 
-    A check runs the program once with no fault and records its operations. Its
-    scenarios are positions in that run, chosen from its structure.
+    A check runs the program once with no fault and records its operations: its
+    connects, accepts, reads, writes and receives, in order. Its scenarios are
+    places in that run, chosen from its structure.
 
     The structural elements of a sequence are its first three, its last, and the
     first of each class. The length class of a length is that length rounded
     down to a power of two.
 
     - The {e structural connections} of a run are those of its connections,
-      classed by their address family and the length classes each side writes.
-    - The {e structural writes} of an end are those of its writes, classed by
-      length, and the {e structural datagrams} of a datagram socket are those of
-      the datagrams it receives, classed by length.
-    - The {e structural positions} of what an end reads are its first byte and
-      the ends of its peer's structural writes. Those of what an end writes are
-      the starts of its structural writes and, over IP, its last byte. Over IP
-      the byte either side of a position is one too, as TCP splits and joins
-      segments.
+      classed by their address family and the kinds and length classes of the
+      operations of each end: a refused connect is a connection of its own.
+    - The {e structural reads and writes} of an end are those of its reads and
+      of its writes, classed by length, and the {e structural datagrams} of a
+      datagram socket are those of the datagrams it receives, classed by length.
+    - A read or a write may also be cut inside, at a {e place}: a read at the
+      end of each write of the peer whose bytes it returns, and over IP the byte
+      either side of it, as TCP splits and joins segments; a write over IP at
+      the byte after its start and the byte before its end, and the byte before
+      the start of the next one. A place is structural when the write that made
+      it is.
 
     The scenarios come in two tiers:
 
     - the linear tier always runs whole. On each end of each structural
-      connection it cuts the bytes at each structural position, and it fails the
-      connection's connect and accept. On each datagram socket it fails each
-      structural datagram. It runs each lasting condition. It grows with the
-      structure of the exchange, not with its bytes, its clients or its
-      messages;
-    - the sampled tier spends the rest, at most half as much as the linear tier
-      and at least 200 runs: the faults the linear tier left, on other write
-      ends, connections and datagrams, and pairs of faults, the second at a
-      position of the run the first one changed. That is where a retry, or a
+      connection it fails each structural read and write at its start and at
+      each structural place, and it fails the connection's connect and accept.
+      On each datagram socket it fails each structural datagram. It runs each
+      lasting condition. It grows with the structure of the exchange, not with
+      its bytes, its clients or its messages;
+    - the sampled tier spends a fortieth of the budget, or half as much as the
+      linear tier if that is more: the faults the linear tier left, on other
+      connections, reads, writes and places, and pairs of faults, the second at
+      an operation of the run the first one changed. That is where a retry, or a
       second connection after a reset, gets tested. When it has fewer runs than
       scenarios of a kind, it splits them, in order, into as many groups of
       neighbours as it has runs, and runs one scenario of each group, drawn from
       a seed. Each draw may land on any scenario of its group, so a pattern that
-      repeats along the scenarios, as the faults tried at each position do,
-      hides no kind of fault from it, where taking every k-th scenario may meet
-      only one.
+      repeats along the scenarios, as the faults tried at each place do, hides
+      no kind of fault from it, where taking every k-th scenario may meet only
+      one.
 
     A check never passes on a partial linear tier. One that needs more runs than
     its budget fails and says so: shrink the program or raise [~budget]. *)
@@ -523,38 +528,40 @@ val pair :
 
 (** {1:replay Failures and replay}
 
-    A failure raises [Failure] with the scenario, the operations of the failing
+    A failure raises [Failure] with the fault, the operations of the failing
     run, how it ended when its [inspect] or restart failed, what it printed, and
     the [Eio_net_chaos.run ~replay:"..." app] call that runs that scenario
-    alone; a failure of the run with no fault, with its operations and the
-    replay that runs it again. Each operation shows the fault it met, and one
-    cut short where a fault lands names that fault. Repeated operations are
-    folded and a long report is cut around its first fault.
+    alone; a failure of the run with no fault, with its operations. Each
+    operation shows the fault it met, and a fault inside a read or a write says
+    after how many of its bytes it fell. Repeated operations are folded and a
+    long report is cut around its first fault.
 
     A program need not be deterministic: the check owns what makes runs differ.
     The clocks, the scheduling, the entropy and OCaml's [Random] are simulated
-    or drawn from [~seed], and faults are aimed at operations by their place
-    among the connections and their bytes, never by an address, so a port or a
-    socket path the program draws does not move them. A program built with
-    {{:https://github.com/samoht/ocaml-hermetic}hermetic} ([open! Hermetic])
-    reaches the outside world only through {!type-env}: the compiler rejects
-    every other way, so every run replays exactly. Without it, a direct call,
-    such as [Unix.gettimeofday], [Random.self_init] or a file read, escapes the
-    check, and two runs with no fault may differ. The check then goes on, and a
-    failure says where they first differed, on its [diverged] line.
+    or drawn from a fixed seed, and faults are aimed at operations by their kind
+    and their rank among the operations of that kind, never by an address, so a
+    port or a socket path the program draws does not move them. A program built
+    with {{:https://github.com/samoht/ocaml-hermetic}hermetic}
+    ([open! Hermetic]) reaches the outside world only through {!type-env}: the
+    compiler rejects every other way, so every run replays exactly. Without it,
+    a direct call, such as [Unix.gettimeofday], [Random.self_init] or a file
+    read, escapes the check, and two runs with no fault may differ. Where they
+    make other kinds of operation, or in another order, the check fails, as it
+    cannot aim its faults; where only their connections differ, it goes on, and
+    a failure says where they first differed, on its [diverged] line.
 
-    The scenario is found by its position and fault, so a replay still runs
-    after a fix that changes the program's first run, such as the size of its
-    reads: a failure then says the scenario was re-matched, and a re-matched
-    replay that passes returns as any passing check does, saying nothing. A
-    replay whose scenario the check no longer has fails, and one whose scenario
-    is not of the form a failure names is refused.
+    The scenario is found by the operation it names and its fault, so a replay
+    still runs after a fix that changes the program's first run: a failure then
+    says the scenario was re-matched, and a re-matched replay that passes
+    returns as any passing check does, saying nothing. A replay whose scenario
+    the check no longer has fails, and one whose scenario is not of the form a
+    failure names is refused.
 
     The sampled tier draws its scenarios from a seed, the same one on every
     check unless [~seed] gives another, so a check meets the same faults each
-    time. A replay names its scenario, not the draw that found it; the program
-    draws its entropy from the seed too, so the replay line passes [~seed] when
-    it is not [0].
+    time. A replay names its scenario, not the draw that found it, and the
+    program's entropy does not depend on [~seed]: the replay line needs no
+    [~seed].
 
     A check reads no environment variable and prints nothing. A test that wants
     a larger budget at night, or other faults in the sampled tier, reads its
@@ -601,8 +608,7 @@ val pair :
     connects, accepts, reads, writes and receives, as a check plans from each of
     them, so that the operations it keeps stay bounded. The reads and writes a
     one-byte condition splits do not count: a report of a run stopped while they
-    ran says how many there were, and shows its first and last 10,000
-    operations. *)
+    ran says how many there were. *)
 
 (**/**)
 
