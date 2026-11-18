@@ -71,15 +71,15 @@ restart:
 # match Eio_net_chaos.run (app ~reuse_addr:false) with
   | () -> print_endline "passed"
   | exception Failure report -> print_endline report;;
-Eio_net_chaos.run: the restart failed: the program, run again with no fault on the same network, did not return
-  faults:   accept of 1s at 0 is reset
-  ended:    the faulty run raised Eio.Io Net Connection_reset Injected_fault (eio-net.chaos)
+Eio_net_chaos.run: the restart failed: the program, run again with no fault on what the faulty run left, did not return
+  faults:   #2 read 1c @0+64 ends
+  ended:    the faulty run raised End_of_file
   error:    Eio.Io Unix_error (Address already in use, "bind", "")
   trace:
     #1 connect 1c @0
-    #2 read 1c @0+64
-    #3 accept 1s @0  <- is reset
-  replay:   Eio_net_chaos.run ~replay:"net/29d1c4cd/accept1s@0.reset" app
+    #2 read 1c @0+64  <- ends
+    #3 accept 1s @0
+  replay:   Eio_net_chaos.run ~replay:"net/29d1c4cd/read:1.eof" app
 - : unit = ()
 ```
 
@@ -97,6 +97,13 @@ most two faults, so the third try always succeeds, except under the outage,
 which `Eio_net_chaos.is_outage env` names.
 [`eio_net_chaos.mli`](lib/chaos/eio_net_chaos.mli) says how the faults are
 picked and what a program may and may not do.
+
+The network is a part of [eio-chaos](https://github.com/samoht/ocaml-eio-chaos),
+`Eio_net_chaos.network ()`, and `Eio_net_chaos.run app` is
+`Eio_chaos.run [ Eio_net_chaos.network () ] app`. A program that also writes
+files is tested on the disk of [eio-fs](https://github.com/samoht/ocaml-eio-fs)
+in the same check, `Eio_chaos.run [ Eio_fs_chaos.disk (); Eio_net_chaos.network () ] app`,
+whose runs fail either part, or both.
 
 ## Testing a network
 
