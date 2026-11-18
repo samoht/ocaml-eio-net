@@ -1,3 +1,0 @@
-(executable
- (name measure)
- (libraries eio-net cstruct eio eio.unix eio_main mtime.clock.os fmt))

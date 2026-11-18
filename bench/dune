@@ -1,0 +1,9 @@
+(executable
+ (name framing)
+ (modules framing)
+ (libraries eio-net cstruct eio eio.unix eio_main mtime.clock.os fmt))
+
+(executable
+ (name interface)
+ (modules interface)
+ (libraries eio-net.unix unix fmt))

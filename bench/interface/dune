@@ -1,3 +1,0 @@
-(executable
- (name measure)
- (libraries eio-net.unix unix fmt))
