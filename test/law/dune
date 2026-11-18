@@ -6,11 +6,11 @@
  (package eio-net)
  (libraries
   hermetic
+  eio-chaos
   eio-net.mem
   eio
   eio.mock
   eio.unix
-  eio.utils
   cstruct
   fmt
   unix

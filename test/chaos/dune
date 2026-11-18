@@ -2,6 +2,7 @@
  (name test)
  (package eio-net)
  (libraries
+  eio-chaos
   eio-net.chaos
   eio-net.mem
   eio-net.accept

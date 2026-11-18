@@ -284,7 +284,10 @@ let run ~os ~family ~spy ?f steps =
   in
   let net =
     match f with
-    | Some f -> Wrapper.v ~os ~clock ~outage:false f base
+    | Some f ->
+        Wrapper.v ~os ~clock ~outage:false
+          (fun op -> Option.map (fun f -> (f, 0)) (f op))
+          base
     | None -> base
   in
   transcript ~clock ~family ?spy net steps

@@ -32,49 +32,53 @@ let main ?(fail = false) env =
 
 let runs () = Eio_net_chaos.run main
 
-(* The lines of a report's section [name], each without its indent. *)
+(* What a report says the program printed, a line each. *)
 let section name report =
-  let rec body = function
-    | l :: rest when String.starts_with ~prefix:"    " l ->
-        String.sub l 4 (String.length l - 4) :: body rest
-    | _ -> []
-  in
-  let rec go = function
-    | [] -> []
-    | l :: rest when l = "  " ^ name ^ ":" -> body rest
-    | _ :: rest -> go rest
-  in
-  go (String.split_on_char '\n' report)
+  match Expect.field name report with
+  | "" -> []
+  | first ->
+      let rec rest = function
+        | l :: more when String.starts_with ~prefix:"            " l ->
+            String.trim l :: rest more
+        | _ -> []
+      in
+      let rec go = function
+        | [] -> []
+        | l :: more when String.starts_with ~prefix:("  " ^ name ^ ":") l ->
+            first :: rest more
+        | _ :: more -> go more
+      in
+      go (String.split_on_char '\n' report)
 
 let printed seed =
   section "output"
     (Expect.report (fun () -> Eio_net_chaos.run ~seed (main ~fail:true)))
 
-(* The same seed draws the same port, and another seed another one. *)
+(* The entropy does not depend on the seed: two seeds draw the same port. *)
 let same_seed () =
   let a = printed 1 and b = printed 1 and c = printed 2 in
   Alcotest.(check (list string)) "same seed" a b;
-  match (a, c) with
-  | [ port; trace ], [ other; _ ]
+  match a with
+  | [ port; trace ]
     when String.starts_with ~prefix:"port " port
-         && String.starts_with ~prefix:"+served on " trace ->
-      if port = other then Alcotest.failf "seeds 1 and 2 both print %S" port
+         && String.starts_with ~prefix:"served on " trace ->
+      Alcotest.(check (list string)) "another seed" a c
   | _ -> Alcotest.failf "the run printed %a" Fmt.(Dump.list string) a
 
-(* A failure names the seed in its replay, which runs that case again. *)
+(* The program, which fails once a fault met it. *)
+let faulted env =
+  main env;
+  if Eio_chaos.faulted env#chaos then failwith "a fault met it"
+
+(* A failure's replay names no seed, and runs that case again under any. *)
 let replay_seed () =
-  let report =
-    Expect.report (fun () -> Eio_net_chaos.run ~seed:3 (main ~fail:true))
-  in
+  let report = Expect.report (fun () -> Eio_net_chaos.run ~seed:3 faulted) in
   let replay =
     Scanf.sscanf
       (Expect.field "replay" report)
-      "Eio_net_chaos.run ~seed:3 ~replay:%S app" Fun.id
+      "Eio_net_chaos.run ~replay:%S app" Fun.id
   in
-  let again =
-    Expect.report (fun () ->
-        Eio_net_chaos.run ~seed:3 ~replay (main ~fail:true))
-  in
+  let again = Expect.report (fun () -> Eio_net_chaos.run ~replay faulted) in
   Alcotest.(check string) "replayed" report again
 
 (* A program may not start a process. *)
@@ -89,8 +93,8 @@ let spawn () =
     not
       (String.starts_with
          ~prefix:
-           "Eio_net_chaos.run: the run with no fault failed: Eio.Io Unix_error \
-            (Operation not permitted, \"spawn\", \"ls\")"
+           "Eio_net_chaos.run: the run with no fault failed: Eio.Io \
+            Not_available env#process_mgr: spawn ls"
          report)
   then Alcotest.failf "the spawn failed with %S" report
 
@@ -98,7 +102,7 @@ let suite =
   ( "sim",
     [
       Alcotest.test_case "a program written against Eio.Stdenv runs" `Quick runs;
-      Alcotest.test_case "the same seed prints the same" `Quick same_seed;
-      Alcotest.test_case "a replay names its seed" `Quick replay_seed;
+      Alcotest.test_case "every seed prints the same" `Quick same_seed;
+      Alcotest.test_case "a replay names no seed" `Quick replay_seed;
       Alcotest.test_case "a process is refused" `Quick spawn;
     ] )

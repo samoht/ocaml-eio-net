@@ -73,8 +73,11 @@ let shutdown_of (Eio.Resource.T (t, ops) : datagram) cmd =
 
 let refused b () = if b () then "refused" else "offered"
 
-let tid () =
-  Eio.Private.Fiber_context.tid (Effect.perform Eio.Private.Effects.Get_context)
+(* The wrapper with a fault at the start of each operation [f] fails. *)
+let wrapped ?os ~clock ~outage f net =
+  Wrapper.v ?os ~clock ~outage
+    (fun op -> Option.map (fun f -> (f, 0)) (f op))
+    net
 
 (* --- Classes ------------------------------------------------------------- *)
 
@@ -124,12 +127,6 @@ let drive : type c. c Law.t -> fixture -> unit -> string =
       fun () ->
         fst (Eio.Net.getnameinfo fx.net (`Tcp (Eio.Net.Ipaddr.V4.loopback, 80)))
   | Outage -> fun () -> string_of_bool (Wrapper.is_outage fx.net)
-  | Livelocked -> fun () -> string_of_bool (Wrapper.livelocked fx.net)
-  | Overrun -> fun () -> string_of_bool (Wrapper.overrun fx.net)
-  | Splits -> fun () -> string_of_int (Wrapper.splits fx.net)
-  | Activity ->
-      fun () ->
-        string_of_bool (Option.is_none (fst (Wrapper.activity fx.net (tid ()))))
   | Accept ->
       ignore (Eio.Net.connect ~sw fx.net (stream_addr fx.family 0));
       ok (fun () -> ignore (Eio.Net.accept ~sw fx.listener))
@@ -190,7 +187,7 @@ let observe ~wrap ~family op =
   let asked = ref [] in
   let net =
     if wrap then
-      Wrapper.v ~clock:env#clock ~outage:false
+      wrapped ~clock:env#clock ~outage:false
         (fun (o : Op.t) ->
           asked := o.kind :: !asked;
           None)
@@ -370,7 +367,7 @@ let run op ~family fault =
   let clock = env#clock in
   Eio.Switch.run @@ fun sw ->
   let net =
-    Wrapper.v ~clock ~outage:false
+    wrapped ~clock ~outage:false
       (first (Law.kind op) fault)
       (Eio_net_mem.v ~sw ())
   in
@@ -384,7 +381,7 @@ let left_open op ~family fault =
   let clock = env#clock in
   Eio.Switch.run @@ fun sw ->
   let spy, base = Spy.v (Eio_net_mem.v ~sw ()) in
-  let net = Wrapper.v ~clock ~outage:false (first (Law.kind op) fault) base in
+  let net = wrapped ~clock ~outage:false (first (Law.kind op) fault) base in
   let steps, close_all = steps op ~sw ~family net in
   List.iter (fun s -> ignore (timed clock s)) steps;
   close_all ();

@@ -25,6 +25,17 @@ let refused_with prefix f () =
   if not (String.starts_with ~prefix m) then
     Alcotest.failf "the check failed with %S" m
 
+(* The first run of a program that returns, and the check that stops there:
+   no guard stopped it before. *)
+let first_run f env =
+  f env;
+  failwith "the first run returned"
+
+let first_returned =
+  refused_with
+    "Eio_net_chaos.run: the run with no fault failed: Failure(\"the first run \
+     returned\")"
+
 (* A download whose client logs what it got before the end or an error,
    and when. *)
 let logged log () =
@@ -131,6 +142,8 @@ let message ?replay ~size ~bug () =
         Fmt.failwith "got %S" (Buffer.contents got)
   | exception (Eio.Io _ | End_of_file | Eio.Time.Timeout) -> ()
 
+let key replay = List.nth (String.split_on_char '/' replay) 2
+
 (* A replay whose workload's first run changed, but which still has the
    scenario, runs it: the fix changed the size of the client's reads. *)
 let test_rematched_replay () =
@@ -138,10 +151,7 @@ let test_rematched_replay () =
   let replay = replay_of report in
   message ~replay ~size:4 ~bug:false ();
   let again = Expect.report (message ~replay ~size:4 ~bug:true) in
-  Alcotest.(check string)
-    "faults"
-    (Expect.field "faults" report)
-    (Expect.field "faults" again);
+  Alcotest.(check string) "scenario" (key replay) (key (replay_of again));
   Alcotest.(check string)
     "re-matched"
     (Fmt.str "the replay named first run %s, and the program's is now %s"
@@ -156,7 +166,7 @@ let test_stale_replay () =
     Eio.Switch.run @@ fun sw ->
     try ignore (Eio.Net.connect ~sw env#net addr) with Eio.Io _ -> ()
   in
-  let key = List.nth (String.split_on_char '/' replay) 2 in
+  let key = key replay in
   refused_with
     (Fmt.str
        "Eio_net_chaos.run: the replay names %s, a scenario this check no \
@@ -167,12 +177,12 @@ let test_stale_replay () =
 
 let test_unknown_replay () =
   let replay = replay_of (Expect.report (fun () -> mutant ())) in
-  refused_with "Eio_net_chaos.run: the replay names read9c@0.reset, a scenario"
+  refused_with "Eio_net_chaos.run: the replay names read:999.reset, a scenario"
     (fun () ->
-      mutant ~replay:(Fmt.str "net/%s/read9c@0.reset" (hash replay)) ())
+      mutant ~replay:(Fmt.str "net/%s/read:999.reset" (hash replay)) ())
     ();
   invalid_with
-    "Eio_net_chaos.run: replay is \"fs/x/y\", not a replay string of eio-net"
+    "Eio_net_chaos.run: replay is \"fs/x/y\", not a replay string of this check"
     (fun () -> mutant ~replay:"fs/x/y" ())
     ()
 
@@ -231,9 +241,10 @@ let test_nothing () =
     (fun () -> Eio_net_chaos.run ignore)
     ()
 
-(* A program whose operations depend on a counter it keeps across runs
-   differs from one run to the next: the check runs it all the same. *)
-let counted ~strict =
+(* A program that keeps a counter across runs: every other run opens a
+   datagram socket first, which takes a number, so its connection is
+   numbered apart, or, with [twice], connects twice. *)
+let counted ?(twice = false) ~strict () =
   let calls = ref 0 in
   fun (env : Eio_net_chaos.env) ->
     incr calls;
@@ -242,7 +253,11 @@ let counted ~strict =
     Eio.Fiber.fork_daemon ~sw (fun () ->
         Eio.Net.run_server l ~on_error:ignore (fun flow _ ->
             Eio.Flow.copy_string "hello" flow));
-    for _ = 1 to 1 + (!calls mod 2) do
+    if (not twice) && !calls mod 2 = 0 then
+      ignore
+        (Eio.Net.datagram_socket ~sw env#net
+           (`Udp (Eio.Net.Ipaddr.V4.loopback, 0)));
+    for _ = 1 to if twice then 1 + (!calls mod 2) else 1 do
       match
         Eio.Time.with_timeout_exn env#clock 5.0 @@ fun () ->
         Eio.Switch.run @@ fun sw ->
@@ -255,16 +270,25 @@ let counted ~strict =
       | exception (Eio.Io _ | Eio.Time.Timeout) -> failwith "no answer"
     done
 
-let test_nondeterministic () = Eio_net_chaos.run (counted ~strict:false)
+(* Runs that number their connections apart are checked all the same. *)
+let test_nondeterministic () = Eio_net_chaos.run (counted ~strict:false ())
 
 (* A failure of such a program says where two runs with no fault
    differed. *)
 let test_diverged () =
   let report =
-    Expect.report (fun () -> Eio_net_chaos.run (counted ~strict:true))
+    Expect.report (fun () -> Eio_net_chaos.run (counted ~strict:true ()))
   in
   if Expect.field "diverged" report = "" then
     Alcotest.failf "the report does not say the runs differed: %s" report
+
+(* Runs that make different operations cannot be aimed at. *)
+let test_different_kinds () =
+  refused_with
+    "Eio_net_chaos.run: two runs with no fault made different operations: #6 \
+     connect 2c @1 in the first, nothing more in the second"
+    (fun () -> Eio_net_chaos.run (counted ~twice:true ~strict:false ()))
+    ()
 
 (* A program that draws the length of its answer from Random draws the same
    length in every run. *)
@@ -283,11 +307,11 @@ let test_random () =
     ignore (Eio.Flow.read_all flow : string)
   with Eio.Io _ | Eio.Time.Timeout -> ()
 
-(* A run with no fault that fails is reported with its operations and the
-   replay that runs it again. *)
+(* A run with no fault that fails is reported with its operations, and
+   with no replay: a check runs it first. *)
 let test_first_run_fails () =
-  let run ?replay () =
-    Eio_net_chaos.run ?replay (fun env ->
+  let run () =
+    Eio_net_chaos.run (fun env ->
         Eio.Switch.run @@ fun sw -> ignore (Eio.Net.connect ~sw env#net addr))
   in
   refused_with "Eio_net_chaos.run: the run with no fault failed: Eio.Io" run ();
@@ -295,9 +319,7 @@ let test_first_run_fails () =
   Alcotest.(check string) "trace" "" (Expect.field "trace" report);
   if not (List.mem "    #1 connect 1c @0" (String.split_on_char '\n' report))
   then Alcotest.failf "no operation in %S" report;
-  let replay = replay_of report in
-  Alcotest.(check bool) "replay" true (String.ends_with ~suffix:"/none" replay);
-  Alcotest.(check string) "replayed" report (Expect.report (run ~replay))
+  Alcotest.(check string) "no replay" "" (Expect.field "replay" report)
 
 (* A run with no fault that fails before any operation has no trace to
    show. *)
@@ -363,7 +385,8 @@ let reconnect () =
    a new connection, an answer and no failure, so the run with no fault
    passes, and only the budget stops the check. *)
 let batch () =
-  Eio_net_chaos.run ~budget:1 @@ fun env ->
+  Eio_net_chaos.run @@ first_run
+  @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 env#net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -418,7 +441,8 @@ let broken_server () =
    still, is not a spin: the check's first run passes, and only the budget
    stops it. *)
 let scan () =
-  Eio_net_chaos.run ~budget:1 @@ fun env ->
+  Eio_net_chaos.run @@ first_run
+  @@ fun env ->
   for port = 30000 to 40500 do
     match
       Eio.Switch.run (fun sw ->
@@ -568,8 +592,8 @@ let test_report_collapses_by_shape () =
     Alcotest.failf "the trace of 1200 connects has %d lines:@.%s"
       (List.length lines) (String.concat "\n" lines)
 
-(* A write cut where a reset lands says so: the write before it moves what
-   comes before the reset. The client demands every byte. *)
+(* A write a reset lands inside says after how many of its bytes. The
+   client demands every byte. *)
 let test_report_names_the_cut () =
   let run ?replay () =
     Eio_net_chaos.run ?replay @@ fun env ->
@@ -587,9 +611,9 @@ let test_report_names_the_cut () =
   in
   let h = hash (replay_of (Expect.report run)) in
   let report =
-    Expect.report (run ~replay:(Fmt.str "net/%s/write1s@1.reset" h))
+    Expect.report (run ~replay:(Fmt.str "net/%s/write:1@1.reset" h))
   in
-  let cut = "<- moves 1 byte, up to where it is reset" in
+  let cut = "<- is reset after 1 byte" in
   if
     not
       (List.exists
@@ -602,7 +626,7 @@ let test_malformed_replay () =
     (fun replay ->
       invalid_with
         (Fmt.str
-           "Eio_net_chaos.run: replay is %S, not a replay string of eio-net"
+           "Eio_net_chaos.run: replay is %S, not a replay string of this check"
            replay)
         (fun () -> mutant ~replay ())
         ())
@@ -795,8 +819,9 @@ let bursts () =
 
 (* A worker that does [n] jobs, each 1000 yields of work, and sleeps 1 ms
    between two jobs: 1001 turns a job. *)
-let jobs ?budget n () =
-  Eio_net_chaos.run ?budget @@ fun env ->
+let jobs ?(first = Fun.id) n () =
+  Eio_net_chaos.run @@ first
+  @@ fun env ->
   touch env;
   for _ = 1 to n do
     for _ = 1 to 1000 do
@@ -885,28 +910,23 @@ let test_malformed_scenario () =
       let replay = Fmt.str "net/%s/%s" h k in
       invalid_with
         (Fmt.str
-           "Eio_net_chaos.run: replay is %S, not a replay string of eio-net"
+           "Eio_net_chaos.run: replay is %S, not a replay string of this check"
            replay)
         (fun () -> mutant ~replay ())
         ())
     [
-      "read1c@0.reset+read1c@1.reset+read1c@2.reset";
-      "read1c@x.reset";
-      "read1c@0.explode";
-      "read1c@0.reset+";
-      "read1x@0.reset";
       "";
-      "read1c@0.stall-1";
-      "read1c@0.stallnan";
-      "read1c@0.stall1e308";
-      "read1c@0.short0";
-      "read1c@0.garble12";
-      "connect1c@0.hang";
-      "accept1s@0.timeout";
-      "accept1s@0.no_descriptor";
-      "read0c@0.reset";
-      "read1c@0.reset+read1c@0.eof";
-      "read1c@99999999999999999999999.reset";
+      "read:1.reset+";
+      "read:x.reset";
+      "read:0.reset";
+      "read:01.reset";
+      "read:1@0.reset";
+      "read:1@x.reset";
+      "read.reset";
+      "read:1.";
+      "net:read:1.reset";
+      "from:read:1";
+      "read:1@99999999999999999999999.reset";
     ]
 
 (* The hash of a replay may be written in either case. *)
@@ -938,7 +958,8 @@ let ops =
 (* 200 fibers on a 20 ms heartbeat for 600 s of the clock: six million
    turns, each heartbeat a wait. *)
 let heartbeats () =
-  Eio_net_chaos.run ~budget:2 @@ fun env ->
+  Eio_net_chaos.run @@ first_run
+  @@ fun env ->
   touch env;
   Eio.Fiber.all
     (List.init 200 (fun _ () ->
@@ -1200,13 +1221,15 @@ let suite =
       Alcotest.test_case "lookups in a loop that never waits are a busy loop"
         `Quick (first_fails busy lookups);
       Alcotest.test_case "a batch of jobs ended by the server is no spin" `Quick
-        (refused_with "Eio_net_chaos.run: the linear tier needs" batch);
+        (first_returned batch);
       Alcotest.test_case "a client of a server a fault broke spins" `Quick
         (error_is ops broken_server);
       Alcotest.test_case "a client that polls with a deadline" `Quick
         (Expect.passes (poll ~patience:1.0));
       Alcotest.test_case "a client that polls for ever hangs" `Quick
-        (error_is busy (poll ?patience:None));
+        (error_is
+           (busy ^ "; outage multiplied its operations, 3333331 of them")
+           (poll ?patience:None));
       Alcotest.test_case "fibers that yield while they compute meet a deadline"
         `Quick
         (Expect.passes deadline_compute);
@@ -1224,13 +1247,12 @@ let suite =
         `Quick
         (first_fails too_large bursts);
       Alcotest.test_case "9000 jobs between 1 ms sleeps are no busy loop" `Quick
-        (refused_with "Eio_net_chaos.run: the linear tier needs"
-           (jobs ~budget:2 9000));
+        (first_returned (jobs ~first:first_run 9000));
       Alcotest.test_case "20000 jobs between 1 ms sleeps are too large" `Quick
-        (first_fails too_large (jobs ~budget:2 20_000));
+        (first_fails too_large (jobs 20_000));
       Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
       Alcotest.test_case "many fibers on a heartbeat are no busy loop" `Quick
-        (refused_with "Eio_net_chaos.run: the linear tier needs" heartbeats);
+        (first_returned heartbeats);
       Alcotest.test_case "a busy loop's trace is bounded" `Quick
         test_busy_memory;
       Alcotest.test_case "a check keeps no run's operations" `Quick
@@ -1257,7 +1279,7 @@ let suite =
         test_malformed_replay;
       Alcotest.test_case "a report names a loop" `Quick test_loop_named;
       Alcotest.test_case "a scan of closed ports is not a spin" `Quick
-        (refused_with "Eio_net_chaos.run: the linear tier needs" scan);
+        (first_returned scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
         (Expect.passes (transfer 25 4096));
       Alcotest.test_case "80 clients of an echo fit the default budget" `Quick
@@ -1269,12 +1291,12 @@ let suite =
       Alcotest.test_case "a run the one-byte reads multiplied says so" `Quick
         (error_is
            "the run woke 10,000,000 times without waiting 1 ms or more: a busy \
-            loop; one-byte reads multiplied its operations, 4096 of them"
+            loop; one-byte-reads multiplied its operations, 4096 of them"
            slow_reply);
       Alcotest.test_case "a linear tier past the budget fails" `Quick
         (refused_with
-           "Eio_net_chaos.run: the linear tier needs 69 runs, more than the \
-            budget of 20"
+           "Eio_net_chaos.run: the linear tier needs more than the budget of \
+            20 runs"
            (transfer ~budget:20 25 4096));
       Alcotest.test_case "resume: correct" `Quick
         (Expect.passes (fun () -> resume ()));
@@ -1298,6 +1320,8 @@ let suite =
         test_nondeterministic;
       Alcotest.test_case "a report says where two runs differed" `Quick
         test_diverged;
+      Alcotest.test_case "runs that make other operations are refused" `Quick
+        test_different_kinds;
       Alcotest.test_case "Random draws the same in every run" `Quick test_random;
       Alcotest.test_case "a first run that fails is refused" `Quick
         test_first_run_fails;
