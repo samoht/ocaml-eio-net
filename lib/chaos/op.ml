@@ -25,14 +25,9 @@ let equal_kind (a : kind) b = a = b
 let side_name = function `Client -> "c" | `Server -> "s"
 let other : side -> side = function `Client -> `Server | `Server -> `Client
 
-let family_of_stream : Eio.Net.Sockaddr.stream -> family = function
+let family_of = function
   | `Unix _ -> `Unix
-  | `Tcp _ -> `Inet
-
-let family_of_datagram :
-    [ Eio.Net.Sockaddr.datagram | `UdpV4 | `UdpV6 ] -> family = function
-  | `Unix _ -> `Unix
-  | `Udp _ | `UdpV4 | `UdpV6 -> `Inet
+  | `Tcp _ | `Udp _ | `UdpV4 | `UdpV6 -> `Inet
 
 let is_bytes = function
   | `Read | `Write -> true

@@ -26,12 +26,8 @@ val side_name : side -> string
 val other : side -> side
 (** [other s] is the side opposite [s]. *)
 
-val family_of_stream : Eio.Net.Sockaddr.stream -> family
-(** [family_of_stream addr] is the address family of [addr]. *)
-
-val family_of_datagram :
-  [ Eio.Net.Sockaddr.datagram | `UdpV4 | `UdpV6 ] -> family
-(** [family_of_datagram addr] is the address family of [addr]. *)
+val family_of : [< Eio.Net.Sockaddr.t | `UdpV4 | `UdpV6 ] -> family
+(** [family_of addr] is the address family of [addr]. *)
 
 val is_bytes : kind -> bool
 (** [is_bytes k] is [true] iff [k] moves the bytes of a connection. *)

@@ -1126,7 +1126,7 @@ module Network = struct
 
     let connect_ t ~bind_to ~options ~sw addr =
       let ctx = t.ctx in
-      let family = Op.family_of_stream addr in
+      let family = Op.family_of addr in
       let socket, fault =
         locked ctx (fun () ->
             let offset = ctx.connects in
@@ -1181,7 +1181,7 @@ module Network = struct
       let listener =
         {
           Listener.ctx = t.ctx;
-          family = Op.family_of_stream addr;
+          family = Op.family_of addr;
           l :> [ `Generic ] Eio.Net.listening_socket_ty Eio.Resource.t;
           held = [];
           closed = false;
@@ -1199,8 +1199,7 @@ module Network = struct
 
     let datagram_socket t ~reuse_addr ~reuse_port ~sw addr =
       forward t.ctx Law.Datagram_socket;
-      Datagram.v ~sw t.ctx
-        ~family:(Op.family_of_datagram addr)
+      Datagram.v ~sw t.ctx ~family:(Op.family_of addr)
         (Eio.Net.datagram_socket ~reuse_addr ~reuse_port ~sw t.net addr
           :> Datagram.socket)
 
