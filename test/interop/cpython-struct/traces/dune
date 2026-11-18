@@ -11,14 +11,16 @@
   (setenv
    VENV_DIR
    .venv
-   (progn
-    (run bash ../scripts/generate.sh .)
-    (run
-     bash
-     ../../../provenance/write.sh
-     test/interop/cpython-struct
-     scripts/probe.sh
-     scripts/generate.sh
-     scripts/generate.py
-     --
-     %{targets})))))
+   (run
+    bash
+    ../../../provenance/write.sh
+    test/interop/cpython-struct
+    scripts/probe.sh
+    scripts/generate.sh
+    scripts/generate.py
+    --
+    %{targets}
+    --
+    bash
+    ../scripts/generate.sh
+    .))))

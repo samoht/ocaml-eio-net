@@ -17,14 +17,17 @@
   (source_tree ../scripts)
   ../../../provenance/write.sh)
  (action
-  (progn
-   (run bash ../scripts/generate.sh . ../scripts/record.exe)
-   (run
-    bash
-    ../../../provenance/write.sh
-    test/interop/kernel
-    scripts/probe.sh
-    scripts/generate.sh
-    scripts/record.ml
-    --
-    %{targets}))))
+  (run
+   bash
+   ../../../provenance/write.sh
+   test/interop/kernel
+   scripts/probe.sh
+   scripts/generate.sh
+   scripts/record.ml
+   --
+   %{targets}
+   --
+   bash
+   ../scripts/generate.sh
+   .
+   ../scripts/record.exe)))

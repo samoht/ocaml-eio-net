@@ -11,15 +11,18 @@
   ../../kernel/scripts/probe.sh
   ../../../provenance/write.sh)
  (action
-  (progn
-   (run bash ../scripts/generate.sh . ../scripts/measure.exe)
-   (run
-    bash
-    ../../../provenance/write.sh
-    test/interop/silent-peer
-    ../kernel/scripts/probe.sh
-    scripts/generate.sh
-    scripts/measure.ml
-    scripts/silence_stubs.c
-    --
-    %{targets}))))
+  (run
+   bash
+   ../../../provenance/write.sh
+   test/interop/silent-peer
+   ../kernel/scripts/probe.sh
+   scripts/generate.sh
+   scripts/measure.ml
+   scripts/silence_stubs.c
+   --
+   %{targets}
+   --
+   bash
+   ../scripts/generate.sh
+   .
+   ../scripts/measure.exe)))
