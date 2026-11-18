@@ -66,7 +66,7 @@ type env = Eio_chaos.env
 (** {1:program Testing a program} *)
 
 val run :
-  ?os:[< Eio_chaos.os ] ->
+  ?os:[< `Linux | `Macos ] ->
   ?budget:int ->
   ?seed:int ->
   ?replay:string ->
@@ -178,7 +178,7 @@ val is_outage : env -> bool
 (** {1:device Testing a network} *)
 
 val device :
-  ?os:[< Eio_chaos.os ] ->
+  ?os:[< `Linux | `Macos ] ->
   ?under:Eio_chaos.part list ->
   ?budget:int ->
   ?seed:int ->
@@ -427,7 +427,7 @@ module Fault : sig
 end
 
 val wrap :
-  ?os:[< Eio_chaos.os ] ->
+  ?os:[< `Linux | `Macos ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   _ Eio.Net.t ->
@@ -472,7 +472,7 @@ val wrap :
     each operation does what it does on [net], but for that guard. *)
 
 val pair :
-  ?os:[< Eio_chaos.os ] ->
+  ?os:[< `Linux | `Macos ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
@@ -677,7 +677,7 @@ module Private : sig
       holds, as {!val-device} replays the traces of [os] on it. *)
 
   val device_in_loop :
-    ?os:[< Eio_chaos.os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
+    ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
   (** [device_in_loop ~os net] is {!val-device} with each sequence in the
       caller's event loop, for the host's own network, which only the host's
       event loop drives: the test of the kernel's traces runs it there. *)

@@ -112,7 +112,7 @@ let pp_op ppf op =
 (* {1 The part} *)
 
 type t = {
-  mutable os : Eio_chaos.os;
+  mutable os : [ `Linux | `Macos ];
   mutable chaos : Eio_chaos.t;
   mutable sw : Eio.Switch.t option;
   mutable clock : float Eio.Time.clock_ty Eio.Resource.t option;
@@ -191,8 +191,14 @@ let fresh t =
       (Eio_net_mem.Private.v ~os:t.os ~capacity:(capacity t) ~clock:(get t.mono)
          ~sw:(get t.sw) ())
 
+(* No recording of Windows' network grounds a model of it: a run under
+   Windows that holds a network is refused. *)
 let start t ~os ~sw ~clock ~mono_clock chaos =
-  t.os <- os;
+  t.os <-
+    (match os with
+    | (`Linux | `Macos) as os -> os
+    | `Windows ->
+        invalid_arg "Eio_net_chaos: the network has no model of Windows");
   t.chaos <- chaos;
   t.sw <- Some sw;
   t.clock <- Some clock;

@@ -1560,9 +1560,17 @@ let test_unix_hang_stops_write () =
   Eio.Time.sleep env#clock 0.01;
   Alcotest.(check string) "its own shutdown ends it" "reset" !wrote
 
+(* Windows' network has no model: a run under Windows that holds one is
+   refused, before the program runs. *)
+let test_windows_refused () =
+  match Eio_chaos.run ~os:`Windows [ Eio_net_chaos.network () ] ignore with
+  | () -> Alcotest.fail "a network ran under Windows"
+  | exception Invalid_argument _ -> ()
+
 let suite =
   ( "eio_net_chaos",
     [
+      Alcotest.test_case "no network under Windows" `Quick test_windows_refused;
       Alcotest.test_case "Short cuts each read to its length" `Quick
         test_flow_short;
       Alcotest.test_case "tiny buffers never raise macOS's AF_UNIX queue" `Quick

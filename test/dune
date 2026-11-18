@@ -6,6 +6,7 @@
   eio-net.addr
   eio-net.mem
   eio-net.chaos
+  eio-chaos
   eio
   eio.mock
   eio.unix
