@@ -40,9 +40,3 @@ val of_connected_datagram_fd :
     @raise Invalid_argument
       if [max_length] or [max_batch] is not positive, or if [max_batch] exceeds
       [64]. *)
-
-val widen_datagram_buffers : Unix.file_descr -> unit
-(** [widen_datagram_buffers fd] sets [SO_SNDBUF] to 2 MiB and [SO_RCVBUF] to 4
-    MiB on the datagram descriptor [fd]. A kernel may clamp either to its
-    configured maximum, and a setting it refuses is left as it was: the call
-    never raises. *)

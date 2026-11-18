@@ -17,12 +17,6 @@ let eio f x =
    closes: once it has, it raises Eio's error for a closed descriptor. *)
 let use fd f = Eio_unix.Fd.use_exn "Eio_net_unix.Frame" fd f
 
-let widen_datagram_buffers fd =
-  let send = 2 * 1024 * 1024 in
-  let recv = send * 2 in
-  (try Unix.setsockopt_int fd Unix.SO_SNDBUF send with Unix.Unix_error _ -> ());
-  try Unix.setsockopt_int fd Unix.SO_RCVBUF recv with Unix.Unix_error _ -> ()
-
 (* [check_length ~max_length len] raises the {!Eio_net.Datagram.Too_long} error
    if a datagram of [len] bytes is longer than [max_length]. *)
 let check_length ~max_length len =
