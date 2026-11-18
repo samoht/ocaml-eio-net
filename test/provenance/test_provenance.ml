@@ -5,7 +5,8 @@
    traces, the revision, date, user and host they were recorded at, and pins
    with MD5s the generator files that decide the traces ("input: PATH MD5")
    and every trace ("trace: PATH MD5"), paths relative to the oracle
-   directory. *)
+   directory. A trace two hosts record in turn, each its own columns, keeps
+   the other host's pins as "HOST.input: PATH MD5", which must hold too. *)
 
 let required =
   [ "generator"; "regenerate"; "revision"; "recorded"; "uid"; "host" ]
@@ -21,14 +22,14 @@ let fields file =
             Some (String.sub line 0 i, String.trim value)
         | None -> Fmt.failwith "%s: bad line %S" file line)
 
-let pins file fields key =
+let pins file fields is_key =
   List.filter_map
     (fun (k, v) ->
-      if k <> key then None
+      if not (is_key k) then None
       else
         match String.split_on_char ' ' v with
         | [ path; md5 ] -> Some (path, md5)
-        | _ -> Fmt.failwith "%s: bad %s %S" file key v)
+        | _ -> Fmt.failwith "%s: bad %s %S" file k v)
     fields
 
 let md5 file = Digest.to_hex (Digest.file file)
@@ -57,8 +58,10 @@ let check dir () =
       | _ -> Alcotest.failf "%s names no %s" file key)
     required;
   let regen = "regenerate them with " ^ List.assoc "regenerate" fields in
-  let inputs = pins file fields "input"
-  and recorded = pins file fields "trace" in
+  let inputs =
+    pins file fields (fun k ->
+        k = "input" || String.ends_with ~suffix:".input" k)
+  and recorded = pins file fields (String.equal "trace") in
   if inputs = [] then Alcotest.failf "%s pins no input" file;
   check_pins dir ~regen ~what:"input" inputs;
   let held =

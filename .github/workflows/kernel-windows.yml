@@ -1,0 +1,43 @@
+name: Kernel traces (Windows)
+
+# Records the windows column of test/interop/kernel/traces through
+# eio_windows, and uploads the traces as the artifact kernel-windows: see
+# test/interop/kernel/README.md.
+on:
+  workflow_dispatch:
+  push:
+    branches: [r-windows]
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    name: Record through eio_windows
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      # The provenance pins its inputs by MD5: check them out as committed.
+      - run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '5.4'
+
+      # The recorder needs eio-net.mem, not the whole package, which is not
+      # available on Windows.
+      - run: opam install -y dune eio.1.7 eio_windows.1.7 hermetic cstruct fmt mtime ipaddr
+
+      # About 45 minutes; a hang the recorder's bounds miss ends here.
+      - run: opam exec -- dune build @test/interop/kernel/regen-traces
+        timeout-minutes: 90
+        env:
+          REGEN: '1'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-windows
+          path: test/interop/kernel/traces/

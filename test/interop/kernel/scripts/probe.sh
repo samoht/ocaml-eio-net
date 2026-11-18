@@ -1,8 +1,10 @@
 #!/bin/bash
-# Prints, as "key: value" lines, the two kernels generate.sh records: the Mac
-# it runs on and the Linux of Docker's VM, as a container of the image
-# generate.sh pins sees it, with the settings the traces depend on. A setting
-# the kernel does not have reads "absent", one it refuses to show "unreadable".
+# Prints, as "key: value" lines, the kernels generate.sh records: the Mac it
+# runs on and the Linux of Docker's VM, as a container of the image
+# generate.sh pins sees it, with the settings the traces depend on, and, kept
+# from the provenance before, where the Windows column was recorded. A
+# setting the kernel does not have reads "absent", one it refuses to show
+# "unreadable".
 set -euo pipefail
 dir="$(dirname "$0")"
 image="$(sed -n 's/^image="\(.*\)"$/\1/p' "$dir/generate.sh")"
@@ -33,3 +35,5 @@ docker run --rm --network none "$image" bash -euc '
     if [ -r "$f" ]; then v="$(tr "\t" " " <"$f")"; else v=absent; fi
     echo "linux.$n: $v"
   done'
+bash "$dir/carry.sh" "${DUNE_SOURCEROOT:?run through dune}/test/interop/kernel/traces/provenance" \
+  windows "CYGWIN|MINGW|MSYS" "eio_windows: |windows[.:]"

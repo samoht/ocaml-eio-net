@@ -1,17 +1,28 @@
 (* Writes the module of the kernel's traces from their CSV files, given as
-   NAME=FILE: each sequence's answers as an index into the distinct ones, and
-   each scenario's answers. *)
+   NAME=FILE, their linux and macos columns found by name: each sequence's
+   answers as an index into the distinct ones, and each scenario's answers. *)
 
 let rows file =
-  match In_channel.with_open_text file In_channel.input_lines with
-  | "ops,linux,macos" :: rows ->
+  match In_channel.with_open_bin file In_channel.input_lines with
+  | header :: rows ->
+      let names = String.split_on_char ',' header in
+      let index name =
+        let rec go i = function
+          | [] -> Fmt.failwith "%s: no column %S" file name
+          | n :: _ when n = name -> i
+          | _ :: r -> go (i + 1) r
+        in
+        go 0 names
+      in
+      let linux = index "linux" and macos = index "macos" in
       List.map
         (fun line ->
-          match String.split_on_char ',' line with
-          | [ _; linux; macos ] -> (linux, macos)
-          | _ -> Fmt.failwith "%s: bad row %S" file line)
+          let cells = String.split_on_char ',' line in
+          if List.compare_lengths cells names <> 0 then
+            Fmt.failwith "%s: bad row %S" file line;
+          (List.nth cells linux, List.nth cells macos))
         rows
-  | _ -> Fmt.failwith "%s: not a trace" file
+  | [] -> Fmt.failwith "%s: not a trace" file
 
 let () =
   let args = List.tl (Array.to_list Sys.argv) in

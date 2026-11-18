@@ -1,3 +1,12 @@
 (executable
  (name record)
- (libraries eio_net_kernel eio eio_posix fmt))
+ (libraries
+  eio_net_kernel
+  eio
+  eio.unix
+  fmt
+  (select
+   backend.ml
+   from
+   (eio_windows -> backend.windows.ml)
+   (eio_posix -> backend.posix.ml))))

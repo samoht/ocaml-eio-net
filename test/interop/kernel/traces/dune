@@ -2,7 +2,9 @@
  (alias regen)
  (mode promote)
  (enabled_if
-  (= %{env:REGEN=0} 1))
+  (and
+   (= %{env:REGEN=0} 1)
+   (= %{os_type} Unix)))
  (targets
   tcp4.csv
   tcp6.csv
@@ -24,10 +26,48 @@
    scripts/probe.sh
    scripts/generate.sh
    scripts/record.ml
+   scripts/backend.posix.ml
    --
    %{targets}
    --
    bash
    ../scripts/generate.sh
+   .
+   ../scripts/record.exe)))
+
+(rule
+ (alias regen)
+ (mode promote)
+ (enabled_if
+  (and
+   (= %{env:REGEN=0} 1)
+   (= %{os_type} Win32)))
+ (targets
+  tcp4.csv
+  tcp6.csv
+  unix-stream.csv
+  udp4.csv
+  udp6.csv
+  unix-dgram.csv
+  scenarios.csv
+  provenance)
+ (deps
+  ../scripts/record.exe
+  (source_tree ../scripts)
+  ../../../provenance/write.sh)
+ (action
+  (run
+   bash
+   ../../../provenance/write.sh
+   test/interop/kernel
+   scripts/probe-windows.sh
+   scripts/generate-windows.sh
+   scripts/record.ml
+   scripts/backend.windows.ml
+   --
+   %{targets}
+   --
+   bash
+   ../scripts/generate-windows.sh
    .
    ../scripts/record.exe)))

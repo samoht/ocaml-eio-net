@@ -1,8 +1,10 @@
 # Kernel traces
 
-`traces/*.csv` hold what Linux and macOS answer to every operation sequence
-and scenario of [`Eio_net_kernel`](../../../lib/kernel/eio_net_kernel.mli),
-recorded through `eio_posix`: one row per sequence, a column per kernel.
+`traces/*.csv` hold what Linux, macOS and Windows answer to every operation
+sequence and scenario of
+[`Eio_net_kernel`](../../../lib/kernel/eio_net_kernel.mli), recorded through
+`eio_posix` on Linux and macOS and through `eio_windows` on Windows: one row
+per sequence, a column per kernel.
 `eio-net.chaos` compiles them in, with
 [`lib/chaos/gen`](../../../lib/chaos/gen/gen.ml), and `Eio_net_chaos.device`
 replays them on any network. The test runs it on `eio-net.mem`, and
@@ -12,24 +14,51 @@ replays them on any network. The test runs it on `eio-net.mem`, and
 dune build @test/interop/kernel/host/host-device
 ```
 
-[`scripts/generate.sh`](scripts/generate.sh) records them on a Mac: macOS
-natively, and Linux in Docker, in the `ocaml/opam` image it pins by digest,
-with IPv6 enabled on loopback and, for the scenarios that run out of ports,
-`net.ipv4.ip_local_port_range` narrowed to `40000 40019`. To regenerate, on
-macOS with Docker, outside any sandbox that keeps it from the network or the
-Docker socket:
+## Regenerate
+
+Two hosts record the traces, each its own columns, and keep the others from
+the traces before: `record merge` writes a row per sequence or scenario, and
+an answer no host recorded reads `not recorded`. Each column is found by its
+name: `linux`, `macos` and `windows eio_windows`.
+
+On macOS, with Docker, outside any sandbox that keeps it from the network or
+the Docker socket:
 
 ```sh
 REGEN=1 dune build @test/interop/kernel/regen-traces
 ```
 
+[`scripts/generate.sh`](scripts/generate.sh) records macOS natively, and
+Linux in Docker, in the `ocaml/opam` image it pins by digest, with Eio 1.7
+from the opam-repository commit it pins, IPv6 enabled on loopback and, for
+the scenarios that run out of ports, `net.ipv4.ip_local_port_range` narrowed
+to `40000 40019`.
+
+On Windows the same command runs
+[`scripts/generate-windows.sh`](scripts/generate-windows.sh), which records
+through eio_windows. The workflow
+[`kernel-windows.yml`](../../../.github/workflows/kernel-windows.yml) runs it
+on GitHub's `windows-latest` with Eio 1.7 and uploads `traces/` as the
+artifact `kernel-windows`, to copy into the tree before the Mac's turn. The
+runner has other interfaces and its ephemeral range cannot be narrowed below
+255 ports, so the scenarios that send off loopback or run out of ports read
+`not recorded` there. eio_windows never completes a refused TCP connect, so
+a TCP operation answers `timeout` after 5 s and ends its sequence.
+
+A change to the sequences, the scenarios or the recorder means recording on
+both hosts: Windows first, then macOS.
+
 ## Provenance
 
 [`traces/provenance`](traces/provenance) says where the traces come from: the
-revision, date, user and host, the macOS version, the Linux kernel of Docker's
-VM, the settings the traces depend on (from
-[`scripts/probe.sh`](scripts/probe.sh)), and the MD5 of each trace and of
-`generate.sh` and `record.ml`. Regenerating rewrites it.
+revision, date, user and host of the last recording, the macOS version, the
+Linux kernel of Docker's VM and the settings they depend on (from
+[`scripts/probe.sh`](scripts/probe.sh)), the Windows version, runner image,
+TCP settings and eio_windows's version (from
+[`scripts/probe-windows.sh`](scripts/probe-windows.sh)), and the MD5 of each
+trace and of the scripts that recorded it. A recording keeps the other
+host's lines, its revision, date and pins as `posix.*` or `windows.*`
+([`scripts/carry.sh`](scripts/carry.sh)).
 
 [`test/provenance`](../../provenance) fails when a trace or a pinned input
 differs from what the file records. `Eio_net_kernel` is not pinned: the replay

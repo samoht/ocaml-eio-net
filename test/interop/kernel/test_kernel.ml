@@ -15,8 +15,8 @@ let first_column file =
   |> List.tl
   |> List.map (fun line ->
       match String.split_on_char ',' line with
-      | [ ops; _; _ ] -> ops
-      | _ -> Fmt.failwith "%s: bad row %S" file line)
+      | ops :: _ -> ops
+      | [] -> Fmt.failwith "%s: bad row %S" file line)
 
 let split = function "" -> [] | s -> String.split_on_char ';' s
 

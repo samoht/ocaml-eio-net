@@ -148,12 +148,18 @@ let outcome = function
 
 let rows () =
   let file = Filename.concat ".." (Filename.concat "traces" "scenarios.csv") in
-  In_channel.with_open_text file In_channel.input_lines
-  |> List.tl
-  |> List.map (fun line ->
-      match String.split_on_char ',' line with
-      | [ name; linux; macos ] -> (name, linux, macos)
-      | _ -> Fmt.failwith "%s: bad row %S" file line)
+  match In_channel.with_open_text file In_channel.input_lines with
+  | [] -> Fmt.failwith "%s: empty" file
+  | header :: lines ->
+      let names = String.split_on_char ',' header in
+      List.map
+        (fun line ->
+          let cells = String.split_on_char ',' line in
+          if List.compare_lengths cells names <> 0 then
+            Fmt.failwith "%s: bad row %S" file line;
+          let cell c = List.assoc c (List.combine names cells) in
+          (cell "ops", cell "linux", cell "macos"))
+        lines
 
 let sub_from s i = String.sub s i (String.length s - i)
 

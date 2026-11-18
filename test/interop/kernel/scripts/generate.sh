@@ -1,6 +1,8 @@
 #!/bin/bash
-# Records the kernel's traces through eio_posix: macOS natively, so this runs
-# on a Mac, and Linux in Docker, in the image pinned below.
+# Records the kernel's linux and macos columns through eio_posix: macOS
+# natively, so this runs on a Mac, and Linux in Docker, in the image pinned
+# below. The column Windows recorded, generate-windows.sh, is kept from the
+# traces before.
 #   generate.sh OUT_DIR RECORD_EXE
 set -euo pipefail
 [ "$(uname -s)" = Darwin ] || {
@@ -71,5 +73,6 @@ docker run --rm --network none \
 "$record" overlay "$work/both.linux" "$work/ports.linux" >"$work/scenarios.linux"
 
 for t in $traces; do
-  "$record" merge "$work/$t.linux" "$work/$t.macos" >"$out/$t.csv"
+  "$record" merge "$t" "$src/test/interop/kernel/traces/$t.csv" \
+    linux="$work/$t.linux" macos="$work/$t.macos" >"$out/$t.csv"
 done
