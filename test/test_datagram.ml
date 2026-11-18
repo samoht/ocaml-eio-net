@@ -31,13 +31,13 @@ let test_source_round_trip () =
   Alcotest.(check string) "request arrives whole" "ping" payload;
   Alcotest.(check bool)
     "source is the sender's bound address" true
-    (Eio_net_addr.equal_datagram source addr_a);
+    (Eio_net_addr.equal_sockaddr source addr_a);
   send b ~dst:source "pong";
   let reply_source, reply = Eio_net.Datagram.recv a in
   Alcotest.(check string) "reply reaches the source" "pong" reply;
   Alcotest.(check bool)
     "reply comes from the responder" true
-    (Eio_net_addr.equal_datagram reply_source addr_b)
+    (Eio_net_addr.equal_sockaddr reply_source addr_b)
 
 (* On eio_posix: eio_linux refuses a send to a Unix-domain address with EINVAL
    until ocaml-uring sets msg_namelen to the size of the address it is given
@@ -62,13 +62,13 @@ let test_unix_source_round_trip () =
   Alcotest.(check string) "request arrives whole" "ping" payload;
   Alcotest.(check bool)
     "source is the sender's path" true
-    (Eio_net_addr.equal_datagram source (`Unix path_a));
+    (Eio_net_addr.equal_sockaddr source (`Unix path_a));
   send b ~dst:source "pong";
   let reply_source, reply = Eio_net.Datagram.recv a in
   Alcotest.(check string) "reply reaches the source" "pong" reply;
   Alcotest.(check bool)
     "reply comes from the responder" true
-    (Eio_net_addr.equal_datagram reply_source (`Unix path_b))
+    (Eio_net_addr.equal_sockaddr reply_source (`Unix path_b))
 
 let test_default_destination () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->

@@ -29,22 +29,22 @@ let test_sockaddr () =
   Alcotest.(check (option (pair ip int)))
     "a stream address"
     (Some (a, 9997))
-    (Eio_net_addr.of_stream (Eio_net_addr.tcp a 9997));
+    (Eio_net_addr.of_sockaddr (Eio_net_addr.tcp a 9997));
   Alcotest.(check (option (pair ip int)))
     "a datagram address"
     (Some (a, 53))
-    (Eio_net_addr.of_datagram (Eio_net_addr.udp a 53));
+    (Eio_net_addr.of_sockaddr (Eio_net_addr.udp a 53));
   Alcotest.(check (option (pair ip int)))
     "a unix socket names no address" None
-    (Eio_net_addr.of_stream (`Unix "/tmp/agent.sock"))
+    (Eio_net_addr.of_sockaddr (`Unix "/tmp/agent.sock"))
 
 (* A comparison of the ports alone or of the hosts alone answers one of these
    wrongly. *)
-let test_equal_stream () =
+let test_equal_stream_sockaddr () =
   let a = Ipaddr.of_string_exn "192.0.2.7"
   and b = Ipaddr.of_string_exn "192.0.2.8" in
   let check name want x y =
-    Alcotest.(check bool) name want (Eio_net_addr.equal_stream x y)
+    Alcotest.(check bool) name want (Eio_net_addr.equal_sockaddr x y)
   in
   check "the same address" true (Eio_net_addr.tcp a 1) (Eio_net_addr.tcp a 1);
   check "another host" false (Eio_net_addr.tcp a 1) (Eio_net_addr.tcp b 1);
@@ -53,18 +53,21 @@ let test_equal_stream () =
   check "the same path" true (`Unix "/a") (`Unix "/a");
   check "another path" false (`Unix "/a") (`Unix "/b")
 
-let test_equal_datagram () =
+let test_equal_datagram_sockaddr () =
   let a = Ipaddr.of_string_exn "127.0.0.1"
   and b = Ipaddr.of_string_exn "127.0.0.2" in
   let check name want x y =
-    Alcotest.(check bool) name want (Eio_net_addr.equal_datagram x y)
+    Alcotest.(check bool) name want (Eio_net_addr.equal_sockaddr x y)
   in
   check "the same address" true (Eio_net_addr.udp a 9000)
     (`Udp (Eio.Net.Ipaddr.of_raw "\127\000\000\001", 9000));
   check "another port" false (Eio_net_addr.udp a 9000) (Eio_net_addr.udp a 9001);
   check "another host" false (Eio_net_addr.udp a 9000) (Eio_net_addr.udp b 9000);
   check "the same path" true (`Unix "/tmp/a") (`Unix "/tmp/a");
-  check "a path and a port" false (Eio_net_addr.udp a 9000) (`Unix "/tmp/a")
+  check "a path and a port" false (Eio_net_addr.udp a 9000) (`Unix "/tmp/a");
+  check "a stream and a datagram address" false
+    (Eio_net_addr.tcp a 9000 :> Eio.Net.Sockaddr.t)
+    (Eio_net_addr.udp a 9000 :> Eio.Net.Sockaddr.t)
 
 let suite =
   ( "eio_net_addr",
@@ -72,6 +75,6 @@ let suite =
       Alcotest.test_case "roundtrip" `Quick test_roundtrip;
       Alcotest.test_case "octets" `Quick test_octets;
       Alcotest.test_case "sockaddr" `Quick test_sockaddr;
-      Alcotest.test_case "stream equality" `Quick test_equal_stream;
-      Alcotest.test_case "datagram equality" `Quick test_equal_datagram;
+      Alcotest.test_case "stream equality" `Quick test_equal_stream_sockaddr;
+      Alcotest.test_case "datagram equality" `Quick test_equal_datagram_sockaddr;
     ] )
