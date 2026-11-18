@@ -228,10 +228,10 @@ let test_forward_sheds_within_its_pool () =
   Eio.Switch.run @@ fun sw ->
   let mem = Eio_net_mem.v ~sw () in
   let upstream = mem_echo ~sw mem in
-  let pool = Eio_net_accept.pool () in
+  let pool = Eio_net.Accept.pool () in
   let server = Eio.Net.listen ~sw ~backlog:16 mem (loopback 0) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      Eio_net_accept.run ~pool ~max_connections:4 server (fun _head flow _ ->
+      Eio_net.Accept.run ~pool ~max_connections:4 server (fun _head flow _ ->
           ignore (Eio.Buf_read.(parse_exn take_all) ~max_size:64 flow)));
   let shed, shed_r = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->

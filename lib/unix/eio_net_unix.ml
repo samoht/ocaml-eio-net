@@ -24,4 +24,4 @@ let classify_accept = function
   | Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (e, _, _)), _)
     when List.mem e pending ->
       Some `Aborted
-  | e -> Eio_net_accept.classify e
+  | e -> Eio_net.Accept.classify e

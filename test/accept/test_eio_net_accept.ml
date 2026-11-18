@@ -13,13 +13,13 @@ let answer =
 let test_portable () =
   Alcotest.(check (option answer))
     "an aborted connection" (Some `Aborted)
-    (Eio_net_accept.classify aborted);
+    (Eio_net.Accept.classify aborted);
   Alcotest.(check (option answer))
     "no descriptor is a backend error" None
-    (Eio_net_accept.classify no_descriptor);
+    (Eio_net.Accept.classify no_descriptor);
   Alcotest.(check (option answer))
     "an exception it does not name" None
-    (Eio_net_accept.classify Exit)
+    (Eio_net.Accept.classify Exit)
 
 let suite =
   ( "eio_net_accept",

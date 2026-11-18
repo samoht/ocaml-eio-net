@@ -769,7 +769,7 @@ let test_classify_accept () =
       Alcotest.(check string)
         (Unix.error_message e ^ ", portably")
         portable
-        (answer (Eio_net_accept.classify exn)))
+        (answer (Eio_net.Accept.classify exn)))
     [
       (Unix.ECONNABORTED, "aborted", "aborted");
       (Unix.EMFILE, "descriptors", "none");

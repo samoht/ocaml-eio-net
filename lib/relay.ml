@@ -21,9 +21,9 @@ let forward ?on_error ?pool ?classify ~sw ~net ~max_connections ~listen ~connect
   (* A daemon fiber: the listener must not hold the switch open once the
      caller's own work ends. A relay has no head: it serves from the accept. *)
   Eio.Fiber.fork_daemon ~sw (fun () ->
-      Eio_net_accept.run ?on_error ?pool ?classify ~max_connections socket
+      Accept.run ?on_error ?pool ?classify ~max_connections socket
         (fun head client _addr ->
-          Eio_net_accept.complete head;
+          Accept.complete head;
           Eio.Switch.run @@ fun conn_sw ->
           let upstream = Eio.Net.connect ~sw:conn_sw net connect in
           splice client upstream));

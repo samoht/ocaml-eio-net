@@ -8,8 +8,10 @@
     descriptor, with batched system calls. {!Datagram} is the addressed channel
     over a datagram socket: each receive also gives the source.
 
-    {!Relay} forwards stream connections between two addresses, and {!Progress}
-    ends a transfer that moves too few bytes a second. *)
+    {!Accept} is the loop a listener serves its connections with, holding at
+    most a given number of them. {!Relay} forwards stream connections between
+    two addresses, and {!Progress} ends a transfer that moves too few bytes a
+    second. *)
 
 module Frame = Frame
 (** Frame channels. *)
@@ -19,6 +21,9 @@ module Framing = Framing
 
 module Datagram = Datagram
 (** Addressed datagram channels. *)
+
+module Accept = Accept
+(** Accept loops bounded by their connections. *)
 
 module Relay = Relay
 (** Stream relays. *)

@@ -103,11 +103,11 @@ let slow_listener ~sw net =
 let line_server ?(served = ignore) head flow _addr =
   let reader = Eio.Buf_read.of_flow ~max_size:4096 flow in
   let rec next () =
-    Eio_net_accept.reading head (fun () -> Eio.Buf_read.buffered_bytes reader);
+    Eio_net.Accept.reading head (fun () -> Eio.Buf_read.buffered_bytes reader);
     match Eio.Buf_read.line reader with
     | exception End_of_file -> ()
     | line ->
-        Eio_net_accept.complete head;
+        Eio_net.Accept.complete head;
         served line;
         Eio.Flow.copy_string ("ok " ^ line ^ "\n") flow;
         next ()
@@ -118,12 +118,12 @@ let line_server ?(served = ignore) head flow _addr =
    handshake reads its records: the head's progress is the bytes the layer
    read off the socket. *)
 let layered_server head flow _addr =
-  let flow = Eio_net_accept.reading_flow head flow in
+  let flow = Eio_net.Accept.reading_flow head flow in
   let reader = Eio.Buf_read.of_flow ~max_size:4096 flow in
   match Eio.Buf_read.line reader with
   | exception End_of_file -> ()
   | line ->
-      Eio_net_accept.complete head;
+      Eio_net.Accept.complete head;
       Eio.Flow.copy_string ("ok " ^ line ^ "\n") flow
 
 (* A peer that sends [data], ends its side and reads the answer to its end. *)
@@ -175,7 +175,7 @@ let test_aborted_accept_is_followed_by_the_next () =
       ]
   in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~max_connections:4 ~on_error listening
+      Eio_net.Accept.run ~max_connections:4 ~on_error listening
         (line_server ?served:None));
   Alcotest.(check string)
     "the fresh peer is answered" "ok fresh\n" (exchange net "fresh\n");
@@ -208,7 +208,7 @@ let pressure_sheds_the_least_progressed ?(server = line_server ?served:None)
               | `Descriptors -> [ (pressed, no_descriptor ()) ])
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net_accept.run ~classify ~max_connections ~on_error listening
+              Eio_net.Accept.run ~classify ~max_connections ~on_error listening
                 server);
           for i = 0 to n - 1 do
             stall ~sw:clients net
@@ -245,7 +245,7 @@ let descriptors_are_shared_across_loops n () =
   let pressed, press = Eio.Promise.create () in
   let ended = Array.make n false in
   let last_ended, last_ended_r = Eio.Promise.create () in
-  let pool = Eio_net_accept.pool () in
+  let pool = Eio_net.Accept.pool () in
   Eio.Switch.run (fun clients ->
       Eio.Switch.run (fun scope ->
           let first = scripted ~sw:scope net [] in
@@ -253,10 +253,10 @@ let descriptors_are_shared_across_loops n () =
             scripted ~addr:other ~sw:scope net [ (pressed, no_descriptor ()) ]
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net_accept.run ~pool ~classify ~max_connections:(10 * n)
+              Eio_net.Accept.run ~pool ~classify ~max_connections:(10 * n)
                 ~on_error first (line_server ?served:None));
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net_accept.run ~pool ~classify ~max_connections:(10 * n)
+              Eio_net.Accept.run ~pool ~classify ~max_connections:(10 * n)
                 ~on_error second (line_server ?served:None));
           for i = 0 to n - 1 do
             stall ~sw:clients net
@@ -299,7 +299,7 @@ let descriptors_are_not_shared_without_a_pool n () =
               [ (Eio.Promise.create_resolved (), no_descriptor ()) ]
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net_accept.run ~classify ~max_connections:(10 * n) ~on_error
+              Eio_net.Accept.run ~classify ~max_connections:(10 * n) ~on_error
                 first (line_server ?served:None));
           for i = 0 to n - 1 do
             stall ~sw:clients net
@@ -309,7 +309,7 @@ let descriptors_are_not_shared_without_a_pool n () =
           settle n;
           let second =
             Eio.Fiber.fork_promise ~sw:scope (fun () ->
-                Eio_net_accept.run ~classify ~max_connections:(10 * n) ~on_error
+                Eio_net.Accept.run ~classify ~max_connections:(10 * n) ~on_error
                   second (line_server ?served:None))
           in
           settle n;
@@ -336,7 +336,7 @@ let test_no_descriptor_and_none_held_raises () =
     scripted ~sw net [ (Eio.Promise.create_resolved (), no_descriptor ()) ]
   in
   match
-    Eio_net_accept.run ~classify ~max_connections:4 ~on_error:ignore listening
+    Eio_net.Accept.run ~classify ~max_connections:4 ~on_error:ignore listening
       (line_server ?served:None)
   with
   | (_ : unit) -> Alcotest.fail "the loop returned"
@@ -358,7 +358,7 @@ let test_no_classifier_reads_the_portable_errors () =
   let listening = scripted ~sw:scope net [ (pressed, no_descriptor ()) ] in
   let loop =
     Eio.Fiber.fork_promise ~sw:scope (fun () ->
-        Eio_net_accept.run ~max_connections:4 ~on_error:ignore listening
+        Eio_net.Accept.run ~max_connections:4 ~on_error:ignore listening
           (line_server ?served:None))
   in
   stall ~sw:scope net "x" ~on_end:ignore;
@@ -372,7 +372,7 @@ let test_no_classifier_reads_the_portable_errors () =
         (classify e = Some `Descriptors);
       Alcotest.(check bool)
         "a backend error to the portable classifier" true
-        (Eio_net_accept.classify e = None)
+        (Eio_net.Accept.classify e = None)
   | Some (Error e) -> raise e
   | Some (Ok ()) -> Alcotest.fail "the loop returned"
   | None -> Alcotest.fail "the loop read EMFILE with no classifier handed"
@@ -400,11 +400,11 @@ let test_each_loop_reads_failures_with_its_classifier () =
   let first = scripted ~sw:scope net (failing ()) in
   let second = scripted ~addr:other ~sw:scope net (failing ()) in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~classify:lenient ~max_connections:4 ~on_error first
+      Eio_net.Accept.run ~classify:lenient ~max_connections:4 ~on_error first
         (line_server ?served:None));
   let strict =
     Eio.Fiber.fork_promise ~sw:scope (fun () ->
-        Eio_net_accept.run ~classify ~max_connections:4 ~on_error second
+        Eio_net.Accept.run ~classify ~max_connections:4 ~on_error second
           (line_server ?served:None))
   in
   Alcotest.(check string)
@@ -430,7 +430,7 @@ let test_a_connection_ending_during_its_shedding () =
   Eio.Switch.run @@ fun scope ->
   let listening = slow_listener ~sw:scope net in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~max_connections:1 ~on_error listening
+      Eio_net.Accept.run ~max_connections:1 ~on_error listening
         (line_server ?served:None));
   stall ~sw:clients net "x" ~on_end:(fun () -> shed := true);
   settle 1;
@@ -452,7 +452,7 @@ let complete_heads_are_not_shed n () =
   Eio.Switch.run @@ fun scope ->
   let listening = scripted ~sw:scope net [] in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~max_connections:n ~on_error listening
+      Eio_net.Accept.run ~max_connections:n ~on_error listening
         (line_server ~served));
   Eio.Switch.run (fun clients ->
       for _ = 1 to n + 1 do
@@ -480,7 +480,7 @@ let test_a_failed_connection_leaves_the_loop () =
   Eio.Switch.run @@ fun scope ->
   let listening = scripted ~sw:scope net [] in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~max_connections:4 ~on_error listening
+      Eio_net.Accept.run ~max_connections:4 ~on_error listening
         (line_server ~served));
   Alcotest.(check string)
     "the failed peer is not answered" "" (exchange net "boom\n");
@@ -505,7 +505,7 @@ let exceptions_end_their_connection n () =
   Eio.Switch.run @@ fun scope ->
   let listening = scripted ~sw:scope net [] in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~max_connections:4 ~on_error listening
+      Eio_net.Accept.run ~max_connections:4 ~on_error listening
         (line_server ~served));
   for i = 1 to n do
     Alcotest.(check string)
@@ -542,7 +542,7 @@ let test_a_failed_connection_is_logged_by_default () =
   Eio.Switch.run @@ fun scope ->
   let listening = scripted ~sw:scope net [] in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~max_connections:4 listening (line_server ~served));
+      Eio_net.Accept.run ~max_connections:4 listening (line_server ~served));
   Alcotest.(check string)
     "the failed peer is not answered" "" (exchange net "boom\n");
   Alcotest.(check string)
@@ -560,7 +560,7 @@ let test_a_malformed_peer_leaves_the_loop () =
   let seen = ref [] in
   let on_error e = seen := e :: !seen in
   let handler head flow _ =
-    Eio_net_accept.complete head;
+    Eio_net.Accept.complete head;
     let channel = Eio_net.Frame.of_length_prefixed_flow flow in
     let frame = Eio_net.Frame.recv channel in
     Eio_net.Frame.send channel [ Cstruct.of_string ("ok " ^ frame) ]
@@ -568,7 +568,7 @@ let test_a_malformed_peer_leaves_the_loop () =
   Eio.Switch.run @@ fun scope ->
   let listening = scripted ~sw:scope net [] in
   Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-      Eio_net_accept.run ~max_connections:4 ~on_error listening handler);
+      Eio_net.Accept.run ~max_connections:4 ~on_error listening handler);
   Alcotest.(check string)
     "the malformed peer is not answered" ""
     (exchange net "\255\255\255\255");
@@ -593,7 +593,7 @@ let test_on_error_raising_ends_the_loop () =
     Eio.Switch.run @@ fun scope ->
     let listening = scripted ~sw:scope net [] in
     Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-        Eio_net_accept.run ~max_connections:4 ~on_error:raise listening
+        Eio_net.Accept.run ~max_connections:4 ~on_error:raise listening
           (line_server ~served));
     ignore (exchange net "boom\n" : string)
   with
@@ -612,11 +612,11 @@ let test_a_connection_shed_after_stop_is_not_reported () =
   Eio.Switch.run (fun scope ->
       let listening = scripted ~sw:scope net [] in
       Eio.Fiber.fork ~sw:scope (fun () ->
-          Eio_net_accept.run ~stop ~max_connections:4 ~on_error listening
+          Eio_net.Accept.run ~stop ~max_connections:4 ~on_error listening
             (fun head flow _ ->
-              Eio_net_accept.complete head;
+              Eio_net.Accept.complete head;
               Eio.Promise.await release;
-              Eio_net_accept.reading head (fun () -> 0);
+              Eio_net.Accept.reading head (fun () -> 0);
               Eio.Flow.copy_string "late\n" flow));
       let (_ : _ Eio.Net.stream_socket) = Eio.Net.connect ~sw:scope net addr in
       settle 1;
@@ -645,7 +645,7 @@ let test_stop_sheds_incomplete_heads () =
       Eio.Fiber.fork ~sw:scope (fun () ->
           returned :=
             Some
-              (Eio_net_accept.run ~stop ~max_connections:4 ~on_error listening
+              (Eio_net.Accept.run ~stop ~max_connections:4 ~on_error listening
                  (line_server ~served)));
       for _ = 1 to 2 do
         stall ~sw:scope net "xx" ~on_end:(fun () -> incr stalled)

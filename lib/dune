@@ -1,4 +1,4 @@
 (library
  (name eio_net)
  (public_name eio-net)
- (libraries hermetic eio-net.accept eio cstruct fmt bytesrw mtime))
+ (libraries hermetic eio cstruct fmt logs bytesrw mtime))

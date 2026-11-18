@@ -4,7 +4,6 @@
  (libraries
   eio-net
   eio-net.connect
-  eio-net.accept
   eio
   eio.unix
   cstruct

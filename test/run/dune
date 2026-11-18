@@ -2,7 +2,6 @@
  (name test)
  (package eio-net)
  (libraries
-  eio-net.accept
   eio-net
   eio-net.unix
   eio-net.mem

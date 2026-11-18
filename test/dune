@@ -4,7 +4,6 @@
  (libraries
   eio-net
   eio-net.addr
-  eio-net.accept
   eio-net.mem
   eio-net.chaos
   eio

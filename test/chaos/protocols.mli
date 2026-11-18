@@ -15,7 +15,7 @@ val busy_accept : unit -> unit
     [Fault.No_descriptor]. *)
 
 val accept_loop : unit -> unit
-(** [accept_loop ()] runs [Eio_net_accept.run] on a network wrapped to fail its
+(** [accept_loop ()] runs [Eio_net.Accept.run] on a network wrapped to fail its
     second accept with [Fault.No_descriptor], with an idle client to shed and a
     client to serve. *)
 

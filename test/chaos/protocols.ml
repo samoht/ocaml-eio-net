@@ -111,7 +111,7 @@ let busy_accept () =
   in
   ignore (Eio.Fiber.List.map (fun _ -> client ()) [ 1; 2 ])
 
-(* [Eio_net_accept.run] under [Fault.No_descriptor]: it sheds an idle connection,
+(* [Eio_net.Accept.run] under [Fault.No_descriptor]: it sheds an idle connection,
    whose close frees a descriptor, and takes the queued one. *)
 let accept_loop () =
   Eio_mock.Backend.run_full @@ fun env ->
@@ -127,7 +127,7 @@ let accept_loop () =
   let shed = ref false in
   Eio.Fiber.both
     (fun () ->
-      Eio_net_accept.run ~stop ~classify:Eio_net_unix.classify_accept
+      Eio_net.Accept.run ~stop ~classify:Eio_net_unix.classify_accept
         ~max_connections:4 l (fun _ flow _ ->
           match App.strict_line (Eio.Buf_read.of_flow flow ~max_size:16) with
           | line -> Eio.Flow.copy_string (line ^ "\n") flow

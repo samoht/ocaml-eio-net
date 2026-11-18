@@ -17,8 +17,8 @@ val splice : _ Eio.Flow.two_way -> _ Eio.Flow.two_way -> unit
 
 val forward :
   ?on_error:(exn -> unit) ->
-  ?pool:Eio_net_accept.pool ->
-  ?classify:(exn -> Eio_net_accept.answer option) ->
+  ?pool:Accept.pool ->
+  ?classify:(exn -> Accept.answer option) ->
   sw:Eio.Switch.t ->
   net:_ Eio.Net.t ->
   max_connections:int ->
@@ -29,25 +29,24 @@ val forward :
 (** [forward ~on_error ~pool ~classify ~sw ~net ~max_connections ~listen
      ~connect ()] listens on [listen] (with a backlog of [16], and
     [SO_REUSEADDR] for a TCP address) and, for every accepted connection, dials
-    [connect] and {!splice}s the two, in an {!Eio_net_accept.run} loop on [sw].
-    It is the bound address once listening (for a [listen] naming port 0, the
-    port the system chose), and it serves until [sw] ends.
+    [connect] and {!splice}s the two, in an {!Accept.run} loop on [sw]. It is
+    the bound address once listening (for a [listen] naming port 0, the port the
+    system chose), and it serves until [sw] ends.
 
     The loop relays at most [max_connections] connections at once: a client past
     them waits, holding no upstream connection, until one ends. A relay reads
     nothing from a client before it relays it, so it marks each connection
-    {!Eio_net_accept.complete} as it is accepted, and the loop sheds none of
-    them under pressure.
+    {!Accept.complete} as it is accepted, and the loop sheds none of them under
+    pressure.
 
     A connection that fails (the dial refused, either side dropping mid-splice)
     closes that connection's flows and is reported to [on_error] (defaults to
-    logging a warning on the [eio-net.accept] log source, as
-    {!Eio_net_accept.run} does); the listener itself keeps accepting. A failed
-    accept is read by [classify] (defaults to {!Eio_net_accept.classify}) as
-    {!Eio_net_accept.run} reads it, and one that ends the loop fails [sw]: over
-    a Unix network, [~classify:Eio_net_unix.classify_accept] makes an accept
-    with no descriptor left wait for a relayed connection to end rather than end
-    the relay.
+    logging a warning on the [eio-net.accept] log source, as {!Accept.run}
+    does); the listener itself keeps accepting. A failed accept is read by
+    [classify] (defaults to {!Accept.classify}) as {!Accept.run} reads it, and
+    one that ends the loop fails [sw]: over a Unix network,
+    [~classify:Eio_net_unix.classify_accept] makes an accept with no descriptor
+    left wait for a relayed connection to end rather than end the relay.
 
     [pool] (defaults to a new pool of this relay alone) is the loop's pool. When
     an accept finds no descriptor left and the relay relays nothing, a relay

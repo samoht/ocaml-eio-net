@@ -5,7 +5,7 @@
   eio-chaos
   eio-net.chaos
   eio-net.mem
-  eio-net.accept
+  eio-net
   eio-net.unix
   eio
   eio.mock

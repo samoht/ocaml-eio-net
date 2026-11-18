@@ -195,7 +195,7 @@ let run ?stop ?(on_error = log_error) ?(pool = pool ()) ?(classify = classify)
     ~max_connections listening handler =
   if max_connections < 1 then
     Fmt.invalid_arg
-      "Eio_net_accept.run: max_connections is %d, must be positive"
+      "Eio_net.Accept.run: max_connections is %d, must be positive"
       max_connections;
   let loop =
     {
@@ -208,7 +208,7 @@ let run ?stop ?(on_error = log_error) ?(pool = pool ()) ?(classify = classify)
   in
   (* The connections are forked on a switch of the loop's own, so they end
      with it. *)
-  Eio.Switch.run ~name:"Eio_net_accept.run" @@ fun sw ->
+  Eio.Switch.run ~name:"Eio_net.Accept.run" @@ fun sw ->
   let rec accept () =
     match Eio.Net.accept ~sw listening with
     | flow, addr ->

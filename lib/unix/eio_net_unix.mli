@@ -28,7 +28,7 @@ val classify_connect : exn -> Eio_net_connect.answer option
     It is the classifier to hand a connection library that connects over a Unix
     network, in place of the portable {!Eio_net_connect.classify}. *)
 
-val classify_accept : exn -> Eio_net_accept.answer option
+val classify_accept : exn -> Eio_net.Accept.answer option
 (** [classify_accept exn] is the answer a failed {!Eio.Net.accept} raising [exn]
     carries from the system, or [None] when it carries none:
 
@@ -46,7 +46,7 @@ val classify_accept : exn -> Eio_net_accept.answer option
     - [`Descriptors] for EMFILE and ENFILE: the process, or the system, has no
       descriptor left for the connection.
 
-    It is the classifier to hand {!Eio_net_accept.run} over a Unix network, as
+    It is the classifier to hand {!Eio_net.Accept.run} over a Unix network, as
     [~classify:Eio_net_unix.classify_accept]: the portable
-    {!Eio_net_accept.classify} reads no descriptor left as no answer, and a loop
+    {!Eio_net.Accept.classify} reads no descriptor left as no answer, and a loop
     handed it raises that accept's error. *)

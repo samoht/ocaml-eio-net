@@ -229,15 +229,14 @@ on the wire.
 ## Libraries
 
 - `eio-net` has `Eio_net`: frame channels over datagram sockets and byte
-  streams, with the length-prefix codec of a byte stream, a relay, and a
-  guard that ends a transfer that moves too few bytes a second.
+  streams, with the length-prefix codec of a byte stream, an accept loop
+  that holds at most a given number of connections, a relay, and a guard
+  that ends a transfer that moves too few bytes a second.
 - `eio-net.mem` has `Eio_net_mem`, the in-memory network.
   [MODEL.md](MODEL.md) says how closely it follows each kernel.
 - `eio-net.chaos` has `Eio_net_chaos`, the two checks above and the faults
   they are made of, so a program that uses only the network links none of
   it.
-- `eio-net.accept` has an accept loop that holds at most a given number of
-  connections.
 - `eio-net.connect` classifies failed connects.
 - `eio-net.addr` converts [Ipaddr](https://github.com/mirage/ocaml-ipaddr)
   addresses to Eio's and back.
