@@ -6,7 +6,7 @@
       the program many times on in-memory networks that fail, and after each
       fault starts it again on the same network, healed, as a machine restarts a
       service.
-    - {!device} checks that an Eio network answers as Linux or macOS does.
+    - {!val-device} checks that an Eio network answers as Linux or macOS does.
 
     Both raise [Failure] with a report when the check fails, as an assertion
     does, so they are the body of a test in any test runner. {!run} is
@@ -16,15 +16,15 @@
     {{!blocks}building blocks}: {!wrap} for a network, {!pair} for two connected
     streams.
 
-    {!run}, {!device} and {!wrap} take [?os], as {!Eio_net_mem.v} does:
+    {!run}, {!val-device} and {!wrap} take [?os], as {!Eio_net_mem.v} does:
     [`Linux], the default, or [`Macos]. It picks the answers expected and the
     kernel's timings the faults follow. The choice comes from the argument,
     never from the host, so a test checks the same thing on every machine.
 
-    {!device} replays two kinds of recording: {e sequences}, each an order of a
-    few socket operations, and {e scenarios}, longer programs written by hand,
-    such as the reuse of a port or a name lookup. A report of {!run} names its
-    runs as scenarios too: a fault at a place of the first run.
+    {!val-device} replays two kinds of recording: {e sequences}, each an order
+    of a few socket operations, and {e scenarios}, longer programs written by
+    hand, such as the reuse of a port or a name lookup. A report of {!run} names
+    its runs as scenarios too: a fault at a place of the first run.
 
     How a check picks its {{!exploration}faults}, the {{!contracts}contracts} a
     program meets, its {{!replay}reports and replay} and its {{!runs}runs} come
@@ -523,10 +523,14 @@ val pair :
       a seed. Each draw may land on any scenario of its group, so a pattern that
       repeats along the scenarios, as the faults tried at each place do, hides
       no kind of fault from it, where taking every k-th scenario may meet only
-      one.
+      one. A larger budget tries more only once a fortieth of it passes half the
+      linear tier, so raising it a little may change nothing.
 
     A check never passes on a partial linear tier. One that needs more runs than
-    its budget fails and says so: shrink the program or raise [~budget]. *)
+    its budget fails and says so: shrink the program or raise [~budget]. The
+    first run stops as soon as the tier needs more, so a program that polls for
+    ever costs no more than the budget allows, and the report shows its trace up
+    to there. *)
 
 (** {1:contracts Contracts}
 
@@ -647,10 +651,14 @@ val pair :
       stay bounded. The reads and writes a one-byte condition splits do not
       count: a report of a run stopped while they ran says how many there were;
     - a run stops at 10,000,000 turns. If no fiber waited 1 ms or more for a
-      timer in the last 10,000,000, it fails as a busy loop. Otherwise it fails
-      as a busy loop or as too large for a check: a check repeats the run
-      hundreds of times, so it refuses a longer one;
-    - a run still going after an hour of its clock fails as a hang. *)
+      timer in the last 10,000,000, it fails as a busy loop: a poll by yields,
+      or by sleeps shorter than 1 ms, that never ends. Otherwise it fails as a
+      busy loop or as too large for a check: a check repeats the run hundreds of
+      times, so it refuses a longer one, as it refuses one past its budget.
+      Fibers on timers take turns too: a thousand on a heartbeat of 100 ms reach
+      10,000,000 in 1000 s of clock;
+    - a run still going after an hour of its clock fails as a hang: a poll that
+      sleeps 1 ms or more between its tries and never ends. *)
 
 (**/**)
 
@@ -658,7 +666,7 @@ val pair :
    answers needed, and [device] on the host's own network. *)
 module Private : sig
   val device_allowances : ([ `Linux | `Macos ] * string) list
-  (** [device_allowances] is each allowance of {!device}, by the kernel it
+  (** [device_allowances] is each allowance of {!val-device}, by the kernel it
       applies to and why it holds. *)
 
   val device_allowed :
@@ -666,13 +674,13 @@ module Private : sig
     (sw:Eio.Switch.t -> env -> _ Eio.Net.t) ->
     string list
   (** [device_allowed os net] is why each allowance the answers of [net] needed
-      holds, as {!device} replays the traces of [os] on it. *)
+      holds, as {!val-device} replays the traces of [os] on it. *)
 
   val device_in_loop :
     ?os:[< Eio_chaos.os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
-  (** [device_in_loop ~os net] is {!device} with each sequence in the caller's
-      event loop, for the host's own network, which only the host's event loop
-      drives: the test of the kernel's traces runs it there. *)
+  (** [device_in_loop ~os net] is {!val-device} with each sequence in the
+      caller's event loop, for the host's own network, which only the host's
+      event loop drives: the test of the kernel's traces runs it there. *)
 end
 
 (**/**)

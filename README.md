@@ -115,8 +115,9 @@ Eio_net_chaos.run: the restart failed: the program, run again with no fault on w
 ```
 
 A report gives the fault, the operations of the run, what the program printed,
-if anything, and one line to paste, which runs that case alone. An
-operation reads `#3 accept 1s @0`: the third of the run, an accept on socket
+if anything, and one line to paste that runs that case again; to find it, a
+replay may run the program a few times first, and the failing run is the
+last. An operation reads `#3 accept 1s @0`: the third of the run, an accept on socket
 1, at the end that accepted (`c` is the end that connected), after 0 earlier
 accepts; a read or a write adds the bytes it asks for or offers, as in
 `#2 read 1c @0+64`, 64 bytes from offset 0.
