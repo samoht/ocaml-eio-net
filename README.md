@@ -135,6 +135,11 @@ e.g. tcp4 accept; close S; close S; connect`, where `C` is the end that
 connected and `S` the one that accepted. Pass ``~os:`Macos`` to compare with
 macOS.
 
+A network built over another one, such as a tunnel, is checked over a faulty
+one too with `~under:[ Eio_net_chaos.network () ]`: on a healthy network its
+answers must be the kernel's, and once the network under it failed, it must
+not hang or give an error no network gives.
+
 The in-memory network of eio-net (`Eio_net_mem.v`) passes this check for both
 systems, in about three seconds. Three kinds of recorded sequence are left
 out, because only a prepared host can answer them: those that wait a minute
