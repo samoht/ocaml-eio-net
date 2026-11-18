@@ -11,13 +11,18 @@ let errno : Unix.error -> string = function
   | ENOTCONN -> "ENOTCONN"
   | EPIPE -> "EPIPE"
   | ECONNRESET -> "ECONNRESET"
+  | ECONNABORTED -> "ECONNABORTED"
   | ECONNREFUSED -> "ECONNREFUSED"
   | ENOENT -> "ENOENT"
   | EBADF -> "EBADF"
   | EISCONN -> "EISCONN"
   | EOPNOTSUPP -> "EOPNOTSUPP"
   | ENOBUFS -> "ENOBUFS"
-  | e -> Unix.error_message e
+  | ESHUTDOWN -> "ESHUTDOWN"
+  | EWOULDBLOCK -> "EWOULDBLOCK"
+  | EUNKNOWNERR n -> "EUNKNOWNERR" ^ string_of_int n
+  (* Windows' messages end with CRLF. *)
+  | e -> String.trim (Unix.error_message e)
 
 (* eio-net.mem's codes, named by the system error each stands for. *)
 let mem_errno : Eio.Exn.Backend.t -> string option = function

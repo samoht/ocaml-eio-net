@@ -130,7 +130,12 @@ let sends op =
   | ("connect" | "close_listener" | "write" | "shutdown" | "close") :: _ -> true
   | _ -> false
 
-let run_stream ~settle net t ops =
+(* An operation that took longer than the bound ends its sequence. *)
+exception Unbounded
+
+let bounded bound f = match bound f with Some r -> r | None -> raise Unbounded
+
+let run_stream ~settle ~bound net t ops =
   let path = "s.sock" in
   unlink path;
   let addr : Eio.Net.Sockaddr.stream =
@@ -149,6 +154,7 @@ let run_stream ~settle net t ops =
      List.iter
        (fun op ->
          let r =
+           bounded bound @@ fun () ->
            outcome @@ fun () ->
            match words op with
            | [ "connect" ] ->
@@ -183,7 +189,9 @@ let run_stream ~settle net t ops =
          if sends op then settle ();
          out := r :: !out)
        ops
-   with e -> out := ("abort " ^ classify e) :: !out);
+   with
+  | Unbounded -> out := "timeout" :: !out
+  | e -> out := ("abort " ^ classify e) :: !out);
   unlink path;
   List.rev !out
 
@@ -194,7 +202,7 @@ let dgram_shutdown (sock : _ Eio.Net.datagram_socket) cmd =
   let module S = (val Eio.Resource.get ops Eio.Flow.Pi.Shutdown) in
   S.shutdown t cmd
 
-let run_dgram net t ops =
+let run_dgram ~bound net t ops =
   let pa = "a.sock" and pb = "b.sock" in
   unlink pa;
   unlink pb;
@@ -227,6 +235,7 @@ let run_dgram net t ops =
      List.iter
        (fun op ->
          let r =
+           bounded bound @@ fun () ->
            outcome @@ fun () ->
            let s, dst = sock op in
            match words op with
@@ -250,13 +259,16 @@ let run_dgram net t ops =
          in
          out := r :: !out)
        ops
-   with e -> out := ("abort " ^ classify e) :: !out);
+   with
+  | Unbounded -> out := "timeout" :: !out
+  | e -> out := ("abort " ^ classify e) :: !out);
   unlink pa;
   unlink pb;
   List.rev !out
 
-let run ?(settle = ignore) net t ops =
-  if is_stream t then run_stream ~settle net t ops else run_dgram net t ops
+let run ?(settle = ignore) ?(bound = fun f -> Some (f ())) net t ops =
+  if is_stream t then run_stream ~settle ~bound net t ops
+  else run_dgram ~bound net t ops
 
 (* Scenarios: the address, backlog, reuse and resolution cases the
    sequences above do not reach, each run on a fresh network and printed as
@@ -821,6 +833,123 @@ let attempt f =
   attempt_s (fun sw ->
       f sw;
       "ok")
+
+(* A second listen at the port of a listener at 127.0.0.1, at [at]: its
+   outcome, and which listener a connect to [at] then reaches. *)
+let takeover ~first ~second at net =
+  let p = free_port net in
+  Eio.Switch.run @@ fun sw ->
+  let listen reuse_addr a =
+    Eio.Net.listen ~sw ~reuse_addr ~backlog:4 net (`Tcp (ip a, p))
+  in
+  let l1 = listen first "127.0.0.1" in
+  match listen second at with
+  | exception e -> "second " ^ classify e
+  | l2 ->
+      let c =
+        outcome (fun () ->
+            ignore (Eio.Net.connect ~sw net (`Tcp (ip at, p)));
+            "ok")
+      in
+      let got l =
+        outcome (fun () ->
+            ignore (now (fun () -> Eio.Net.accept ~sw l));
+            "accepted")
+      in
+      Fmt.str "second ok connect=%s first=%s second=%s" c (got l1) (got l2)
+
+(* An error with the system error under it: a reset, as Eio classes it,
+   carries the errno that raised it, which eio-net.mem's has not. *)
+let detailed e =
+  match e with
+  | Eio.Io (Eio.Net.E (Connection_reset code), _) ->
+      let errno =
+        match code with
+        | Eio_unix.Unix_error (e, _, _) -> errno e
+        | code -> Option.value (mem_errno code) ~default:"error"
+      in
+      "Reset " ^ errno
+  | e -> classify e
+
+let detail f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Blocked -> "blk"
+  | e -> detailed e
+
+(* A TCP connection whose peer goes as [how], and what each of [ops] then
+   gives this end, with the errno under a reset. Each operation but the
+   first waits for nothing; the first read waits for the peer's segment. *)
+let abort how ops net =
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (ip "127.0.0.1", 0)) in
+  let c = Eio.Net.connect ~sw net (Eio.Net.listening_addr l) in
+  let peer, _ = Eio.Net.accept ~sw l in
+  (match how with
+  | `Closes -> Eio.Flow.close peer
+  | `Closes_unread ->
+      Eio.Flow.copy_string "xy" c;
+      ignore (Eio.Flow.single_read peer (Cstruct.create 1));
+      Eio.Flow.close peer
+  | `Resets ->
+      Eio.Net.setsockopt peer Eio.Net.Sockopt.SO_LINGER (Some 0);
+      Eio.Flow.close peer);
+  let op i o =
+    detail @@ fun () ->
+    match o with
+    | `Read ->
+        let buf = Cstruct.create 4 in
+        let read () = Eio.Flow.single_read c buf in
+        "r" ^ string_of_int (if i = 0 then read () else now read)
+    | `Write -> string_of_int (Eio.Flow.single_write c [ Cstruct.create 1 ])
+    | `Shutdown ->
+        Eio.Flow.shutdown c `Send;
+        "ok"
+  in
+  String.concat " " (List.mapi op ops)
+
+(* A client that resets its connection before the accept: what the accept
+   gives, and a read of what it gave. *)
+let abort_before_accept net =
+  Eio.Switch.run @@ fun sw ->
+  let l = Eio.Net.listen ~sw ~backlog:4 net (`Tcp (ip "127.0.0.1", 0)) in
+  ( Eio.Switch.run @@ fun sw ->
+    let c = Eio.Net.connect ~sw net (Eio.Net.listening_addr l) in
+    Eio.Net.setsockopt c Eio.Net.Sockopt.SO_LINGER (Some 0) );
+  match now (fun () -> Eio.Net.accept ~sw l) with
+  | exception e -> detail (fun () -> raise e)
+  | s, _ ->
+      let read =
+        detail (fun () ->
+            "r" ^ string_of_int (Eio.Flow.single_read s (Cstruct.create 4)))
+      in
+      "accepted " ^ read
+
+(* A listen with reuse_addr at the path of a live listener, and which of
+   the two a connect there then reaches. *)
+let unix_relisten net =
+  let path = "relisten.sock" in
+  unlink path;
+  let r =
+    attempt_s @@ fun sw ->
+    let l1 = Eio.Net.listen ~sw ~backlog:4 net (`Unix path) in
+    match Eio.Net.listen ~sw ~reuse_addr:true ~backlog:4 net (`Unix path) with
+    | exception e -> "second " ^ classify e
+    | l2 ->
+        let c =
+          outcome (fun () ->
+              ignore (Eio.Net.connect ~sw net (`Unix path));
+              "ok")
+        in
+        let got l =
+          outcome (fun () ->
+              ignore (now (fun () -> Eio.Net.accept ~sw l));
+              "accepted")
+        in
+        Fmt.str "second ok connect=%s first=%s second=%s" c (got l1) (got l2)
+  in
+  unlink path;
+  r
 
 let abstract_cases =
   let dgram sw net a = ignore (Eio.Net.datagram_socket ~sw net a) in
@@ -1574,7 +1703,7 @@ let untimed_scenarios : (string * (net -> string)) list =
                     with
                     | exception e -> classify e
                     | _ -> listen_at ~reuse_addr:ry net (`Tcp (ip y, p)) ))
-              [ (false, false); (true, true) ])
+              [ (false, false); (true, true); (false, true); (true, false) ])
           [ "127.0.0.1"; "0.0.0.0"; "::1"; "::"; "127.0.0.2" ])
       [ "127.0.0.1"; "0.0.0.0"; "::1"; "::"; "127.0.0.2" ]
   @ List.concat_map
@@ -1679,6 +1808,35 @@ let untimed_scenarios : (string * (net -> string)) list =
         ("relisten with reuse_addr", `Relisten_reuse);
         ("connect bound there", `Bind_to);
       ]
+  @ List.concat_map
+      (fun at ->
+        List.map
+          (fun (first, second) ->
+            ( Fmt.str "takeover: 127.0.0.1 reuse=%b then %s reuse=%b" first at
+                second,
+              takeover ~first ~second at ))
+          [ (false, false); (true, true); (false, true); (true, false) ])
+      [ "127.0.0.1"; "0.0.0.0" ]
+  @ List.concat_map
+      (fun (how_name, how) ->
+        List.map
+          (fun (ops_name, ops) ->
+            (Fmt.str "abort: peer %s then %s" how_name ops_name, abort how ops))
+          [
+            ("read read", [ `Read; `Read ]);
+            ("read write write", [ `Read; `Write; `Write ]);
+            ("read write read", [ `Read; `Write; `Read ]);
+            ("read shutdown", [ `Read; `Shutdown ]);
+          ])
+      [
+        ("closes", `Closes);
+        ("closes unread", `Closes_unread);
+        ("resets", `Resets);
+      ]
+  @ [
+      ("abort: client resets before accept", abort_before_accept);
+      ("unix relisten with reuse_addr", unix_relisten);
+    ]
   @ List.map (fun (name, f) -> ("abstract " ^ name, f)) abstract_cases
   @ List.map (fun (name, f) -> ("empty path " ^ name, f)) empty_path_cases
   @ [ ("listening_addr after close", listening_addr_closed) ]
@@ -1822,4 +1980,4 @@ let narrow_ports name = String.starts_with ~prefix:"ports: " name
 let scenario ?(wait = fun _ -> ()) net name =
   let f = List.assoc name scenario_list in
   let r = try f ~wait net with e -> "abort " ^ classify e in
-  String.map (function ',' | '\n' -> ';' | '\000' -> '0' | c -> c) r
+  String.map (function ',' | '\n' | '\r' -> ';' | '\000' -> '0' | c -> c) r

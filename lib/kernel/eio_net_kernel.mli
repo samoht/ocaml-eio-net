@@ -27,16 +27,19 @@ val dgram_shutdown :
 
 val run :
   ?settle:(unit -> unit) ->
+  ?bound:((unit -> string) -> string option) ->
   _ Eio.Net.t ->
   transport ->
   string list ->
   string list
-(** [run ~settle net t ops] runs [ops] on a fresh listener or pair of datagram
-    sockets of [t] and is the outcome of each operation: a result, ["blk"] for
-    one that would wait, or the error it raised. On a stream, [settle] runs
-    after each operation that can send a segment, so that the peer's answer
-    arrives before the next one; it does nothing by default. Unix paths are
-    relative to the current directory. *)
+(** [run ~settle ~bound net t ops] runs [ops] on a fresh listener or pair of
+    datagram sockets of [t] and is the outcome of each operation: a result,
+    ["blk"] for one that would wait, or the error it raised. On a stream,
+    [settle] runs after each operation that can send a segment, so that the
+    peer's answer arrives before the next one; it does nothing by default.
+    [bound f] is [Some (f ())], or [None] if [f] takes too long: the operation
+    then answers ["timeout"] and ends the sequence. Unix paths are relative to
+    the current directory. *)
 
 val scenarios : string list
 (** [scenarios] names the scenarios the traces hold, in a fixed order: three
@@ -44,15 +47,18 @@ val scenarios : string list
     the loopback addresses, address reuse after a close, Unix paths, host and
     service resolution, bind error shapes, autobind, UDP reuse, datagram error
     order, edge addresses, a connect to itself, a listener closed with
-    connections queued, Linux's abstract Unix addresses and the empty path,
-    [listening_addr] after a close, the names of IPv4-compatible and abstract
-    addresses, the address a failed connect keeps bound, a Unix path with a NUL,
-    connects bound at the IPv6 wildcard address next to IPv4 holds on their
-    port, connects and datagrams off the loopback interface, socket options
-    (each one's default and a value set, on every kind of socket, edge values,
-    those an accepted socket takes and those of a connect, and what the buffer
-    sizes and [SO_LINGER] change), timed closes, and connects that run out of
-    ephemeral ports. *)
+    connections queued, a second listen at a listener's port and which of the
+    two a connect reaches, what an end gives once its peer closes or resets the
+    connection (with the errno under a reset), a listen with [reuse_addr] over a
+    live Unix listener's path, Linux's abstract Unix addresses and the empty
+    path, [listening_addr] after a close, the names of IPv4-compatible and
+    abstract addresses, the address a failed connect keeps bound, a Unix path
+    with a NUL, connects bound at the IPv6 wildcard address next to IPv4 holds
+    on their port, connects and datagrams off the loopback interface, socket
+    options (each one's default and a value set, on every kind of socket, edge
+    values, those an accepted socket takes and those of a connect, and what the
+    buffer sizes and [SO_LINGER] change), timed closes, and connects that run
+    out of ephemeral ports. *)
 
 val timed : string -> bool
 (** [timed name] is [true] for a scenario that lets time pass: TIME_WAIT and
