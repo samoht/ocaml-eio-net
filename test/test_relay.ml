@@ -55,10 +55,12 @@ let test_dial_failure_keeps_listening () =
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let upstream = echo_server ~sw ~net in
-  let failures = ref 0 in
+  (* The loop reports a failure once the connection's switch has closed the
+     client, which may see its end first. *)
+  let failed, report = Eio.Promise.create () in
   let dead =
     Eio_net.Relay.forward ~sw ~net ~max_connections:4
-      ~on_error:(fun _ -> incr failures)
+      ~on_error:(fun _ -> ignore (Eio.Promise.try_resolve report ()))
       ~listen:(loopback 0) ~connect:(loopback 1) ()
   in
   (let flow = Eio.Net.connect ~sw net (loopback (port_of dead)) in
@@ -70,7 +72,7 @@ let test_dial_failure_keeps_listening () =
      with Eio.Io (Eio.Net.E (Connection_reset _), _) -> ""
    in
    Alcotest.(check string) "nothing comes back from a dead upstream" "" got);
-  Alcotest.(check bool) "the failure was reported" true (!failures >= 1);
+  Eio.Promise.await failed;
   let dead2 = Eio.Net.connect ~sw net (loopback (port_of dead)) in
   Eio.Flow.shutdown dead2 `Send;
   let healthy =

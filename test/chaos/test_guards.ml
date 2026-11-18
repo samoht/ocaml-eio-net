@@ -231,8 +231,10 @@ let test_restart () =
     not
       (String.starts_with
          ~prefix:
-           "Eio_net_chaos.run: the run with no fault failed: Eio.Io Unix_error \
-            (Address already in use, \"bind\""
+           (Fmt.str
+              "Eio_net_chaos.run: the run with no fault failed: Eio.Io \
+               Unix_error (%s, \"bind\""
+              (Unix.error_message Unix.EADDRINUSE))
          m)
   then Alcotest.failf "failed with %S" m
 

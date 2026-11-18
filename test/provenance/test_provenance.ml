@@ -67,7 +67,7 @@ let check dir () =
   let held =
     Sys.readdir traces |> Array.to_list
     |> List.filter (fun f -> f <> "dune" && f <> "provenance")
-    |> List.map (Filename.concat "traces")
+    |> List.map (fun f -> "traces/" ^ f)
     |> List.sort String.compare
   in
   let listed = List.sort String.compare (List.map fst recorded) in
