@@ -49,6 +49,13 @@ let test_quiet_wrap os () =
   Eio_net_chaos.device ~os (fun ~sw env ->
       Eio_net_chaos.wrap ~os ~clock:env#clock (fun _ -> None) (mem os ~sw env))
 
+(* A network that passes the one under it through, on a faulty one: it
+   answers as the kernel does, or with the errors the faults give. *)
+let test_over_faulty_network () =
+  Eio_net_chaos.device ~budget:2000
+    ~under:[ Eio_net_chaos.network () ]
+    (fun ~sw:_ env -> env#net)
+
 (* Each allowance of the check is one eio-net.mem needs. *)
 let test_allowances () =
   let used =
@@ -150,6 +157,8 @@ let suite =
       Alcotest.test_case "a broken network fails, with a report" `Quick
         test_broken;
       Alcotest.test_case "every allowance is needed" `Quick test_allowances;
+      Alcotest.test_case "a network over a faulty network" `Quick
+        test_over_faulty_network;
       Alcotest.test_case "macOS leaves out what depends on timing" `Quick
         test_macos_timing;
     ]
