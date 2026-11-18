@@ -1,9 +1,9 @@
 (** A frame channel: a bidirectional packet link where one {!recv} is one frame
     and one {!send} puts one frame on the wire.
 
-    Over a byte stream it uses the codec of {!Framing}
-    ({!of_length_prefixed_flow}), and [Eio_net_unix.Frame] builds one over a
-    Unix datagram descriptor.
+    It runs over an addressed datagram channel ({!of_datagram}), over a byte
+    stream with the codec of {!Framing} ({!of_length_prefixed_flow}), and
+    [Eio_net_unix.Frame] builds one over a Unix datagram descriptor.
 
     Frame-based protocols such as CCSDS transfer frames, AX.25 and Ethernet read
     and write over it, independently of how the bytes move: a network interface,
@@ -13,7 +13,7 @@
 
     {b Errors and ownership.} What a receive raises depends on the transport:
 
-    - Over a datagram socket, the {!Eio.Io} error of a failed receive, the
+    - Over a datagram channel, the {!Eio.Io} error of a failed receive, the
       {!Datagram.Too_long} one among them, and never [End_of_file], since a
       datagram socket has no end.
     - Over a length-prefixed flow, [End_of_file] at the end of input at a frame
@@ -61,26 +61,17 @@ val v :
     {!recv_slice}: a batch is non-empty, a slice stays valid until the next
     receive, and the slice of an empty frame is {!Bytesrw.Bytes.Slice.eod}. *)
 
-val of_datagram_socket :
-  ?max_length:int ->
-  ?dst:Eio.Net.Sockaddr.datagram ->
-  _ Eio.Net.datagram_socket ->
-  t
-(** [of_datagram_socket ~max_length ~dst socket] presents [socket] as a frame
-    channel: each datagram is one frame. Frames are sent to [dst] (omit it for a
-    connected socket) and received from any source, up to [max_length] bytes
-    (defaults to [65536]). {!send_batch} sends its frames one datagram at a
-    time.
+val of_datagram : Datagram.t -> t
+(** [of_datagram d] is the addressed channel [d] as a frame channel: each
+    datagram is one frame, received from any source, its source dropped, and
+    sent to the destination of [d]. {!send_batch} sends its frames one datagram
+    at a time.
 
-    {!recv}, {!recv_batch} and {!recv_slice} raise the {!Eio.Io} error
-    {!Datagram.Too_long} on a datagram longer than [max_length] rather than
-    silently truncating it; the oversized datagram is consumed and the channel
-    stays usable. Concurrent receives run one at a time, as
-    {!Datagram.of_socket} runs them; sends run at once. A protocol that needs
-    the source address of each datagram uses the addressed {!Datagram} channel
-    instead.
-
-    @raise Invalid_argument if [max_length] is not positive. *)
+    {!recv}, {!recv_batch} and {!recv_slice} raise what {!Datagram.recv} raises,
+    the {!Eio.Io} error {!Datagram.Too_long} among them, after which the channel
+    stays usable. Concurrent receives run one at a time, as on [d]; sends run at
+    once. A frame channel over a datagram socket [s] is
+    [of_datagram (Datagram.of_socket s)]. *)
 
 val of_length_prefixed_flow :
   ?framing:Framing.Config.t -> _ Eio.Flow.two_way -> t

@@ -2,11 +2,11 @@
     a stream relay and a transfer bounded by its progress.
 
     A frame channel ({!Frame}) is a packet link where one receive is one frame.
-    It runs over a datagram socket, over a byte stream where each frame is a
-    length prefix and a payload in the format of {!Framing}, or over an
-    in-memory pair. [Eio_net_unix.Frame] builds one over a Unix datagram
-    descriptor, with batched system calls. {!Datagram} is the addressed channel
-    over a datagram socket: each receive also gives the source.
+    It runs over a {!Datagram} channel, the addressed channel over a datagram
+    socket whose receives also give the source, over a byte stream where each
+    frame is a length prefix and a payload in the format of {!Framing}, or over
+    an in-memory pair. [Eio_net_unix.Frame] builds one over a Unix datagram
+    descriptor, with batched system calls.
 
     {!Connect} tells a refused connect from an unreachable peer, and {!Accept}
     is the loop a listener serves its connections with, holding at most a given

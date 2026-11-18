@@ -102,7 +102,9 @@ let test_oversized_refused () =
 let test_frame_carrier_refuses_oversize () =
   with_bound_pair @@ fun ~addr_a:_ ~addr_b ~sock_a ~sock_b ->
   let a = Eio_net.Datagram.of_socket sock_a in
-  let b = Eio_net.Frame.of_datagram_socket ~max_length:4 sock_b in
+  let b =
+    Eio_net.Frame.of_datagram (Eio_net.Datagram.of_socket ~max_length:4 sock_b)
+  in
   send a ~dst:addr_b "five!";
   Alcotest.(check bool)
     "recv refuses an oversized datagram" true
@@ -149,7 +151,8 @@ let test_concurrent_receives () =
   Eio_mock.Backend.run @@ fun () ->
   let channel = Eio_net.Datagram.of_socket (completing [ "first"; "second" ]) in
   let frames =
-    Eio_net.Frame.of_datagram_socket (completing [ "third"; "fourth" ])
+    Eio_net.Frame.of_datagram
+      (Eio_net.Datagram.of_socket (completing [ "third"; "fourth" ]))
   in
   let got = Array.make 4 "" in
   Eio.Fiber.all

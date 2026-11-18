@@ -4,8 +4,8 @@
 
     Datagram protocols that need the peer address use it: a UDP server that
     answers whoever wrote to it, or a receiver that locks onto the peer that
-    opened an exchange. A protocol that does not care about addresses uses the
-    source-blind {!Frame} channel instead.
+    opened an exchange. A protocol that does not care about addresses reads it
+    as a source-blind frame channel, [Eio_net.Frame.of_datagram].
 
     {b Errors and ownership.} A receive or a send raises the {!Eio.Io} error of
     the socket, {!Too_long} among them for a datagram longer than the channel

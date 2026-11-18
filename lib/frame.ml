@@ -50,18 +50,10 @@ let recv_slice t = t.recv_slice ()
 let send t bufs = t.send bufs
 let send_batch t frames = t.send_batch frames
 
-let of_datagram_socket ?max_length ?dst socket =
-  Option.iter
-    (fun n ->
-      if n <= 0 then
-        Fmt.invalid_arg
-          "Eio_net.Frame.of_datagram_socket: max_length is %d, must be positive"
-          n)
-    max_length;
-  let datagrams = Datagram.of_socket ?max_length ?dst socket in
+let of_datagram d =
   channel ~slice:view
-    ~recv:(fun () -> snd (Datagram.recv datagrams))
-    ~send:(fun bufs -> Datagram.send datagrams bufs)
+    ~recv:(fun () -> snd (Datagram.recv d))
+    ~send:(fun bufs -> Datagram.send d bufs)
     ()
 
 (* [locked m f x] is [Eio.Mutex.use_ro m (fun () -> f x)] without allocating
