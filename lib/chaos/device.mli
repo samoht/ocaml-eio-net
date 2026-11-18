@@ -1,6 +1,6 @@
 (** Does a network answer as Linux or macOS does? *)
 
-type os = [ `Linux | `Macos ]
+type os = Eio_chaos.os
 (** The type for the kernels the traces hold. *)
 
 type difference = {
@@ -48,6 +48,10 @@ val check_in_loop : ?os:[< os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
 (** [check_in_loop ~os net] is {!check} with each sequence in the caller's event
     loop, on a fresh [net ~sw]: for a network of the host's sockets, which only
     the host's event loop drives. *)
+
+val defect_findings : string list
+(** [defect_findings] is each eio_windows defect allowed under [`Windows], by
+    its finding. *)
 
 val allowances : (os * string) list
 (** [allowances] is each allowance, by the kernel it applies to and why it

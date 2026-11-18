@@ -6,7 +6,8 @@
       the program many times on in-memory networks that fail, and after each
       fault starts it again on the same network, healed, as a machine restarts a
       service.
-    - {!val-device} checks that an Eio network answers as Linux or macOS does.
+    - {!val-device} checks that an Eio network answers as Linux, macOS or
+      Windows does.
 
     Both raise [Failure] with a report when the check fails, as an assertion
     does, so they are the body of a test in any test runner. {!run} is
@@ -17,9 +18,10 @@
     streams.
 
     {!run}, {!val-device} and {!wrap} take [?os], as {!Eio_net_mem.v} does:
-    [`Linux], the default, or [`Macos]. It picks the answers expected and the
-    kernel's timings the faults follow. The choice comes from the argument,
-    never from the host, so a test checks the same thing on every machine.
+    [`Linux], the default, [`Macos] or [`Windows]. It picks the answers expected
+    and the kernel's timings the faults follow. The choice comes from the
+    argument, never from the host, so a test checks the same thing on every
+    machine.
 
     {!val-device} replays two kinds of recording: {e sequences}, each an order
     of a few socket operations, and {e scenarios}, longer programs written by
@@ -66,7 +68,7 @@ type env = Eio_chaos.env
 (** {1:program Testing a program} *)
 
 val run :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   ?budget:int ->
   ?seed:int ->
   ?replay:string ->
@@ -146,8 +148,10 @@ val run :
 
     Under [`Macos] a connect that times out takes 75 seconds, TIME_WAIT lasts
     30, and a Unix-domain crash reads as end of file at both ends, as macOS
-    reports no reset on AF_UNIX. The networks live in memory and their clocks
-    jump to the next timer, so a check of a small program takes milliseconds.
+    reports no reset on AF_UNIX. Under [`Windows] it takes 21 seconds, as
+    Windows documents its two SYN retransmissions, which no trace records, and
+    there is no TIME_WAIT. The networks live in memory and their clocks jump to
+    the next timer, so a check of a small program takes milliseconds.
 
     @raise Failure
       with a report of the first failing run: the fault, the operations of the
@@ -178,7 +182,7 @@ val is_outage : env -> bool
 (** {1:device Testing a network} *)
 
 val device :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   ?under:Eio_chaos.part list ->
   ?budget:int ->
   ?seed:int ->
@@ -233,7 +237,16 @@ val device :
     answer: 21 scenarios, and the TCP sequences that read or write after an end
     shut its receive side while bytes or an end of stream were on their way to
     it, or after bytes went to an end that had shut it or closed, as whether the
-    reset macOS then sends has arrived depends on when the operation runs. Unix
+    reset macOS then sends has arrived depends on when the operation runs; and,
+    under [`Windows], the scenarios eio-net.mem does not model (socket options'
+    values, the addresses a connect or a datagram reaches across families, the
+    edge addresses, the receive memory and the names getnameinfo gives). Under
+    [`Windows] an answer where eio_windows breaks Eio's contract (a refused
+    connect that never returns, a read that waits after a receive shutdown, an
+    unclassified [WSAESHUTDOWN], a datagram receive that raises [EMSGSIZE], a
+    write of no bytes on a closed flow, a raw [Unix.Unix_error], lookups,
+    abstract Unix paths and [reuse_addr] on a Unix path) is allowed the answer
+    the contract gives, and the report names each such defect it allowed. Unix
     paths are made in the current directory.
 
     An operation is "would wait" if it has not completed after 64 turns of the
@@ -393,9 +406,9 @@ module Fault : sig
             reads what is queued to it first. *)
     | Refuse  (** A connect fails with [Connection_failure (Refused _)]. *)
     | Timeout
-        (** A connect fails after 133 seconds of the clock, or 75 under
-            [`Macos], as a lost handshake does, with the error eio_posix raises
-            then:
+        (** A connect fails after 133 seconds of the clock, 75 under [`Macos] or
+            21 under [`Windows], as a lost handshake does, with the error
+            eio_posix raises then:
             [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (ETIMEDOUT,
              "connect-in-progress", "")), _)]. Eio does not classify it as a
             [Connection_failure]. *)
@@ -427,7 +440,7 @@ module Fault : sig
 end
 
 val wrap :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   _ Eio.Net.t ->
@@ -472,7 +485,7 @@ val wrap :
     each operation does what it does on [net], but for that guard. *)
 
 val pair :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
@@ -665,19 +678,21 @@ val pair :
 (* For this package's tests: the allowances of [device], those a network's
    answers needed, and [device] on the host's own network. *)
 module Private : sig
-  val device_allowances : ([ `Linux | `Macos ] * string) list
+  val device_allowances : (Eio_chaos.os * string) list
   (** [device_allowances] is each allowance of {!val-device}, by the kernel it
       applies to and why it holds. *)
 
+  val device_defects : string list
+  (** [device_defects] is each eio_windows defect {!val-device} allows under
+      [`Windows], by its finding. *)
+
   val device_allowed :
-    [ `Linux | `Macos ] ->
-    (sw:Eio.Switch.t -> env -> _ Eio.Net.t) ->
-    string list
+    Eio_chaos.os -> (sw:Eio.Switch.t -> env -> _ Eio.Net.t) -> string list
   (** [device_allowed os net] is why each allowance the answers of [net] needed
       holds, as {!val-device} replays the traces of [os] on it. *)
 
   val device_in_loop :
-    ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
+    ?os:[< Eio_chaos.os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
   (** [device_in_loop ~os net] is {!val-device} with each sequence in the
       caller's event loop, for the host's own network, which only the host's
       event loop drives: the test of the kernel's traces runs it there. *)

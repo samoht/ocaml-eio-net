@@ -145,6 +145,17 @@ let check_local ~os ?(tcp = false) ?(fail = fail) ip =
   let ip = unmap ip in
   match os with
   | Macos -> check_local_macos ~tcp ~fail ip
+  | Windows ->
+      (* Windows binds a socket at no multicast, broadcast or scoped
+         address. *)
+      let s = (ip :> string) in
+      let multicast =
+        if is_v4 ip then
+          Char.code s.[0] land 0xf0 = 0xe0 || s = "\255\255\255\255"
+        else s.[0] = '\xff'
+      in
+      if multicast || needs_scope ip || off_loopback ip then
+        fail Address_not_available
   | Linux ->
       if needs_scope ip then fail Invalid_address;
       let local =
@@ -167,7 +178,8 @@ let embedded_nul ~os path =
    bind, [Eio.Fs.Not_found] from a [connect] or a [send]. macOS binds no
    empty path, with EINVAL. *)
 let check_path ~os ?(bind = false) path =
-  if String.length path >= match os with Linux -> 108 | Macos -> 104 then
+  if String.length path >= match os with Linux | Windows -> 108 | Macos -> 104
+  then
     if bind then raise (Posix.bind_error (`Name_too_long path))
     else fail Name_too_long
   else if embedded_nul ~os path then

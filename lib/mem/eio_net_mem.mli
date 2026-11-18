@@ -5,11 +5,12 @@
     makes a network of its own: two of them share no socket. The library
     [eio-net.chaos] tests programs and networks with it.
 
-    Where Linux and macOS differ, the network follows one, chosen by [?os]:
-    [`Linux], the default, or [`Macos]. The choice comes from the argument,
-    never from the host, so a test sees the same network on every machine.
-    {!section-macos} lists what [`Macos] changes. Its answers are those recorded
-    on Linux and macOS, and [Eio_net_chaos.device] checks them. *)
+    Where Linux, macOS and Windows differ, the network follows one, chosen by
+    [?os]: [`Linux], the default, [`Macos] or [`Windows]. The choice comes from
+    the argument, never from the host, so a test sees the same network on every
+    machine. {!section-macos} lists what [`Macos] changes and {!section-windows}
+    what [`Windows] changes. Its answers are those recorded on Linux, macOS and
+    Windows, and [Eio_net_chaos.device] checks them. *)
 
 (** {1:errors Errors}
 
@@ -166,11 +167,19 @@ type Eio.Exn.Backend.t +=
         (** The code of the error raised under [`Macos] where macOS finds no
             route to a host, with [EHOSTUNREACH]: a [connect] to a link-local
             address, and the datagram [send]s {!section-datagrams} lists. *)
+  | Exclusive_address
+        (** The backend code of the [Eio.Fs.Permission_denied] error raised
+            under [`Windows] by a bind with [reuse_addr] at an address a socket
+            without it holds, where Windows fails it with [WSAEACCES]. *)
+  | Shut_down
+        (** The code of the error a read raises under [`Windows] once its end
+            shut its receive side, where Windows fails it with [WSAESHUTDOWN].
+        *)
 
 (** {1:networks Networks} *)
 
 val v :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< `Linux | `Macos | `Windows ] ->
   ?capacity:int ->
   ?clock:_ Eio.Time.Mono.t ->
   sw:Eio.Switch.t ->
@@ -215,7 +224,7 @@ val v :
     @raise Invalid_argument if [capacity] is not positive. *)
 
 val pair :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< `Linux | `Macos | `Windows ] ->
   ?capacity:int ->
   unit ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
@@ -628,11 +637,56 @@ val pair :
     Where macOS's loopback delivers a segment asynchronously, the network
     delivers it at once, as if the next call came after it. *)
 
+(** {1:windows Windows}
+
+    Under [`Windows] the network follows Windows where it differs from Linux, as
+    the kernel traces record it through eio_windows on GitHub's windows-latest
+    (Windows Server 2025), and Eio's documented contract where eio_windows
+    breaks it: a refused [connect] raises [Connection_failure] where eio_windows
+    waits for ever, a read after a receive shutdown raises where eio_windows
+    waits, and a write after a send shutdown raises a connection reset where
+    eio_windows raises [WSAESHUTDOWN] unclassified.
+
+    - Binds. A bind looks only at sockets bound at its own address, the IPv4 and
+      IPv6 ones apart, as [IPV6_V6ONLY] is on: a wildcard address and a specific
+      one share a port. A socket at an address another socket holds without
+      [reuse_addr] fails with [EADDRINUSE], or, with [reuse_addr], with
+      [Eio.Fs.Permission_denied] ({!Exclusive_address}); two with [reuse_addr]
+      share it, and a [connect] reaches the first listener. A connected socket
+      holds no address against a bind, and a closed one holds none: there is no
+      TIME_WAIT. An IPv4-mapped address binds nothing ([EADDRNOTAVAIL]).
+    - Listeners. The accept queue takes [backlog] connections, at least one.
+    - Connections. A read after its end's receive shutdown raises {!Shut_down}.
+      Bytes that reach a shut receive side, or a receive side that shuts with
+      bytes unread, reset the connection, and each read and write of either end
+      then raises the reset, as does each read after a write to a closed peer
+      ([WSAECONNABORTED]). A Unix-domain end takes one write after its peer
+      closed.
+    - Datagrams. There are no Unix-domain datagram sockets ({!Address_family}).
+      A send with no destination raises [ENOTCONN]. A datagram sent to a port no
+      socket holds makes the sender's next receive raise a connection reset, as
+      the ICMP port unreachable does. Of sockets sharing an address with
+      [reuse_addr], the first bound receives.
+    - Unix paths. A [connect] to a path no socket binds is refused.
+    - Resolution. [getaddrinfo] gives the stream addresses, then the datagram
+      ones, [::1] first, as eio_windows asks for each socket type. A host is a
+      dotted quad, an IPv6 address, in brackets or not, with a numeric scope
+      only.
+
+    Not modelled: [SO_EXCLUSIVEADDRUSE], which neither Eio nor OCaml's Unix
+    reaches; the socket options' defaults and values, which follow Linux; which
+    addresses a [connect] or a datagram reaches across families, the edge
+    addresses and the receive memory, which follow Linux; sends off loopback and
+    port exhaustion, which the recordings leave out; and a connect's timeout, 21
+    seconds as Windows documents it, which no trace records.
+    [Eio_net_chaos.device] leaves those scenarios out under [`Windows] and names
+    each answer it allows as an eio_windows defect. *)
+
 (**/**)
 
 module Private : sig
   val v :
-    ?os:[< `Linux | `Macos ] ->
+    ?os:[< `Linux | `Macos | `Windows ] ->
     capacity:(int -> int) ->
     ?clock:_ Eio.Time.Mono.t ->
     sw:Eio.Switch.t ->

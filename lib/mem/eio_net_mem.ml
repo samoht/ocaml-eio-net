@@ -19,6 +19,8 @@ type Eio.Exn.Backend.t +=
   | Invalid_address = Code.Invalid_address
   | Broadcast = Code.Broadcast
   | Host_unreachable = Code.Host_unreachable
+  | Exclusive_address = Code.Exclusive_address
+  | Shut_down = Code.Shut_down
 
 module Flow = struct
   module Impl = struct
@@ -69,7 +71,7 @@ module Flow = struct
         let first = t.given_up = `No in
         if first then t.given_up <- `Pending;
         let report =
-          t.given_up = `Pending && (op = `Read || Pipe.os t.from_peer = Linux)
+          t.given_up = `Pending && (op = `Read || Pipe.os t.from_peer <> Macos)
         in
         if report then t.given_up <- `Reported;
         (first, report)
@@ -162,11 +164,16 @@ module Flow = struct
             Pipe.shut t.to_peer;
             Pipe.fin_sent t.from_peer;
             t.on_fin ()
-        | `Receive -> Pipe.shut_receive t.from_peer
+        | `Receive ->
+            Pipe.shut_receive t.from_peer;
+            if Pipe.os t.from_peer = Windows && Pipe.refused t.from_peer then
+              Pipe.abort t.to_peer
         | `All ->
             Pipe.shut t.to_peer;
             Pipe.fin_sent t.from_peer;
             Pipe.shut_receive t.from_peer;
+            if Pipe.os t.from_peer = Windows && Pipe.refused t.from_peer then
+              Pipe.abort t.to_peer;
             if Pipe.os t.from_peer = Macos && not (Pipe.local t.from_peer) then
               Pipe.open_window t.from_peer;
             t.on_fin ()
@@ -253,7 +260,7 @@ module Flow = struct
      at most about 250 KiB. *)
   let default_capacity ~os ~local =
     match os with
-    | Linux -> if local then 256 * 1024 else 4 * 1024 * 1024
+    | Linux | Windows -> if local then 256 * 1024 else 4 * 1024 * 1024
     | Macos -> if local then 8 * 1024 else 1024 * 1024
 
   (* What a direction queues: [capacity] until a socket sets a buffer, and at
@@ -353,6 +360,7 @@ module Listening_socket = struct
     match os with
     | Linux -> if backlog < 0 || backlog > 4096 then 4097 else backlog + 1
     | Macos -> if backlog <= 0 || backlog > 128 then 128 else backlog
+    | Windows -> Int.max backlog 1
 
   let is_closed t = Mutex.protect t.lock (fun () -> Life.is_closed t.life)
 
@@ -365,7 +373,7 @@ module Listening_socket = struct
       | `Tcp (ip, 0) ->
           let free =
             match Ports.os hub.ports with
-            | Linux -> Ports.free hub.ports
+            | Linux | Windows -> Ports.free hub.ports
             | Macos -> Ports.free_next hub.ports
           in
           Option.map (fun port -> `Tcp (ip, port)) free
@@ -381,7 +389,13 @@ module Listening_socket = struct
               Files.bind hub.files ~take_over:reuse_addr path Files.Listener
           | `Tcp a -> not (Ports.in_use hub.ports ~reuse:reuse_addr a)
         in
-        if not bound then Error `In_use
+        let denied =
+          match addr with
+          | `Tcp a -> Ports.denied hub.ports ~reuse:reuse_addr a
+          | `Unix _ -> false
+        in
+        if denied then Error `Denied
+        else if not bound then Error `In_use
         else
           let hold =
             match addr with
@@ -405,13 +419,27 @@ module Listening_socket = struct
               opts = Sockopt.listener ~os:(Ports.os hub.ports) addr;
             }
           in
-          Hashtbl.replace hub.listeners addr t;
+          (match (Ports.os hub.ports, Hashtbl.find_opt hub.listeners addr) with
+          | Windows, Some first ->
+              (* The second takes the port over, and a connect still
+                 reaches the first, as Windows answers. *)
+              Hashtbl.remove hub.listeners addr;
+              Hashtbl.add hub.listeners addr t;
+              Hashtbl.add hub.listeners addr first
+          | _ -> Hashtbl.replace hub.listeners addr t);
           Ok t
 
   (* The refusals are raised once the mutex is released, which an exception
      inside it would poison. *)
   let v hub ~reuse_addr ~backlog addr =
     (match addr with
+    | `Tcp (ip, _)
+      when Ports.os hub.ports = Windows
+           && String.length (ip : Eio.Net.Ipaddr.v4v6 :> string) = 16
+           && String.sub (ip :> string) 0 12
+              = "\000\000\000\000\000\000\000\000\000\000\255\255" ->
+        (* IPV6_V6ONLY is on: an IPv6 socket has no IPv4 side. *)
+        bind_fail Address_not_available
     | `Tcp (ip, _) ->
         check_local ~os:(Ports.os hub.ports) ~tcp:true ~fail:bind_fail ip
     | `Unix path -> check_path ~os:(Ports.os hub.ports) ~bind:true path);
@@ -423,6 +451,7 @@ module Listening_socket = struct
     (* A port of zero with none of the range free is bind(2)'s EADDRINUSE, as
        an address a socket holds is. *)
     | Error (`In_use | `No_port) -> bind_fail Address_in_use
+    | Error `Denied -> raise (Eio.Fs.err (Permission_denied Exclusive_address))
 
   (* The connections waiting to be accepted are reset with the listener, as
      a kernel resets them. A connect that queues one after this is
@@ -433,13 +462,18 @@ module Listening_socket = struct
        listener's path as it closes, even one a new listener took over. *)
     Eio.Cancel.protect @@ fun () ->
     Eio.Mutex.use_rw ~protect:true t.hub.mutex (fun () ->
-        (match Hashtbl.find_opt t.hub.listeners t.addr with
-        | Some held when held == t -> (
-            Hashtbl.remove t.hub.listeners t.addr;
-            match (t.addr, t.hold) with
-            | `Tcp (_, port), Some h -> Ports.remove t.hub.ports port h
-            | `Tcp _, None | `Unix _, _ -> ())
-        | Some _ | None -> ());
+        let held = Hashtbl.find_all t.hub.listeners t.addr in
+        if List.memq t held then begin
+          while Hashtbl.mem t.hub.listeners t.addr do
+            Hashtbl.remove t.hub.listeners t.addr
+          done;
+          List.iter
+            (Hashtbl.add t.hub.listeners t.addr)
+            (List.rev (List.filter (fun l -> l != t) held));
+          match (t.addr, t.hold) with
+          | `Tcp (_, port), Some h -> Ports.remove t.hub.ports port h
+          | `Tcp _, None | `Unix _, _ -> ()
+        end;
         match t.addr with
         | `Unix path -> Files.leave ~remove:true t.hub.files path Listener
         | `Tcp _ -> ());
@@ -560,6 +594,9 @@ module Datagram_socket = struct
     wmem : int Atomic.t;
     readable : Eio.Condition.t;
     mutable closed : bool;
+    mutable unreachable : bool;
+        (* Under Windows, a datagram it sent found no socket: its next
+           receive raises the reset the ICMP port unreachable brought. *)
     mutable send_shut : bool;
     mutable recv_shut : bool;
     mutable release : Eio.Switch.hook;
@@ -638,6 +675,10 @@ module Datagram_socket = struct
       | `Unix path -> not (Files.bind hub.files path Files.Datagram)
       | `Udp a -> Ports.in_use hub.ports ~reuse a
     in
+    (match addr with
+    | `Udp a when Ports.denied hub.ports ~reuse a ->
+        raise (Eio.Fs.err (Permission_denied Exclusive_address))
+    | _ -> ());
     if in_use then bind_fail Address_in_use;
     let hold =
       match addr with
@@ -656,6 +697,7 @@ module Datagram_socket = struct
         wmem = Atomic.make 0;
         readable = Eio.Condition.create ();
         closed = false;
+        unreachable = false;
         send_shut = false;
         recv_shut = false;
         release = Eio.Switch.null_hook;
@@ -668,14 +710,18 @@ module Datagram_socket = struct
     Hashtbl.add hub.sockets addr t;
     t
 
-  (* The socket a datagram sent to [addr] reaches ([reaching]). *)
+  (* The socket a datagram sent to [addr] reaches ([reaching]): of those
+     sharing an address, the last bound, or the first under Windows. *)
   let find hub (addr : Eio.Net.Sockaddr.datagram) =
     Mutex.protect hub.mutex @@ fun () ->
+    let at a =
+      match Ports.os hub.ports with
+      | Windows -> List.nth_opt (List.rev (Hashtbl.find_all hub.sockets a)) 0
+      | Linux | Macos -> Hashtbl.find_opt hub.sockets a
+    in
     match addr with
     | `Udp (ip, port) ->
-        List.find_map
-          (fun ip -> Hashtbl.find_opt hub.sockets (`Udp (ip, port)))
-          (reaching ip)
+        List.find_map (fun ip -> at (`Udp (ip, port))) (reaching ip)
     | `Unix _ -> Hashtbl.find_opt hub.sockets addr
 
   (* The longest datagram [t] sends to [dst]: UDP's payload over IPv4 or
@@ -898,7 +944,9 @@ module Datagram_socket = struct
       | Some dst -> dst
       | None ->
           let code =
-            if local && t.hub.os = Linux then Not_connected else No_destination
+            if t.hub.os = Windows || (local && t.hub.os = Linux) then
+              Not_connected
+            else No_destination
           in
           fail code
     in
@@ -918,7 +966,7 @@ module Datagram_socket = struct
     let local = match t.addr with `Unix _ -> true | `Udp _ -> false in
     let dst =
       match (destination t ~local dst, t.addr) with
-      | `Udp (d, port), `Udp (bound, _) when os = Linux ->
+      | `Udp (d, port), `Udp (bound, _) when os <> Macos ->
           `Udp (toward ~os ~bound d, port)
       | dst, _ -> dst
     in
@@ -950,7 +998,12 @@ module Datagram_socket = struct
             match dst with
             | `Unix path when Files.abstract path -> refused ()
             | `Unix _ -> raise (no_file ())
-            | `Udp _ -> Some ())
+            | `Udp _ ->
+                if t.hub.os = Windows then begin
+                  t.unreachable <- true;
+                  Eio.Condition.broadcast t.readable
+                end;
+                Some ())
         | Some Datagram, None -> Some ()
         | (None | Some Datagram), Some peer -> (
             match deliver t ~local ~dst peer bufs with
@@ -963,6 +1016,12 @@ module Datagram_socket = struct
       Eio.Condition.loop_no_mutex t.readable @@ fun () ->
       Mutex.protect t.lock @@ fun () ->
       if t.closed then invalid_arg "Eio.Net.recv: the datagram socket is closed"
+      else if t.recv_shut && t.hub.os = Windows then
+        raise (Code.shut_down_exn ())
+      else if t.unreachable then begin
+        t.unreachable <- false;
+        raise (Code.reset_exn ())
+      end
       else if t.batch = 0 then t.batch <- Queue.length t.queued;
       match Queue.take_opt t.queued with
       | None -> None
@@ -1203,7 +1262,7 @@ module Network = struct
         match (toward, t.os) with
         | _ when port <> 0 -> Some port
         | Some toward, _ -> Ports.free_toward ports toward
-        | None, Linux -> Ports.free_down ports
+        | None, (Linux | Windows) -> Ports.free_down ports
         | None, Macos -> Ports.free_next ports
       in
       match port with
@@ -1342,6 +1401,8 @@ module Network = struct
         | Some Datagram -> fail Wrong_socket_type
         | Some (Stale | Client | Listener) -> refused ()
         | None when Files.abstract path -> refused ()
+        (* Windows refuses a connect to a path no socket binds. *)
+        | None when t.os = Windows -> refused ()
         | None -> raise (no_file ()))
 
   (* The accepted socket holds the listener's port at the address the client
@@ -1528,6 +1589,10 @@ module Network = struct
       invalid_arg
         "Eio.Net.datagram_socket: reuse_port is true, which Eio_net_mem does \
          not support";
+    (* Windows has no Unix-domain datagram sockets. *)
+    (match addr with
+    | `Unix _ when t.os = Windows -> fail Address_family
+    | _ -> ());
     let datagram = Datagram_socket.v t.datagrams ~reuse:reuse_addr addr in
     let socket = Eio.Resource.T (datagram, datagram_handler) in
     datagram.release <-
@@ -1541,7 +1606,7 @@ module Network = struct
   let getaddrinfo t ~service node =
     let port =
       match t.os with
-      | Linux -> Resolve.port service
+      | Linux | Windows -> Resolve.port service
       | Macos -> Resolve.port_macos service
     in
     match port with
@@ -1549,13 +1614,17 @@ module Network = struct
     | None when t.os = Macos ->
         raise (Eio.Net.err (Address_lookup_failed NONAME))
     | None -> raise (Eio.Net.err (Address_lookup_failed SERVICE))
-    | Some port ->
-        List.concat_map
-          (fun ip ->
-            match t.os with
-            | Linux -> [ `Tcp (ip, port); `Udp (ip, port) ]
-            | Macos -> [ `Udp (ip, port); `Tcp (ip, port) ])
-          (Resolve.host ~os:t.os node)
+    | Some port -> (
+        let ips = Resolve.host ~os:t.os node in
+        match t.os with
+        | Linux ->
+            List.concat_map (fun ip -> [ `Tcp (ip, port); `Udp (ip, port) ]) ips
+        | Macos ->
+            List.concat_map (fun ip -> [ `Udp (ip, port); `Tcp (ip, port) ]) ips
+        | Windows ->
+            (* eio_windows asks for stream addresses, then datagram ones. *)
+            List.map (fun ip -> `Tcp (ip, port)) ips
+            @ List.map (fun ip -> `Udp (ip, port)) ips)
 
   (* An IPv4-compatible address, ::a.b.c.d past ::1, which glibc's
      getnameinfo names as its IPv4 address, and inet_ntop(3) writes dotted

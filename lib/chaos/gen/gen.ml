@@ -1,5 +1,5 @@
 (* Writes the module of the kernel's traces from their CSV files, given as
-   NAME=FILE, their linux and macos columns found by name: each sequence's
+   NAME=FILE, their linux, macos and windows columns found by name: each sequence's
    answers as an index into the distinct ones, and each scenario's answers. *)
 
 let rows file =
@@ -14,13 +14,15 @@ let rows file =
         in
         go 0 names
       in
-      let linux = index "linux" and macos = index "macos" in
+      let linux = index "linux"
+      and macos = index "macos"
+      and windows = index "windows eio_windows" in
       List.map
         (fun line ->
           let cells = String.split_on_char ',' line in
           if List.compare_lengths cells names <> 0 then
             Fmt.failwith "%s: bad row %S" file line;
-          (List.nth cells linux, List.nth cells macos))
+          (List.nth cells linux, List.nth cells macos, List.nth cells windows))
         rows
   | [] -> Fmt.failwith "%s: not a trace" file
 
@@ -58,12 +60,13 @@ let () =
       sequences
   in
   if Hashtbl.length index > 0xffff then failwith "too many distinct answers";
-  let row ppf (l, m) = Fmt.pf ppf "(%S, %S)" l m in
+  let row ppf (l, m, w) = Fmt.pf ppf "(%S, %S, %S)" l m w in
   Fmt.pr "let answers =@\n  [|@\n%a|]@\n@\n"
     Fmt.(list ~sep:nop (any "    " ++ row ++ any ";@\n"))
     (List.rev !answers);
+  let code ppf (name, codes) = Fmt.pf ppf "(%S, %S)" name codes in
   Fmt.pr "let sequences =@\n  [@\n%a]@\n@\n"
-    Fmt.(list ~sep:nop (any "    " ++ row ++ any ";@\n"))
+    Fmt.(list ~sep:nop (any "    " ++ code ++ any ";@\n"))
     codes;
   Fmt.pr "let scenarios =@\n  [|@\n%a|]@\n"
     Fmt.(list ~sep:nop (any "    " ++ row ++ any ";@\n"))

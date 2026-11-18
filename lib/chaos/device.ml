@@ -1,10 +1,15 @@
 open! Hermetic
 module K = Eio_net_kernel
 
-type os = [ `Linux | `Macos ]
+type os = Eio_chaos.os
 
 let name = "Eio_net_chaos.device"
-let os_name : os -> string = function `Linux -> "Linux" | `Macos -> "macOS"
+
+let os_name : os -> string = function
+  | `Linux -> "Linux"
+  | `Macos -> "macOS"
+  | `Windows -> "Windows"
+
 let split sep = function "" -> [] | s -> String.split_on_char sep s
 let starts_with ~prefix s = String.starts_with ~prefix s
 
@@ -217,7 +222,7 @@ let table : allowance list =
     };
     {
       why = "a host with no services database knows no service name";
-      oses = [ `Linux; `Macos ];
+      oses = [ `Linux; `Macos; `Windows ];
       label = "SERVICE or NONAME, as a host with no services database answers";
       applies =
         (fun name ->
@@ -254,7 +259,7 @@ let table : allowance list =
       why =
         "a host with no name server maps a name /etc/hosts does not hold, such \
          as localhost. with its final dot, to no address";
-      oses = [ `Linux; `Macos ];
+      oses = [ `Linux; `Macos; `Windows ];
       label = "NONAME, as a host with no name server answers";
       applies =
         (fun name ->
@@ -276,6 +281,119 @@ let table : allowance list =
         (fun _ ~kernel given -> given = "sent" && kernel = "EADDRNOTAVAIL");
     };
   ]
+
+(* {1 eio_windows' defects}
+
+   Where eio_windows breaks Eio's contract, the Windows column holds the
+   defect and a network that keeps the contract answers otherwise: that
+   answer is allowed, by the finding that names the defect. [matches step
+   ~expected ~given] holds for an operation, or a scenario, the defect
+   explains, [expected] the recorded answer and [given] the network's. *)
+
+type defect = {
+  finding : string;
+  matches : string -> expected:string -> given:string -> bool;
+}
+
+let words s = split ' ' s
+let has_word w s = List.mem w (words s)
+
+let defects : defect list =
+  [
+    {
+      finding =
+        "eio_windows never completes a refused TCP connect: it waits for \
+         writability in select(2), which reports a failed connect only as an \
+         exception";
+      matches = (fun _ ~expected ~given:_ -> expected = "timeout");
+    };
+    {
+      finding =
+        "eio_windows's getaddrinfo, through OCaml's Unix.getaddrinfo, answers \
+         NONAME for every failure and reads a numeric service past its range";
+      matches =
+        (fun step ~expected ~given ->
+          let hosts s = List.map (fun a -> fst (split_last ':' a)) (words s) in
+          starts_with ~prefix:"getaddrinfo" step
+          && (given = "SERVICE"
+             || (is_address given && hosts given = hosts expected)));
+    };
+    {
+      finding =
+        "eio_windows passes a Unix path that starts with a NUL, or is empty, \
+         to Windows, which has no abstract namespace";
+      matches =
+        (fun step ~expected:_ ~given:_ ->
+          List.exists
+            (fun prefix -> starts_with ~prefix step)
+            [ "abstract "; "empty path "; "failed connect: abstract" ]);
+    };
+    {
+      finding =
+        "eio_windows's listen with reuse_addr removes no socket left at a Unix \
+         path, as OCaml's Unix.lstat does not report it as a socket";
+      matches =
+        (fun step ~expected ~given:_ ->
+          step = "unix relisten with reuse_addr"
+          && expected = "second EADDRINUSE");
+    };
+    {
+      finding =
+        "eio_windows's datagram_socket raises a raw Unix.Unix_error, not \
+         Eio.Io, where it cannot make the socket";
+      matches =
+        (fun step ~expected ~given ->
+          let io w =
+            if starts_with ~prefix:"raw:" w then
+              "io:" ^ String.sub w 4 (String.length w - 4)
+            else w
+          in
+          step = "bind error shapes"
+          && List.map io (words expected) = words given);
+    };
+    {
+      finding =
+        "eio_windows's recv raises EMSGSIZE for a datagram larger than the \
+         buffer, where Eio discards the excess";
+      matches = (fun _ ~expected ~given:_ -> has_word "EMSGSIZE" expected);
+    };
+    {
+      finding =
+        "eio_windows waits for readability before a read, which select(2) \
+         never reports once the socket has shut its receive side";
+      matches =
+        (fun step ~expected ~given ->
+          starts_with ~prefix:"read" step && expected = "blk" && given <> "blk");
+    };
+    {
+      finding =
+        "eio_windows raises WSAESHUTDOWN unclassified for a write after its \
+         own shutdown, where Eio classes EPIPE as a connection reset";
+      matches =
+        (fun _ ~expected ~given ->
+          has_word "ESHUTDOWN" expected && has_word "Reset" given);
+    };
+    {
+      finding =
+        "eio_windows writes no bytes without a system call, so a write of none \
+         succeeds on a closed or reset flow";
+      matches =
+        (fun step ~expected ~given:_ ->
+          starts_with ~prefix:"write" step
+          && Filename.check_suffix step " 0"
+          && expected = "0");
+    };
+  ]
+
+let defect_findings = List.map (fun d -> d.finding) defects
+
+let defect os step ~expected ~given =
+  if os <> `Windows then None
+  else
+    List.find_map
+      (fun d ->
+        if d.matches step ~expected ~given then Some d.finding else None)
+      defects
 
 let allowances =
   List.concat_map (fun a -> List.map (fun os -> (os, a.why)) a.oses) table
@@ -333,6 +451,28 @@ let racy ops =
 
 let timing = "have a macOS answer that depends on timing"
 
+(* The scenarios whose Windows answers eio-net.mem does not model (MODEL.md
+   lists them): socket options' values, which addresses connect and send
+   to which, the edge addresses, the receive memory, and the names
+   getnameinfo gives. *)
+let not_modelled_windows name =
+  List.exists
+    (fun prefix -> starts_with ~prefix name)
+    [
+      "sockopt";
+      "connect ";
+      "dgram ";
+      "edge connect";
+      "udp rmem";
+      "wildcard bind";
+      "dual-stack hold";
+      "unix paths";
+      "self connect";
+      "getnameinfo";
+    ]
+
+let unmodelled = "have a Windows answer eio-net.mem does not model"
+
 (* Why a sequence of [t] is left out under [os], if it is. *)
 let sequence_left_out os t ops =
   match (os, t) with
@@ -345,6 +485,7 @@ let left_out os name =
   else if K.narrow_ports name then Some "use up every port"
   else if K.off_loopback name then Some "send off the loopback interface"
   else if os = `Macos && timing_dependent name then Some timing
+  else if os = `Windows && not_modelled_windows name then Some unmodelled
   else None
 
 let reasons =
@@ -353,11 +494,13 @@ let reasons =
     "use up every port";
     "send off the loopback interface";
     timing;
+    unmodelled;
   ]
 
 (* {1 Replay} *)
 
-let column os (linux, macos) = match os with `Linux -> linux | `Macos -> macos
+let column os (linux, macos, windows) =
+  match os with `Linux -> linux | `Macos -> macos | `Windows -> windows
 
 (* A sequence's answers, one per operation, for each kernel. *)
 let sequence_rows t =
@@ -365,10 +508,10 @@ let sequence_rows t =
   List.init
     (String.length codes / 2)
     (fun i ->
-      let linux, macos =
+      let linux, macos, windows =
         Device_traces.answers.(String.get_uint16_be codes (2 * i))
       in
-      (split '|' linux, split '|' macos))
+      (split '|' linux, split '|' macos, split '|' windows))
 
 (* A scenario that does not end within that many turns of the event loop
    answers "timeout", as the recorder gave up on it. *)
@@ -435,21 +578,25 @@ let sequence os fresh t ops row =
     |> Option.value ~default:[ "timeout" ]
   in
   let rec first i = function
-    | [], [] -> None
+    | [], [] -> `Passed
     | e :: es, g :: gs when token ~expected:e g -> first (i + 1) (es, gs)
-    | es, gs ->
+    | es, gs -> (
         let op = List.nth_opt ops i |> Option.value ~default:"end" in
         let upto = List.filteri (fun j _ -> j < i) ops @ [ op ] in
         let one = function [] -> "nothing" | x :: _ -> shown x in
-        Some
-          {
-            step = op;
-            expected = one es;
-            got = one gs;
-            sequence =
-              Fmt.kstr Option.some "%s %s" (K.transport_name t)
-                (String.concat "; " upto);
-          }
+        let raw = function [] -> "" | x :: _ -> x in
+        match defect os op ~expected:(raw es) ~given:(raw gs) with
+        | Some why -> `Allowed why
+        | None ->
+            `Differs
+              {
+                step = op;
+                expected = one es;
+                got = one gs;
+                sequence =
+                  Fmt.kstr Option.some "%s %s" (K.transport_name t)
+                    (String.concat "; " upto);
+              })
   in
   first 0 (column os row, got)
 
@@ -466,6 +613,8 @@ let scenario os fresh sc ~kernel =
   else
     match List.find_opt (fun a -> a.holds sc ~kernel given) these with
     | Some a -> `Allowed a.why
+    | None when defect os sc ~expected:kernel ~given <> None ->
+        `Allowed (Option.get (defect os sc ~expected:kernel ~given))
     | None ->
         let expected =
           match these with
@@ -503,8 +652,11 @@ let replay_with os fresh =
           | Some why -> skip why
           | None -> (
               match sequence os fresh t ops row with
-              | None -> incr passed
-              | Some d -> differed := d :: !differed))
+              | `Passed -> incr passed
+              | `Allowed why ->
+                  Hashtbl.replace allowed why ();
+                  incr passed
+              | `Differs d -> differed := d :: !differed))
         sequences rows)
     K.transports;
   let rows = Device_traces.scenarios in
@@ -566,6 +718,7 @@ let shown_lines = 100
 
 let os_of : [< os ] option -> os = function
   | Some `Macos -> `Macos
+  | Some `Windows -> `Windows
   | Some `Linux | None -> `Linux
 
 (* The report of a replay, if anything differed: its first lines, then the

@@ -16,6 +16,8 @@ type Eio.Exn.Backend.t +=
   | Invalid_address
   | Broadcast
   | Host_unreachable
+  | Exclusive_address
+  | Shut_down
 
 let label = function
   | Closed -> Some "Closed"
@@ -33,6 +35,8 @@ let label = function
   | Invalid_address -> Some "Invalid address"
   | Broadcast -> Some "Broadcast not allowed"
   | Host_unreachable -> Some "No route to host"
+  | Exclusive_address -> Some "Address held without SO_REUSEADDR"
+  | Shut_down -> Some "Receive side shut down"
   | _ -> None
 
 let () =
@@ -43,6 +47,7 @@ let () =
           true
       | None -> false)
 
+let shut_down_exn () = Eio.Exn.create (Eio.Exn.X Shut_down)
 let reset_exn () = Eio.Net.err (Eio.Net.Connection_reset Closed)
 let address_in_use () = Eio.Exn.create (Eio.Exn.X Address_in_use)
 let fail code = raise (Eio.Exn.create (Eio.Exn.X code))

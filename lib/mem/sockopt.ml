@@ -102,7 +102,8 @@ let family_of_ip (ip : Eio.Net.Ipaddr.v4v6) =
 (* Linux marks an IPv6 socket bound at an address other than the wildcard
    and the IPv4-mapped ones as IPv6 only. *)
 let bound t (ip : Eio.Net.Ipaddr.v4v6) =
-  if t.os = Linux && t.family = V6 && (not (is_v4 ip)) && not (same ip (any ip))
+  if
+    t.os <> Macos && t.family = V6 && (not (is_v4 ip)) && not (same ip (any ip))
   then t.v6only <- true
 
 let tcp t = t.family <> Local && t.kind <> Datagram
@@ -111,9 +112,9 @@ let connected t = Validation.connected t.kind
 (* The send and receive buffers each kernel gives a socket. *)
 let default_sndbuf t =
   match (t.os, t.family, t.kind) with
-  | Linux, (V4 | V6), Stream (Unconnected | Listening) -> 16384
-  | Linux, (V4 | V6), Stream (Connected _) -> 2626560
-  | Linux, _, _ -> 229376
+  | (Linux | Windows), (V4 | V6), Stream (Unconnected | Listening) -> 16384
+  | (Linux | Windows), (V4 | V6), Stream (Connected _) -> 2626560
+  | (Linux | Windows), _, _ -> 229376
   | Macos, (V4 | V6), Stream (Unconnected | Listening) -> 131072
   | Macos, V4, Stream (Connected Client) -> 146988
   | Macos, V6, Stream (Connected Client) -> 146808
@@ -125,8 +126,8 @@ let default_sndbuf t =
 
 let default_rcvbuf t =
   match (t.os, t.family, t.kind) with
-  | Linux, (V4 | V6), Stream _ -> 131072
-  | Linux, _, _ -> 229376
+  | (Linux | Windows), (V4 | V6), Stream _ -> 131072
+  | (Linux | Windows), _, _ -> 229376
   | Macos, (V4 | V6), Stream (Unconnected | Listening) -> 131072
   | Macos, V4, Stream (Connected Client) -> 408300
   | Macos, V6, Stream (Connected Client) -> 407800
@@ -172,7 +173,7 @@ let datagram ~os : Eio.Net.Sockaddr.datagram -> t = function
 let connect t role =
   t.kind <- Stream (Connected role);
   match t.os with
-  | Linux -> t.maxseg <- Some (linux_mss t)
+  | Linux | Windows -> t.maxseg <- Some (linux_mss t)
   | Macos -> t.maxseg <- None
 
 (* What an accepted socket takes of its listener's options: on Linux a TCP
@@ -183,8 +184,8 @@ let accepted l =
   let fresh = v ~os:l.os ~family:l.family (Stream (Connected Server)) in
   let t =
     match (l.os, l.family) with
-    | Linux, Local -> fresh
-    | Linux, _ ->
+    | (Linux | Windows), Local -> fresh
+    | (Linux | Windows), _ ->
         {
           l with
           kind = Stream (Connected Server);
@@ -227,7 +228,7 @@ let timeout t f =
     let usec = Float.to_int (1e6 *. (f -. Float.of_int sec)) in
     let sec, usec =
       match t.os with
-      | Linux ->
+      | Linux | Windows ->
           let ms = (usec + 999) / 1000 in
           if ms = 1000 then (sec + 1, 0) else (sec, ms * 1000)
       | Macos -> (sec, usec)
@@ -263,7 +264,7 @@ let secs_of_retrans n =
    keeps it as it is, at most [kern.ipc.maxsockbuf]. *)
 let buffer t ~min:least n =
   match t.os with
-  | Linux ->
+  | Linux | Windows ->
       let n = if n < 0 || n > 7500000 then 7500000 else n in
       max (2 * n) least
   | Macos -> min n 8388608
@@ -273,7 +274,7 @@ let buffer t ~min:least n =
    macOS at the receive buffer. *)
 let rcvlowat t v =
   match t.os with
-  | Linux ->
+  | Linux | Windows ->
       let v = if v < 0 then 0x7fffffff else v in
       let v =
         if not (tcp t) then v
@@ -286,7 +287,7 @@ let rcvlowat t v =
    buffers resize the queues. *)
 let store : type a. t -> a O.t -> a -> unit =
  fun t opt v ->
-  let linux = t.os = Linux in
+  let linux = t.os <> Macos in
   match opt with
   | O.SO_DEBUG -> t.debug <- v
   | O.SO_BROADCAST -> t.broadcast <- v
@@ -360,19 +361,19 @@ let sndlowat t =
   match t.sndlowat with
   | Some n -> n
   | None ->
-      if t.os = Linux || (t.family = Local && t.kind = Datagram) then 1
+      if t.os <> Macos || (t.family = Local && t.kind = Datagram) then 1
       else 2048
 
 (* The maximum segment size the kernel reads back. *)
 let maxseg t =
   match (t.os, t.maxseg) with
-  | Linux, Some n when connected t -> n
-  | Linux, _ -> if t.user_mss > 0 then t.user_mss else 536
+  | (Linux | Windows), Some n when connected t -> n
+  | (Linux | Windows), _ -> if t.user_mss > 0 then t.user_mss else 536
   | Macos, _ -> (view t).maxseg
 
 let keepidle t = Option.value t.keepidle ~default:7200
 let keepintvl t = Option.value t.keepintvl ~default:75
-let keepcnt t = Option.value t.keepcnt ~default:(if t.os = Linux then 9 else 8)
+let keepcnt t = Option.value t.keepcnt ~default:(if t.os <> Macos then 9 else 8)
 
 let get : type a. t -> a Eio.Net.Sockopt.t -> a =
  fun t opt ->
@@ -380,7 +381,7 @@ let get : type a. t -> a Eio.Net.Sockopt.t -> a =
   Result.iter_error
     (fun r -> raise (Validation.exn `Get r))
     (Validation.get (view t) opt);
-  let linux = t.os = Linux in
+  let linux = t.os <> Macos in
   match (Posix.extra opt, opt) with
   | Some Acceptconn, _ ->
       if linux then t.kind = Stream Listening else missing ()
@@ -451,8 +452,8 @@ let queue ~local ~writer ~reader =
   | _ -> (
       let snd = sndbuf writer in
       match (writer.os, local) with
-      | Linux, false -> Some (max snd 32768 + (rcvbuf reader / 2))
-      | Linux, true -> Some (snd / 2)
+      | (Linux | Windows), false -> Some (max snd 32768 + (rcvbuf reader / 2))
+      | (Linux | Windows), true -> Some (snd / 2)
       | Macos, false ->
           let window =
             match reader.rcvbuf with Some r -> r + 131072 | None -> 180224
@@ -475,7 +476,7 @@ let give_up t ~silenced ~last ~oldest =
   and secs n = Int64.(mul (of_int n) 1_000_000_000L) in
   let at n = Some (Mtime.of_uint64_ns n) in
   let user = Int64.(mul (of_int t.user_timeout) 1_000_000L) in
-  let linux = t.os = Linux in
+  let linux = t.os <> Macos in
   let keepalive =
     if not t.keepalive then None
     else

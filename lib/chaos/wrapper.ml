@@ -38,7 +38,7 @@ type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
    ends, and its number, for the places of the reads that return its bytes. *)
 type conn = {
   lock : Mutex.t;
-  os : [ `Linux | `Macos ];
+  os : Eio_chaos.os;
   family : Op.family;
   paired : bool;
   broken : [ `Open | `Reset | `Closed of Op.side | `Silent ] Atomic.t;
@@ -156,7 +156,7 @@ type target =
 type ctx = {
   f : Op.t -> (Fault.t * int) option;
   chaos : Eio_chaos.t option;
-  os : [ `Linux | `Macos ];
+  os : Eio_chaos.os;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   outage : bool;
   lock : Mutex.t;
@@ -177,7 +177,7 @@ let ctx ?os ?chaos ~clock ~outage f =
   {
     f;
     chaos;
-    os = (match os with Some `Macos -> `Macos | Some `Linux | None -> `Linux);
+    os = Option.value (os :> Eio_chaos.os option) ~default:`Linux;
     clock :> float Eio.Time.clock_ty Eio.Resource.t;
     outage;
     lock = Mutex.create ();
@@ -1158,9 +1158,14 @@ module Network = struct
           (* Linux gives up 64 s after its tenth SYN retransmission
              (tcp_syn_retries 6 plus tcp_syn_linear_timeouts 4), macOS after
              net.inet.tcp.keepinit; test/interop/connect-timeout measures
-             both. *)
+             both. Windows retransmits its SYN twice
+             (TcpMaxConnectRetransmissions), from 3 s doubling: 21 s, which
+             no trace here records. *)
           Eio.Time.sleep ctx.clock
-            (match ctx.os with `Linux -> 133. | `Macos -> 75.);
+            (match ctx.os with
+            | `Linux -> 133.
+            | `Macos -> 75.
+            | `Windows -> 21.);
           raise (Posix.timeout ())
       | Some Unreachable -> raise (Posix.unreachable ())
       | Some Hang -> Eio.Fiber.await_cancel ()

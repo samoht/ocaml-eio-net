@@ -158,7 +158,7 @@ let rows () =
           if List.compare_lengths cells names <> 0 then
             Fmt.failwith "%s: bad row %S" file line;
           let cell c = List.assoc c (List.combine names cells) in
-          (cell "ops", cell "linux", cell "macos"))
+          (cell "ops", cell "linux", cell "macos", cell "windows eio_windows"))
         lines
 
 let sub_from s i = String.sub s i (String.length s - i)
@@ -249,8 +249,10 @@ let case ~os name =
           Some (s, option_named o, "connect=", false)
       | _ -> None)
 
-let differences ~os (name, linux, macos) =
-  let kernel = match os with Kernel.Linux -> linux | Macos -> macos in
+let differences ~os (name, linux, macos, windows) =
+  let kernel =
+    match os with Kernel.Linux -> linux | Macos -> macos | Windows -> windows
+  in
   match case ~os name with
   | None -> None
   | Some (s, opt, key, probe) ->

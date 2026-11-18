@@ -26,6 +26,7 @@ let device ?os ?under ?budget ?seed ?replay net =
 
 module Private = struct
   let device_allowances = Device.allowances
+  let device_defects = Device.defect_findings
   let device_allowed os net = (Device.replay os net).allowed
   let device_in_loop = Device.check_in_loop
 end

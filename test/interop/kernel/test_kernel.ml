@@ -5,10 +5,14 @@
 
 open Eio_net_kernel
 
-type os = [ `Linux | `Macos ]
+type os = Eio_chaos.os
 
-let os_name : os -> string = function `Linux -> "Linux" | `Macos -> "macOS"
-let oses : os list = [ `Linux; `Macos ]
+let os_name : os -> string = function
+  | `Linux -> "Linux"
+  | `Macos -> "macOS"
+  | `Windows -> "Windows"
+
+let oses : os list = [ `Linux; `Macos; `Windows ]
 
 let first_column file =
   In_channel.with_open_text file In_channel.input_lines
@@ -72,6 +76,17 @@ let test_allowances () =
         Alcotest.failf "no %s answer of eio-net.mem needs the allowance %S"
           (os_name os) why)
     Eio_net_chaos.Private.device_allowances
+
+(* Under Windows, each eio_windows defect allowed is one an answer of
+   eio-net.mem, which keeps Eio's contract, needs. *)
+let test_defects () =
+  let used = Eio_net_chaos.Private.device_allowed `Windows (mem `Windows) in
+  List.iter
+    (fun finding ->
+      if not (List.mem finding used) then
+        Alcotest.failf "no Windows answer of eio-net.mem needs the defect %S"
+          finding)
+    Eio_net_chaos.Private.device_defects
 
 (* A network whose connects are all reset fails, and the report says
    where. *)
@@ -157,6 +172,8 @@ let suite =
       Alcotest.test_case "a broken network fails, with a report" `Quick
         test_broken;
       Alcotest.test_case "every allowance is needed" `Quick test_allowances;
+      Alcotest.test_case "every eio_windows defect is needed" `Quick
+        test_defects;
       Alcotest.test_case "a network over a faulty network" `Quick
         test_over_faulty_network;
       Alcotest.test_case "macOS leaves out what depends on timing" `Quick

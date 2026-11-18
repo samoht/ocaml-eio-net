@@ -1728,6 +1728,40 @@ let test_connection () =
     "another socket" true
     (Eio_net_mem.Private.connection_id (mock :> _ Eio.Net.stream_socket) = None)
 
+(* Under [`Windows] a second listen with reuse_addr takes over the port of
+   a listener with it, and a connect still reaches the first; one without
+   reuse_addr beside it is denied; SO_REUSEPORT is no option; there are no
+   Unix-domain datagram sockets; and a closed listener holds no port. *)
+let test_windows_traps () =
+  Eio_mock.Backend.run @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~os:`Windows ~sw () in
+  let lo = Eio.Net.Ipaddr.V4.loopback in
+  let listen ?(reuse_addr = false) port =
+    Eio.Net.listen ~sw ~reuse_addr ~backlog:4 net (`Tcp (lo, port))
+  in
+  let first = listen ~reuse_addr:true 4000 in
+  let _second = listen ~reuse_addr:true 4000 in
+  let _c = Eio.Net.connect ~sw net (`Tcp (lo, 4000)) in
+  let _ = Eio.Net.accept ~sw first in
+  let _plain = listen 4001 in
+  (match listen ~reuse_addr:true 4001 with
+  | _ -> Alcotest.fail "a bind beside a listener without reuse_addr"
+  | exception Eio.Io (Eio.Fs.E (Permission_denied _), _) -> ());
+  (match Eio.Net.setsockopt first Eio.Net.Sockopt.SO_REUSEPORT true with
+  | () -> Alcotest.fail "SO_REUSEPORT was set"
+  | exception Eio.Io (Eio.Net.E Invalid_option, _) -> ());
+  (match Eio.Net.datagram_socket ~sw net (`Unix "/tmp/windows-dgram.sock") with
+  | _ -> Alcotest.fail "a Unix-domain datagram socket"
+  | exception Eio.Io (Eio.Exn.X Eio_net_mem.Address_family, _) -> ());
+  Eio.Switch.run (fun sw ->
+      let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, 4002)) in
+      let c = Eio.Net.connect ~sw net (`Tcp (lo, 4002)) in
+      let s, _ = Eio.Net.accept ~sw l in
+      Eio.Flow.close s;
+      Eio.Flow.close c);
+  ignore (listen 4002)
+
 let suite =
   ( "eio_net_mem",
     [
@@ -1760,6 +1794,8 @@ let suite =
       Alcotest.test_case "a capacity above the default" `Quick
         test_large_capacity;
       Alcotest.test_case "macOS: buffers" `Quick test_macos_capacity;
+      Alcotest.test_case "Windows: reuse_addr, options and ports" `Quick
+        test_windows_traps;
       Alcotest.test_case "macOS: a connect to 127.0.0.2 times out" `Quick
         test_macos_connect;
       Alcotest.test_case "a silent connection gives up as Linux does" `Quick

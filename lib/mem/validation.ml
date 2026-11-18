@@ -118,7 +118,7 @@ let gate_macos ~op s level =
 
 let gate ~op s level =
   match s.os with
-  | Linux -> gate_linux ~op s level
+  | Linux | Windows -> gate_linux ~op s level
   | Macos -> gate_macos ~op s level
 
 (* Up to the first NUL and 15 bytes, as Linux reads the name. *)
@@ -184,6 +184,15 @@ let macos : type a. socket -> a O.t -> a -> refusal option =
   | O.TCP_KEEPIDLE | O.TCP_KEEPINTVL | O.TCP_KEEPCNT | O.IP_TTL -> None
   | _ -> Some Missing
 
+(* Windows has no SO_REUSEPORT, which OCaml's Unix then refuses with
+   ENOPROTOOPT; the other options follow Linux. *)
+let windows_missing : type a. a O.t -> bool = function
+  | O.SO_REUSEPORT -> true
+  | _ -> false
+
+let windows : type a. socket -> a O.t -> a -> refusal option =
+ fun s opt v -> if windows_missing opt then errno `No_option else linux s opt v
+
 let refusal : type a. socket -> a O.t -> a -> refusal option =
  fun s opt v ->
   match eio_check opt v with
@@ -193,7 +202,10 @@ let refusal : type a. socket -> a O.t -> a -> refusal option =
       | Some r -> Some r
       | None when Posix.extra opt <> None -> errno `No_option
       | None -> (
-          match s.os with Linux -> linux s opt v | Macos -> macos s opt v))
+          match s.os with
+          | Linux -> linux s opt v
+          | Windows -> windows s opt v
+          | Macos -> macos s opt v))
 
 let set s opt v =
   match refusal s (Posix.canonical opt) v with
@@ -202,6 +214,8 @@ let set s opt v =
 
 let get s opt =
   match gate ~op:`Get s (level (Posix.canonical opt)) with
+  | None when s.os = Windows && windows_missing (Posix.canonical opt) ->
+      Error (Option.get (errno `No_option))
   | None -> Ok ()
   | Some r -> Error r
 

@@ -1560,17 +1560,33 @@ let test_unix_hang_stops_write () =
   Eio.Time.sleep env#clock 0.01;
   Alcotest.(check string) "its own shutdown ends it" "reset" !wrote
 
-(* Windows' network has no model: a run under Windows that holds one is
-   refused, before the program runs. *)
-let test_windows_refused () =
-  match Eio_chaos.run ~os:`Windows [ Eio_net_chaos.network () ] ignore with
-  | () -> Alcotest.fail "a network ran under Windows"
-  | exception Invalid_argument _ -> ()
+(* A run under Windows has Windows' network: a second listen with
+   reuse_addr at a port a listener with it holds takes the port over, where
+   Linux refuses it. *)
+let test_windows_network () =
+  let second os =
+    let r = ref "" in
+    Eio_chaos.run ~os
+      [ Eio_net_chaos.network () ]
+      (fun env ->
+        Eio.Switch.run @@ fun sw ->
+        let listen () =
+          Eio.Net.listen ~sw ~reuse_addr:true ~backlog:1 env#net
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, 4242))
+        in
+        let l = listen () in
+        (r := match listen () with _ -> "ok" | exception Eio.Io _ -> "refused");
+        ignore (Eio.Net.connect ~sw env#net (Eio.Net.listening_addr l)));
+    !r
+  in
+  Alcotest.(check string) "Linux" "refused" (second `Linux);
+  Alcotest.(check string) "Windows" "ok" (second `Windows)
 
 let suite =
   ( "eio_net_chaos",
     [
-      Alcotest.test_case "no network under Windows" `Quick test_windows_refused;
+      Alcotest.test_case "Windows' network under Windows" `Quick
+        test_windows_network;
       Alcotest.test_case "Short cuts each read to its length" `Quick
         test_flow_short;
       Alcotest.test_case "tiny buffers never raise macOS's AF_UNIX queue" `Quick

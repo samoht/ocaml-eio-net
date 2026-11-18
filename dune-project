@@ -23,8 +23,8 @@ faults, and frame channels to build programs on. Each test gets a fresh
 network of its own, used through the ordinary Eio.Net API, so the code under
 test does not change. Eio_net_chaos.run runs a program again and again, each
 time with a different network fault, and restarts it on the network the fault
-left. Eio_net_chaos.device checks that an Eio network answers as Linux or
-macOS does. The frame channels, in which one receive is one frame, come with
+left. Eio_net_chaos.device checks that an Eio network answers as Linux,
+macOS or Windows does. The frame channels, in which one receive is one frame, come with
 an accept loop and a relay.")
  (depends
   (hermetic (>= 0.1.0))

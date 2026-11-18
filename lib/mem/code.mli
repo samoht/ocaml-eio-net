@@ -17,6 +17,12 @@ type Eio.Exn.Backend.t +=
   | Invalid_address  (** [EINVAL] for an address. *)
   | Broadcast  (** [EACCES] for a broadcast. *)
   | Host_unreachable  (** [EHOSTUNREACH]. *)
+  | Exclusive_address
+        (** [EACCES] for a bind beside a socket without [SO_REUSEADDR]. *)
+  | Shut_down  (** [ESHUTDOWN] for a read after a receive shutdown. *)
+
+val shut_down_exn : unit -> exn
+(** [shut_down_exn ()] is the error marked {!Shut_down}. *)
 
 val reset_exn : unit -> exn
 (** [reset_exn ()] is the connection reset a flow raises. *)

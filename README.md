@@ -9,7 +9,7 @@ Each test gets a fresh network of its own, used through the ordinary
 again and again, each time with a different network fault, and checks that
 it starts again on the network the fault left
 ([How it works](#how-it-works)). `Eio_net_chaos.device` checks that an Eio
-network answers as Linux or macOS does. The frame channels, in which one
+network answers as Linux, macOS or Windows does. The frame channels, in which one
 receive is one frame, come with an accept loop and a relay.
 
 ## Installation
@@ -133,7 +133,7 @@ picked and what a program may and may not do.
 ## Testing a network
 
 `Eio_net_chaos.device` checks that an Eio network of your own, such as a
-userspace stack or a tunnel, answers as Linux or macOS does. It takes a
+userspace stack or a tunnel, answers as Linux, macOS or Windows does. It takes a
 function that makes a fresh network and runs on it the sequences of socket
 operations that were recorded on a real Linux and a real macOS kernel:
 

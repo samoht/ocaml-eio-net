@@ -65,6 +65,13 @@ val open_window : t -> unit
 (** [open_window t] advertises the room the bytes a TCP reader dropped took, as
     its FIN does. *)
 
+val refused : t -> bool
+(** [refused t] is [true] once [t] refuses its writer's bytes. *)
+
+val abort : t -> unit
+(** [abort t] resets [t]: its reader reads the reset, and its writer's bytes are
+    refused. *)
+
 val receive_ended : t -> bool
 (** [receive_ended t] is [true] once the reader reads end-of-file when nothing
     is queued. *)

@@ -3,7 +3,7 @@
 type Eio.Exn.Backend.t += Injected_fault
 
 val v :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   ?chaos:Eio_chaos.t ->
   clock:_ Eio.Time.clock ->
   outage:bool ->
@@ -21,7 +21,7 @@ val v :
     while the clock stands still stops the run as a hang. *)
 
 val pair :
-  ?os:[< `Linux | `Macos ] ->
+  ?os:[< Eio_chaos.os ] ->
   clock:_ Eio.Time.clock ->
   (Op.t -> Fault.t option) ->
   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t

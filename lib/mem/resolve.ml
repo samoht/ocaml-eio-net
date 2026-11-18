@@ -184,19 +184,39 @@ let scope ~os ip s =
   (s <> "" && String.for_all is_digit s && Int64.compare value 0xffff_ffffL <= 0)
   || (s = "lo" && needs_scope ip)
 
+(* Windows reads a dotted quad only, an IPv6 address in brackets too, and
+   a numeric scope only. *)
+let number_windows name =
+  let n = String.length name in
+  if n > 2 && name.[0] = '[' && name.[n - 1] = ']' then
+    ipv6 (String.sub name 1 (n - 2))
+  else if List.length (String.split_on_char '.' name) = 4 then
+    match inet_aton ~os:Windows name with
+    | Some ip -> Some ip
+    | None -> ipv6 name
+  else
+    match String.index_opt name '%' with
+    | None -> ipv6 name
+    | Some i ->
+        let s = String.sub name (i + 1) (n - i - 1) in
+        if s <> "" && String.for_all is_digit s then ipv6 (String.sub name 0 i)
+        else None
+
 let number ~os name =
-  match inet_aton ~os name with
-  | Some ip -> Some ip
-  | None -> (
-      match String.index_opt name '%' with
-      | None -> ipv6 name
-      | Some i -> (
-          match ipv6 (String.sub name 0 i) with
-          | Some ip
-            when scope ~os ip
-                   (String.sub name (i + 1) (String.length name - i - 1)) ->
-              Some ip
-          | Some _ | None -> None))
+  if os = Windows then number_windows name
+  else
+    match inet_aton ~os name with
+    | Some ip -> Some ip
+    | None -> (
+        match String.index_opt name '%' with
+        | None -> ipv6 name
+        | Some i -> (
+            match ipv6 (String.sub name 0 i) with
+            | Some ip
+              when scope ~os ip
+                     (String.sub name (i + 1) (String.length name - i - 1)) ->
+                Some ip
+            | Some _ | None -> None))
 
 (* The addresses of a host: a number as it reads, the loopback addresses
    for "localhost" and the empty name, IPv6 first as glibc and macOS order

@@ -54,7 +54,10 @@ let v ~os ?now () =
 (* TCP_TIMEWAIT_LEN on Linux, twice macOS's 15-second MSL, and the
    default tcp_fin_timeout of both. *)
 let time_wait t =
-  match t.os with Linux -> Mtime.Span.(60 * s) | Macos -> Mtime.Span.(30 * s)
+  match t.os with
+  | Linux -> Mtime.Span.(60 * s)
+  | Macos -> Mtime.Span.(30 * s)
+  | Windows -> Mtime.Span.zero
 
 let fin_timeout = Mtime.Span.(60 * s)
 
@@ -223,10 +226,26 @@ let in_use_macos t ~reuse ((ip : Eio.Net.Ipaddr.v4v6), port) =
   in
   List.exists conflict (at t port)
 
+(* Windows looks a bind up at its own address only, the IPv4 and IPv6
+   ones apart as IPV6_V6ONLY is on: a socket bound there that is not
+   connected conflicts, unless both have [SO_REUSEADDR], and the second
+   then takes the port over. One with it where the held one has none is
+   denied ([denied]). A closed socket holds nothing. *)
+let held_windows t (ip, port) =
+  List.filter (fun g -> (not g.connected) && same g.ip ip) (at t port)
+
+let in_use_windows t ~reuse a =
+  List.exists (fun g -> not (reuse && g.reuse)) (held_windows t a)
+
+let denied t ?(reuse = false) a =
+  t.os = Windows && reuse
+  && List.exists (fun g -> not g.reuse) (held_windows t a)
+
 let in_use t ?(reuse = false) a =
   match t.os with
   | Linux -> in_use_linux t ~reuse a
   | Macos -> in_use_macos t ~reuse a
+  | Windows -> in_use_windows t ~reuse a
 
 let is_free t port = at t port = []
 

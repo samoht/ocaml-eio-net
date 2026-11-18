@@ -144,3 +144,42 @@ Notes:
     as a reset, and clears it.
 
 <!-- End of the section made from lib/mem/scope.ml -->
+
+## Windows
+
+Under `` `Windows `` eio-net.mem follows Linux, as the tables above give it,
+but where the kernel traces record Windows otherwise through eio_windows on
+GitHub's `windows-latest`, and where eio_windows breaks Eio's contract it
+follows the contract. `Eio_net_mem`'s Windows section lists each change.
+
+Modelled:
+
+- `SO_REUSEADDR` port takeover: two listeners with `reuse_addr` share a port,
+  and a connect reaches the first; one with `reuse_addr` beside one without is
+  denied with `Eio.Fs.Permission_denied` (`WSAEACCES`); a wildcard address and
+  a specific one share a port, IPv4 and IPv6 apart as `IPV6_V6ONLY` is on.
+- `SO_REUSEPORT` is refused with `Invalid_option`.
+- No TIME_WAIT: a closed socket's address is free at once.
+- Resets: each read and write after a reset raises it; a read after a write to
+  a closed peer raises one (`WSAECONNABORTED`); bytes reaching a shut receive
+  side, or a receive side shut with bytes unread, reset the connection.
+- A read after its end's receive shutdown raises `ESHUTDOWN`.
+- No Unix-domain datagram sockets (`EAFNOSUPPORT`); a Unix-domain connect to a
+  path no socket binds is refused; a Unix-domain end takes one write after its
+  peer closed.
+- Datagrams: a send with no destination raises `ENOTCONN`; one to a port no
+  socket holds makes the sender's next receive raise a reset; of sockets that
+  share an address, the first bound receives.
+- Resolution: stream addresses, then datagram ones, `::1` first; a host is a
+  dotted quad or an IPv6 address, in brackets or not.
+
+Not modelled, and left out of `Eio_net_chaos.device`'s Windows replay:
+
+- `SO_EXCLUSIVEADDRUSE`, which neither Eio nor OCaml's `Unix` reaches.
+- The socket options' defaults and values, which follow Linux.
+- Which addresses a connect or a datagram reaches across address families,
+  the edge addresses, the receive memory, and the names `getnameinfo` gives.
+- Sends off loopback and port exhaustion: the runner has other interfaces,
+  and its ephemeral range cannot be narrowed below 255 ports.
+- A connect's timeout, 21 seconds as Windows documents its two SYN
+  retransmissions, which no trace records.

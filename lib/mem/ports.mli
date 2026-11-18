@@ -56,6 +56,11 @@ val in_use : t -> ?reuse:bool -> Eio.Net.Ipaddr.v4v6 * int -> bool
 (** [in_use t ~reuse a] is [true] if a bind at [a], with [SO_REUSEADDR] if
     [reuse], conflicts with a hold, as the kernel looks a bind up. *)
 
+val denied : t -> ?reuse:bool -> Eio.Net.Ipaddr.v4v6 * int -> bool
+(** [denied t ~reuse a] is [true] under Windows if a bind at [a] with
+    [SO_REUSEADDR] meets a socket bound there without it, which Windows refuses
+    with [WSAEACCES]. *)
+
 val free : t -> int option
 (** [free t] is the lowest port nothing holds, at any address. *)
 

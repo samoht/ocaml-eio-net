@@ -139,6 +139,9 @@ type t = {
   mutable head : int; (* Bytes of the first queued buffer already read. *)
   mutable shut : bool;
   mutable reset : bool;
+  mutable aborted : bool;
+      (* Under Windows, reset as its shut receive side got bytes: a read
+         reports the reset, not the shutdown. *)
   mutable refused : bool;
   mutable reader : reader;
   mutable silent : int option;
@@ -187,6 +190,7 @@ let v ~os ~local ~timer ~capacity =
     head = 0;
     shut = false;
     reset = false;
+    aborted = false;
     refused = false;
     reader = Live { receive = Open; send = Open };
     silent = None;
@@ -259,8 +263,9 @@ let update t f =
 let resize t capacity = update t (fun t -> t.capacity <- capacity)
 
 (* On macOS a write that fails on a reset leaves it to the next read, as
-   it raises EPIPE without clearing the socket's pending error. *)
-let lasting t = t.os = Macos && not t.local
+   it raises EPIPE without clearing the socket's pending error; Windows
+   reports a reset to every read and write. *)
+let lasting t = (t.os = Macos && not t.local) || t.os = Windows
 
 (* The reset reaches the reader once it has read what is queued. A TCP
    reader that has the writer's end-of-file keeps reading end-of-file on
@@ -333,6 +338,11 @@ let write_step t ~turn bufs n =
     if t.local && (t.reader = Gone || (receive_shut t && t.os = Linux)) then
       leave (`Raise (reset_exn ()))
     else leave (`Done 0)
+  else if t.reader = Gone && t.local && t.os = Windows then begin
+    (* Windows takes one write past a Unix-domain peer's close. *)
+    t.refused <- true;
+    leave (`Lost n)
+  end
   else if t.reader = Gone then begin
     t.refused <- true;
     if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
@@ -341,6 +351,13 @@ let write_step t ~turn bufs n =
     leave (`Raise (reset_exn ()))
   else if Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
   then (`Wait (Waiters.queue t.writers ~turn), [])
+  else if receive_shut t && t.os = Windows then begin
+    (* Windows resets a connection whose shut receive side gets data. *)
+    t.reset <- true;
+    t.aborted <- true;
+    t.refused <- true;
+    leave (`Dropped n)
+  end
   else if receive_shut t && t.os = Macos then begin
     (* macOS drops what reaches a receive side shut down, still counted
        in its buffer: a TCP one answers it with a reset. *)
@@ -414,6 +431,8 @@ let rec read_turn ~turn ?until t dst =
     locked t @@ fun t ->
     if Waiters.must_wait t.readers ~turn then
       (`Wait (Waiters.queue t.readers ~turn), [])
+    else if t.os = Windows && receive_shut t && not t.aborted then
+      (`Raise (Code.shut_down_exn ()), Waiters.release t.readers ~turn)
     else if Option.is_some t.silent then
       match t.silent with
       | Some left when left > 0 ->
@@ -439,8 +458,10 @@ let rec read_turn ~turn ?until t dst =
       (`Read n, (if receive_shut t then [] else Waiters.pass t.writers) @ next)
     end
     else if t.reset then begin
-      t.reset <- false;
-      t.shut <- true;
+      if t.os <> Windows then begin
+        t.reset <- false;
+        t.shut <- true
+      end;
       (`Raise (reset_exn ()), Waiters.release t.readers ~turn)
     end
     else if t.shut || receive_shut t then
@@ -463,6 +484,17 @@ let shut t = update t (fun t -> t.shut <- true)
 let shut_receive t =
   update t (fun t ->
       shut_reader `Receive t;
+      (* Windows resets a connection whose receive side shuts with bytes
+         unread. *)
+      if t.os = Windows then
+        if t.size > 0 then begin
+          Queue.clear t.queued;
+          t.head <- 0;
+          t.size <- 0;
+          t.reset <- true;
+          t.aborted <- true;
+          t.refused <- true
+        end;
       if t.os = Macos then begin
         Queue.clear t.queued;
         t.head <- 0;
@@ -477,6 +509,13 @@ let open_window t =
 
 (* The reader reads end-of-file once nothing is queued: macOS refuses to
    shut down its receive side again. *)
+let refused t = Mutex.protect t.mutex (fun () -> t.refused)
+
+let abort t =
+  update t (fun t ->
+      t.reset <- true;
+      t.refused <- true)
+
 let receive_ended t = Mutex.protect t.mutex (fun () -> receive_shut t || t.shut)
 
 (* The reader shut its send side. *)
