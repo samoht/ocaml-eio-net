@@ -1,30 +1,30 @@
 (** Unix-domain stream sockets.
 
-    A socket is reached through a capability: {!connect_at} and {!listen}
-    through the directory the {!Eio.Path.t} they are handed is part of, whose
-    descriptor resolves the socket's name, so a path of any length works and a
-    confined directory confines it. No function here opens a file by a name of
-    its own, changes the working directory of the process or its umask. *)
+    A socket is reached through a capability: {!connect} and {!listen} through
+    the directory the {!Eio.Path.t} they are handed is part of, whose descriptor
+    resolves the socket's name, so a path of any length works and a confined
+    directory confines it. No function here opens a file by a name of its own,
+    changes the working directory of the process or its umask. *)
 
 val max_path_length : int
 (** [max_path_length] is the longest path, in bytes, a Unix-domain socket
     address holds: the size of [sun_path] less its terminating NUL, 103 on macOS
     and 107 on Linux. [Eio.Net.connect ~sw net (`Unix path)] refuses a longer
-    path with [ENAMETOOLONG]; {!connect_at} and {!listen} reach one through its
+    path with [ENAMETOOLONG]; {!connect} and {!listen} reach one through its
     directory. *)
 
-val connect_at :
+val connect :
   sw:Eio.Switch.t ->
   net:[> [ `Generic | `Unix ] Eio.Net.ty ] Eio.Resource.t ->
   _ Eio.Path.t ->
   [ `Unix_fd | Eio_unix.Net.stream_socket_ty ] Eio.Resource.t
-(** [connect_at ~sw ~net path] connects to the Unix-domain stream socket at
-    [path], whatever its length. The directory that holds it is opened through
-    [path]'s own capability, which refuses a path that leaves a confined
-    directory as {!Eio.Path.open_in} does, and the socket is reached by its base
-    name from that directory, as Git's unix-socket.c reaches it by changing into
-    it: on macOS that directory is made the working directory of the connecting
-    thread alone ([pthread_fchdir_np]), on FreeBSD the connection is made with
+(** [connect ~sw ~net path] connects to the Unix-domain stream socket at [path],
+    whatever its length. The directory that holds it is opened through [path]'s
+    own capability, which refuses a path that leaves a confined directory as
+    {!Eio.Path.open_in} does, and the socket is reached by its base name from
+    that directory, as Git's unix-socket.c reaches it by changing into it: on
+    macOS that directory is made the working directory of the connecting thread
+    alone ([pthread_fchdir_np]), on FreeBSD the connection is made with
     [connectat(2)], and on Linux through the short link
     [/proc/self/fd/<dir>/<name>]. [net] is the host's network, whose authority a
     socket of the host needs: an in-memory network does not have the type.
@@ -35,9 +35,9 @@ val connect_at :
     follows a link, so one who can write the directory can swap a link in
     between and have this process connect, with its own credentials, to a socket
     outside the directory. macOS gives no descriptor of a socket's file to
-    connect through, and the window is left open on every system: [connect_at]
-    is for a directory no untrusted user writes. The base name must fit an
-    address: {!max_path_length} bytes on macOS and FreeBSD, and on Linux
+    connect through, and the window is left open on every system: [connect] is
+    for a directory no untrusted user writes. The base name must fit an address:
+    {!max_path_length} bytes on macOS and FreeBSD, and on Linux
     {!max_path_length} less the length of the [/proc/self/fd/<dir>/] prefix; a
     longer one is refused with [ENAMETOOLONG]. On a Linux system with no [/proc]
     mounted, the link does not resolve and the connect fails as a missing socket
@@ -69,11 +69,11 @@ val listen :
 (** [listen ~replace ~sw ~net ~backlog ~perm path] is a stream socket listening
     at [path], whatever its length, whose file has the permission bits [perm]
     from the moment a peer can reach it. The directory that holds [path] is
-    opened through [path]'s own capability, as for {!connect_at}, and [net] is
-    the host's network. The socket is bound and given its mode in a directory of
-    its own, made in that one and that no other user can enter, and it listens
+    opened through [path]'s own capability, as for {!connect}, and [net] is the
+    host's network. The socket is bound and given its mode in a directory of its
+    own, made in that one and that no other user can enter, and it listens
     before it is linked to [path]'s base name; the process's umask is neither
-    read nor changed. On Linux the bind goes through [/proc], as {!connect_at}
+    read nor changed. On Linux the bind goes through [/proc], as {!connect}
     does.
 
     A file already at [path] is kept and the listen fails with [EADDRINUSE],
@@ -95,7 +95,7 @@ val listen :
     getpeername(2) reports. Its connections keep the Unix platform's type, so
     that they pass descriptors ({!receive}).
 
-    @raise Invalid_argument as {!connect_at} does. *)
+    @raise Invalid_argument as {!connect} does. *)
 
 val receive :
   sw:Eio.Switch.t ->

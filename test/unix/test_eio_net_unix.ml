@@ -379,9 +379,7 @@ let ping flow =
   Eio.Buf_read.parse_exn ~max_size:4096 Eio.Buf_read.take_all flow
 
 let exchange ~sw ~net path = ping (Eio.Net.connect ~sw net (`Unix path))
-
-let exchange_at ~sw ~net path =
-  ping (Eio_net_unix.Local.connect_at ~sw ~net path)
+let exchange_at ~sw ~net path = ping (Eio_net_unix.Local.connect ~sw ~net path)
 
 (* A directory whose path is [n] bytes or more. *)
 let deep n =
@@ -417,12 +415,12 @@ let test_local_connect () =
         "a short path, through its directory" "echo:ping"
         (exchange_at ~sw ~net Eio.Path.(fs / short)))
 
-(* Local.connect_at resolves a path through the directory capability it is
+(* Local.connect resolves a path through the directory capability it is
    part of: a path that leaves a confined directory is refused, as Eio
    refuses to open one, and so is a socket's name that is a symbolic link,
    whose target the capability does not vouch for. The server outside
    accepts nothing. *)
-let test_local_connect_at_is_confined () =
+let test_local_connect_is_confined () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let fs = Eio.Stdenv.fs env in
@@ -438,16 +436,16 @@ let test_local_connect_at_is_confined () =
   with_server ~accepted ~sw socket (fun () ->
       let dir = Eio.Path.open_dir ~sw Eio.Path.(fs / inside) in
       (match
-         Eio_net_unix.Local.connect_at ~sw ~net
+         Eio_net_unix.Local.connect ~sw ~net
            Eio.Path.(dir / "../outside/socket")
        with
       | _ -> Alcotest.fail "connected outside the directory"
       | exception Eio.Io (Eio.Fs.E (Eio.Fs.Permission_denied _), _) -> ());
-      (match Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(dir / "link") with
+      (match Eio_net_unix.Local.connect ~sw ~net Eio.Path.(dir / "link") with
       | _ -> Alcotest.fail "connected through a symbolic link"
       | exception Eio.Io (Eio.Fs.E Eio.Fs.Symlink, _) -> ());
       (match
-         Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / inside / "link")
+         Eio_net_unix.Local.connect ~sw ~net Eio.Path.(fs / inside / "link")
        with
       | _ -> Alcotest.fail "connected through a symbolic link from the root"
       | exception Eio.Io (Eio.Fs.E Eio.Fs.Symlink, _) -> ());
@@ -468,11 +466,11 @@ let test_local_errors () =
     | exception Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> ()
   in
   let connect p = Eio.Net.connect ~sw net (`Unix p) in
-  let connect_at p = Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / p) in
-  missing connect_at (Filename.concat (deep 200) "socket");
-  missing connect_at (Filename.concat (deep 200) "absent/socket");
+  let local p = Eio_net_unix.Local.connect ~sw ~net Eio.Path.(fs / p) in
+  missing local (Filename.concat (deep 200) "socket");
+  missing local (Filename.concat (deep 200) "absent/socket");
   missing connect (Filename.concat (Filename.temp_dir "short" "") "socket");
-  missing connect_at (Filename.concat (Filename.temp_dir "short" "") "socket");
+  missing local (Filename.concat (Filename.temp_dir "short" "") "socket");
   let refused f p =
     Eio.Switch.run (fun sw -> Eio.Net.close (listen_at ~sw p));
     match f p with
@@ -482,9 +480,9 @@ let test_local_errors () =
       ->
         ()
   in
-  refused connect_at (Filename.concat (deep 200) "socket");
+  refused local (Filename.concat (deep 200) "socket");
   refused connect (Filename.concat (Filename.temp_dir "short" "") "socket");
-  refused connect_at (Filename.concat (Filename.temp_dir "short" "") "socket")
+  refused local (Filename.concat (Filename.temp_dir "short" "") "socket")
 
 (* A path of [n] bytes under a short temporary directory. *)
 let of_length n =
@@ -612,13 +610,13 @@ let test_local_receive =
       (Eio.Net.connect ~sw net (`Unix p)
         :> Eio_unix.Net.stream_socket_ty Eio.Resource.t))
 
-(* A connection [Local.connect_at] makes to a path no address holds passes
+(* A connection [Local.connect] makes to a path no address holds passes
    descriptors too. *)
 let test_local_receive_long =
   local_receive
     ~dir:(fun () -> deep 200)
     ~connect:(fun ~sw ~net ~fs p ->
-      (Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / p)
+      (Eio_net_unix.Local.connect ~sw ~net Eio.Path.(fs / p)
         :> Eio_unix.Net.stream_socket_ty Eio.Resource.t))
 
 (* A listener reports the path it was given, not the name it was bound by in
@@ -715,7 +713,7 @@ let test_local_listen_long () =
           Alcotest.(check string)
             "served" "long"
             (Eio.Buf_read.parse_exn ~max_size:64 Eio.Buf_read.take_all
-               (Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / long)))));
+               (Eio_net_unix.Local.connect ~sw ~net Eio.Path.(fs / long)))));
   Alcotest.(check bool) "removed on release" false (Sys.file_exists long);
   let p = Filename.concat (Filename.temp_dir "moved" "") "s" in
   Eio.Switch.run (fun sw ->
@@ -849,7 +847,7 @@ let with_mono_clock mono f =
 (* A listener whose backlog is full: on Linux a connect waits for room, and
    a timeout ends the wait, and an accept that makes room lets it through;
    on macOS a connect is refused at once. *)
-let test_local_connect_at_full_backlog () =
+let test_local_connect_full_backlog () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let fs = Eio.Stdenv.fs env in
@@ -870,7 +868,7 @@ let test_local_connect_at_full_backlog () =
         n
   in
   Alcotest.(check bool) "the backlog takes some" true (fill 0 > 0);
-  let connect () = Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / p) in
+  let connect () = Eio_net_unix.Local.connect ~sw ~net Eio.Path.(fs / p) in
   match Lazy.force system with
   | "Darwin" -> (
       match connect () with
@@ -946,9 +944,9 @@ let suite =
       Alcotest.test_case "a local socket that is missing or refusing" `Quick
         test_local_errors;
       Alcotest.test_case "a local connect confined to its directory" `Quick
-        test_local_connect_at_is_confined;
+        test_local_connect_is_confined;
       Alcotest.test_case "a local connect to a full backlog" `Quick
-        test_local_connect_at_full_backlog;
+        test_local_connect_full_backlog;
       Alcotest.test_case "connected datagram batch" `Quick
         test_connected_datagram_batch;
       Alcotest.test_case "connected datagram duplex" `Quick

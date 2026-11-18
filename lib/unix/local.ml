@@ -60,13 +60,13 @@ let parent ~fn ~sw path =
    cancellation ends. *)
 let max_pause = 0.1
 
-let connect_at ~sw ~net:_ path =
+let connect ~sw ~net:_ path =
   let sock = eio (fun () -> Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0) in
   match
     Unix.set_nonblock sock;
-    Eio.Switch.run ~name:"Eio_net_unix.Local.connect_at" @@ fun dsw ->
-    let dir, name = parent ~fn:"Eio_net_unix.Local.connect_at" ~sw:dsw path in
-    Eio_unix.Fd.use_exn "Eio_net_unix.Local.connect_at" dir @@ fun dir ->
+    Eio.Switch.run ~name:"Eio_net_unix.Local.connect" @@ fun dsw ->
+    let dir, name = parent ~fn:"Eio_net_unix.Local.connect" ~sw:dsw path in
+    Eio_unix.Fd.use_exn "Eio_net_unix.Local.connect" dir @@ fun dir ->
     let rec attempt pause =
       match connect_at_dir dir sock name with
       | () -> ()
