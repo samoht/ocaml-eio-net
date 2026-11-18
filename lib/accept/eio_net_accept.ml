@@ -195,7 +195,7 @@ let run ?stop ?(on_error = log_error) ?(pool = pool ()) ?(classify = classify)
     ~max_connections listening handler =
   if max_connections < 1 then
     Fmt.invalid_arg
-      "Eio_net_accept.run: max_connections is %d, it must be positive"
+      "Eio_net_accept.run: max_connections is %d, must be positive"
       max_connections;
   let loop =
     {

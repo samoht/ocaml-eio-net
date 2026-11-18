@@ -12,7 +12,7 @@ let forward ?on_error ?pool ?classify ~sw ~net ~max_connections ~listen ~connect
      the error would fail [sw] rather than reach the caller. *)
   if max_connections < 1 then
     Fmt.invalid_arg
-      "Eio_net.Relay.forward: max_connections is %d, it must be positive"
+      "Eio_net.Relay.forward: max_connections is %d, must be positive"
       max_connections;
   (* On a Unix path, Eio's POSIX backend takes [reuse_addr] as leave to
      remove the file there, a live listener's included. *)

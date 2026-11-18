@@ -1608,7 +1608,7 @@ let capacity_rule fn = function
   | None -> Fun.id
   | Some c when c >= 1 -> Fun.const c
   | Some c ->
-      Fmt.invalid_arg "Eio_net_mem.%s: capacity is %d, it must be positive" fn c
+      Fmt.invalid_arg "Eio_net_mem.%s: capacity is %d, must be positive" fn c
 
 let pair ?os ?capacity () =
   let os = Kernel.of_arg os in
