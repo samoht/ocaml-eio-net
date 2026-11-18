@@ -389,14 +389,18 @@ type fresh = {
   run : 'a. ([ `Generic ] Eio.Net.ty Eio.Resource.t -> 'a) -> 'a option;
 }
 
+(* The parts a network is built over, and a quiet network unless one is. *)
+let below under =
+  if List.exists (fun p -> Eio_chaos.Private.name p = "net") under then under
+  else under @ [ Eio_chaos.quiet (Network.part ()) ]
+
 (* Each sequence in an event loop of its own, on a simulated environment
    whose network follows [os]. *)
-let simulated os f =
+let simulated ?(under = []) os f =
   let run g =
     match
-      Eio_chaos.Private.within ~os
-        [ Eio_chaos.quiet (Network.part ()) ]
-        (fun env -> Eio.Switch.run @@ fun sw -> g (generic (f ~sw env)))
+      Eio_chaos.Private.within ~os (below under) (fun env ->
+          Eio.Switch.run @@ fun sw -> g (generic (f ~sw env)))
     with
     | Ok v -> Some v
     | Error _ -> None
@@ -593,14 +597,76 @@ let report os s =
               pf ppf "; %a that %s" Text.pp_count k why))
         s.left_out
 
-let replay os f = replay_with os (simulated os f)
+let replay ?under os f = replay_with os (simulated ?under os f)
 
 (* The caller's Random goes on where it was, whatever the networks drew. *)
-let check ?os f =
+let check_healthy ?under ?os f =
   let os = os_of os in
   let random = Random.get_state () in
   Fun.protect ~finally:(fun () -> Random.set_state random) @@ fun () ->
-  report os (replay os f)
+  report os (replay ?under os f)
+
+(* {1 Over faulty parts} *)
+
+(* An outcome a failure below a network may explain: any but one that names
+   an error no network gives, as the faults eio-net injects also make
+   datagrams lost, duplicated, reordered or garbled, and peers silent. *)
+let foreign given =
+  List.exists
+    (fun w ->
+      List.mem w [ "Not_found"; "Fs"; "Invalid_argument" ]
+      || String.starts_with ~prefix:"Failure" w
+      || String.starts_with ~prefix:"Not_available" w)
+    (split ' ' given)
+
+(* The scenarios each run of a check over faulty parts replays: [n] of those
+   [os] runs, drawn from [seed], as each run replays them all. *)
+let sample os ~seed n =
+  let all =
+    List.filteri
+      (fun _ (sc, _) -> left_out os sc = None)
+      (List.mapi (fun i sc -> (sc, i)) K.scenarios)
+  in
+  let len = List.length all in
+  if len <= n then all
+  else
+    let a = Array.of_list all and rng = Random.State.make [| seed |] in
+    List.init n (fun i ->
+        let lo = i * len / n and hi = (i + 1) * len / n in
+        a.(lo + Random.State.int rng (hi - lo)))
+
+let sampled = 32
+
+let program ?os ~seed f (env : Eio_chaos.env) =
+  let os = os_of os in
+  let rows = Device_traces.scenarios in
+  if not (Eio_chaos.Private.restarted env) then
+    List.iter
+      (fun (sc, i) ->
+        let kernel = column os rows.(i) in
+        let given =
+          Eio.Switch.run @@ fun sw ->
+          let net = generic (f ~sw env) in
+          bounded ~timeout:"timeout" (fun () -> K.scenario net sc)
+        in
+        let these =
+          List.filter (fun a -> List.mem os a.oses && a.applies sc) table
+        in
+        let allowed =
+          same ~expected:kernel given
+          || List.exists (fun a -> a.holds sc ~kernel given) these
+          || (Eio_chaos.faulted env#chaos && not (foreign given))
+        in
+        if not allowed then
+          Fmt.failwith "%s: expected %s, got %s" sc (shown kernel) (shown given))
+      (sample os ~seed sampled)
+
+let check ?os ?(under = []) ?budget ?(seed = 0) ?replay f =
+  if replay = None then check_healthy ~under ?os f;
+  if under <> [] then
+    Eio_chaos.Private.run ~name:"Eio_net_chaos.device" ~args:"net"
+      ~passes:[ Errors ] ?os ?budget ~seed ?replay (below under)
+      (program ?os ~seed f)
 
 let check_in_loop ?os f =
   let os = os_of os in

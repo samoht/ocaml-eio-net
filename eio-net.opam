@@ -54,5 +54,5 @@ x-maintenance-intent: ["(latest)"]
 available: os != "win32"
 # eio-chaos is not on opam yet: drop once eio-chaos is released.
 pin-depends: [
-  ["eio-chaos.dev" "git+https://github.com/samoht/ocaml-eio-chaos.git#79b87b357eb21d552ecf5ac16ffda968968b7fd4"]
+  ["eio-chaos.dev" "git+https://github.com/samoht/ocaml-eio-chaos.git#6c07eac4a94475334d8afb21d5e4d05de8676dbf"]
 ]

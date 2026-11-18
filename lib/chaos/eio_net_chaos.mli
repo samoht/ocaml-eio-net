@@ -10,9 +10,9 @@
 
     Both raise [Failure] with a report when the answer is no, as an assertion
     does, so they are the body of a test in any test runner. {!run} is
-    {!Eio_chaos.run} on one part, {!network}: a program that also needs a disk
-    is tested with [Eio_chaos.run [ Eio_fs_chaos.disk (); network () ]]. A test
-    that wants one fault at one place builds it from the
+    {!Eio_chaos.run} on one part, {!val-network}: a program that also needs a
+    disk is tested with [Eio_chaos.run [ Eio_fs_chaos.disk (); network () ]]. A
+    test that wants one fault at one place builds it from the
     {{!blocks}building blocks}: {!wrap} for a network, {!pair} for two connected
     streams.
 
@@ -156,7 +156,13 @@ val is_outage : < net : [ `Generic ] Eio.Net.ty Eio.Resource.t ; .. > -> bool
 (** {1:network Testing a network} *)
 
 val device :
-  ?os:[< `Linux | `Macos ] -> (sw:Eio.Switch.t -> env -> _ Eio.Net.t) -> unit
+  ?os:[< `Linux | `Macos ] ->
+  ?under:Eio_chaos.part list ->
+  ?budget:int ->
+  ?seed:int ->
+  ?replay:string ->
+  (sw:Eio.Switch.t -> env -> _ Eio.Net.t) ->
+  unit
 (** [device ~os net] runs each sequence of socket operations recorded on the
     kernel of [os] (defaults to [`Linux]) on a fresh network [net ~sw env], and
     compares each answer with the kernel's. [sw] ends with the sequence, so what
@@ -210,6 +216,24 @@ val device :
     event loop, as the recorder took it, and a sequence that has not ended after
     10,000 turns answers "timeout". Each turn takes 1 us of a simulated clock,
     so eio-net.mem passes in about three seconds.
+
+    {b Over other parts.} A network built over other devices, as a tunnel over
+    another network, takes them from its {!type-env}: [under] (defaults to none)
+    are the parts it holds, with a quiet {!val-network} as its [net] unless one
+    of them is a network. Its sequences and scenarios first run as above, each
+    on healthy parts. Then, if [under] is not empty, [device] is
+    {!Eio_chaos.run} of a program that runs 32 of the scenarios, drawn from
+    [seed] (defaults to [0]), in one event loop, as the sequences and scenarios
+    are too many to replay at each of its runs, with [budget] and [replay] as
+    {!run} takes them, and the failures the parts of [under] allow. It passes
+    iff each run does: until a part fails, every answer is the kernel's; once
+    one failed ({!Eio_chaos.faulted}), an answer may differ, as the faults
+    eio-net injects also lose, duplicate, reorder and garble datagrams and
+    silence peers, but it names no error a network does not give, such as
+    [Not_found] or [Invalid_argument], and the run does not hang. The restart
+    replays nothing, as a network keeps its ports across it and the scenarios
+    name fixed ports. This checks less than with no fault: a network that loses
+    what it was given passes there.
 
     @raise Failure
       if an answer is outside its set, with a line for each step and answers

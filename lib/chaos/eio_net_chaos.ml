@@ -21,7 +21,8 @@ let run ?os ?budget ?seed ?replay ?setup ?inspect app =
     [ network () ]
     app
 
-let device ?os net = Device.check ?os net
+let device ?os ?under ?budget ?seed ?replay net =
+  Device.check ?os ?under ?budget ?seed ?replay net
 
 module Private = struct
   let device_allowances = Device.allowances
