@@ -31,7 +31,7 @@ exception Error of error
 
 let () =
   Printexc.register_printer (function
-    | Error e -> Fmt.kstr Option.some "Eio_net_framing.Error: %a" pp_error e
+    | Error e -> Fmt.kstr Option.some "Eio_net.Framing.Error: %a" pp_error e
     | _ -> None)
 
 module Config = struct
@@ -56,7 +56,7 @@ module Config = struct
       || Int64.of_int max_length > capacity
     then
       Fmt.invalid_arg
-        "Eio_net_framing.Config.v: min_length is %d and max_length is %d, not \
+        "Eio_net.Framing.Config.v: min_length is %d and max_length is %d, not \
          a range within 0-%Ld"
         min_length max_length capacity;
     let prefix_length =

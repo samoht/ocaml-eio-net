@@ -33,5 +33,5 @@ let split sizes s =
 
 let reader config chunks =
   Eio.Buf_read.of_flow
-    ~max_size:(Eio_net_framing.Config.buffer_size config)
+    ~max_size:(Eio_net.Framing.Config.buffer_size config)
     (Eio.Resource.T (ref (List.filter (( <> ) "") chunks), handler))

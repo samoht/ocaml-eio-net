@@ -3,7 +3,7 @@
 
     A frame channel ({!Frame}) is a packet link where one receive is one frame.
     It runs over a datagram socket, over a byte stream where each frame is a
-    length prefix and a payload in the format of {!Eio_net_framing}, or over an
+    length prefix and a payload in the format of {!Framing}, or over an
     in-memory pair. [Eio_net_unix.Frame] builds one over a Unix datagram
     descriptor, with batched system calls. {!Datagram} is the addressed channel
     over a datagram socket: each receive also gives the source.
@@ -13,6 +13,9 @@
 
 module Frame = Frame
 (** Frame channels. *)
+
+module Framing = Framing
+(** The length-prefix codec of a frame channel over a byte stream. *)
 
 module Datagram = Datagram
 (** Addressed datagram channels. *)

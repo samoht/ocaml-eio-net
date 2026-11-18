@@ -25,7 +25,7 @@ let vectors input =
   | "operation,length_field,length,prefix_hex" :: lines -> List.map vector lines
   | _ -> failwith "vectors.csv: unexpected header"
 
-module Framing = Eio_net_framing
+module Framing = Eio_net.Framing
 
 let assert_frame config prefix payload =
   let r = Chunked.reader config [ prefix; payload ] in

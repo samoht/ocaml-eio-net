@@ -119,7 +119,7 @@ val run :
     [Eio.Cancel.Cancelled], with the peer's address in its context when it is an
     [Eio.Io], and the loop goes on serving the others: a failure on the socket,
     and an error the peer caused, such as a malformed frame
-    ([Eio_net_framing.Error]) or a stalled transfer
+    ([Eio_net.Framing.Error]) or a stalled transfer
     ([Eio_net.Progress.Too_slow]), end that connection alone. A shed
     connection's is ignored. An exception [on_error] raises ends the loop, which
     raises it: [~on_error:raise] makes every failed connection end it.

@@ -1,5 +1,5 @@
 open Alcobar
-module Framing = Eio_net_framing
+module Framing = Eio_net.Framing
 
 let field sixteen = if sixteen then Framing.Uint16_be else Framing.Uint32_be
 

@@ -1,4 +1,4 @@
-module Framing = Eio_net_framing
+module Framing = Eio_net.Framing
 
 let error = Alcotest.testable Framing.pp_error Framing.equal_error
 let payloads strings = List.map (fun s -> [ Cstruct.of_string s ]) strings
@@ -192,7 +192,7 @@ let test_uint16_boundaries () =
     (Result.map ignore (Framing.encode config (payloads [ payload ^ "x" ])));
   Alcotest.check_raises "uint16 capacity is enforced"
     (Invalid_argument
-       "Eio_net_framing.Config.v: min_length is 0 and max_length is 65536, not \
+       "Eio_net.Framing.Config.v: min_length is 0 and max_length is 65536, not \
         a range within 0-65535") (fun () ->
       ignore (Framing.Config.v ~length_field:Uint16_be ~max_length:65536 ()))
 

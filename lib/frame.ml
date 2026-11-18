@@ -81,27 +81,23 @@ let locked mutex f x =
    case the direction refuses further use rather than resynchronise on the
    middle of a frame. A refused batch writes nothing, so it leaves the stream
    usable. *)
-let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
+let of_length_prefixed_flow ?(framing = Framing.Config.v ()) flow =
   let reader =
-    Eio.Buf_read.of_flow
-      ~max_size:(Eio_net_framing.Config.buffer_size framing)
-      flow
+    Eio.Buf_read.of_flow ~max_size:(Framing.Config.buffer_size framing) flow
   in
   let read_failure = ref None and write_failed = ref false in
   let read_lock = Eio.Mutex.create () and write_lock = Eio.Mutex.create () in
   (* The prefixes of a batch of up to 16 frames, reused under the write lock:
      each write is done with them before the next one starts. *)
-  let prefixes =
-    Cstruct.create (16 * Eio_net_framing.Config.prefix_length framing)
-  in
+  let prefixes = Cstruct.create (16 * Framing.Config.prefix_length framing) in
   let read_frame () =
     match !read_failure with
     | Some exn -> raise exn
     | None -> (
         let consumed = Eio.Buf_read.consumed_bytes reader in
-        match Eio_net_framing.read framing reader with
+        match Framing.read framing reader with
         | payload -> payload
-        | exception (Eio_net_framing.Error _ as exn) ->
+        | exception (Framing.Error _ as exn) ->
             read_failure := Some exn;
             raise exn
         | exception End_of_file -> raise End_of_file
@@ -112,8 +108,8 @@ let of_length_prefixed_flow ?(framing = Eio_net_framing.Config.v ()) flow =
   in
   let write_batch payloads =
     if !write_failed then raise Aborted;
-    match Eio_net_framing.encode ~prefixes framing payloads with
-    | Error error -> raise (Eio_net_framing.Error error)
+    match Framing.encode ~prefixes framing payloads with
+    | Error error -> raise (Framing.Error error)
     | Ok [] -> ()
     | Ok buffers -> (
         match Eio.Flow.write flow buffers with

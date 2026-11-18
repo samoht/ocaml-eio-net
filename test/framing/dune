@@ -1,4 +1,4 @@
 (test
  (name test)
  (package eio-net)
- (libraries eio-net.framing chunked eio cstruct fmt alcotest))
+ (libraries eio-net chunked eio cstruct fmt alcotest))

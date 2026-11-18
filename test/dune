@@ -2,7 +2,6 @@
  (name test)
  (package eio-net)
  (libraries
-  eio-net.framing
   eio-net
   eio-net.addr
   eio-net.accept

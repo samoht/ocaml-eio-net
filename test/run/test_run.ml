@@ -551,7 +551,7 @@ let test_a_failed_connection_is_logged_by_default () =
     "the failure is a warning of eio-net.accept" [ "eio-net.accept" ] !warnings
 
 (* A peer that sends a length prefix past the bound makes its connection's
-   handler raise [Eio_net_framing.Error]: the error is reported to [on_error]
+   handler raise [Eio_net.Framing.Error]: the error is reported to [on_error]
    with the others, and the loop serves the next peer. *)
 let test_a_malformed_peer_leaves_the_loop () =
   Eio_mock.Backend.run @@ fun () ->
@@ -576,7 +576,7 @@ let test_a_malformed_peer_leaves_the_loop () =
     "the next peer is answered" "\000\000\000\008ok fresh"
     (exchange net "\000\000\000\005fresh");
   match !seen with
-  | [ Eio_net_framing.Error (Invalid_length _) ] -> ()
+  | [ Eio_net.Framing.Error (Invalid_length _) ] -> ()
   | errors ->
       Alcotest.failf "expected one framing error, got [%a]"
         Fmt.(list ~sep:semi exn)

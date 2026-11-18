@@ -1,7 +1,7 @@
 (** A frame channel: a bidirectional packet link where one {!recv} is one frame
     and one {!send} puts one frame on the wire.
 
-    Over a byte stream it uses the codec of {!Eio_net_framing}
+    Over a byte stream it uses the codec of {!Framing}
     ({!of_length_prefixed_flow}), and [Eio_net_unix.Frame] builds one over a
     Unix datagram descriptor.
 
@@ -17,15 +17,15 @@
       {!Datagram.Too_long} one among them, and never [End_of_file], since a
       datagram socket has no end.
     - Over a length-prefixed flow, [End_of_file] at the end of input at a frame
-      boundary, [Eio_net_framing.Error] for a frame the input cuts short or a
-      length out of range, and the {!Eio.Io} error of the flow.
+      boundary, [Framing.Error] for a frame the input cuts short or a length out
+      of range, and the {!Eio.Io} error of the flow.
     - Over a {!pair}, nothing, since a pair has no end-of-file: a receive waits
       until a frame arrives, and a fiber waiting on a peer that has gone is
       cancelled to end it.
 
     A send raises the {!Eio.Io} error of the transport, the {!Datagram.Too_long}
     one among them over [Eio_net_unix.Frame] for a frame longer than its bound,
-    and over a length-prefixed flow [Eio_net_framing.Error] as
+    and over a length-prefixed flow [Framing.Error] as
     {!of_length_prefixed_flow} says. A cancellation passes through every
     transport. A channel does not own its flow or socket: closing it is the
     caller's job, and a receive or send after that raises what the flow or
@@ -83,27 +83,26 @@ val of_datagram_socket :
     @raise Invalid_argument if [max_length] is not positive. *)
 
 val of_length_prefixed_flow :
-  ?framing:Eio_net_framing.Config.t -> _ Eio.Flow.two_way -> t
+  ?framing:Framing.Config.t -> _ Eio.Flow.two_way -> t
 (** [of_length_prefixed_flow ~framing flow] presents a byte stream as a frame
-    channel: each frame is a length prefix and a payload, as {!Eio_net_framing}
-    reads and writes them with [framing] (defaults to
-    [Eio_net_framing.Config.v ()]: a uint32 network-order length, payloads up to
-    1 MiB). It buffers at most {!Eio_net_framing.Config.buffer_size} bytes of
-    input. Receives are serialised among themselves, and so are sends, so a
-    batch reaches the wire whole even when fibers send concurrently.
+    channel: each frame is a length prefix and a payload, as {!Framing} reads
+    and writes them with [framing] (defaults to [Framing.Config.v ()]: a uint32
+    network-order length, payloads up to 1 MiB). It buffers at most
+    {!Framing.Config.buffer_size} bytes of input. Receives are serialised among
+    themselves, and so are sends, so a batch reaches the wire whole even when
+    fibers send concurrently.
 
     {!recv}, {!recv_batch} and {!recv_slice} raise [End_of_file] at the end of
-    input at a frame boundary, and [Eio_net_framing.Error] if the input ends
-    inside a frame ([Truncated _]) or a prefix declares a length outside the
-    range of [framing] ([Invalid_length _]). After such an error, or any
-    exception that interrupts a frame after part of it was consumed (a
-    cancellation), every later receive raises [Eio_net_framing.Error] with that
-    error, or {!Aborted} for another exception, rather than read the middle of a
-    frame as a prefix.
+    input at a frame boundary, and [Framing.Error] if the input ends inside a
+    frame ([Truncated _]) or a prefix declares a length outside the range of
+    [framing] ([Invalid_length _]). After such an error, or any exception that
+    interrupts a frame after part of it was consumed (a cancellation), every
+    later receive raises [Framing.Error] with that error, or {!Aborted} for
+    another exception, rather than read the middle of a frame as a prefix.
 
     {!send} and {!send_batch} write a batch with one [Eio.Flow.write]. They
-    raise [Eio_net_framing.Error (Invalid_length _)] before writing anything if
-    a payload's length is outside the range of [framing], and the channel stays
+    raise [Framing.Error (Invalid_length _)] before writing anything if a
+    payload's length is outside the range of [framing], and the channel stays
     usable. Once a write has raised, part of a frame may be on the wire, so
     every later send raises {!Aborted}. *)
 

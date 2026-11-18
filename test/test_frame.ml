@@ -63,7 +63,7 @@ let test_length_prefixed_over_limit () =
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
   let receiver =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Eio_net_framing.Config.v ~max_length:16 ())
+      ~framing:(Eio_net.Framing.Config.v ~max_length:16 ())
       b
   in
   let raised = ref false in
@@ -74,7 +74,7 @@ let test_length_prefixed_over_limit () =
       Eio.Flow.write a [ Cstruct.of_bytes hdr ])
     (fun () ->
       (try ignore (Eio_net.Frame.recv receiver)
-       with Eio_net_framing.Error _ -> raised := true);
+       with Eio_net.Framing.Error _ -> raised := true);
       Eio.Flow.close a);
   Alcotest.(check bool) "over-limit frame refused" true !raised
 
@@ -100,12 +100,12 @@ let test_length_prefixed_16bit () =
   let a, b = Eio_unix.Net.socketpair_stream ~sw () in
   let sender =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Eio_net_framing.Config.v ~length_field:Uint16_be ())
+      ~framing:(Eio_net.Framing.Config.v ~length_field:Uint16_be ())
       a
   in
   let receiver =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Eio_net_framing.Config.v ~length_field:Uint16_be ())
+      ~framing:(Eio_net.Framing.Config.v ~length_field:Uint16_be ())
       b
   in
   let got = ref "" in
@@ -189,7 +189,7 @@ let test_batch_refused_before_writing () =
   let writer, reader = Eio_unix.Net.socketpair_stream ~sw () in
   let channel =
     Eio_net.Frame.of_length_prefixed_flow
-      ~framing:(Eio_net_framing.Config.v ~max_length:16 ())
+      ~framing:(Eio_net.Framing.Config.v ~max_length:16 ())
       writer
   in
   let refused =
@@ -200,7 +200,7 @@ let test_batch_refused_before_writing () =
           [ Cstruct.of_string (String.make 17 'x') ];
         ];
       false
-    with Eio_net_framing.Error _ -> true
+    with Eio_net.Framing.Error _ -> true
   in
   Eio.Flow.shutdown writer `Send;
   let observed =
@@ -218,14 +218,14 @@ let test_truncated_frames () =
       let frame = Eio_net.Frame.of_length_prefixed_flow reader in
       Eio.Flow.write writer [ Cstruct.of_string wire ];
       Eio.Flow.shutdown writer `Send;
-      Alcotest.check_raises "exact partial EOF" (Eio_net_framing.Error expected)
+      Alcotest.check_raises "exact partial EOF" (Eio_net.Framing.Error expected)
         (fun () -> ignore (Eio_net.Frame.recv frame)))
     [
       ( "\000\000",
-        Eio_net_framing.Truncated { part = Prefix; expected = 4; received = 2 }
+        Eio_net.Framing.Truncated { part = Prefix; expected = 4; received = 2 }
       );
       ( "\000\000\000\003x",
-        Eio_net_framing.Truncated { part = Payload; expected = 3; received = 1 }
+        Eio_net.Framing.Truncated { part = Payload; expected = 3; received = 1 }
       );
     ]
 
@@ -355,7 +355,7 @@ module Scripted_flow = struct
 end
 
 let invalid_length length =
-  Eio_net_framing.Invalid_length
+  Eio_net.Framing.Invalid_length
     { length; min_length = 0; max_length = 1_048_576 }
 
 let test_sticky_read_error () =
@@ -364,7 +364,7 @@ let test_sticky_read_error () =
     Scripted_flow.v [ Some "\255\255\255\255"; Some "\000\000\000\001x"; None ]
   in
   let channel = Eio_net.Frame.of_length_prefixed_flow flow in
-  let refusal = Eio_net_framing.Error (invalid_length 0xffff_ffffL) in
+  let refusal = Eio_net.Framing.Error (invalid_length 0xffff_ffffL) in
   Alcotest.check_raises "hostile length refused" refusal (fun () ->
       ignore (Eio_net.Frame.recv channel));
   Alcotest.check_raises "the refusal is sticky" refusal (fun () ->
@@ -372,7 +372,7 @@ let test_sticky_read_error () =
   let _, flow = Scripted_flow.v [ Some "\000\000\000\003x"; None ] in
   let channel = Eio_net.Frame.of_length_prefixed_flow flow in
   let truncated =
-    Eio_net_framing.Error
+    Eio_net.Framing.Error
       (Truncated { part = Payload; expected = 3; received = 1 })
   in
   Alcotest.check_raises "truncated payload" truncated (fun () ->
@@ -399,10 +399,10 @@ let test_cancelled_read () =
 let test_refused_batch_usable () =
   Eio_mock.Backend.run @@ fun () ->
   let script, flow = Scripted_flow.v [] in
-  let framing = Eio_net_framing.Config.v ~max_length:4 () in
+  let framing = Eio_net.Framing.Config.v ~max_length:4 () in
   let channel = Eio_net.Frame.of_length_prefixed_flow ~framing flow in
   Alcotest.check_raises "oversized batch refused"
-    (Eio_net_framing.Error
+    (Eio_net.Framing.Error
        (Invalid_length { length = 5L; min_length = 0; max_length = 4 }))
     (fun () ->
       Eio_net.Frame.send_batch channel
