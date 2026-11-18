@@ -40,6 +40,8 @@ jobs:
     name: Windows
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      ALCOTEST_SHOW_ERRORS: 'true'
     steps:
       # The provenance pins its inputs by MD5: check them out as committed.
       - run: git config --global core.autocrlf false
