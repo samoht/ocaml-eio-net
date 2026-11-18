@@ -29,7 +29,6 @@ depends: [
   "mtime" {>= "2.0.0"}
   "eio-chaos" {>= "0.1.0" & < "0.2.0"}
   "ipaddr" {>= "5.3.0"}
-  "fpath"
   "conf-linux-libc-dev" {os = "linux"}
   "alcotest" {with-test & >= "1.7.0"}
   "alcobar" {with-test}

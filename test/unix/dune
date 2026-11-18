@@ -5,14 +5,12 @@
   eio-net
   bytesrw
   eio-net.unix
-  eio-net.mem
   eio
   eio.unix
   eio.mock
   eio_main
   alcotest
   fmt
-  fpath
   ipaddr
   cstruct
   unix)

@@ -16,17 +16,9 @@ external rename_at : fd -> string -> fd -> string -> unit
 
 external unlink_at : fd -> string -> bool -> unit = "caml_eio_net_unlink_at"
 
-type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-
 let eio f =
   try f ()
   with Unix.Unix_error (e, fn, arg) -> raise (Eio_unix.Err.v e fn arg)
-
-let connect ~sw ~net path =
-  let s = Fpath.to_string path in
-  if String.length s > max_path_length then
-    raise (Eio_unix.Err.v ENAMETOOLONG "connect" s);
-  (Eio.Net.connect ~sw net (`Unix s) :> stream)
 
 let receive ~sw ~max_fds ~max_length flow =
   let b = Buffer.create 4096 and buf = Cstruct.create 65536 in

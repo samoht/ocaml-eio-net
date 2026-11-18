@@ -1,28 +1,17 @@
 (** Unix-domain stream sockets.
 
-    A socket is reached through a capability: {!connect} through the network it
-    is handed, as {!Eio.Net.connect} is, and {!connect_at} and {!listen} through
-    the directory the {!Eio.Path.t} they are handed is part of, whose descriptor
-    resolves the socket's name, so a path of any length works and a confined
-    directory confines it. No function here opens a file by a name of its own,
-    changes the working directory of the process or its umask. *)
+    A socket is reached through a capability: {!connect_at} and {!listen}
+    through the directory the {!Eio.Path.t} they are handed is part of, whose
+    descriptor resolves the socket's name, so a path of any length works and a
+    confined directory confines it. No function here opens a file by a name of
+    its own, changes the working directory of the process or its umask. *)
 
 val max_path_length : int
 (** [max_path_length] is the longest path, in bytes, a Unix-domain socket
     address holds: the size of [sun_path] less its terminating NUL, 103 on macOS
-    and 107 on Linux. {!connect} refuses a longer path; {!connect_at} and
-    {!listen} reach one through its directory. *)
-
-val connect :
-  sw:Eio.Switch.t ->
-  net:_ Eio.Net.t ->
-  Fpath.t ->
-  [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
-(** [connect ~sw ~net path] is [Eio.Net.connect ~sw net (`Unix path)]: the
-    connection [net] makes to the Unix-domain stream socket at [path], and
-    nothing else. A path longer than {!max_path_length} is refused with
-    [ENAMETOOLONG], an {!Eio.Io} error made by {!Eio_unix.Err.v}, before [net]
-    is asked: {!connect_at} reaches it through its directory. *)
+    and 107 on Linux. [Eio.Net.connect ~sw net (`Unix path)] refuses a longer
+    path with [ENAMETOOLONG]; {!connect_at} and {!listen} reach one through its
+    directory. *)
 
 val connect_at :
   sw:Eio.Switch.t ->

@@ -37,7 +37,6 @@ an accept loop and a relay.")
   (mtime (>= 2.0.0))
   (eio-chaos (and (>= 0.1.0) (< 0.2.0)))
   (ipaddr (>= 5.3.0))
-  fpath
   (conf-linux-libc-dev (= :os linux))
   (alcotest (and :with-test (>= 1.7.0)))
   (alcobar :with-test)

@@ -378,8 +378,7 @@ let ping flow =
   Eio.Flow.shutdown flow `Send;
   Eio.Buf_read.parse_exn ~max_size:4096 Eio.Buf_read.take_all flow
 
-let exchange ~sw ~net path =
-  ping (Eio_net_unix.Local.connect ~sw ~net (Fpath.v path))
+let exchange ~sw ~net path = ping (Eio.Net.connect ~sw net (`Unix path))
 
 let exchange_at ~sw ~net path =
   ping (Eio_net_unix.Local.connect_at ~sw ~net path)
@@ -417,29 +416,6 @@ let test_local_connect () =
       Alcotest.(check string)
         "a short path, through its directory" "echo:ping"
         (exchange_at ~sw ~net Eio.Path.(fs / short)))
-
-(* Local.connect goes through the network it is handed and nothing else: a
-   path no socket address holds is refused with ENAMETOOLONG before the
-   network is asked, whether it is the host's or an in-memory one that knows
-   no such socket, and the server at that path accepts nothing. *)
-let test_local_connect_through_net_alone () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let long = Filename.concat (deep 200) "socket" in
-  let accepted = ref 0 in
-  with_server ~accepted ~sw long (fun () ->
-      let refused net =
-        match Eio_net_unix.Local.connect ~sw ~net (Fpath.v long) with
-        | _ -> Alcotest.failf "connected to %s" long
-        | exception
-            Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.ENAMETOOLONG, _, _)), _)
-          ->
-            ()
-      in
-      refused (Eio_net_mem.v ~sw ());
-      refused (Eio.Stdenv.net env);
-      Eio.Fiber.yield ();
-      Alcotest.(check int) "the server accepted nothing" 0 !accepted)
 
 (* Local.connect_at resolves a path through the directory capability it is
    part of: a path that leaves a confined directory is refused, as Eio
@@ -491,7 +467,7 @@ let test_local_errors () =
     | _ -> Alcotest.failf "connected to %s" p
     | exception Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> ()
   in
-  let connect p = Eio_net_unix.Local.connect ~sw ~net (Fpath.v p) in
+  let connect p = Eio.Net.connect ~sw net (`Unix p) in
   let connect_at p = Eio_net_unix.Local.connect_at ~sw ~net Eio.Path.(fs / p) in
   missing connect_at (Filename.concat (deep 200) "socket");
   missing connect_at (Filename.concat (deep 200) "absent/socket");
@@ -579,7 +555,7 @@ let test_local_listen_perm () =
             Eio.Flow.copy_string "served" flow;
             Eio.Flow.close flow)
           (fun () ->
-            let flow = Eio_net_unix.Local.connect ~sw ~net (Fpath.v p) in
+            let flow = Eio.Net.connect ~sw net (`Unix p) in
             Alcotest.(check string)
               "served" "served"
               (Eio.Buf_read.parse_exn ~max_size:64 Eio.Buf_read.take_all flow)));
@@ -969,8 +945,6 @@ let suite =
         test_local_connect;
       Alcotest.test_case "a local socket that is missing or refusing" `Quick
         test_local_errors;
-      Alcotest.test_case "a local connect through its network alone" `Quick
-        test_local_connect_through_net_alone;
       Alcotest.test_case "a local connect confined to its directory" `Quick
         test_local_connect_at_is_confined;
       Alcotest.test_case "a local connect to a full backlog" `Quick
