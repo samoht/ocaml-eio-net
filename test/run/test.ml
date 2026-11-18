@@ -1,1 +1,1 @@
-let () = Alcotest.run "eio-net.accept run" [ Test_run.suite ]
+let () = Alcotest.run "eio-net.run" [ Test_run.suite ]

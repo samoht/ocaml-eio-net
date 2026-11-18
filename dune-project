@@ -1,4 +1,5 @@
 (lang dune 3.21)
+
 (using mdx 0.4)
 
 (name eio-net)
@@ -14,16 +15,17 @@
 
 (package
  (name eio-net)
- (synopsis "Network tests and channels for Eio")
+ (synopsis "In-memory network for Eio, to test code under network faults, and frame channels")
+ (tags (eio test chaos network in-memory framing))
  (description
-  "eio-net tests Eio code against a network, and gives programs frame
-channels to build on. Eio_net_chaos.run runs a program again and again on an
-in-memory network, each time with a different fault, and restarts it on what
-the fault left. Eio_net_chaos.device checks that an Eio network answers as
-Linux or macOS does; the in-memory network follows either kernel and passes
-it. The frame channels run over datagram sockets and byte streams, in which
-one receive is one frame, beside an accept loop and a relay.")
- (tags (eio test chaos network framing))
+  "eio-net is an in-memory network for Eio, to test code under network
+faults, and frame channels to build programs on. Each test gets a fresh
+network of its own, used through the ordinary Eio.Net API, so the code under
+test does not change. Eio_net_chaos.run runs a program again and again, each
+time with a different network fault, and restarts it on the network the fault
+left. Eio_net_chaos.device checks that an Eio network answers as Linux or
+macOS does. The frame channels, in which one receive is one frame, come with
+an accept loop and a relay.")
  (depends
   (hermetic (>= 0.1.0))
   (ocaml (>= 5.4))
