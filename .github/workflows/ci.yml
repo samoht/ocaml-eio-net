@@ -59,6 +59,8 @@ jobs:
       - run: opam install . --deps-only --with-test
       # Quoted: PowerShell reads a bare @install as an empty splat.
       - run: opam exec -- dune build '@install' '@runtest'
+      # mdx ran the README's examples: it wrote what they answer.
+      - run: if (-not (Test-Path _build/default/.mdx/README.md.corrected)) { exit 1 }
 
   release:
     name: Release build
