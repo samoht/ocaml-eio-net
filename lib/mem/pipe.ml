@@ -325,33 +325,11 @@ let write_silent t ~turn bufs n =
     end
     else (`Done k, room t)
 
-(* Under the mutex: what a write of [n] bytes of [bufs] does now, and the
-   waiters it wakes. *)
-let write_step t ~turn bufs n =
+(* Under the mutex: a write of [n] bytes to a live peer, with room in its
+   queue. *)
+let write_room t ~turn bufs n =
   let leave = leave t ~turn in
-  (* An empty write fails where a write would, as eio_posix sends it with
-     sendmsg(2). *)
-  if t.shut then leave `Shut
-  else if Option.is_some t.silent then write_silent t ~turn bufs n
-  else if t.refused then leave `Refused
-  else if n = 0 then
-    if t.local && (t.reader = Gone || (receive_shut t && t.os = Linux)) then
-      leave (`Raise (reset_exn ()))
-    else leave (`Done 0)
-  else if t.reader = Gone && t.local && t.os = Windows then begin
-    (* Windows takes one write past a Unix-domain peer's close. *)
-    t.refused <- true;
-    leave (`Lost n)
-  end
-  else if t.reader = Gone then begin
-    t.refused <- true;
-    if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
-  end
-  else if receive_shut t && t.local && t.os = Linux then
-    leave (`Raise (reset_exn ()))
-  else if Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
-  then (`Wait (Waiters.queue t.writers ~turn), [])
-  else if receive_shut t && t.os = Windows then begin
+  if receive_shut t && t.os = Windows then begin
     (* Windows resets a connection whose shut receive side gets data. *)
     t.reset <- true;
     t.aborted <- true;
@@ -380,6 +358,34 @@ let write_step t ~turn bufs n =
     let k = queue t ~turn bufs n in
     if k > 0 && Option.is_some t.timer then t.last <- now t;
     (`Done k, Waiters.pass t.readers @ room t)
+
+(* Under the mutex: what a write of [n] bytes of [bufs] does now, and the
+   waiters it wakes. *)
+let write_step t ~turn bufs n =
+  let leave = leave t ~turn in
+  (* An empty write fails where a write would, as eio_posix sends it with
+     sendmsg(2). *)
+  if t.shut then leave `Shut
+  else if Option.is_some t.silent then write_silent t ~turn bufs n
+  else if t.refused then leave `Refused
+  else if n = 0 then
+    if t.local && (t.reader = Gone || (receive_shut t && t.os = Linux)) then
+      leave (`Raise (reset_exn ()))
+    else leave (`Done 0)
+  else if t.reader = Gone && t.local && t.os = Windows then begin
+    (* Windows takes one write past a Unix-domain peer's close. *)
+    t.refused <- true;
+    leave (`Lost n)
+  end
+  else if t.reader = Gone then begin
+    t.refused <- true;
+    if t.local then leave (`Raise (reset_exn ())) else leave (`Lost n)
+  end
+  else if receive_shut t && t.local && t.os = Linux then
+    leave (`Raise (reset_exn ()))
+  else if Waiters.must_wait t.writers ~turn || t.size + t.unacked >= t.capacity
+  then (`Wait (Waiters.queue t.writers ~turn), [])
+  else write_room t ~turn bufs n
 
 let rec write_turn ~turn ?until t ~back bufs =
   let n = Cstruct.lenv bufs in
