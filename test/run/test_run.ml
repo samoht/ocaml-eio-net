@@ -160,7 +160,7 @@ let check_no_error seen =
 let test_aborted_accept_is_followed_by_the_next () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   Eio.Switch.run @@ fun scope ->
   let listening =
@@ -187,7 +187,7 @@ let pressure_sheds_the_least_progressed ?(server = line_server ?served:None)
     pressure n () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let max_connections =
     match pressure with `Held -> n | `Descriptors -> 10 * n
@@ -234,7 +234,7 @@ let pressure_sheds_the_least_progressed ?(server = line_server ?served:None)
 let descriptors_are_shared_across_loops n () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let other = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5001) in
   let pressed, press = Eio.Promise.create () in
@@ -282,7 +282,7 @@ let descriptors_are_shared_across_loops n () =
 let descriptors_are_not_shared_without_a_pool n () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let other = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5001) in
   let ended = ref 0 in
@@ -326,7 +326,7 @@ let descriptors_are_not_shared_without_a_pool n () =
 let test_no_descriptor_and_none_held_raises () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let listening =
     scripted ~sw net [ (Eio.Promise.create_resolved (), no_descriptor ()) ]
   in
@@ -349,7 +349,7 @@ let test_no_descriptor_and_none_held_raises () =
 let test_each_loop_reads_failures_with_its_classifier () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let other = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5001) in
   let lenient = function
@@ -386,7 +386,7 @@ let test_each_loop_reads_failures_with_its_classifier () =
 let test_a_connection_ending_during_its_shedding () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let shed = ref false in
   Eio.Switch.run @@ fun clients ->
@@ -407,7 +407,7 @@ let test_a_connection_ending_during_its_shedding () =
 let complete_heads_are_not_shed n () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let release, release_r = Eio.Promise.create () in
   let served _ = Eio.Promise.await release in
@@ -434,7 +434,7 @@ let complete_heads_are_not_shed n () =
 let test_a_failed_connection_leaves_the_loop () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let served = function
     | "boom" -> raise (Eio_unix.Err.v Unix.ECONNRESET "write" "")
@@ -458,7 +458,7 @@ let test_a_failed_connection_leaves_the_loop () =
 let exceptions_end_their_connection n () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let served = function
     | "invalid" -> invalid_arg "invalid"
@@ -497,7 +497,7 @@ let test_a_failed_connection_is_logged_by_default () =
   Fun.protect ~finally:(fun () -> Logs.set_reporter previous) @@ fun () ->
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let served = function
     | "boom" -> raise (Eio_unix.Err.v Unix.ECONNRESET "write" "")
     | _ -> ()
@@ -519,7 +519,7 @@ let test_a_failed_connection_is_logged_by_default () =
 let test_a_malformed_peer_leaves_the_loop () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen = ref [] in
   let on_error e = seen := e :: !seen in
   let handler head flow _ =
@@ -550,7 +550,7 @@ let test_a_malformed_peer_leaves_the_loop () =
 let test_on_error_raising_ends_the_loop () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let served = function "boom" -> failwith "boom" | _ -> () in
   match
     Eio.Switch.run @@ fun scope ->
@@ -568,7 +568,7 @@ let test_on_error_raising_ends_the_loop () =
 let test_a_connection_shed_after_stop_is_not_reported () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let stop, stop_r = Eio.Promise.create () in
   let release, release_r = Eio.Promise.create () in
@@ -595,7 +595,7 @@ let test_a_connection_shed_after_stop_is_not_reported () =
 let test_stop_sheds_incomplete_heads () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let seen, on_error = errors () in
   let stop, stop_r = Eio.Promise.create () in
   let release, release_r = Eio.Promise.create () in
@@ -648,7 +648,10 @@ let test_recovers_under_no_descriptor () =
       Some Eio_net_chaos.Fault.No_descriptor
     else None
   in
-  let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
+  let net =
+    Eio_net_chaos.wrap ~clock:env#clock emfile
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 net addr in
   let stop, set_stop = Eio.Promise.create () in
   let shed = ref false in

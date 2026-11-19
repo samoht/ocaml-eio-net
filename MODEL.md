@@ -21,8 +21,8 @@ class of each option against what a connection does.
 | Datagram memory | modelled | approximated (9) |
 | Accept queue | modelled | modelled |
 | Routes off loopback | modelled | modelled |
-| TIME_WAIT and FIN_WAIT2, on a clock | modelled | approximated (10) |
-| A silent connection, on a clock | modelled | modelled |
+| TIME_WAIT and FIN_WAIT2 | modelled | approximated (10) |
+| A silent connection | modelled | modelled |
 
 | Option | Linux | macOS |
 | --- | --- | --- |

@@ -18,12 +18,14 @@ opam install eio-net
 
 ## An in-memory network
 
-`Eio_net_mem.v ~sw ()` is a new network with a loopback interface:
+`Eio_net_mem.v ~clock ~sw ()` is a new network with a loopback interface,
+whose TCP timers run on the monotonic clock `clock`:
 
 ```ocaml
 # Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let clock = Eio_mock.Clock.Mono.make () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
   let l = Eio.Net.listen ~sw ~backlog:1 net addr in
   let c = Eio.Net.connect ~sw net addr in

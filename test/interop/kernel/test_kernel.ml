@@ -41,7 +41,6 @@ let test_rows () =
       "the scenario traces hold other scenarios than Eio_net_kernel's: \
        regenerate them"
 
-(* eio-net.mem holds a closed connection's port only on a clock. *)
 let mem os ~sw (env : Eio_net_chaos.env) =
   Eio_net_mem.v ~os ~clock:env#mono_clock ~sw ()
 
@@ -111,7 +110,8 @@ let reset (op : Eio_net_chaos.Op.t) =
 
 let test_broken () =
   let net ~sw (env : Eio_net_chaos.env) =
-    Eio_net_chaos.wrap ~clock:env#clock reset (Eio_net_mem.v ~sw ())
+    Eio_net_chaos.wrap ~clock:env#clock reset
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   match Eio_net_chaos.conformance net with
   | () -> Alcotest.fail "a network that resets every connect passed"
@@ -160,7 +160,7 @@ let test_broken () =
 let test_macos_timing () =
   let net ~sw (env : Eio_net_chaos.env) =
     Eio_net_chaos.wrap ~os:`Macos ~clock:env#clock reset
-      (Eio_net_mem.v ~os:`Macos ~sw ())
+      (Eio_net_mem.v ~os:`Macos ~clock:env#mono_clock ~sw ())
   in
   match Eio_net_chaos.conformance ~os:`Macos net with
   | () -> Alcotest.fail "a network that resets every connect passed"

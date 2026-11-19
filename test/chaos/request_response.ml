@@ -35,7 +35,7 @@ let test ~serve () =
 let test_idle ~serve () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:n net addr in
   Eio.Fiber.fork_daemon ~sw (fun () -> serve ~clock:env#clock l);
   let flow = Eio.Net.connect ~sw net addr in

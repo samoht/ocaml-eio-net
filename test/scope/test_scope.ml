@@ -145,7 +145,7 @@ let trace ~os l =
 let refused ~os (Scope.Sample (o, v) as sample) =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~os ~sw () in
+  let net = Eio_net_mem.v ~os ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let addr = addr [ sample ] in
   let _listener = Eio.Net.listen ~sw ~backlog:1 net addr in
   match Eio.Net.connect ~sw ~options:O.[ (o, v) ] net addr with

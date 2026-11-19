@@ -214,7 +214,7 @@ let test_accept_reset () =
   let net =
     Chaos.wrap ~clock:env#clock
       (nth `Accept 1 Fault.Reset)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:1 net addr in
@@ -241,7 +241,7 @@ let test_accept_emfile () =
   let net =
     Chaos.wrap ~clock:env#clock
       (nth `Accept 2 Fault.No_descriptor)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:2 net addr in
@@ -285,7 +285,10 @@ let test_accept_keeps_connection () =
   let accept_after first =
     Eio_mock.Backend.run_full @@ fun env ->
     Eio.Switch.run @@ fun sw ->
-    let net = Chaos.wrap ~clock:env#clock first (Eio_net_mem.v ~sw ()) in
+    let net =
+      Chaos.wrap ~clock:env#clock first
+        (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+    in
     let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
     let client = Eio.Net.connect ~sw net addr in
@@ -520,7 +523,7 @@ let test_fault_free_identity () =
   List.iter
     (fun os ->
       identity ~clock ~real:false ~os ~make:(fun ~sw ->
-          Eio_net_mem.v ~os ~sw ()))
+          Eio_net_mem.v ~os ~clock:env#mono_clock ~sw ()))
     [ `Linux; `Macos ];
   identity ~clock ~real:true ~os:(Lazy.force host_os) ~make:(fun ~sw:_ ->
       (env#net :> [ `Generic ] Eio.Net.ty Eio.Resource.t))
@@ -534,7 +537,9 @@ let loopback port = `Udp (Eio.Net.Ipaddr.V4.loopback, port)
 let with_datagrams f payloads k =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+  let net =
+    Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
   let rx = Eio.Net.datagram_socket ~sw net (loopback 9000) in
   let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
   let send p = Eio.Net.send tx ~dst:(loopback 9000) [ Cstruct.of_string p ] in
@@ -688,7 +693,9 @@ let test_net_short_reads () =
   let f (op : Op.t) =
     if op.kind = `Read && op.side = `Client then Some (Fault.Short 2) else None
   in
-  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+  let net =
+    Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
   serve ~sw net "abcd";
   let flow = Eio.Net.connect ~sw net addr in
   let a = read1 flow in
@@ -701,7 +708,7 @@ let test_net_connect_refused () =
   let net =
     Chaos.wrap ~clock:env#clock
       (nth `Connect 1 Fault.Refuse)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   match Eio.Net.connect ~sw net addr with
   | exception Eio.Io (Eio.Net.E (Connection_failure (Refused _)), _) -> ()
@@ -713,7 +720,9 @@ let test_net_connect_context () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let contexts f =
-    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let net =
+      Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+    in
     match Eio.Net.connect ~sw net addr with
     | _ -> Alcotest.fail "the connect went through"
     | exception (Eio.Io _ as e) ->
@@ -739,7 +748,7 @@ let connect_timeout ~os =
   let net =
     Chaos.wrap ~os ~clock:env#clock
       (nth `Connect 1 Fault.Timeout)
-      (Eio_net_mem.v ~os ~sw ())
+      (Eio_net_mem.v ~os ~clock:env#mono_clock ~sw ())
   in
   (match Eio.Net.connect ~sw net addr with
   | exception
@@ -789,7 +798,7 @@ let test_net_connect_unreachable () =
   let net =
     Chaos.wrap ~clock:env#clock
       (nth `Connect 1 Fault.Unreachable)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   (match Eio.Net.connect ~sw net addr with
   | exception
@@ -806,7 +815,7 @@ let test_net_connect_stall () =
   let net =
     Chaos.wrap ~clock:env#clock
       (nth `Connect 1 (Fault.Stall 2.))
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   serve ~sw net "ok";
   let flow = Eio.Net.connect ~sw net addr in
@@ -822,7 +831,9 @@ let test_ops () =
     ops := Fmt.str "%a" Op.pp op :: !ops;
     None
   in
-  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+  let net =
+    Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
   serve ~sw net "abcd";
   let flow = Eio.Net.connect ~sw net addr in
   let _ = read1 flow in
@@ -843,7 +854,9 @@ let test_scan_is_not_a_spin () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net =
-    Chaos.wrap ~clock:env#clock (fun _ -> None) (Eio_net_mem.v ~sw ())
+    Chaos.wrap ~clock:env#clock
+      (fun _ -> None)
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let connect port =
     match
@@ -882,7 +895,9 @@ let test_unix_has_no_ip_faults () =
              (op.offset mod 5))
     | _ -> None
   in
-  let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+  let net =
+    Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
   let l = Eio.Net.listen ~sw ~backlog:2 net (`Unix "/tmp/s.sock") in
   let _ = Eio.Net.connect ~sw net (`Unix "/tmp/s.sock") in
   let _ = Eio.Net.connect ~sw net (`Unix "/tmp/s.sock") in
@@ -911,7 +926,9 @@ let test_unix_cut_keeps_written () =
     let f (op : Op.t) =
       if op.kind = `Read && op.side = `Server then Some fault else None
     in
-    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let net =
+      Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+    in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
     let client = Eio.Net.connect ~sw net addr in
     let server, _ = Eio.Net.accept ~sw l in
@@ -956,7 +973,10 @@ let test_unix_reset_survivor () =
         Some Fault.Reset)
       else None
     in
-    let net = Chaos.wrap ~os ~clock:env#clock f (Eio_net_mem.v ~os ~sw ()) in
+    let net =
+      Chaos.wrap ~os ~clock:env#clock f
+        (Eio_net_mem.v ~os ~clock:env#mono_clock ~sw ())
+    in
     let addr = `Unix "/tmp/s.sock" in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
     let client = Eio.Net.connect ~sw net addr in
@@ -1023,7 +1043,9 @@ let test_write_after_peer_close () =
         Some fault)
       else None
     in
-    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let net =
+      Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+    in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
     let client = Eio.Net.connect ~sw net addr in
     let server, _ = Eio.Net.accept ~sw l in
@@ -1061,7 +1083,9 @@ let test_unix_hang_keeps_written () =
         Some Fault.Hang
       else None
     in
-    let net = Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~sw ()) in
+    let net =
+      Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+    in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
     let client = Eio.Net.connect ~sw net addr in
     let server, _ = Eio.Net.accept ~sw l in
@@ -1106,7 +1130,8 @@ let test_hang_silences () =
       if op.kind = `Read && op.side = `Client then Some Fault.Hang else None
     in
     let net =
-      Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~capacity:4096 ~sw ())
+      Chaos.wrap ~clock:env#clock f
+        (Eio_net_mem.v ~capacity:4096 ~clock:env#mono_clock ~sw ())
     in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
     let client = Eio.Net.connect ~sw net addr in
@@ -1154,16 +1179,15 @@ let test_hang_silences () =
 (* A writer blocked behind a server whose read hung gives up once its data
    has gone unacknowledged long enough: after 948.6 s with ETIMEDOUT on Linux,
    as tcp_retries2 = 15 does over loopback, and after 18 s with EPIPE on
-   macOS. A network with no clock never gives up. *)
+   macOS. *)
 let test_hang_times_out_writer () =
-  let run ?clock os =
+  let run os =
     Eio_mock.Backend.run_full @@ fun env ->
     Eio.Switch.run @@ fun sw ->
     let f (op : Op.t) =
       if op.kind = `Read && op.side = `Server then Some Fault.Hang else None
     in
-    let clock = if clock = Some () then Some env#mono_clock else None in
-    let mem = Eio_net_mem.v ~os ~capacity:4096 ?clock ~sw () in
+    let mem = Eio_net_mem.v ~os ~capacity:4096 ~clock:env#mono_clock ~sw () in
     let net = Chaos.wrap ~os ~clock:env#clock f mem in
     let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
     let l = Eio.Net.listen ~sw ~backlog:2 net addr in
@@ -1189,10 +1213,8 @@ let test_hang_times_out_writer () =
     in
     Fmt.str "%s after %gs" ended (Eio.Time.now env#clock -. t0)
   in
-  Alcotest.(check string)
-    "Linux" "ETIMEDOUT after 948.6s" (run ~clock:() `Linux);
-  Alcotest.(check string) "macOS" "reset after 18s" (run ~clock:() `Macos);
-  Alcotest.(check string) "no clock" "waits after 3600s" (run `Linux)
+  Alcotest.(check string) "Linux" "ETIMEDOUT after 948.6s" (run `Linux);
+  Alcotest.(check string) "macOS" "reset after 18s" (run `Macos)
 
 (* --- Switch release ------------------------------------------------------- *)
 
@@ -1207,7 +1229,9 @@ let test_flow_released_with_switch () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net =
-    Chaos.wrap ~clock:env#clock (fun _ -> None) (Eio_net_mem.v ~sw ())
+    Chaos.wrap ~clock:env#clock
+      (fun _ -> None)
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:1 net addr in
@@ -1230,7 +1254,7 @@ let test_emfile_freed_by_switch () =
   let net =
     Chaos.wrap ~clock:env#clock
       (nth `Accept 2 Fault.No_descriptor)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~sw ~backlog:2 net addr in
@@ -1257,7 +1281,7 @@ let test_listener_released_with_switch () =
   let net =
     Chaos.wrap ~clock:env#clock
       (nth `Accept 1 Fault.No_descriptor)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l, client =
@@ -1282,7 +1306,8 @@ let test_dgram_released_with_switch () =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net =
-    Chaos.wrap ~clock:env#clock (nth `Recv 1 Fault.Dup) (Eio_net_mem.v ~sw ())
+    Chaos.wrap ~clock:env#clock (nth `Recv 1 Fault.Dup)
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
   let rx, closed =
@@ -1304,7 +1329,7 @@ let bare_and_wrapped f =
   let run wrap =
     Eio_mock.Backend.run_full @@ fun env ->
     Eio.Switch.run @@ fun sw ->
-    let net = Eio_net_mem.v ~sw () in
+    let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
     let net =
       if wrap then Chaos.wrap ~clock:env#clock (fun _ -> None) net else net
     in
@@ -1426,7 +1451,8 @@ let test_datagrams_shared_across_domains () =
   in
   Eio.Switch.run @@ fun sw ->
   let net =
-    Chaos.wrap ~clock:(Eio_mock.Clock.make ()) f (Eio_net_mem.v ~sw ())
+    Chaos.wrap ~clock:(Eio_mock.Clock.make ()) f
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let rx = Eio.Net.datagram_socket ~sw net (loopback 9000) in
   let tx = Eio.Net.datagram_socket ~sw net `UdpV4 in
@@ -1485,7 +1511,8 @@ let test_connections_paired_across_domains () =
   in
   Eio.Switch.run @@ fun sw ->
   let net =
-    Chaos.wrap ~clock:(Eio_mock.Clock.make ()) f (Eio_net_mem.v ~sw ())
+    Chaos.wrap ~clock:(Eio_mock.Clock.make ()) f
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let l = Eio.Net.listen ~sw ~backlog:64 net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -1528,7 +1555,8 @@ let test_unix_hang_stops_write () =
     else None
   in
   let net =
-    Chaos.wrap ~clock:env#clock f (Eio_net_mem.v ~capacity:32768 ~sw ())
+    Chaos.wrap ~clock:env#clock f
+      (Eio_net_mem.v ~capacity:32768 ~clock:env#mono_clock ~sw ())
   in
   let addr = `Unix "/tmp/s.sock" in
   let l = Eio.Net.listen ~sw ~backlog:2 net addr in

@@ -225,8 +225,7 @@ val conformance :
     passes iff it is in the set. Errors compare by the class Eio gives them
     ([Connection_reset], [Connection_failure], [Not_found]), else by their
     errno, and an error of a backend that carries no errno is any error.
-    {!Eio_net_mem.v} passes for the [os] it is given, on a [clock], which it
-    needs to hold a closed connection's port.
+    {!Eio_net_mem.v} passes for the [os] it is given.
 
     [conformance] runs every sequence, whatever the earlier ones answered. Of a
     sequence it reports the first answer outside its set only, as the later ones

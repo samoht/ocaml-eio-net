@@ -47,7 +47,8 @@ let chaos os () =
       if op.kind = `Connect then Some Chaos.Fault.Timeout else None
     in
     let net =
-      Chaos.wrap ~os ~clock:env#clock timeout (Eio_net_mem.v ~os ~sw ())
+      Chaos.wrap ~os ~clock:env#clock timeout
+        (Eio_net_mem.v ~os ~clock:env#mono_clock ~sw ())
     in
     let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 80) in
     timed_out (fun () -> Eio.Net.connect ~sw net addr);

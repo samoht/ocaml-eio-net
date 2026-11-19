@@ -96,7 +96,7 @@ let test_dial_failure_keeps_listening () =
 let test_forward_holds_its_bound () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let dialled = ref 0 in
   let upstream = Eio.Net.listen ~sw ~backlog:16 net (loopback 0) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -207,7 +207,7 @@ let relayed ~sw net bound data =
 let test_forward_reads_failures_with_its_classifier () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let mem = Eio_net_mem.v ~sw () in
+  let mem = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let upstream = mem_echo ~sw mem in
   let net = failing_net mem [ pending_error (); pending_error () ] in
   let classify = function
@@ -229,7 +229,7 @@ let test_forward_reads_failures_with_its_classifier () =
 let test_forward_sheds_within_its_pool () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let mem = Eio_net_mem.v ~sw () in
+  let mem = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let upstream = mem_echo ~sw mem in
   let pool = Eio_net.Accept.pool () in
   let server = Eio.Net.listen ~sw ~backlog:16 mem (loopback 0) in
@@ -272,7 +272,7 @@ let test_forward_sheds_within_its_pool () =
 let test_forward_unix_path_in_use () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let path = `Unix "relay.sock" in
   let _live = Eio.Net.listen ~sw ~backlog:4 net path in
   match

@@ -42,7 +42,7 @@ let connection ~sw net ?bind_to ?(reuse_addr = false) addr =
 let test_accepted_holds_the_port () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8110) in
   let client, server = connection ~sw net addr in
   Alcotest.(check bool) "relisten" true (fails in_use (listens net addr));
@@ -129,7 +129,7 @@ let test_time_wait () =
 let test_unavailable_addresses () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let ip = Eio.Net.Ipaddr.of_raw in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   let unavailable = fails not_available in
@@ -191,7 +191,7 @@ let test_unavailable_addresses () =
 let test_bind_to_another_family () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let v4 = Eio.Net.Ipaddr.V4.loopback and v6 = Eio.Net.Ipaddr.V6.loopback in
   let raises ~bind_to addr =
     match Eio.Net.connect ~sw ~bind_to net addr with
@@ -219,7 +219,7 @@ let test_bind_to_another_family () =
 let test_source_address () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let other = Eio.Net.Ipaddr.of_raw "\127\000\000\002" in
   let pp = Fmt.to_to_string Eio.Net.Sockaddr.pp in
   let l = Eio.Net.listen ~sw ~backlog:1 net (`Tcp (other, 8130)) in
@@ -246,7 +246,7 @@ let test_source_address () =
 let test_wildcard_destination () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let ip = Eio.Net.Ipaddr.of_raw in
   let other = ip "\127\000\000\002" in
   let mapped =
@@ -296,7 +296,7 @@ let test_wildcard_destination () =
 let test_port_choice () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   let port l =
     match Eio.Net.listening_addr l with `Tcp (_, p) -> p | _ -> 0
@@ -337,7 +337,7 @@ let test_port_choice () =
 let test_no_ephemeral_port_for_a_listen () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   for port = 49152 to 65535 do
     ignore (Eio.Net.listen ~sw ~backlog:1 net (`Tcp (lo, port)))
@@ -354,7 +354,7 @@ let test_no_ephemeral_port_for_a_listen () =
 let test_no_ephemeral_port_for_a_datagram_socket () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   for port = 49152 to 65535 do
     ignore (Eio.Net.datagram_socket ~sw net (`Udp (lo, port)))
@@ -373,7 +373,7 @@ let test_no_ephemeral_port_for_a_datagram_socket () =
 let test_no_ephemeral_port_for_a_connect () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let lo = Eio.Net.Ipaddr.V4.loopback in
   let addr = `Tcp (lo, 8170) in
   ignore (Eio.Net.listen ~sw ~backlog:1 net addr);
@@ -553,7 +553,7 @@ let test_fin_wait2_times_out () =
 let test_edge_addresses () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let ip s = Eio_unix.Net.Ipaddr.of_unix (Unix.inet_addr_of_string s) in
   let outcome f =
     match f () with
@@ -624,7 +624,7 @@ let test_edge_addresses () =
 let test_self_connect () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8193) in
   let flow = Eio.Net.connect ~sw ~bind_to:addr net addr in
   Eio.Flow.copy_string "hi" flow;

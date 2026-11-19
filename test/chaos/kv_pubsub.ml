@@ -86,7 +86,7 @@ let pinned ?bug () =
   let net =
     Eio_net_chaos.wrap ~clock:e#clock
       (fun _ -> None)
-      (Eio_net_mem.v ~capacity:8 ~sw ())
+      (Eio_net_mem.v ~capacity:8 ~clock:(Eio_mock.Clock.Mono.make ()) ~sw ())
   in
   let env =
     object

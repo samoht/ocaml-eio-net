@@ -89,7 +89,10 @@ let busy_accept () =
       Some Eio_net_chaos.Fault.No_descriptor
     else None
   in
-  let net = Eio_net_chaos.wrap ~clock:env#clock emfile (Eio_net_mem.v ~sw ()) in
+  let net =
+    Eio_net_chaos.wrap ~clock:env#clock emfile
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:5 net (tcp 7060) in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let rec loop () =

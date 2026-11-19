@@ -3,7 +3,7 @@
 let test_closed_datagram_path () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let path = `Unix "/tmp/gone.sock" in
   Eio.Switch.run (fun inner ->
       ignore (Eio.Net.datagram_socket ~sw:inner net path));
@@ -19,7 +19,7 @@ let test_closed_datagram_path () =
 let test_datagram_autobind () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let server = Eio.Net.datagram_socket ~sw net (`Unix "/tmp/autobind.sock") in
   let a = Eio.Net.datagram_socket ~sw net (`Unix "") in
   let b = Eio.Net.datagram_socket ~sw net (`Unix "") in
@@ -53,7 +53,7 @@ let test_datagram_autobind () =
 let test_datagram_reuse_addr () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let ip = function
     | "127.0.0.1" -> Eio.Net.Ipaddr.V4.loopback
     | "0.0.0.0" -> Eio.Net.Ipaddr.V4.any
@@ -117,7 +117,7 @@ let test_datagram_reuse_addr () =
 let test_datagram_error_order () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let ip = Eio.Net.Ipaddr.of_raw in
   let v4 = Eio.Net.Ipaddr.V4.loopback and v6 = Eio.Net.Ipaddr.V6.loopback in
   let mapped =
@@ -197,7 +197,7 @@ let recv_string sock =
 let test_datagram_too_long () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let v6 port : Eio.Net.Sockaddr.datagram =
     `Udp (Eio.Net.Ipaddr.V6.loopback, port)
   in
@@ -229,7 +229,7 @@ let test_datagram_too_long () =
 let test_datagram_reaches_like_a_kernel () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let mapped =
     Eio.Net.Ipaddr.of_raw
       "\000\000\000\000\000\000\000\000\000\000\xff\xff\127\000\000\001"
@@ -260,9 +260,9 @@ let test_datagram_reaches_like_a_kernel () =
    answers whoever wrote to it, as over UDP. The client binds no address of its
    own and is given one. *)
 let test_datagram_roundtrip () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
   let server = Eio.Net.datagram_socket ~sw net (udp 9000) in
   let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
   Eio.Net.send client ~dst:(udp 9000) [ Cstruct.of_string "ping" ];
@@ -277,9 +277,9 @@ let test_datagram_roundtrip () =
    and none is dropped however many are sent before the first is read: the
    network is a queue, not a buffer of a fixed size. *)
 let test_datagrams_keep_order () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
   let server = Eio.Net.datagram_socket ~sw net (udp 9001) in
   let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
   (* What the receive buffer holds of datagrams this short. *)
@@ -296,9 +296,9 @@ let test_datagrams_keep_order () =
 (* A datagram sent to an address no socket binds is lost, as UDP loses it,
    and the sender is not told. *)
 let test_datagram_to_nobody_is_lost () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
   let client = Eio.Net.datagram_socket ~sw net `UdpV4 in
   Eio.Net.send client ~dst:(udp 9002) [ Cstruct.of_string "lost" ];
   let server = Eio.Net.datagram_socket ~sw net (udp 9002) in
@@ -309,9 +309,9 @@ let test_datagram_to_nobody_is_lost () =
 
 (* A socket's address is free again once the switch it was made under ends. *)
 let test_datagram_address_freed_at_switch_end () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
   Eio.Switch.run (fun inner ->
       ignore (Eio.Net.datagram_socket ~sw:inner net (udp 9003)));
   let again = Eio.Net.datagram_socket ~sw net (udp 9003) in
@@ -327,7 +327,7 @@ let test_datagram_address_freed_at_switch_end () =
 let test_datagram_address_in_use () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:(Eio_mock.Clock.Mono.make ()) ~sw () in
   let in_use addr =
     match Eio.Net.datagram_socket ~sw net addr with
     | exception
@@ -361,9 +361,9 @@ let poll sock buf =
    gives it: the counts kept of 300 datagrams of each length, measured on
    Linux over IPv4 and IPv6. Once read, the buffer takes as many again. *)
 let test_udp_receive_buffer () =
-  Eio_main.run @@ fun _ ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
   let port = ref 6000 in
   let kept ip n =
     incr port;
@@ -413,9 +413,9 @@ let test_udp_receive_buffer () =
    received fill its send buffer, and goes on once the receiver takes one:
    the counts sent before the first wait, measured on Linux. *)
 let test_unix_dgram_queue () =
-  Eio_main.run @@ fun _ ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
   let sent_before_wait n =
     Eio.Switch.run @@ fun sw ->
     let path = Fmt.str "/tmp/r%d.sock" n in
@@ -450,11 +450,11 @@ let test_unix_dgram_queue () =
 (* A Unix-domain datagram socket that sends to its own path reads its
    datagram back, from itself, on Linux and on macOS. *)
 let test_unix_dgram_self_send () =
-  Eio_main.run @@ fun _ ->
+  Eio_main.run @@ fun env ->
   List.iter
     (fun os ->
       Eio.Switch.run @@ fun sw ->
-      let net = Eio_net_mem.v ~os ~sw () in
+      let net = Eio_net_mem.v ~os ~clock:env#mono_clock ~sw () in
       let self = `Unix "/tmp/self.sock" in
       let s = Eio.Net.datagram_socket ~sw net self in
       Eio.Net.send s ~dst:self [ Cstruct.of_string "me" ];

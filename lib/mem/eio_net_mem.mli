@@ -181,16 +181,16 @@ type Eio.Exn.Backend.t +=
 val v :
   ?os:[< `Linux | `Macos | `Windows ] ->
   ?capacity:int ->
-  ?clock:_ Eio.Time.Mono.t ->
+  clock:_ Eio.Time.Mono.t ->
   sw:Eio.Switch.t ->
   unit ->
   [ `Generic ] Eio.Net.ty Eio.Resource.t
 (** [v ~os ~capacity ~clock ~sw ()] is a network following the kernel [os]
     (defaults to [`Linux]) whose [listen] and [connect] operations are paired in
-    memory, and whose datagram sockets deliver to each other.
-    {!section-streams}, {!section-datagrams} and {!section-paths} say how its
-    sockets behave. {!section-resolution} says how [getaddrinfo] and
-    [getnameinfo] answer.
+    memory, whose datagram sockets deliver to each other, and whose TCP timers
+    run on [clock]. {!section-streams}, {!section-datagrams} and
+    {!section-paths} say how its sockets behave. {!section-resolution} says how
+    [getaddrinfo] and [getnameinfo] answer.
 
     Each direction of a connection queues at most [capacity] bytes: a write
     takes what fits and waits while the queue is full, as a socket's send buffer
@@ -204,22 +204,20 @@ val v :
     TCP and over a Unix path, above the default too, and it bounds what a
     socket's send and receive buffers give ({!section-options}).
 
-    On [clock], the end of a TCP connection whose FIN went first holds its
-    address in TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}),
-    or 30 seconds under [`Macos]. Without a clock there is no TIME_WAIT: an
-    address is free once both ends close.
+    The end of a TCP connection whose FIN went first holds its address in
+    TIME_WAIT for 60 seconds, as Linux holds it ({!section-streams}), or 30
+    seconds under [`Macos].
 
-    On [clock], each end of a TCP connection gone silent ({!Private.silence})
-    gives up on its peer as Linux does, measured over loopback. With
-    [SO_KEEPALIVE] and no byte unacknowledged, it probes once [TCP_KEEPIDLE] has
-    passed since the last segment it received. Its probes go [TCP_KEEPINTVL]
-    apart, and it gives up one interval after the [TCP_KEEPCNT]th, or with
-    [TCP_USER_TIMEOUT] at the first probe that long after that segment. A byte
-    it sent unacknowledged stops the probes, and ends the connection
-    [TCP_USER_TIMEOUT] later, or 948.6 seconds later, as [tcp_retries2] at 15
-    does. The first read or write then raises [ETIMEDOUT]; later reads return
-    end-of-file and writes raise [EPIPE]. With no keepalive and nothing
-    unacknowledged, or without a clock, a wait on it lasts for ever.
+    Each end of a TCP connection gone silent ({!Private.silence}) gives up on
+    its peer as Linux does, measured over loopback. With [SO_KEEPALIVE] and no
+    byte unacknowledged, it probes once [TCP_KEEPIDLE] has passed since the last
+    segment it received. Its probes go [TCP_KEEPINTVL] apart, and it gives up
+    one interval after the [TCP_KEEPCNT]th, or with [TCP_USER_TIMEOUT] at the
+    first probe that long after that segment. A byte it sent unacknowledged
+    stops the probes, and ends the connection [TCP_USER_TIMEOUT] later, or 948.6
+    seconds later, as [tcp_retries2] at 15 does. The first read or write then
+    raises [ETIMEDOUT]; later reads return end-of-file and writes raise [EPIPE].
+    With no keepalive and nothing unacknowledged, a wait on it lasts for ever.
 
     @raise Invalid_argument if [capacity] is not positive. *)
 
@@ -309,14 +307,13 @@ val pair :
       a client bound there does, so a later bind at a wildcard address of its
       port finds it in use.
     - A queued end that its listener's close resets lets go at once.
-    - Without a clock, or after a reset, any other end lets go once both ends
-      have closed.
-    - With a clock, the end whose FIN went first, by a shutdown of its send side
-      or by its close, holds its address in TIME_WAIT once closed, for 60
-      seconds from the peer's FIN. The other end lets go when it closes.
-    - With a clock, an end closed before the peer's FIN waits for that FIN for
-      its [TCP_LINGER2] if one is set, or else 60 seconds ([tcp_fin_timeout]),
-      and then lets go.
+    - After a reset, any other end lets go once both ends have closed.
+    - Otherwise the end whose FIN went first, by a shutdown of its send side or
+      by its close, holds its address in TIME_WAIT once closed, for 60 seconds
+      from the peer's FIN. The other end lets go when it closes.
+    - An end closed before the peer's FIN waits for that FIN for its
+      [TCP_LINGER2] if one is set, or else 60 seconds ([tcp_fin_timeout]), and
+      then lets go.
     - [listen] at an address held this way raises [EADDRINUSE], and [connect]
       bound there raises {!Address_in_use}, unless both sockets have
       [reuse_addr]. An accepted end has its listener's [reuse_addr], a client
@@ -332,8 +329,8 @@ val pair :
       destination address and port. Connections to different destinations thus
       share ports: the range bounds the connections to each destination, not
       their sum.
-    - With a clock, a port in TIME_WAIT toward the same destination is free for
-      it again once more than a second has passed since the peer's FIN, as
+    - A port in TIME_WAIT toward the same destination is free for it again once
+      more than a second has passed since the peer's FIN, as
       [net.ipv4.tcp_tw_reuse] has it by default on loopback. A port in FIN_WAIT2
       is not.
     - With no port left, [connect] raises {!Address_not_available}.
@@ -577,12 +574,11 @@ val pair :
     - Addresses. The loopback interface has 127.0.0.1 and [::1] only: a bind at
       another address of 127.0.0.0/8 raises [EADDRNOTAVAIL], a connect there is
       never answered and fails after 75 seconds on [clock], with the [ETIMEDOUT]
-      error eio_posix raises (it waits for ever without one), and a datagram
-      sent there is lost. A TCP socket binds no multicast or broadcast address,
-      and a [connect] reaches none: it raises {!Address_family}; a link-local
-      address raises [EADDRNOTAVAIL] from a bind and {!Host_unreachable} from a
-      [connect]. A [connect] bound at its own destination raises
-      {!Invalid_address}.
+      error eio_posix raises, and a datagram sent there is lost. A TCP socket
+      binds no multicast or broadcast address, and a [connect] reaches none: it
+      raises {!Address_family}; a link-local address raises [EADDRNOTAVAIL] from
+      a bind and {!Host_unreachable} from a [connect]. A [connect] bound at its
+      own destination raises {!Invalid_address}.
     - Ports. A TCP port of [0] takes the next free port of the range, counting
       up from the last one taken, for listeners and clients alike. A [connect]
       without [bind_to] takes one too: macOS shares no port between
@@ -688,14 +684,14 @@ module Private : sig
   val v :
     ?os:[< `Linux | `Macos | `Windows ] ->
     capacity:(int -> int) ->
-    ?clock:_ Eio.Time.Mono.t ->
+    clock:_ Eio.Time.Mono.t ->
     sw:Eio.Switch.t ->
     unit ->
     [ `Generic ] Eio.Net.ty Eio.Resource.t
-  (** [v ~capacity ~sw ()] is the network [Eio_net_mem.v ~sw ()] makes, whose
-      connections queue [capacity d] each way, where [d] is the chosen kernel's
-      default for their family. [capacity d] must be positive. For
-      eio-net.chaos; it may change at any release. *)
+  (** [v ~capacity ~clock ~sw ()] is the network [Eio_net_mem.v ~clock ~sw ()]
+      makes, whose connections queue [capacity d] each way, where [d] is the
+      chosen kernel's default for their family. [capacity d] must be positive.
+      For eio-net.chaos; it may change at any release. *)
 
   val silence : _ Eio.Net.stream_socket -> unit
   (** [silence s] cuts the connection of [s] for good, as a partition does:

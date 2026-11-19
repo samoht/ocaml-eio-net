@@ -23,7 +23,14 @@ let run ?capacity backend f =
   | Mem ->
       Eio_mock.Backend.run @@ fun () ->
       Eio.Switch.run @@ fun sw ->
-      f { backend; sw; net = Eio_net_mem.v ?capacity ~sw (); next = 0 }
+      f
+        {
+          backend;
+          sw;
+          net =
+            Eio_net_mem.v ?capacity ~clock:(Eio_mock.Clock.Mono.make ()) ~sw ();
+          next = 0;
+        }
   | Real ->
       (* Eio_main picks this backend on macOS. On Linux it is named here: the
          would-block probe below needs a backend that tries each operation

@@ -45,7 +45,10 @@ let test_cut ~read () =
     | `Write, `Server, 15 -> Some Eio_net_chaos.Fault.Eof
     | _ -> None
   in
-  let net = Eio_net_chaos.wrap ~clock:env#clock cut (Eio_net_mem.v ~sw ()) in
+  let net =
+    Eio_net_chaos.wrap ~clock:env#clock cut
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
+  in
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, 8080) in
   let l = Eio.Net.listen ~reuse_addr:true ~sw ~backlog:1 net addr in
   Eio.Fiber.fork_daemon ~sw (fun () ->

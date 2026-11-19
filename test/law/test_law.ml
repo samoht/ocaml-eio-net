@@ -183,7 +183,7 @@ let drive : type c. c Law.t -> fixture -> unit -> string =
 let observe ~wrap ~family op =
   Eio_mock.Backend.run_full @@ fun env ->
   Eio.Switch.run @@ fun sw ->
-  let spy, base = Spy.v (Eio_net_mem.v ~sw ()) in
+  let spy, base = Spy.v (Eio_net_mem.v ~clock:env#mono_clock ~sw ()) in
   let asked = ref [] in
   let net =
     if wrap then
@@ -369,7 +369,7 @@ let run op ~family fault =
   let net =
     wrapped ~clock ~outage:false
       (first (Law.kind op) fault)
-      (Eio_net_mem.v ~sw ())
+      (Eio_net_mem.v ~clock:env#mono_clock ~sw ())
   in
   let steps, _ = steps op ~sw ~family net in
   List.map (timed clock) steps
@@ -380,7 +380,7 @@ let left_open op ~family fault =
   Eio_mock.Backend.run_full @@ fun env ->
   let clock = env#clock in
   Eio.Switch.run @@ fun sw ->
-  let spy, base = Spy.v (Eio_net_mem.v ~sw ()) in
+  let spy, base = Spy.v (Eio_net_mem.v ~clock:env#mono_clock ~sw ()) in
   let net = wrapped ~clock ~outage:false (first (Law.kind op) fault) base in
   let steps, close_all = steps op ~sw ~family net in
   List.iter (fun s -> ignore (timed clock s)) steps;

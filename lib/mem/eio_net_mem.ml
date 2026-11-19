@@ -1098,8 +1098,7 @@ end
    seconds from the peer's FIN, as Linux does, and the other lets go at once.
    Closed with no FIN from its peer, it waits for one in FIN_WAIT2 for its
    TCP_LINGER2, or 60 seconds, Linux's tcp_fin_timeout, as tcp_fin_time has
-   it. After a reset, and without a clock, each lets go once both have
-   closed. An end its listener dropped unaccepted lets go at once, as Linux
+   it. After a reset, each lets go once both have closed. An end its listener dropped unaccepted lets go at once, as Linux
    destroys it. *)
 module Ends = struct
   type side = [ `Client | `Server ]
@@ -1202,8 +1201,8 @@ module Network = struct
         (* What a connection queues each way, from the kernel's default. *)
     bounded : bool;
         (* The test gave [capacity]: it bounds what buffers set give too. *)
-    sleep : (float -> unit) option;
-    timer : Pipe.timer option;
+    sleep : float -> unit;
+    timer : Pipe.timer;
   }
 
   let listening_handler = Eio.Net.Pi.listening_socket (module Listening_socket)
@@ -1367,12 +1366,9 @@ module Network = struct
   let check_macos t ~to_itself = function
     | `Unix _ -> ()
     | `Tcp _ when to_itself -> fail Invalid_address
-    | `Tcp (d, _) when unanswered d -> (
-        match t.sleep with
-        | Some sleep ->
-            sleep 75.;
-            raise (Posix.timed_out `Connect)
-        | None -> Eio.Fiber.await_cancel ())
+    | `Tcp (d, _) when unanswered d ->
+        t.sleep 75.;
+        raise (Posix.timed_out `Connect)
     | `Tcp _ -> ()
 
   (* Its FIN reaches itself: it holds its address in TIME_WAIT. *)
@@ -1380,7 +1376,7 @@ module Network = struct
     let capacity = t.capacity (Flow.default_capacity ~os:t.os ~local:false) in
     Sockopt.connect opts Client;
     let flow =
-      Flow.self ~os:t.os ~timer:t.timer ~capacity ~bound:t.bounded ~opts
+      Flow.self ~os:t.os ~timer:(Some t.timer) ~capacity ~bound:t.bounded ~opts
     in
     let ends = Ends.v t.hub.Listening_socket.ports in
     Flow.on_close flow (fun ~reset ~abort:_ ~linger2 ->
@@ -1461,8 +1457,8 @@ module Network = struct
     let capacity = t.capacity (Flow.default_capacity ~os:t.os ~local:unix) in
     Sockopt.connect opts Client;
     let client, server =
-      Flow.pair ~os:t.os ~local:unix ~timer:t.timer ~capacity ~bound:t.bounded
-        ~client:opts
+      Flow.pair ~os:t.os ~local:unix ~timer:(Some t.timer) ~capacity
+        ~bound:t.bounded ~client:opts
         ~server:(Sockopt.accepted listener.opts)
     in
     let child = child_hold t listener addr in
@@ -1695,16 +1691,16 @@ let pair ?os ?capacity () =
   in
   (client, server)
 
-let network ?os ~capacity ~bounded ?clock ~sw () =
+let network ?os ~capacity ~bounded ~clock ~sw () =
   let os = Kernel.of_arg os in
   let files = Files.v () in
-  let now = Option.map (fun mono () -> Eio.Time.Mono.now mono) clock in
-  let sleep = Option.map (fun mono d -> Eio.Time.Mono.sleep mono d) clock in
-  let timer = Option.map Pipe.timer clock in
+  let now () = Eio.Time.Mono.now clock in
+  let sleep d = Eio.Time.Mono.sleep clock d in
+  let timer = Pipe.timer clock in
   let hub =
     {
       Listening_socket.listeners = Hashtbl.create 8;
-      ports = Ports.v ~os ?now ();
+      ports = Ports.v ~os ~now ();
       files;
       mutex = Eio.Mutex.create ();
     }
@@ -1723,14 +1719,14 @@ let network ?os ~capacity ~bounded ?clock ~sw () =
     ( Network.{ sw; os; hub; datagrams; capacity; bounded; sleep; timer },
       handler )
 
-let v ?os ?capacity ?clock ~sw () =
+let v ?os ?capacity ~clock ~sw () =
   network ?os
     ~capacity:(capacity_rule "v" capacity)
-    ~bounded:(Option.is_some capacity) ?clock ~sw ()
+    ~bounded:(Option.is_some capacity) ~clock ~sw ()
 
 module Private = struct
-  let v ?os ~capacity ?clock ~sw () =
-    network ?os ~capacity ~bounded:true ?clock ~sw ()
+  let v ?os ~capacity ~clock ~sw () =
+    network ?os ~capacity ~bounded:true ~clock ~sw ()
 
   let silence = Flow.silence
   let connection_id = Flow.connection

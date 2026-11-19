@@ -27,9 +27,9 @@ let pair ~sw net =
 
 (* A reader waits on one end while another domain closes or shuts down
    either end: it reads the bytes written before, then end-of-file. *)
-let read_race pool how seed =
+let read_race ~clock pool how seed =
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let _, a, b = pair ~sw net in
   let st = Random.State.make [| seed |] in
   let pre = Random.State.int st 3 in
@@ -69,9 +69,9 @@ let read_race pool how seed =
    reads end-of-file. The queue holds one write, so the second waits for
    room, in flight, when the close comes after the first, and the peer
    drains only once the close has returned. *)
-let close_vs_write pool seed =
+let close_vs_write ~clock pool seed =
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~capacity:8 ~sw () in
+  let net = Eio_net_mem.v ~clock ~capacity:8 ~sw () in
   let _, a, b = pair ~sw net in
   let st = Random.State.make [| seed |] in
   let first = Atomic.make false in
@@ -117,9 +117,9 @@ let close_vs_write pool seed =
    others: a connect is refused, or reads what its acceptor wrote, or the
    reset of a connection the close dropped; and every accepted connection
    was one whose connect succeeded. *)
-let accept_race pool seed =
+let accept_race ~clock pool seed =
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let l = Eio.Net.listen ~sw ~backlog:128 net (`Tcp (lo, 0)) in
   let addr = Eio.Net.listening_addr l in
   let st = Random.State.make [| seed |] in
@@ -190,9 +190,9 @@ let accept_race pool seed =
 (* Two Unix-domain datagram sockets on two domains send to each other and
    read what the other sent: each reads every datagram, in order, however
    their sends and receives interleave. *)
-let dgram_exchange pool seed =
+let dgram_exchange ~clock pool seed =
   Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
+  let net = Eio_net_mem.v ~clock ~sw () in
   let a = `Unix "/tmp/a.sock" and b = `Unix "/tmp/b.sock" in
   let sa = Eio.Net.datagram_socket ~sw net a in
   let sb = Eio.Net.datagram_socket ~sw net b in
@@ -230,7 +230,7 @@ let with_pool f () =
     Eio.Executor_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env)
   in
   for seed = 1 to seeds do
-    f pool seed
+    f ~clock:(Eio.Stdenv.mono_clock env) pool seed
   done
 
 let suite =
@@ -238,7 +238,7 @@ let suite =
     List.map
       (fun (name, how) ->
         Alcotest.test_case ("a read racing " ^ name) `Quick
-          (with_pool (fun pool -> read_race pool how)))
+          (with_pool (fun ~clock pool -> read_race ~clock pool how)))
       [
         ("the peer's close", `Peer_close);
         ("its own receive shutdown", `Own_shut_recv);
