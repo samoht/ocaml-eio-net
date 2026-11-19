@@ -14,17 +14,18 @@ val max_path_length : int
     directory. *)
 
 val connect :
+  ?wait:bool ->
   sw:Eio.Switch.t ->
   net:[> [ `Generic | `Unix ] Eio.Net.ty ] Eio.Resource.t ->
   _ Eio.Path.t ->
   [ `Unix_fd | Eio_unix.Net.stream_socket_ty ] Eio.Resource.t
-(** [connect ~sw ~net path] connects to the Unix-domain stream socket at [path],
-    whatever its length. The directory that holds it is opened through [path]'s
-    own capability, which refuses a path that leaves a confined directory as
-    {!Eio.Path.open_in} does, and the socket is reached by its base name from
-    that directory, as Git's unix-socket.c reaches it by changing into it: on
-    macOS that directory is made the working directory of the connecting thread
-    alone ([pthread_fchdir_np]), on FreeBSD the connection is made with
+(** [connect ~wait ~sw ~net path] connects to the Unix-domain stream socket at
+    [path], whatever its length. The directory that holds it is opened through
+    [path]'s own capability, which refuses a path that leaves a confined
+    directory as {!Eio.Path.open_in} does, and the socket is reached by its base
+    name from that directory, as Git's unix-socket.c reaches it by changing into
+    it: on macOS that directory is made the working directory of the connecting
+    thread alone ([pthread_fchdir_np]), on FreeBSD the connection is made with
     [connectat(2)], and on Linux through the short link
     [/proc/self/fd/<dir>/<name>]. [net] is the host's network, whose authority a
     socket of the host needs: an in-memory network does not have the type.
@@ -49,9 +50,11 @@ val connect :
 
     While the listener's backlog is full, a connect on Linux waits for room,
     trying again after a pause of at most 0.1 seconds, and a cancellation, such
-    as one from {!Eio.Time.with_timeout}, ends the wait. macOS and FreeBSD
-    refuse it at once with [Eio.Net.Connection_failure (Refused _)], as
-    connect(2) refuses it there.
+    as one from {!Eio.Time.with_timeout}, ends the wait. With [wait] [false]
+    (defaults to [true]) it does not wait: it raises the error connect(2)
+    answers at once, [EAGAIN], unclassified. macOS and FreeBSD refuse it at once
+    with [Eio.Net.Connection_failure (Refused _)], as connect(2) refuses it
+    there.
 
     @raise Invalid_argument
       if [path] names no file ([""], ["/"], or a base name of ["."] or [".."])
