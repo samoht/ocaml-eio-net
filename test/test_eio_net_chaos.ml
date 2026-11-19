@@ -1627,6 +1627,41 @@ let test_seeded () =
     | _ -> false
     | exception Eio.Io (Eio.Net.E (Connection_reset _), _) -> true)
 
+(* A datagram socket of the caller's, wrapped, meets the fault function on
+   each receive: the first datagram is dropped and the second arrives. A seeded
+   function that duplicates every datagram delivers each twice. *)
+let test_datagram_socket () =
+  Eio_mock.Backend.run_full @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio_net_mem.v ~clock:env#mono_clock ~sw () in
+  let addr port = `Udp (Eio.Net.Ipaddr.V4.loopback, port) in
+  let sender = Eio.Net.datagram_socket ~sw net (addr 1) in
+  let recv sock =
+    let buf = Cstruct.create 16 in
+    let _, n = Eio.Net.recv sock buf in
+    Cstruct.to_string ~len:n buf
+  in
+  let send s = Eio.Net.send sender ~dst:(addr 2) [ Cstruct.of_string s ] in
+  let first (op : Chaos.Op.t) =
+    if op.kind = `Recv && op.offset = 0 then Some Chaos.Fault.Drop else None
+  in
+  let dropping =
+    Chaos.datagram_socket ~sw ~clock:env#clock first
+      (Eio.Net.datagram_socket ~sw net (addr 2))
+  in
+  send "a";
+  send "b";
+  Alcotest.(check string) "the first is dropped" "b" (recv dropping);
+  Eio.Resource.close dropping;
+  let doubling =
+    Chaos.datagram_socket ~sw ~clock:env#clock
+      (Chaos.seeded_receives ~dup:1.0 3)
+      (Eio.Net.datagram_socket ~sw net (addr 2))
+  in
+  send "c";
+  let got = List.init 2 (fun _ -> recv doubling) in
+  Alcotest.(check (list string)) "each twice" [ "c"; "c" ] got
+
 (* A failing listener fails its first accept with the cued exception, then
    accepts from the network's own listener; a stalled peer connects and sends
    what it was given, then nothing. *)
@@ -1659,6 +1694,7 @@ let suite =
       Alcotest.test_case "Short cuts each read to its length" `Quick
         test_flow_short;
       Alcotest.test_case "a seeded end" `Quick test_seeded;
+      Alcotest.test_case "a wrapped datagram socket" `Quick test_datagram_socket;
       Alcotest.test_case "a failing listener, then a stalled peer" `Quick
         test_listener_failing_then_stall;
       Alcotest.test_case "tiny buffers never raise macOS's AF_UNIX queue" `Quick
