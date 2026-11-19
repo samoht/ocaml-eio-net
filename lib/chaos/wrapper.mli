@@ -28,6 +28,15 @@ val pair :
   * [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 (** [pair ~os ~clock f] is {!Eio_net_chaos.pair}. *)
 
+val datagram :
+  ?os:[< Eio_chaos.os ] ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  (Op.t -> Fault.t option) ->
+  _ Eio.Net.datagram_socket ->
+  [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t
+(** [datagram ~os ~sw ~clock f sock] is {!Eio_net_chaos.datagram_socket}. *)
+
 val is_outage : [ `Generic ] Eio.Net.ty Eio.Resource.t -> bool
 (** [is_outage net] is the [outage] [net] was made with by {!v}, and [false] for
     any other network. *)
