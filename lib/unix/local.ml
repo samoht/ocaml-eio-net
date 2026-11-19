@@ -57,10 +57,10 @@ let parent ~fn ~sw path =
    (local_stubs.c). The socket is non-blocking, so each attempt returns at
    once: Linux refuses a connect to a full backlog with EAGAIN, and it is
    tried again after a pause, doubled up to [max_pause], which a
-   cancellation ends. *)
+   cancellation ends, unless the caller does not [wait]. *)
 let max_pause = 0.1
 
-let connect ~sw ~net:_ path =
+let connect ?(wait = true) ~sw ~net:_ path =
   let sock = eio (fun () -> Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0) in
   match
     Unix.set_nonblock sock;
@@ -75,7 +75,7 @@ let connect ~sw ~net:_ path =
           match Unix.getsockopt_error sock with
           | None -> ()
           | Some e -> raise (Unix.Unix_error (e, "connect", name)))
-      | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) ->
+      | exception Unix.Unix_error ((EAGAIN | EWOULDBLOCK), _, _) when wait ->
           Eio_unix.sleep pause;
           attempt (Float.min max_pause (2. *. pause))
     in
