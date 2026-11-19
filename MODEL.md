@@ -159,7 +159,9 @@ Modelled:
   denied with `Eio.Fs.Permission_denied` (`WSAEACCES`); a wildcard address and
   a specific one share a port, IPv4 and IPv6 apart as `IPV6_V6ONLY` is on.
 - `SO_REUSEPORT` is refused with `Invalid_option`.
-- No TIME_WAIT: a closed socket's address is free at once.
+- Holds: a connect's socket holds the address it binds, wildcard or not, until
+  it closes; an accepted socket holds none; and there is no TIME_WAIT: a closed
+  socket's address is free at once.
 - Resets: each read and write after a reset raises it; a read after a write to
   a closed peer raises one (`WSAECONNABORTED`); bytes reaching a shut receive
   side, or a receive side shut with bytes unread, reset the connection.

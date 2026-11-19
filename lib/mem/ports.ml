@@ -17,6 +17,7 @@ type group = {
   reuse : bool;
   listening : bool;
   connected : bool;
+  accepted : bool;
   toward : (Eio.Net.Ipaddr.v4v6 * int) option;
   mutable lasting : int;
   mutable untils : int Untils.t;
@@ -117,11 +118,12 @@ let same_toward a b =
   | _ -> false
 
 let add t ?(wildcard = false) ?(reuse = false) ?(listening = false)
-    ?(connected = false) ?toward (ip, port) =
+    ?(connected = false) ?(accepted = false) ?toward (ip, port) =
   let groups = at t port in
   let alike g =
     same g.ip ip && g.wildcard = wildcard && g.reuse = reuse
     && g.listening = listening && g.connected = connected
+    && g.accepted = accepted
     && same_toward g.toward toward
   in
   let group =
@@ -135,6 +137,7 @@ let add t ?(wildcard = false) ?(reuse = false) ?(listening = false)
             reuse;
             listening;
             connected;
+            accepted;
             toward;
             lasting = 0;
             untils = Untils.empty;
@@ -227,12 +230,14 @@ let in_use_macos t ~reuse ((ip : Eio.Net.Ipaddr.v4v6), port) =
   List.exists conflict (at t port)
 
 (* Windows looks a bind up at its own address only, the IPv4 and IPv6
-   ones apart as IPV6_V6ONLY is on: a socket bound there that is not
-   connected conflicts, unless both have [SO_REUSEADDR], and the second
+   ones apart as IPV6_V6ONLY is on: a socket bound there that was not
+   accepted conflicts, unless both have [SO_REUSEADDR], and the second
    then takes the port over. One with it where the held one has none is
-   denied ([denied]). A closed socket holds nothing. *)
+   denied ([denied]). A connect bound at a wildcard address holds that
+   address, not its source. A closed socket holds nothing. *)
 let held_windows t (ip, port) =
-  List.filter (fun g -> (not g.connected) && same g.ip ip) (at t port)
+  let bound g = if g.wildcard then any g.ip else g.ip in
+  List.filter (fun g -> (not g.accepted) && same (bound g) ip) (at t port)
 
 let in_use_windows t ~reuse a =
   List.exists (fun g -> not (reuse && g.reuse)) (held_windows t a)

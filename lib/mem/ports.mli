@@ -37,13 +37,15 @@ val add :
   ?reuse:bool ->
   ?listening:bool ->
   ?connected:bool ->
+  ?accepted:bool ->
   ?toward:Eio.Net.Ipaddr.v4v6 * int ->
   Eio.Net.Ipaddr.v4v6 * int ->
   hold
-(** [add t ~wildcard ~reuse ~listening ~connected ~toward a] holds [a] for a
-    socket bound at a wildcard address if [wildcard], with [SO_REUSEADDR] if
-    [reuse], that listens if [listening], that is connected if [connected], and
-    on Linux, for a connect that binds no address, [toward] its destination. *)
+(** [add t ~wildcard ~reuse ~listening ~connected ~accepted ~toward a] holds [a]
+    for a socket bound at a wildcard address if [wildcard], with [SO_REUSEADDR]
+    if [reuse], that listens if [listening], that is connected if [connected],
+    that a listener accepted if [accepted], and on Linux, for a connect that
+    binds no address, [toward] its destination. *)
 
 val remove : t -> int -> hold -> unit
 (** [remove t port h] lets go of [h] on [port] now. *)

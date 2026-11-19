@@ -648,9 +648,10 @@ val pair :
       one share a port. A socket at an address another socket holds without
       [reuse_addr] fails with [EADDRINUSE], or, with [reuse_addr], with
       [Eio.Fs.Permission_denied] ({!Exclusive_address}); two with [reuse_addr]
-      share it, and a [connect] reaches the first listener. A connected socket
-      holds no address against a bind, and a closed one holds none: there is no
-      TIME_WAIT. An IPv4-mapped address binds nothing ([EADDRNOTAVAIL]).
+      share it, and a [connect] reaches the first listener. A [connect]'s socket
+      holds the address it binds, wildcard or not, until it closes; an accepted
+      one holds none; and a closed one holds none: there is no TIME_WAIT. An
+      IPv4-mapped address binds nothing ([EADDRNOTAVAIL]).
     - Listeners. The accept queue takes [backlog] connections, at least one.
     - Connections. A read after its end's receive shutdown raises {!Shut_down}.
       Bytes that reach a shut receive side, or a receive side that shuts with

@@ -1420,7 +1420,7 @@ module Network = struct
             Some
               ( port,
                 Ports.add t.hub.Listening_socket.ports ~reuse:listener.reuse
-                  ~connected:true ~wildcard (reached, port) ))
+                  ~connected:true ~accepted:true ~wildcard (reached, port) ))
 
   (* Lets go of the client's address, and of the accepted end's, as the
      connection's ends say. *)
