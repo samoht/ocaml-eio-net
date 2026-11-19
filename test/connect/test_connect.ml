@@ -1,8 +1,5 @@
 type Eio.Exn.Backend.t += Refused_by_peer
 
-let refused = Eio.Net.err (Connection_failure (Refused Refused_by_peer))
-let unreachable = Eio_unix.Err.v Unix.ENETUNREACH "connect" ""
-
 let answer =
   Alcotest.testable
     (fun ppf -> function
@@ -10,18 +7,24 @@ let answer =
       | `Unreachable -> Fmt.string ppf "unreachable")
     ( = )
 
-(* The default classifier reads the errors Eio names portably, and no
-   backend's. *)
-let test_portable () =
+let check name want e =
+  Alcotest.(check (option answer))
+    name want
+    (Eio_net.Connect.classify (Eio_unix.Err.v e "connect" ""))
+
+(* A refused peer and an unreachable network or host are answers from the
+   network; a timeout is none. *)
+let test_classify () =
   Alcotest.(check (option answer))
     "a refusal" (Some `Refused)
-    (Eio_net.Connect.classify refused);
-  Alcotest.(check (option answer))
-    "an unreachable network is a backend error" None
-    (Eio_net.Connect.classify unreachable);
+    (Eio_net.Connect.classify
+       (Eio.Net.err (Connection_failure (Refused Refused_by_peer))));
+  check "ECONNREFUSED" (Some `Refused) Unix.ECONNREFUSED;
+  check "an unreachable network" (Some `Unreachable) Unix.ENETUNREACH;
+  check "an unreachable host" (Some `Unreachable) Unix.EHOSTUNREACH;
+  check "ETIMEDOUT" None Unix.ETIMEDOUT;
   Alcotest.(check (option answer))
     "a timeout carries no answer" None
     (Eio_net.Connect.classify Eio.Time.Timeout)
 
-let suite =
-  ("connect", [ Alcotest.test_case "the portable answers" `Quick test_portable ])
+let suite = ("connect", [ Alcotest.test_case "classify" `Quick test_classify ])
