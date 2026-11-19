@@ -35,7 +35,7 @@ frame, come with an accept loop and a relay.")
   logs
   (bytesrw (>= 0.2.0))
   (mtime (>= 2.0.0))
-  (eio-chaos (and (>= 0.1.0) (< 0.2.0)))
+  (eio-chaos (>= 0.1.0))
   (ipaddr (>= 5.3.0))
   (conf-linux-libc-dev (= :os linux))
   (alcotest (and :with-test (>= 1.7.0)))
