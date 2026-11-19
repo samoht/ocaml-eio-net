@@ -1,4 +1,4 @@
 # eio-chaos is not on opam yet: drop its pin once it is released.
 pin-depends: [
-  ["eio-chaos.0.1.0" "git+https://github.com/samoht/ocaml-eio-chaos.git#1a20dc1f1f8a835957fb8d41d2ebf88e735025ef"]
+  ["eio-chaos.0.1.0" "git+https://github.com/samoht/ocaml-eio-chaos.git#d7a99fbf4188fd6cead461bf85098433831124c4"]
 ]
