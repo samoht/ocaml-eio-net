@@ -44,9 +44,8 @@ val forward :
     logging a warning on the [eio-net.accept] log source, as {!Accept.run}
     does); the listener itself keeps accepting. A failed accept is read by
     [classify] (defaults to {!Accept.classify}) as {!Accept.run} reads it, and
-    one that ends the loop fails [sw]: over a Unix network,
-    [~classify:Eio_net_unix.classify_accept] makes an accept with no descriptor
-    left wait for a relayed connection to end rather than end the relay.
+    one that ends the loop fails [sw]: by default an accept with no descriptor
+    left waits for a relayed connection to end rather than end the relay.
 
     [pool] (defaults to a new pool of this relay alone) is the loop's pool. When
     an accept finds no descriptor left and the relay relays nothing, a relay

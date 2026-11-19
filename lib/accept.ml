@@ -6,9 +6,11 @@ module Log = (val Logs.src_log log_src)
 
 type answer = [ `Aborted | `Descriptors ]
 
+(* Eio reads ENOPROTOOPT as Invalid_option, which in an accept, that sets no
+   option, is the error pending on the new connection. *)
 let classify = function
-  | Eio.Io (Eio.Net.E (Connection_reset _), _) -> Some `Aborted
-  | _ -> None
+  | Eio.Io (Eio.Net.E (Connection_reset _ | Invalid_option), _) -> Some `Aborted
+  | e -> Errno.accept e
 
 (* The head of a held connection. [received] reads the bytes of an incomplete
    head received so far and is [None] once the head is complete. A connection

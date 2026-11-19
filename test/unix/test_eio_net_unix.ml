@@ -724,33 +724,6 @@ let test_local_listen_long () =
     "another file kept" "another"
     (In_channel.with_open_bin p In_channel.input_all)
 
-(* The Unix accept classifier reads a peer that reset its connection before
-   the accept, and a process or system out of descriptors, as failures that
-   leave the listener whole. Linking eio-net.unix leaves the portable
-   classifier, a loop's default, as it is. *)
-let test_classify_accept () =
-  let answer = function
-    | Some `Aborted -> "aborted"
-    | Some `Descriptors -> "descriptors"
-    | None -> "none"
-  in
-  List.iter
-    (fun (e, want, portable) ->
-      let exn = Eio_unix.Err.v e "accept" "" in
-      Alcotest.(check string)
-        (Unix.error_message e) want
-        (answer (Eio_net_unix.classify_accept exn));
-      Alcotest.(check string)
-        (Unix.error_message e ^ ", portably")
-        portable
-        (answer (Eio_net.Accept.classify exn)))
-    [
-      (Unix.ECONNABORTED, "aborted", "aborted");
-      (Unix.EMFILE, "descriptors", "none");
-      (Unix.ENFILE, "descriptors", "none");
-      (Unix.EBADF, "none", "none");
-    ]
-
 (* The system the cases run on, as uname -s names it. *)
 let system =
   lazy
@@ -758,67 +731,6 @@ let system =
      let s = String.trim (In_channel.input_all ic) in
      ignore (Unix.close_process_in ic);
      s)
-
-(* Codes OCaml's Unix names only as EUNKNOWNERR: EPROTO and ENONET, on the
-   systems that define them. *)
-let unknown_codes () =
-  match Lazy.force system with
-  | "Linux" -> [ ("EPROTO", 71); ("ENONET", 64) ]
-  | "Darwin" -> [ ("EPROTO", 100) ]
-  | _ -> []
-
-(* accept(2) on Linux passes on the network error pending on the new
-   connection, which consumes it, and a BSD's clears the listener's error it
-   returns: the Unix classifier reads each as an aborted accept, followed by
-   the next. An error that persists on the listener, EOPNOTSUPP for a socket
-   that is not a stream or EPERM from a security module, is no answer, so the
-   loop raises it rather than spin. *)
-let test_accept_pending_errors () =
-  let answer = function
-    | Some `Aborted -> "aborted"
-    | Some `Descriptors -> "descriptors"
-    | None -> "none"
-  in
-  let check name e want =
-    let exn = Eio_unix.Err.v e "accept" "" in
-    Alcotest.(check string)
-      name want
-      (answer (Eio_net_unix.classify_accept exn))
-  in
-  List.iter
-    (fun e -> check (Unix.error_message e) e "aborted")
-    Unix.[ ENETDOWN; ENOPROTOOPT; EHOSTDOWN; EHOSTUNREACH; ENETUNREACH ];
-  List.iter
-    (fun (name, n) -> check name (Unix.EUNKNOWNERR n) "aborted")
-    (unknown_codes ());
-  List.iter
-    (fun e -> check (Unix.error_message e) e "none")
-    Unix.[ EOPNOTSUPP; EPERM; EINVAL ]
-
-(* The Unix connect classifier reads a refused peer and an unreachable
-   network; linking eio-net.unix leaves the portable classifier as it is. *)
-let test_classify_connect () =
-  let answer = function
-    | Some `Refused -> "refused"
-    | Some `Unreachable -> "unreachable"
-    | None -> "none"
-  in
-  List.iter
-    (fun (e, want, portable) ->
-      let exn = Eio_unix.Err.v e "connect" "" in
-      Alcotest.(check string)
-        (Unix.error_message e) want
-        (answer (Eio_net_unix.classify_connect exn));
-      Alcotest.(check string)
-        (Unix.error_message e ^ ", portably")
-        portable
-        (answer (Eio_net.Connect.classify exn)))
-    [
-      (Unix.ECONNREFUSED, "refused", "refused");
-      (Unix.ENETUNREACH, "unreachable", "none");
-      (Unix.EHOSTUNREACH, "unreachable", "none");
-      (Unix.ETIMEDOUT, "none", "none");
-    ]
 
 (* Lets the event loop run, and take the results of the system threads, 64
    times or until [until ()]. *)
@@ -919,12 +831,6 @@ let test_local_connect_full_backlog () =
 let suite =
   ( "eio_net_unix",
     [
-      Alcotest.test_case "the Unix accept classifier" `Quick
-        test_classify_accept;
-      Alcotest.test_case "pending network errors of an accept" `Quick
-        test_accept_pending_errors;
-      Alcotest.test_case "the Unix connect classifier" `Quick
-        test_classify_connect;
       Alcotest.test_case "a local listener's mode, from its creation" `Quick
         test_local_listen_perm;
       Alcotest.test_case "a local listener reports its path" `Quick

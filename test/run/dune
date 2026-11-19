@@ -1,11 +1,8 @@
 (test
  (name test)
  (package eio-net)
- (build_if
-  (= %{os_type} Unix))
  (libraries
   eio-net
-  eio-net.unix
   eio-net.mem
   eio-net.chaos
   eio

@@ -3,10 +3,6 @@ let aborted () = Eio_unix.Err.v Unix.ECONNABORTED "accept" ""
 let no_descriptor () = Eio_unix.Err.v Unix.EMFILE "accept" ""
 let refused_by_firewall () = Eio_unix.Err.v Unix.EPERM "accept" ""
 
-(* The classifier of a Unix network, which reads no descriptor left (EMFILE)
-   as one of its answers. *)
-let classify = Eio_net_unix.classify_accept
-
 (* A listener over [inner] whose accept fails with each scripted exception in
    turn, once its cue resolves, and otherwise accepts from [inner]. A cue
    resolved already fails the accept before it races [inner]'s, which could
@@ -208,8 +204,7 @@ let pressure_sheds_the_least_progressed ?(server = line_server ?served:None)
               | `Descriptors -> [ (pressed, no_descriptor ()) ])
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net.Accept.run ~classify ~max_connections ~on_error listening
-                server);
+              Eio_net.Accept.run ~max_connections ~on_error listening server);
           for i = 0 to n - 1 do
             stall ~sw:clients net
               (String.make (n - i) 'x')
@@ -253,11 +248,11 @@ let descriptors_are_shared_across_loops n () =
             scripted ~addr:other ~sw:scope net [ (pressed, no_descriptor ()) ]
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net.Accept.run ~pool ~classify ~max_connections:(10 * n)
-                ~on_error first (line_server ?served:None));
+              Eio_net.Accept.run ~pool ~max_connections:(10 * n) ~on_error first
+                (line_server ?served:None));
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net.Accept.run ~pool ~classify ~max_connections:(10 * n)
-                ~on_error second (line_server ?served:None));
+              Eio_net.Accept.run ~pool ~max_connections:(10 * n) ~on_error
+                second (line_server ?served:None));
           for i = 0 to n - 1 do
             stall ~sw:clients net
               (String.make (n - i) 'x')
@@ -299,8 +294,8 @@ let descriptors_are_not_shared_without_a_pool n () =
               [ (Eio.Promise.create_resolved (), no_descriptor ()) ]
           in
           Eio.Fiber.fork_daemon ~sw:scope (fun () ->
-              Eio_net.Accept.run ~classify ~max_connections:(10 * n) ~on_error
-                first (line_server ?served:None));
+              Eio_net.Accept.run ~max_connections:(10 * n) ~on_error first
+                (line_server ?served:None));
           for i = 0 to n - 1 do
             stall ~sw:clients net
               (String.make (n - i) 'x')
@@ -309,15 +304,15 @@ let descriptors_are_not_shared_without_a_pool n () =
           settle n;
           let second =
             Eio.Fiber.fork_promise ~sw:scope (fun () ->
-                Eio_net.Accept.run ~classify ~max_connections:(10 * n) ~on_error
-                  second (line_server ?served:None))
+                Eio_net.Accept.run ~max_connections:(10 * n) ~on_error second
+                  (line_server ?served:None))
           in
           settle n;
           (match Eio.Promise.peek second with
           | Some (Error (Eio.Io _ as e)) ->
               Alcotest.(check bool)
                 "the accept's error is raised" true
-                (classify e = Some `Descriptors)
+                (Eio_net.Accept.classify e = Some `Descriptors)
           | Some (Error e) -> raise e
           | Some (Ok ()) -> Alcotest.fail "the second loop returned"
           | None -> Alcotest.fail "the second loop waits on the first's peers");
@@ -336,53 +331,21 @@ let test_no_descriptor_and_none_held_raises () =
     scripted ~sw net [ (Eio.Promise.create_resolved (), no_descriptor ()) ]
   in
   match
-    Eio_net.Accept.run ~classify ~max_connections:4 ~on_error:ignore listening
+    Eio_net.Accept.run ~max_connections:4 ~on_error:ignore listening
       (line_server ?served:None)
   with
   | (_ : unit) -> Alcotest.fail "the loop returned"
   | exception (Eio.Io _ as e) ->
       Alcotest.(check bool)
         "the accept's error is raised" true
-        (classify e = Some `Descriptors)
-
-(* A loop handed no classifier reads its accepts' failures as Eio's portable
-   errors name them, whatever the program links: this one links eio-net.unix,
-   and an accept with no descriptor left (EMFILE) is still a backend error to
-   it, which it raises, though it holds a peer it could shed. *)
-let test_no_classifier_reads_the_portable_errors () =
-  Eio_mock.Backend.run @@ fun () ->
-  Eio.Switch.run @@ fun sw ->
-  let net = Eio_net_mem.v ~sw () in
-  let pressed, press = Eio.Promise.create () in
-  Eio.Switch.run @@ fun scope ->
-  let listening = scripted ~sw:scope net [ (pressed, no_descriptor ()) ] in
-  let loop =
-    Eio.Fiber.fork_promise ~sw:scope (fun () ->
-        Eio_net.Accept.run ~max_connections:4 ~on_error:ignore listening
-          (line_server ?served:None))
-  in
-  stall ~sw:scope net "x" ~on_end:ignore;
-  settle 1;
-  Eio.Promise.resolve press ();
-  settle 1;
-  match Eio.Promise.peek loop with
-  | Some (Error (Eio.Io _ as e)) ->
-      Alcotest.(check bool)
-        "the accept's error is raised" true
-        (classify e = Some `Descriptors);
-      Alcotest.(check bool)
-        "a backend error to the portable classifier" true
-        (Eio_net.Accept.classify e = None)
-  | Some (Error e) -> raise e
-  | Some (Ok ()) -> Alcotest.fail "the loop returned"
-  | None -> Alcotest.fail "the loop read EMFILE with no classifier handed"
+        (Eio_net.Accept.classify e = Some `Descriptors)
 
 (* Each loop reads its accepts' failures with the classifier it is handed and
    no other. Two loops of one process meet EPERM, which accept(2) on Linux
-   returns for a connection a firewall refused and the Unix classifier leaves
-   unread, since a security module can make it persist on the listener: the
-   one handed a classifier that reads it as aborted accepts its next peer, and
-   the one handed the Unix classifier alone raises it. *)
+   returns for a connection a firewall refused and the default classifier
+   leaves unread, since a security module can make it persist on the listener:
+   the one handed a classifier that reads it as aborted accepts its next peer,
+   and the one handed the default raises it. *)
 let test_each_loop_reads_failures_with_its_classifier () =
   Eio_mock.Backend.run @@ fun () ->
   Eio.Switch.run @@ fun sw ->
@@ -391,7 +354,7 @@ let test_each_loop_reads_failures_with_its_classifier () =
   let other = `Tcp (Eio.Net.Ipaddr.V4.loopback, 5001) in
   let lenient = function
     | Eio.Io (Eio.Fs.E (Permission_denied _), _) -> Some `Aborted
-    | e -> classify e
+    | e -> Eio_net.Accept.classify e
   in
   let failing () =
     [ (Eio.Promise.create_resolved (), refused_by_firewall ()) ]
@@ -404,7 +367,7 @@ let test_each_loop_reads_failures_with_its_classifier () =
         (line_server ?served:None));
   let strict =
     Eio.Fiber.fork_promise ~sw:scope (fun () ->
-        Eio_net.Accept.run ~classify ~max_connections:4 ~on_error second
+        Eio_net.Accept.run ~max_connections:4 ~on_error second
           (line_server ?served:None))
   in
   Alcotest.(check string)
@@ -691,7 +654,7 @@ let test_recovers_under_no_descriptor () =
   let shed = ref false in
   Eio.Fiber.both
     (fun () ->
-      Eio_net.Accept.run ~stop ~classify ~max_connections:4 l (fun _ flow _ ->
+      Eio_net.Accept.run ~stop ~max_connections:4 l (fun _ flow _ ->
           match Eio.Buf_read.line (Eio.Buf_read.of_flow flow ~max_size:16) with
           | line -> Eio.Flow.copy_string (line ^ "\n") flow
           | exception End_of_file -> shed := true))
@@ -736,8 +699,6 @@ let suite =
     @ [
         Alcotest.test_case "no descriptor and none held raises" `Quick
           test_no_descriptor_and_none_held_raises;
-        Alcotest.test_case "no classifier reads the portable errors" `Quick
-          test_no_classifier_reads_the_portable_errors;
         Alcotest.test_case "each loop reads failures with its classifier" `Quick
           test_each_loop_reads_failures_with_its_classifier;
         Alcotest.test_case "a connection ending during its shedding" `Quick

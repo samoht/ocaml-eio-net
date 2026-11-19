@@ -6,9 +6,4 @@
  (libraries eio-net eio eio.unix cstruct bytesrw ipaddr fmt unix)
  (foreign_stubs
   (language c)
-  (names
-   sendmsg_batch
-   writev_offload
-   local_stubs
-   interface_stubs
-   accept_stubs)))
+  (names sendmsg_batch writev_offload local_stubs interface_stubs)))

@@ -5,19 +5,18 @@
 #include <errno.h>
 
 /* The network errors a TCP accept(2) on Linux passes on from the new
- * connection (accept(2), NOTES), as Unix.error values: OCaml's Unix names
- * EPROTO and ENONET only as EUNKNOWNERR of the system's own code. ENONET is
- * Linux's alone. */
+ * connection (accept(2), NOTES) that OCaml's Unix names only as EUNKNOWNERR
+ * of the system's own code: EPROTO, and ENONET, which is Linux's alone.
+ */
 CAMLprim value caml_eio_net_pending_accept_errors(value v_unit)
 {
     CAMLparam1(v_unit);
     CAMLlocal3(list, err, cell);
     static const int codes[] = {
-        ENETDOWN, EPROTO,       ENOPROTOOPT, EHOSTDOWN,
+        EPROTO,
 #ifdef ENONET
         ENONET,
 #endif
-        EHOSTUNREACH, ENETUNREACH,
     };
     (void)v_unit;
     list = Val_emptylist;

@@ -421,7 +421,7 @@ module Fault : sig
         (** An accept fails with the error eio_posix raises when the process has
             no descriptor left:
             [Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (EMFILE, "accept", "")), _)],
-            which [Eio_net_unix.classify_accept] reads as [`Descriptors]. As on
+            which [Eio_net.Accept.classify] reads as [`Descriptors]. As on
             Linux, the connection stays queued and its client sees nothing, and
             every accept on the network fails the same way until the program
             frees a descriptor, by closing a connection, socket or listener of

@@ -9,11 +9,8 @@
     no descriptor left, does not end the loop. A loop sheds the connections of
     another only when both were handed the same pool.
 
-    Eio names a connection reset portably and reports every other failed accept
-    as a backend error. {!run} therefore reads a failed accept with the
-    classifier it is handed: {!classify} by default, or the classifier of the
-    platform's network, such as [Eio_net_unix.classify_accept] for EMFILE and
-    ENFILE. A classifier belongs to one loop, and so does a pool: linking a
+    {!run} reads a failed accept with the classifier it is handed, {!classify}
+    by default. A classifier belongs to one loop, and so does a pool: linking a
     library never changes how another loop reads its failures. *)
 
 (** {1:failures Failed accepts} *)
@@ -32,9 +29,25 @@ type answer =
 
 val classify : exn -> answer option
 (** [classify exn] is the answer the exception [exn] of a failed accept carries
-    as Eio's portable errors name it: [Some `Aborted] for
-    [Eio.Net.Connection_reset _], and [None] otherwise, for example for a closed
-    listener, a cancellation or an error of a backend. It is {!run}'s default.
+    from the system, and [None] if it carries none, as for a closed listener or
+    a cancellation:
+
+    - [`Aborted] for [Eio.Net.Connection_reset _], as Eio reports ECONNABORTED:
+      a connection its peer reset before it was accepted.
+    - [`Aborted] for a network error pending on the new connection, which
+      accept(2) on Linux passes on and tells the caller to retry: ENETDOWN,
+      EPROTO, ENOPROTOOPT (which Eio reports as [Eio.Net.Invalid_option]),
+      EHOSTDOWN, ENONET, EHOSTUNREACH and ENETUNREACH. The error goes with the
+      connection it was pending on, and a BSD system clears the one it returns,
+      so the next accept does not meet it again. EOPNOTSUPP, also on Linux's
+      list, is no answer: accept(2) also returns it for every accept on a socket
+      that is not a stream. Nor is EPERM, which a security module may return for
+      every accept. A loop raises either rather than spin on it.
+    - [`Descriptors] for EMFILE and ENFILE: the process, or the system, has no
+      descriptor left for the connection.
+
+    Every Eio backend, eio_windows included, raises an error Eio does not name
+    as an [Eio_unix.Unix_error], which [classify] reads. It is {!run}'s default.
 *)
 
 (** {1:loop The loop} *)
@@ -110,9 +123,7 @@ val run :
     accept's error, naming that none was held to shed or wait for. Choosing
     costs a pass over the connections the pool's loops hold. A connection is
     shed by shutting its socket down, with no answer, so its reads end on
-    whichever domain it runs. Any other failed accept raises its error, as one
-    with no descriptor left does over a Unix network unless [classify] is
-    [Eio_net_unix.classify_accept].
+    whichever domain it runs. Any other failed accept raises its error.
 
     [on_error] (defaults to logging a warning on the [eio-net.accept] log
     source) receives each exception a connection's [handler] raises but

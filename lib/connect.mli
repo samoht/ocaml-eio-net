@@ -6,13 +6,10 @@
     connection library uses the classifier to tell a peer that refused, or that
     no route reaches, from one that did not reply in time.
 
-    Eio names a refusal portably and reports every other failed connect as a
-    backend error. A connection library therefore reads a failed connect with
-    the classifier its caller hands it: {!classify} by default, or the
-    classifier of the platform's network, such as
-    [Eio_net_unix.classify_connect] for ENETUNREACH and EHOSTUNREACH. A
-    classifier is passed to the code that connects, so linking a library never
-    changes how another's connects are read. *)
+    A connection library reads a failed connect with the classifier its caller
+    hands it, {!classify} by default. A classifier is passed to the code that
+    connects, so linking a library never changes how another's connects are
+    read. *)
 
 type answer =
   [ `Refused
@@ -25,6 +22,14 @@ type answer =
 
 val classify : exn -> answer option
 (** [classify exn] is the answer the exception [exn] of a failed connect carries
-    as Eio's portable errors name it: [Some `Refused] for
-    [Eio.Net.Connection_failure (Refused _)], and [None] otherwise, for example
-    for a timeout, a local error or an error of a backend. *)
+    from the network, and [None] if it carries none, as for a timeout or a local
+    error:
+
+    - [`Refused] for [Eio.Net.Connection_failure (Refused _)], a reset in answer
+      to the SYN (ECONNREFUSED).
+    - [`Unreachable] for ENETUNREACH and EHOSTUNREACH, which Eio reports as an
+      [Eio_unix.Unix_error] it does not name: an ICMP destination unreachable,
+      or the host's own routing table, says no path to the peer exists.
+
+    Every Eio backend, eio_windows included, raises an error Eio does not name
+    as an [Eio_unix.Unix_error], which [classify] reads. *)
