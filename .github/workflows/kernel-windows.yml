@@ -5,8 +5,6 @@ name: Kernel traces (Windows)
 # test/interop/kernel/README.md.
 on:
   workflow_dispatch:
-  push:
-    branches: [r-windows]
 
 permissions:
   contents: read
