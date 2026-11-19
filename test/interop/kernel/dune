@@ -1,14 +1,7 @@
 (test
  (name test)
  (package eio-net)
- (libraries
-  eio_net_kernel
-  eio-net.mem
-  eio-net.chaos
-  eio-chaos
-  eio
-  fmt
-  alcotest)
+ (libraries eio_net_kernel eio-net.mem eio-net.chaos eio-chaos fmt alcotest)
  (deps
   (source_tree traces)))
 

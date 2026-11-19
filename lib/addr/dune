@@ -1,4 +1,4 @@
 (library
  (name eio_net_addr)
  (public_name eio-net.addr)
- (libraries hermetic eio ipaddr fmt))
+ (libraries hermetic eio ipaddr))
