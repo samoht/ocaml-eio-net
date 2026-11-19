@@ -1244,6 +1244,12 @@ let pair ?os ~clock f =
     Flow.resource
       (Flow.v ctx ~socket ~side:`Server ~family:`Inet ~conn (s :> stream)) )
 
+let datagram ?os ~sw ~clock f sock =
+  let ctx =
+    ctx ?os ~clock ~outage:false (fun op -> Option.map (fun f -> (f, 0)) (f op))
+  in
+  Datagram.v ~sw ctx ~family:`Inet (sock :> Datagram.socket)
+
 let is_outage (net : [ `Generic ] Eio.Net.ty Eio.Resource.t) =
   let (Eio.Resource.T (t, ops)) = net in
   match Eio.Resource.get_opt ops Outage with Some f -> f t | None -> false

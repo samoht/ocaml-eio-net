@@ -14,6 +14,7 @@ let wrap ?os ~clock f net =
 let pair = Wrapper.pair
 let is_outage env = Wrapper.is_outage env#net
 let network = Network.device
+let datagram_socket = Wrapper.datagram
 
 (* Reads and writes draw from states of their own, so the faults of each
    depend on [seed] alone, not on how the two interleave. *)
@@ -43,6 +44,26 @@ let seeded ?dribble ?stall ?short_write ?reset_after ?(reset_kind = `Reset)
         | Some n when op.offset >= n -> Some Fault.Reset
         | _ -> capped writes short_write)
     | `Connect | `Accept | `Recv -> None
+
+(* One state draws every receive's fault, in the order of the receives. *)
+let seeded_receives ?(loss = 0.) ?(dup = 0.) ?(reorder = 0.) ?(garble = 0.)
+    ?stall seed =
+  let st = Random.State.make [| seed; 3 |] in
+  fun (op : Op.t) ->
+    match op.kind with
+    | `Recv -> (
+        let x = Random.State.float st 1.0 in
+        if x < loss then Some Fault.Drop
+        else if x < loss +. dup then Some Fault.Dup
+        else if x < loss +. dup +. reorder then Some Fault.Reorder
+        else if x < loss +. dup +. reorder +. garble then
+          Some (Fault.Garble op.length)
+        else
+          match stall with
+          | Some n when n > 0 && Random.State.int st (n + 1) = 0 ->
+              Some (Fault.Stall 0.)
+          | _ -> None)
+    | `Connect | `Accept | `Read | `Write -> None
 
 let by_side ~client ~server (op : Op.t) =
   match op.side with `Client -> client op | `Server -> server op
