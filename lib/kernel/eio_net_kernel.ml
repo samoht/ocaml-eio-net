@@ -1983,3 +1983,4 @@ let scenario ?(wait = fun _ -> ()) net name =
   String.map (function ',' | '\n' | '\r' -> ';' | '\000' -> '0' | c -> c) r
 
 let float_value = Common.float_value
+let errno = Common.errno

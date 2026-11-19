@@ -87,3 +87,6 @@ val scenario :
 val float_value : float -> string
 (** [float_value x] is [x] as the traces print a value, [%g] with a two-digit
     exponent on every host. *)
+
+val errno : Unix.error -> string
+(** [errno e] names [e] as the traces do. *)

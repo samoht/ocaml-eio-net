@@ -124,15 +124,8 @@ let with_value spec =
       if pp x <> v then Fmt.failwith "%S reads back as %S" v (pp x);
       Opt (o, pp, of_string, x)
 
-let errno : Unix.error -> string = function
-  | EINVAL -> "EINVAL"
-  | ENOTCONN -> "ENOTCONN"
-  | EOPNOTSUPP -> "EOPNOTSUPP"
-  | ENOENT -> "ENOENT"
-  | e -> Unix.error_message e
-
 let backend = function
-  | Eio_unix.Unix_error (e, _, _) -> errno e
+  | Eio_unix.Unix_error (e, _, _) -> Eio_net_kernel.errno e
   | b -> Fmt.str "%a" Eio.Exn.Backend.pp b
 
 (* As the recorder prints what an option raised. *)

@@ -21,9 +21,10 @@ let errno : Unix.error -> string = function
   | ESHUTDOWN -> "ESHUTDOWN"
   | EWOULDBLOCK -> "EWOULDBLOCK"
   | EUNKNOWNERR n -> "EUNKNOWNERR" ^ string_of_int n
-  (* As the traces spell it: Linux's and macOS's message, whatever the
+  (* As the traces spell them: Linux's and macOS's messages, whatever the
      host's C library says. *)
   | EHOSTUNREACH -> "No route to host"
+  | EDOM -> "Numerical argument out of domain"
   (* Windows' messages end with CRLF. *)
   | e -> String.trim (Unix.error_message e)
 
