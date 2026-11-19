@@ -453,14 +453,11 @@ let timing = "have a macOS answer that depends on timing"
 
 (* The scenarios whose Windows answers eio-net.mem does not model (MODEL.md
    lists them): socket options' values, which addresses connect and send
-   to which, the edge addresses, the receive memory and the names
-   getnameinfo gives. *)
+   to which, the edge addresses and the names getnameinfo gives. *)
 let not_modelled_windows name =
   List.exists
     (fun prefix -> starts_with ~prefix name)
-    [
-      "sockopt"; "connect "; "dgram "; "edge connect"; "udp rmem"; "getnameinfo";
-    ]
+    [ "sockopt"; "connect "; "dgram "; "edge connect"; "getnameinfo" ]
 
 let unmodelled = "have a Windows answer eio-net.mem does not model"
 
