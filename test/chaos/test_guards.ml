@@ -224,6 +224,20 @@ let restart ~reuse_addr () =
   serve_once ();
   serve_once ()
 
+(* [s] with each CRLF and each lone CR a line feed, as a report has it:
+   Windows ends [Unix.error_message] with CRLF. *)
+let lf s =
+  let n = String.length s in
+  let b = Buffer.create n in
+  String.iteri
+    (fun i c ->
+      match c with
+      | '\r' when i + 1 < n && s.[i + 1] = '\n' -> ()
+      | '\r' -> Buffer.add_char b '\n'
+      | c -> Buffer.add_char b c)
+    s;
+  Buffer.contents b
+
 let test_restart () =
   Expect.passes (restart ~reuse_addr:true) ();
   let m = Expect.report (restart ~reuse_addr:false) in
@@ -234,7 +248,7 @@ let test_restart () =
            (Fmt.str
               "Eio_net_chaos.run: the run with no fault failed: Eio.Io \
                Unix_error (%s, \"bind\""
-              (Unix.error_message Unix.EADDRINUSE))
+              (lf (Unix.error_message Unix.EADDRINUSE)))
          m)
   then Alcotest.failf "failed with %S" m
 
