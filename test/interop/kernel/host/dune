@@ -3,6 +3,6 @@
  (libraries eio-net.chaos eio eio_main unix))
 
 (rule
- (alias host-device)
+ (alias host-conformance)
  (action
   (run %{exe:host.exe})))

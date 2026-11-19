@@ -1,4 +1,4 @@
-(* Eio_net_chaos.device replays the kernel's traces on a network. Traces
+(* Eio_net_chaos.conformance replays the kernel's traces on a network. Traces
    recorded through eio_posix on Linux (Docker image ocaml/opam, pinned by
    digest in scripts/generate.sh) and on macOS (traces/provenance).
    Regenerate, on macOS: REGEN=1 dune build @test/interop/kernel/regen-traces *)
@@ -46,17 +46,17 @@ let mem os ~sw (env : Eio_net_chaos.env) =
   Eio_net_mem.v ~os ~clock:env#mono_clock ~sw ()
 
 (* eio-net.mem answers as the kernel it follows. *)
-let test_mem os () = Eio_net_chaos.device ~os (mem os)
+let test_mem os () = Eio_net_chaos.conformance ~os (mem os)
 
 (* A wrapper that injects nothing answers as the network it wraps. *)
 let test_quiet_wrap os () =
-  Eio_net_chaos.device ~os (fun ~sw env ->
+  Eio_net_chaos.conformance ~os (fun ~sw env ->
       Eio_net_chaos.wrap ~os ~clock:env#clock (fun _ -> None) (mem os ~sw env))
 
 (* A network that passes the one under it through, on a faulty one: it
    answers as the kernel does, or with the errors the faults give. *)
 let test_over_faulty_network () =
-  Eio_net_chaos.device ~budget:2000
+  Eio_net_chaos.conformance ~budget:2000
     ~under:[ Eio_net_chaos.network () ]
     (fun ~sw:_ env -> env#net)
 
@@ -67,7 +67,7 @@ let test_allowances () =
       (fun os ->
         List.map
           (fun why -> (os, why))
-          (Eio_net_chaos.Private.device_allowed os (mem os)))
+          (Eio_net_chaos.Private.conformance_allowed os (mem os)))
       oses
   in
   List.iter
@@ -75,18 +75,20 @@ let test_allowances () =
       if not (List.mem (os, why) used) then
         Alcotest.failf "no %s answer of eio-net.mem needs the allowance %S"
           (os_name os) why)
-    Eio_net_chaos.Private.device_allowances
+    Eio_net_chaos.Private.conformance_allowances
 
 (* Under Windows, each eio_windows defect allowed is one an answer of
    eio-net.mem, which keeps Eio's contract, needs. *)
 let test_defects () =
-  let used = Eio_net_chaos.Private.device_allowed `Windows (mem `Windows) in
+  let used =
+    Eio_net_chaos.Private.conformance_allowed `Windows (mem `Windows)
+  in
   List.iter
     (fun finding ->
       if not (List.mem finding used) then
         Alcotest.failf "no Windows answer of eio-net.mem needs the defect %S"
           finding)
-    Eio_net_chaos.Private.device_defects
+    Eio_net_chaos.Private.conformance_defects
 
 (* A network whose connects are all reset fails, and the report says
    where. *)
@@ -111,13 +113,14 @@ let test_broken () =
   let net ~sw (env : Eio_net_chaos.env) =
     Eio_net_chaos.wrap ~clock:env#clock reset (Eio_net_mem.v ~sw ())
   in
-  match Eio_net_chaos.device net with
+  match Eio_net_chaos.conformance net with
   | () -> Alcotest.fail "a network that resets every connect passed"
   | exception Failure m ->
       let lines = String.split_on_char '\n' m in
       if
         not
-          (String.starts_with ~prefix:"Eio_net_chaos.device: " (List.hd lines))
+          (String.starts_with ~prefix:"Eio_net_chaos.conformance: "
+             (List.hd lines))
       then Alcotest.failf "the report starts %S" (List.hd lines);
       (* Sequences that differ at the same step with the same answers are
          one row, with an example and how many others. *)
@@ -159,7 +162,7 @@ let test_macos_timing () =
     Eio_net_chaos.wrap ~os:`Macos ~clock:env#clock reset
       (Eio_net_mem.v ~os:`Macos ~sw ())
   in
-  match Eio_net_chaos.device ~os:`Macos net with
+  match Eio_net_chaos.conformance ~os:`Macos net with
   | () -> Alcotest.fail "a network that resets every connect passed"
   | exception Failure m ->
       if

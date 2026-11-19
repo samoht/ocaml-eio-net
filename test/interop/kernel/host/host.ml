@@ -1,6 +1,6 @@
-(* Eio_net_chaos.device on the host's own network, eio_posix, under the
+(* Eio_net_chaos.conformance on the host's own network, eio_posix, under the
    host's kernel. Run outside any sandbox that refuses sockets:
-   dune build @test/interop/kernel/host/host-device *)
+   dune build @test/interop/kernel/host/host-conformance *)
 
 let os () =
   match In_channel.input_all (Unix.open_process_in "uname -s") with
@@ -11,7 +11,8 @@ let () =
   let os = os () in
   match
     Eio_main.run @@ fun env ->
-    Eio_net_chaos.Private.device_in_loop ~os (fun ~sw:_ -> Eio.Stdenv.net env)
+    Eio_net_chaos.Private.conformance_in_loop ~os (fun ~sw:_ ->
+        Eio.Stdenv.net env)
   with
   | () -> print_endline "the host's network passes"
   | exception Failure report ->

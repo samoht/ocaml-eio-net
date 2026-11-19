@@ -173,7 +173,7 @@ Modelled:
 - Resolution: stream addresses, then datagram ones, `::1` first; a host is a
   dotted quad or an IPv6 address, in brackets or not.
 
-Not modelled, and left out of `Eio_net_chaos.device`'s Windows replay:
+Not modelled, and left out of `Eio_net_chaos.conformance`'s Windows replay:
 
 - `SO_EXCLUSIVEADDRUSE`, which neither Eio nor OCaml's `Unix` reaches.
 - The socket options' defaults and values, which follow Linux.

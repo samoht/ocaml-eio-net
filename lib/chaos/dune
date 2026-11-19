@@ -9,8 +9,8 @@
   network
   posix
   text
-  device
-  device_traces)
+  conformance
+  conformance_traces)
  (libraries
   hermetic
   eio
@@ -23,7 +23,7 @@
   unix))
 
 (rule
- (target device_traces.ml)
+ (target conformance_traces.ml)
  (action
   (with-stdout-to
    %{target}

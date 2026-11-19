@@ -13,7 +13,7 @@ let wrap ?os ~clock f net =
 
 let pair = Wrapper.pair
 let is_outage env = Wrapper.is_outage env#net
-let network = Network.part
+let network = Network.device
 
 let run ?os ?budget ?seed ?replay ?setup ?inspect app =
   Eio_chaos.run ~name:"Eio_net_chaos.run" ?os ?budget ?seed ?replay ?setup
@@ -21,12 +21,12 @@ let run ?os ?budget ?seed ?replay ?setup ?inspect app =
     [ network () ]
     app
 
-let device ?os ?under ?budget ?seed ?replay net =
-  Device.check ?os ?under ?budget ?seed ?replay net
+let conformance ?os ?under ?budget ?seed ?replay net =
+  Conformance.check ?os ?under ?budget ?seed ?replay net
 
 module Private = struct
-  let device_allowances = Device.allowances
-  let device_defects = Device.defect_findings
-  let device_allowed os net = (Device.replay os net).allowed
-  let device_in_loop = Device.check_in_loop
+  let conformance_allowances = Conformance.allowances
+  let conformance_defects = Conformance.defect_findings
+  let conformance_allowed os net = (Conformance.replay os net).allowed
+  let conformance_in_loop = Conformance.check_in_loop
 end

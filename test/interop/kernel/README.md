@@ -6,12 +6,12 @@ sequence and scenario of
 `eio_posix` on Linux and macOS and through `eio_windows` on Windows: one row
 per sequence, a column per kernel.
 `eio-net.chaos` compiles them in, with
-[`lib/chaos/gen`](../../../lib/chaos/gen/gen.ml), and `Eio_net_chaos.device`
+[`lib/chaos/gen`](../../../lib/chaos/gen/gen.ml), and `Eio_net_chaos.conformance`
 replays them on any network. The test runs it on `eio-net.mem`, and
 [`host`](host) on the host's own network:
 
 ```sh
-dune build @test/interop/kernel/host/host-device
+dune build @test/interop/kernel/host/host-conformance
 ```
 
 ## Regenerate

@@ -10,7 +10,7 @@
     the argument, never from the host, so a test sees the same network on every
     machine. {!section-macos} lists what [`Macos] changes and {!section-windows}
     what [`Windows] changes. Its answers are those recorded on Linux, macOS and
-    Windows, and [Eio_net_chaos.device] checks them. *)
+    Windows, and [Eio_net_chaos.conformance] checks them. *)
 
 (** {1:errors Errors}
 
@@ -679,8 +679,8 @@ val pair :
     addresses and the receive memory, which follow Linux; sends off loopback and
     port exhaustion, which the recordings leave out; and a connect's timeout, 21
     seconds as Windows documents it, which no trace records.
-    [Eio_net_chaos.device] leaves those scenarios out under [`Windows] and names
-    each answer it allows as an eio_windows defect. *)
+    [Eio_net_chaos.conformance] leaves those scenarios out under [`Windows] and
+    names each answer it allows as an eio_windows defect. *)
 
 (**/**)
 

@@ -26,7 +26,7 @@ type summary = {
 (** The type for what a replay of the traces found. *)
 
 val replay :
-  ?under:Eio_chaos.part list ->
+  ?under:Eio_chaos.device list ->
   os ->
   (sw:Eio.Switch.t -> Eio_chaos.env -> _ Eio.Net.t) ->
   summary
@@ -36,13 +36,13 @@ val replay :
 
 val check :
   ?os:[< os ] ->
-  ?under:Eio_chaos.part list ->
+  ?under:Eio_chaos.device list ->
   ?budget:int ->
   ?seed:int ->
   ?replay:string ->
   (sw:Eio.Switch.t -> Eio_chaos.env -> _ Eio.Net.t) ->
   unit
-(** See {!Eio_net_chaos.device}. *)
+(** See {!Eio_net_chaos.conformance}. *)
 
 val check_in_loop : ?os:[< os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
 (** [check_in_loop ~os net] is {!check} with each sequence in the caller's event

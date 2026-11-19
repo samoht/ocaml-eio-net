@@ -88,10 +88,10 @@ exclude = ["E825"]
 files = ["lib/kernel/*"]
 exclude = ["E105", "E005"]
 
-# The allowances of the device check are a table of records, one per way a
+# The allowances of the conformance check are a table of records, one per way a
 # host's answer may differ: they hold no logic.
 [[rules]]
-files = ["lib/chaos/device.ml"]
+files = ["lib/chaos/conformance.ml"]
 exclude = ["E005"]
 
 # Dune's select picks one of these as posix.ml, which posix.mli describes.

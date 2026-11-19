@@ -3,7 +3,7 @@ module K = Eio_net_kernel
 
 type os = Eio_chaos.os
 
-let name = "Eio_net_chaos.device"
+let name = "Eio_net_chaos.conformance"
 
 let os_name : os -> string = function
   | `Linux -> "Linux"
@@ -504,12 +504,12 @@ let column os (linux, macos, windows) =
 
 (* A sequence's answers, one per operation, for each kernel. *)
 let sequence_rows t =
-  let codes = List.assoc (K.transport_name t) Device_traces.sequences in
+  let codes = List.assoc (K.transport_name t) Conformance_traces.sequences in
   List.init
     (String.length codes / 2)
     (fun i ->
       let linux, macos, windows =
-        Device_traces.answers.(String.get_uint16_be codes (2 * i))
+        Conformance_traces.answers.(String.get_uint16_be codes (2 * i))
       in
       (split '|' linux, split '|' macos, split '|' windows))
 
@@ -532,10 +532,10 @@ type fresh = {
   run : 'a. ([ `Generic ] Eio.Net.ty Eio.Resource.t -> 'a) -> 'a option;
 }
 
-(* The parts a network is built over, and a quiet network unless one is. *)
+(* The devices a network is built over, and a quiet network unless one is. *)
 let below under =
   if List.exists (fun p -> Eio_chaos.Private.name p = "net") under then under
-  else under @ [ Eio_chaos.quiet (Network.part ()) ]
+  else under @ [ Eio_chaos.quiet (Network.device ()) ]
 
 (* Each sequence in an event loop of its own, on a simulated environment
    whose network follows [os]. *)
@@ -659,7 +659,7 @@ let replay_with os fresh =
               | `Differs d -> differed := d :: !differed))
         sequences rows)
     K.transports;
-  let rows = Device_traces.scenarios in
+  let rows = Conformance_traces.scenarios in
   out_of_date "scenarios" ~held:(Array.length rows)
     ~runs:(List.length K.scenarios);
   List.iteri
@@ -771,7 +771,7 @@ let check_healthy ?under ?os f =
   Fun.protect ~finally:(fun () -> Random.set_state random) @@ fun () ->
   report os (replay ?under os f)
 
-(* {1 Over faulty parts} *)
+(* {1 Over faulty devices} *)
 
 (* An outcome a failure below a network may explain: any but one that names
    an error no network gives, as the faults eio-net injects also make
@@ -784,7 +784,7 @@ let foreign given =
       || String.starts_with ~prefix:"Not_available" w)
     (split ' ' given)
 
-(* The scenarios each run of a check over faulty parts replays: [n] of those
+(* The scenarios each run of a check over faulty devices replays: [n] of those
    [os] runs, drawn from [seed], as each run replays them all. *)
 let sample os ~seed n =
   let all =
@@ -804,7 +804,7 @@ let sampled = 32
 
 let program ?os ~seed f (env : Eio_chaos.env) =
   let os = os_of os in
-  let rows = Device_traces.scenarios in
+  let rows = Conformance_traces.scenarios in
   if not (Eio_chaos.Private.restarted env) then
     List.iter
       (fun (sc, i) ->
@@ -829,7 +829,7 @@ let program ?os ~seed f (env : Eio_chaos.env) =
 let check ?os ?(under = []) ?budget ?(seed = 0) ?replay f =
   if replay = None then check_healthy ~under ?os f;
   if under <> [] then
-    Eio_chaos.Private.run ~name:"Eio_net_chaos.device" ~args:"net"
+    Eio_chaos.Private.run ~name:"Eio_net_chaos.conformance" ~args:"net"
       ~passes:[ Errors ] ?os ?budget ~seed ?replay (below under)
       (program ?os ~seed f)
 

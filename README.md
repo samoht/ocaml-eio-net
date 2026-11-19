@@ -6,7 +6,7 @@ to test code under network faults, and frame channels to build programs on.
 The network is used through the ordinary `Eio.Net` API, so the code under
 test does not change. On top of it, `Eio_net_chaos.run` runs a program
 again and again, each time with a different network fault, and checks that
-the program starts again on what the fault left. `Eio_net_chaos.device`
+the program starts again on what the fault left. `Eio_net_chaos.conformance`
 checks that a network of your own answers as Linux, macOS or Windows does.
 
 ## Installation
@@ -102,7 +102,7 @@ The report ends with one line that replays the case, and the
 [eio-chaos](https://github.com/samoht/ocaml-eio-chaos) README says more about
 how faults are chosen and what a pass means.
 
-`Eio_net_chaos.network ()` is the same network as a part of eio-chaos, to
+`Eio_net_chaos.network ()` is the same network as a device of eio-chaos, to
 test a program on several simulated devices at once, such as the network and
 the disk of [eio-fs](https://github.com/samoht/ocaml-eio-fs).
 [`eio_net_chaos.mli`](lib/chaos/eio_net_chaos.mli) documents the rest,
@@ -111,13 +111,13 @@ client's reset.
 
 ## Testing a network
 
-`Eio_net_chaos.device` checks that an Eio network of your own, such as a
+`Eio_net_chaos.conformance` checks that an Eio network of your own, such as a
 userspace stack or a tunnel, answers as the kernel does. It takes a function
 that makes a fresh network, and replays on it sequences of socket operations
 recorded on real Linux, macOS and Windows machines:
 
 ```ocaml
-# Eio_net_chaos.device (fun ~sw env ->
+# Eio_net_chaos.conformance (fun ~sw env ->
       Eio_net_mem.v ~clock:env#mono_clock ~sw ());;
 - : unit = ()
 ```

@@ -109,7 +109,7 @@ let pp_op ppf op =
       Fmt.pf ppf "%s %s @%d+%d" k (O.target op) (O.offset op) (O.length op)
   | k -> Fmt.pf ppf "%s %s @%d" k (O.target op) (O.offset op)
 
-(* {1 The part} *)
+(* {1 The device} *)
 
 type t = {
   mutable os : Eio_chaos.os;
@@ -223,7 +223,7 @@ let indeterminate = function
   | End_of_file | Eio.Time.Timeout -> true
   | _ -> false
 
-module Part = Eio_chaos.Part (struct
+module Device = Eio_chaos.Device (struct
   type nonrec t = t
 
   let name = name
@@ -236,4 +236,4 @@ module Part = Eio_chaos.Part (struct
   let indeterminate = indeterminate
 end)
 
-let part () = Part.v (v ())
+let device () = Device.v (v ())

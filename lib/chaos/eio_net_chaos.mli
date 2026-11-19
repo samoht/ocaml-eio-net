@@ -6,27 +6,27 @@
       the program many times on in-memory networks that fail, and after each
       fault starts it again on the same network, healed, as a machine restarts a
       service.
-    - {!val-device} checks that an Eio network answers as Linux, macOS or
+    - {!val-conformance} checks that an Eio network answers as Linux, macOS or
       Windows does.
 
     Both raise [Failure] with a report when the check fails, as an assertion
     does, so they are the body of a test in any test runner. {!run} is
-    {!Eio_chaos.run} on one part, {!val-network}: a program that also needs a
+    {!Eio_chaos.run} on one device, {!val-network}: a program that also needs a
     disk is tested with [Eio_chaos.run [ Eio_fs_chaos.disk (); network () ]]. A
     test that wants one fault at one place builds it from the
     {{!blocks}building blocks}: {!wrap} for a network, {!pair} for two connected
     streams.
 
-    {!run}, {!val-device} and {!wrap} take [?os], as {!Eio_net_mem.v} does:
+    {!run}, {!val-conformance} and {!wrap} take [?os], as {!Eio_net_mem.v} does:
     [`Linux], the default, [`Macos] or [`Windows]. It picks the answers expected
     and the kernel's timings the faults follow. The choice comes from the
     argument, never from the host, so a test checks the same thing on every
     machine.
 
-    {!val-device} replays two kinds of recording: {e sequences}, each an order
-    of a few socket operations, and {e scenarios}, longer programs written by
-    hand, such as the reuse of a port or a name lookup. A report of {!run} names
-    its runs as scenarios too: a fault at a place of the first run.
+    {!val-conformance} replays two kinds of recording: {e sequences}, each an
+    order of a few socket operations, and {e scenarios}, longer programs written
+    by hand, such as the reuse of a port or a name lookup. A report of {!run}
+    names its runs as scenarios too: a fault at a place of the first run.
 
     How a check picks its {{!exploration}faults}, the {{!contracts}contracts} a
     program meets, its {{!replay}reports and replay} and its {{!runs}runs} come
@@ -39,7 +39,7 @@ type env = Eio_chaos.env
     what each is.
 
     - [net] is an in-memory network of {!Eio_net_mem}, the one that fails, and
-      [fs] and [cwd] refuse each operation, unless another part gives them, as
+      [fs] and [cwd] refuse each operation, unless another device gives them, as
       the disk of eio-fs does;
     - [clock] and [mono_clock] start at [0.], and a wait takes no time
       ({{!runs}runs});
@@ -53,7 +53,7 @@ type env = Eio_chaos.env
     - [process_mgr] starts nothing: [spawn] and [pipe] raise [Eio.Io] with
       [Not_available];
     - [debug] is Eio's, [backend_id] is ["chaos"], and [chaos] is the run's
-      {!Eio_chaos.t}, for a device the program builds itself.
+      {!Eio_chaos.t}, for a device the program builds over others.
 
     A program that reaches the system other than through [env], by [Unix], the
     standard library's channels, [Random.self_init], [Domain.spawn] or
@@ -165,12 +165,12 @@ val run :
       if [budget] is not positive, or [replay] is not a replay string of [run].
 *)
 
-val network : unit -> Eio_chaos.part
-(** [network ()] is the network of {!run} as a part of {!Eio_chaos.run}, to test
-    a program on it and other simulated devices at once: an in-memory host with
-    a loopback interface that answers as the [~os] of the check does, with the
-    faults above. A restart keeps the ports held in TIME_WAIT; a power cut,
-    which another part may bring, keeps nothing. [run app] is
+val network : unit -> Eio_chaos.device
+(** [network ()] is the network of {!run} as a device of {!Eio_chaos.run}, to
+    test a program on it and other simulated devices at once: an in-memory host
+    with a loopback interface that answers as the [~os] of the check does, with
+    the faults above. A restart keeps the ports held in TIME_WAIT; a power cut,
+    which another device may bring, keeps nothing. [run app] is
     [Eio_chaos.run [ network () ] app], but for the name its reports give. *)
 
 val is_outage : env -> bool
@@ -179,20 +179,20 @@ val is_outage : env -> bool
     is [false] in every other run, in a restart, in [inspect], and for an [env]
     no run of {!run} made. *)
 
-(** {1:device Testing a network} *)
+(** {1:conformance Testing a network} *)
 
-val device :
+val conformance :
   ?os:[< Eio_chaos.os ] ->
-  ?under:Eio_chaos.part list ->
+  ?under:Eio_chaos.device list ->
   ?budget:int ->
   ?seed:int ->
   ?replay:string ->
   (sw:Eio.Switch.t -> env -> _ Eio.Net.t) ->
   unit
-(** [device ~os net] runs each sequence of socket operations recorded on the
-    kernel of [os] (defaults to [`Linux]) on a fresh network [net ~sw env], and
-    compares each answer with the kernel's. [sw] ends with the sequence, so what
-    [net] holds under it is released there.
+(** [conformance ~os net] runs each sequence of socket operations recorded on
+    the kernel of [os] (defaults to [`Linux]) on a fresh network [net ~sw env],
+    and compares each answer with the kernel's. [sw] ends with the sequence, so
+    what [net] holds under it is released there.
 
     Each sequence runs in an event loop of its own, as a run of {!run} does,
     with a {!type-env} of its own whose devices are simulated: a network built
@@ -200,12 +200,12 @@ val device :
     its ports and sequence numbers, takes them from it, and its answers are the
     same on every run. Its [net] is an in-memory network that follows [os], for
     a network that carries its traffic over another one, as a tunnel does. The
-    host's own network does not pass through [device]: only the host's event
-    loop drives it.
+    host's own network does not pass through [conformance]: only the host's
+    event loop drives it.
 
     {[
     let check_mem () =
-      Eio_net_chaos.device (fun ~sw env ->
+      Eio_net_chaos.conformance (fun ~sw env ->
           Eio_net_mem.v ~clock:env#mono_clock ~sw ())
     ]}
 
@@ -228,7 +228,7 @@ val device :
     {!Eio_net_mem.v} passes for the [os] it is given, on a [clock], which it
     needs to hold a closed connection's port.
 
-    [device] runs every sequence, whatever the earlier ones answered. Of a
+    [conformance] runs every sequence, whatever the earlier ones answered. Of a
     sequence it reports the first answer outside its set only, as the later ones
     depend on it. It leaves out the sequences only a prepared host can answer:
     those that wait 60 seconds for a port to be free again, those that use up
@@ -254,23 +254,23 @@ val device :
     10,000 turns answers "timeout". Each turn takes 1 us of a simulated clock,
     so eio-net.mem passes in about three seconds.
 
-    {b Over other parts.} A network built over other devices, as a tunnel over
+    {b Over other devices.} A network built over other devices, as a tunnel over
     another network, takes them from its {!type-env}: [under] (defaults to none)
-    are the parts it holds, with a quiet {!val-network} as its [net] unless one
-    of them is a network. Its sequences and scenarios first run as above, each
-    on healthy parts. Then, if [under] is not empty, [device] is
+    are the devices it holds, with a quiet {!val-network} as its [net] unless
+    one of them is a network. Its sequences and scenarios first run as above,
+    each on healthy devices. Then, if [under] is not empty, [conformance] is
     {!Eio_chaos.run} of a program that runs 32 of the scenarios, drawn from
     [seed] (defaults to [0]), in one event loop, as the sequences and scenarios
     are too many to replay at each of its runs, with [budget] and [replay] as
-    {!run} takes them, and the faults the parts of [under] allow. It passes iff
-    each run does: until a part fails, every answer is the kernel's; once one
-    failed ({!Eio_chaos.faulted}), an answer may differ, as the faults eio-net
-    injects also lose, duplicate, reorder and garble datagrams and silence
-    peers, but it names no error a network does not give, such as [Not_found] or
-    [Invalid_argument], and the run does not hang. The restart replays nothing,
-    as a network keeps its ports across it and the scenarios name fixed ports.
-    This checks less than with no fault: a network that loses what it was given
-    passes there.
+    {!run} takes them, and the faults the devices of [under] allow. It passes
+    iff each run does: until a device fails, every answer is the kernel's; once
+    one failed ({!Eio_chaos.faulted}), an answer may differ, as the faults
+    eio-net injects also lose, duplicate, reorder and garble datagrams and
+    silence peers, but it names no error a network does not give, such as
+    [Not_found] or [Invalid_argument], and the run does not hang. The restart
+    replays nothing, as a network keeps its ports across it and the scenarios
+    name fixed ports. This checks less than with no fault: a network that loses
+    what it was given passes there.
 
     @raise Failure
       if an answer is outside its set, with a report ({!Eio_chaos.fail}): a
@@ -675,26 +675,26 @@ val pair :
 
 (**/**)
 
-(* For this package's tests: the allowances of [device], those a network's
-   answers needed, and [device] on the host's own network. *)
+(* For this package's tests: the allowances of [conformance], those a network's
+   answers needed, and [conformance] on the host's own network. *)
 module Private : sig
-  val device_allowances : (Eio_chaos.os * string) list
-  (** [device_allowances] is each allowance of {!val-device}, by the kernel it
-      applies to and why it holds. *)
+  val conformance_allowances : (Eio_chaos.os * string) list
+  (** [conformance_allowances] is each allowance of {!val-conformance}, by the
+      kernel it applies to and why it holds. *)
 
-  val device_defects : string list
-  (** [device_defects] is each eio_windows defect {!val-device} allows under
-      [`Windows], by its finding. *)
+  val conformance_defects : string list
+  (** [conformance_defects] is each eio_windows defect {!val-conformance} allows
+      under [`Windows], by its finding. *)
 
-  val device_allowed :
+  val conformance_allowed :
     Eio_chaos.os -> (sw:Eio.Switch.t -> env -> _ Eio.Net.t) -> string list
-  (** [device_allowed os net] is why each allowance the answers of [net] needed
-      holds, as {!val-device} replays the traces of [os] on it. *)
+  (** [conformance_allowed os net] is why each allowance the answers of [net]
+      needed holds, as {!val-conformance} replays the traces of [os] on it. *)
 
-  val device_in_loop :
+  val conformance_in_loop :
     ?os:[< Eio_chaos.os ] -> (sw:Eio.Switch.t -> _ Eio.Net.t) -> unit
-  (** [device_in_loop ~os net] is {!val-device} with each sequence in the
-      caller's event loop, for the host's own network, which only the host's
+  (** [conformance_in_loop ~os net] is {!val-conformance} with each sequence in
+      the caller's event loop, for the host's own network, which only the host's
       event loop drives: the test of the kernel's traces runs it there. *)
 end
 

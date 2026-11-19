@@ -1,1 +1,1 @@
-(** Runs {!Eio_net_chaos.device} on the host's network. *)
+(** Runs {!Eio_net_chaos.conformance} on the host's network. *)
