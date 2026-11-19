@@ -97,6 +97,13 @@ let contains s sub =
   in
   go 0
 
+(* [s] on one line, each run of spaces and line feeds a space. *)
+let flat s =
+  String.map (function '\n' -> ' ' | c -> c) s
+  |> String.split_on_char ' '
+  |> List.filter (( <> ) "")
+  |> String.concat " "
+
 let reset (op : Eio_net_chaos.Op.t) =
   if op.kind = `Connect then Some Eio_net_chaos.Fault.Reset else None
 
@@ -113,17 +120,17 @@ let test_broken () =
           (String.starts_with ~prefix:"Eio_net_chaos.device: " (List.hd lines))
       then Alcotest.failf "the report starts %S" (List.hd lines);
       (* Sequences that differ at the same step with the same answers are
-         one line, with an example. *)
+         one row, with an example and how many others. *)
       let grouped =
         List.exists
           (fun l ->
-            String.starts_with
-              ~prefix:"  connect: expected ok, got Refused, in " l
-            && contains l " sequences, e.g. tcp4 "
-            && String.ends_with ~suffix:"connect" l)
+            String.starts_with ~prefix:"  connect " l
+            && contains l " tcp4 accept;" && contains l " ok "
+            && String.ends_with ~suffix:" Refused" l)
           lines
+        && contains m "(and 20,156"
       in
-      if not grouped then Alcotest.failf "no grouped connect line in:@.%s" m;
+      if not grouped then Alcotest.failf "no grouped connect row in:@.%s" m;
       (* Answers are named, not given as the traces' tokens. *)
       List.iter
         (fun l ->
@@ -132,16 +139,15 @@ let test_broken () =
               if contains l raw then Alcotest.failf "a raw token %S in %S" raw l)
             [ " blk"; "{blk"; "got Fs"; "got Net"; "got r1"; " r1 " ])
         lines;
-      let last = List.nth lines (List.length lines - 1) in
       if
         not
           (String.ends_with
              ~suffix:
-               "left out; 13 that wait 60 seconds for a port to be free again; \
-                5 that use up every port; 114 that send off the loopback \
+               "left out: 13 that wait 60 seconds for a port to be free again, \
+                5 that use up every port, 114 that send off the loopback \
                 interface"
-             last)
-      then Alcotest.failf "the summary is %S" last
+             (flat m))
+      then Alcotest.failf "the summary is %S" m
 
 (* Under macOS, the TCP sequences that read or write after an end shut its
    receive side with bytes or an end of stream on their way to it, or after
@@ -156,14 +162,12 @@ let test_macos_timing () =
   match Eio_net_chaos.device ~os:`Macos net with
   | () -> Alcotest.fail "a network that resets every connect passed"
   | exception Failure m ->
-      let lines = String.split_on_char '\n' m in
-      let last = List.nth lines (List.length lines - 1) in
       if
         not
           (String.ends_with
-             ~suffix:"; 733 that have a macOS answer that depends on timing"
-             last)
-      then Alcotest.failf "the summary is %S" last
+             ~suffix:", 733 that have a macOS answer that depends on timing"
+             (flat m))
+      then Alcotest.failf "the summary is %S" m
 
 let suite =
   ( "kernel",

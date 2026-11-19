@@ -628,10 +628,10 @@ let scenario os fresh sc ~kernel =
 
 let out_of_date what ~held ~runs =
   if held <> runs then
-    Fmt.failwith
-      "%s: the traces hold %d %s, and eio-net runs %d: its traces are out of \
-       date"
-      name held what runs
+    Fmt.kstr
+      (fun s -> Eio_chaos.fail ~name s)
+      "the traces hold %d %s, and eio-net runs %d: its traces are out of date"
+      held what runs
 
 let replay_with os fresh =
   let differed = ref [] and passed = ref 0 in
@@ -702,18 +702,19 @@ let grouped differed =
       | None -> None
       | Some k ->
           Hashtbl.remove counts (key d);
-          let what =
-            Fmt.str "%s: expected %s, got %s" d.step d.expected d.got
+          let operations =
+            match d.sequence with
+            | None -> None
+            | Some sq when k = 1 -> Some sq
+            | Some sq ->
+                Fmt.kstr Option.some "%s\n(and %a more)" sq Text.pp_count (k - 1)
           in
           Some
-            (match d.sequence with
-            | None -> what
-            | Some sq when k = 1 -> Fmt.str "%s, in %s" what sq
-            | Some sq ->
-                Fmt.str "%s, in %a sequences, e.g. %s" what Text.pp_count k sq))
+            (Eio_chaos.difference ?operations ~expected:d.expected ~got:d.got
+               d.step))
     differed
 
-(* A report shows the first [shown_lines] lines, then counts the others. *)
+(* A report shows the first [shown_lines] rows, then counts the others. *)
 let shown_lines = 100
 
 let os_of : [< os ] option -> os = function
@@ -729,26 +730,37 @@ let report os s =
   | differed ->
       let n = List.length differed in
       let left = List.fold_left (fun acc (_, k) -> acc + k) 0 s.left_out in
-      let lines = grouped differed in
-      let m = List.length lines in
-      let lines =
-        List.filteri (fun i _ -> i < shown_lines) lines
-        @
+      let rows = grouped differed in
+      let m = List.length rows in
+      let shown =
         if m > shown_lines then
-          [ Fmt.str "... and %d more lines" (m - shown_lines) ]
+          [ Fmt.str "%d of %a rows shown." shown_lines Text.pp_count m ]
         else []
       in
-      Fmt.failwith
-        "%s: %a of %a sequences differ from %s@\n\
-         %a@\n\
-        \  %a passed, %a differed, %a left out%a"
-        name Text.pp_count n Text.pp_count (s.passed + n) (os_name os)
-        Fmt.(list ~sep:(any "@\n") (any "  " ++ string))
-        lines Text.pp_count s.passed Text.pp_count n Text.pp_count left
-        Fmt.(
-          list ~sep:nop (fun ppf (why, k) ->
-              pf ppf "; %a that %s" Text.pp_count k why))
-        s.left_out
+      let reasons =
+        match s.left_out with
+        | [] -> ""
+        | l ->
+            ": "
+            ^ String.concat ", "
+                (List.map
+                   (fun (why, k) -> Fmt.str "%a that %s" Text.pp_count k why)
+                   l)
+      in
+      let footer =
+        String.concat "\n"
+          (shown
+          @ [
+              Fmt.str "%a passed, %a differed, %a left out%s" Text.pp_count
+                s.passed Text.pp_count n Text.pp_count left reasons;
+            ])
+      in
+      Fmt.kstr
+        (Eio_chaos.fail ~name
+           ~differences:(List.filteri (fun i _ -> i < shown_lines) rows)
+           ~footer)
+        "%a of %a sequences differ from %s" Text.pp_count n Text.pp_count
+        (s.passed + n) (os_name os)
 
 let replay ?under os f = replay_with os (simulated ?under os f)
 

@@ -273,15 +273,15 @@ val device :
     passes there.
 
     @raise Failure
-      if an answer is outside its set, with a line for each step and answers
-      that differ: the operation, the answer allowed, or the set of them, and
-      the one given, then how many sequences gave it and the first of them, its
-      operations up to the one that differs, as
-      [connect: expected ok, got Refused, in 21,361 sequences, e.g. tcp4 accept;
-       close S; close S; connect]; then how many passed, differed and were left
-      out, and why. Past the first hundred lines it gives the count alone. A
-      step names its end of the connection: [C] the one that connected, [S] the
-      one that accepted. *)
+      if an answer is outside its set, with a report ({!Eio_chaos.fail}): a
+      table with a row for each step and answers that differ, the step, the
+      first sequence that gave them, its operations up to the one that differs,
+      and how many more did, the answer allowed, or the set of them, and the one
+      given, as [connect],
+      [tcp4 accept; close S; close S; connect (and 21,360 more)], [ok] and
+      [Refused]; then how many passed, differed and were left out, and why. Past
+      the first hundred rows it gives the count alone. A step names its end of
+      the connection: [C] the one that connected, [S] the one that accepted. *)
 
 (** {1:blocks Building blocks} *)
 
