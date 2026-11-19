@@ -98,3 +98,10 @@ exclude = ["E005"]
 [[rules]]
 files = ["test/posix/posix.eio_posix.ml", "test/posix/posix.none.ml"]
 exclude = ["E505"]
+
+# The regen rules are REGEN-gated in a conjunction with the host, as each host
+# records its own columns and two rules with the same targets cannot both be
+# enabled; E815 reads only a bare (= %{env:REGEN=0} 1) guard.
+[[rules]]
+files = ["test/interop/kernel/traces/dune"]
+exclude = ["E815"]
