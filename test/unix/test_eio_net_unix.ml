@@ -838,6 +838,70 @@ let test_local_connect_full_backlog () =
           settle ();
           ignore (Eio.Net.accept ~sw l))
 
+(* The kernel error a connect's Eio error retains: EAGAIN unclassified, and
+   ECONNREFUSED inside its [Refused]. *)
+let connect_errno = function
+  | Eio.Io
+      ( ( Eio.Exn.X (Eio_unix.Unix_error (e, _, _))
+        | Eio.Net.E
+            (Connection_failure (Refused (Eio_unix.Unix_error (e, _, _)))) ),
+        _ ) ->
+      Some e
+  | _ -> None
+
+(* A connect that does not wait: on a full backlog it raises at once the
+   error the kernel answered a native connect with (EAGAIN on Linux,
+   ECONNREFUSED on macOS), and never sleeps for room. *)
+let test_local_connect_without_waiting () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  Eio.Switch.run @@ fun sw ->
+  let p = Filename.concat (Filename.temp_dir "full" "") "s" in
+  let _l =
+    Eio_net_unix.Local.listen ~sw ~net ~backlog:1 ~perm:0o600 Eio.Path.(fs / p)
+  in
+  let rec fill n =
+    let s = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    Unix.set_nonblock s;
+    match Unix.connect s (Unix.ADDR_UNIX p) with
+    | () ->
+        Eio.Switch.on_release sw (fun () -> Unix.close s);
+        fill (n + 1)
+    | exception Unix.Unix_error (((EAGAIN | ECONNREFUSED) as e), _, _) ->
+        Unix.close s;
+        (n, e)
+  in
+  let taken, refusal = fill 0 in
+  Alcotest.(check bool) "the backlog takes some" true (taken > 0);
+  let mono = Eio_mock.Clock.Mono.make () in
+  let answer =
+    Eio.Fiber.first
+      (fun () ->
+        with_mono_clock mono @@ fun () ->
+        match
+          Eio_net_unix.Local.connect ~wait:false ~sw ~net Eio.Path.(fs / p)
+        with
+        | _ -> `Connected
+        | exception (Eio.Io _ as e) -> `Refused (connect_errno e))
+      (fun () ->
+        (* The connect opens the directory in a system thread first; a sleep
+           on [mono] is a wait for room. *)
+        while not (Eio_mock.Clock.Mono.try_advance mono) do
+          Eio_unix.run_in_systhread ignore
+        done;
+        `Waited)
+  in
+  match answer with
+  | `Refused (Some e) ->
+      Alcotest.(check string)
+        "the kernel's refusal"
+        (Unix.error_message refusal)
+        (Unix.error_message e)
+  | `Refused None -> Alcotest.fail "a refusal without its kernel error"
+  | `Connected -> Alcotest.fail "connected past a full backlog"
+  | `Waited -> Alcotest.fail "waited for room"
+
 let suite =
   ( "eio_net_unix",
     [
@@ -863,6 +927,8 @@ let suite =
         (local test_local_connect_is_confined);
       Alcotest.test_case "a local connect to a full backlog" `Quick
         (local test_local_connect_full_backlog);
+      Alcotest.test_case "a local connect that does not wait" `Quick
+        (local test_local_connect_without_waiting);
       Alcotest.test_case "connected datagram batch" `Quick
         test_connected_datagram_batch;
       Alcotest.test_case "connected datagram duplex" `Quick
