@@ -9,8 +9,8 @@ Each test gets a fresh network of its own, used through the ordinary
 again and again, each time with a different network fault, and checks that
 it starts again on the network the fault left
 ([How it works](#how-it-works)). `Eio_net_chaos.device` checks that an Eio
-network answers as Linux, macOS or Windows does. The frame channels, in which one
-receive is one frame, come with an accept loop and a relay.
+network answers as Linux, macOS or Windows does. The frame channels, in
+which one receive is one frame, come with an accept loop and a relay.
 
 ## Installation
 
@@ -137,9 +137,10 @@ picked and what a program may and may not do.
 ## Testing a network
 
 `Eio_net_chaos.device` checks that an Eio network of your own, such as a
-userspace stack or a tunnel, answers as Linux, macOS or Windows does. It takes a
-function that makes a fresh network and runs on it the sequences of socket
-operations that were recorded on a real Linux and a real macOS kernel:
+userspace stack or a tunnel, answers as Linux, macOS or Windows does. It
+takes a function that makes a fresh network and runs on it the sequences of
+socket operations that were recorded on a real Linux, macOS and Windows
+kernel:
 
 ```ocaml
 # Eio_net_chaos.device (fun ~sw env ->
@@ -165,7 +166,7 @@ accepted:
 
 `connect: expected ok, got Refused, in 21,361 sequences, e.g. tcp4 accept; close S; close S; connect`
 
-Pass ``~os:`Macos`` to compare with macOS.
+Pass ``~os:`Macos`` or ``~os:`Windows`` to compare with macOS or Windows.
 
 A network built over another one, such as a tunnel, is checked over a faulty
 one too with `~under:[ Eio_net_chaos.network () ]`: on a healthy network its
@@ -251,9 +252,9 @@ Each library documents itself in its `.mli`, under [`lib/`](lib/).
 
 ## Limitations
 
-- The network follows one kernel at a time, Linux, or macOS with
-  ``~os:`Macos``: code that runs on both needs a check under each
-  ([`Eio_net_mem`](lib/mem/eio_net_mem.mli)).
+- The network follows one kernel at a time, Linux by default, macOS with
+  ``~os:`Macos`` or Windows with ``~os:`Windows``: code that runs on several
+  needs a check under each ([`Eio_net_mem`](lib/mem/eio_net_mem.mli)).
 - Under macOS, a TCP answer over loopback can depend on timing, and the traces
   hold one recording of each, so `device` leaves those sequences out
   ([`Eio_net_chaos.device`](lib/chaos/eio_net_chaos.mli)).
