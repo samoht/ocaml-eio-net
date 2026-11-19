@@ -5,5 +5,4 @@
 (mdx
  (package eio-net)
  (files README.md)
- (preludes prelude.txt)
  (libraries eio-chaos eio-net.chaos eio-net.mem eio eio.core eio.mock fmt))

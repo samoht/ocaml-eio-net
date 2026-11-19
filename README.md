@@ -101,6 +101,7 @@ the network did fail, so the restart decides. A program with no timeout hangs
 on a silent peer, and a server that listens without `~reuse_addr:true` cannot
 restart:
 
+<!-- $MDX os_type<>Win32 -->
 ```ocaml
 # match Eio_net_chaos.run (app ~reuse_addr:false) with
   | () -> print_endline "passed"
