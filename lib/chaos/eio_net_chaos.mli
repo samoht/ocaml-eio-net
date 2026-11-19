@@ -494,6 +494,20 @@ val pair :
     asks: [socket] is [1]. Its streams follow [os] (defaults to [`Linux]), as
     {!Eio_net_mem.pair} takes it. A fuzzer drives it from its input. *)
 
+val datagram_socket :
+  ?os:[< Eio_chaos.os ] ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  (Op.t -> Fault.t option) ->
+  _ Eio.Net.datagram_socket ->
+  [ `Generic ] Eio.Net.datagram_socket_ty Eio.Resource.t
+(** [datagram_socket ~os ~sw ~clock f sock] is [sock] with [f] asked about each
+    receive, as {!wrap} asks about the datagram sockets of a network: [socket]
+    is [1], [side] is [`Client] and [family] is [`Inet]. Sends, shutdowns,
+    options and the close pass through to [sock]; the end of [sw] drops the
+    datagrams the wrapper holds back. A fuzzer whose datagram sockets are its
+    own, such as two crossed queues, drives it from its input. *)
+
 val seeded :
   ?dribble:int ->
   ?stall:int ->
@@ -514,6 +528,24 @@ val seeded :
     [`Eof]), and a write past [fail_write_after] bytes a reset. Reads and writes
     draw from [seed] apart, so the faults of each do not depend on how the two
     interleave. Connects, accepts and receives meet none. *)
+
+val seeded_receives :
+  ?loss:float ->
+  ?dup:float ->
+  ?reorder:float ->
+  ?garble:float ->
+  ?stall:int ->
+  int ->
+  Op.t ->
+  Fault.t option
+(** [seeded_receives ~loss ~dup ~reorder ~garble ~stall seed] is a fault
+    function for a datagram socket, drawn from [seed], as a fuzzer whose input
+    is a seed drives {!datagram_socket}: each receive meets {!Fault.Drop} with
+    probability [loss], {!Fault.Dup} with [dup], {!Fault.Reorder} with
+    [reorder], and with [garble] a {!Fault.Garble} of the datagram's length;
+    each defaults to [0.]. A receive that meets none of them first waits, one
+    time in [stall + 1], a {!Fault.Stall} of no time, which lets the other
+    fibers run. Connects, accepts, reads and writes meet none. *)
 
 val by_side :
   client:(Op.t -> Fault.t option) ->
