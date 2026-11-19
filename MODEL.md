@@ -171,16 +171,19 @@ Modelled:
   `EAFNOSUPPORT`; a Unix-domain end takes one write after its peer closed.
 - Datagrams: a send with no destination raises `ENOTCONN`; one to a port no
   socket holds makes the sender's next receive raise a reset; of sockets that
-  share an address, the first bound receives.
+  share an address, the first bound receives. A UDP socket's receive buffer is
+  128 KiB, and takes a datagram, counted by its length, while it holds less.
 - Resolution: stream addresses, then datagram ones, `::1` first; a host is a
   dotted quad or an IPv6 address, in brackets or not.
 
 Not modelled, and left out of `Eio_net_chaos.conformance`'s Windows replay:
 
 - `SO_EXCLUSIVEADDRUSE`, which neither Eio nor OCaml's `Unix` reaches.
-- The socket options' defaults and values, which follow Linux.
+- The socket options' defaults and values, which follow Linux but for a UDP
+  socket's receive buffer: one set with `SO_RCVBUF` holds twice what Windows
+  holds, as Linux doubles the size.
 - Which addresses a connect or a datagram reaches across address families,
-  the edge addresses, the receive memory, and the names `getnameinfo` gives.
+  the edge addresses, and the names `getnameinfo` gives.
 - Sends off loopback and port exhaustion: the runner has other interfaces,
   and its ephemeral range cannot be narrowed below 255 ports.
 - A connect's timeout, 21 seconds as Windows documents its two SYN

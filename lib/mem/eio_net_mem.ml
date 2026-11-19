@@ -865,7 +865,9 @@ module Datagram_socket = struct
 
   (* Queues the datagram at [peer], unless [peer] refuses it (a Unix-domain
      socket that shut its receive side) or has closed. A UDP datagram that
-     finds the receive buffer full is lost, as Linux drops it. A Unix-domain
+     finds the receive buffer full is lost, as Linux drops it; Windows counts
+     it by its length, and takes it while the queue holds less than the
+     buffer. A Unix-domain
      one waits while the sender's buffer is full, or [peer] holds more than
      [max_dgram_qlen], as on Linux: [`Wait] says to look again. *)
   let deliver t ~local ~dst peer bufs =
@@ -893,8 +895,14 @@ module Datagram_socket = struct
             let v4 =
               match dst with `Udp (d, _) -> is_v4 d | `Unix _ -> false
             in
-            let size = udp_size ~v4 n in
-            if peer.rmem + size > Sockopt.rcvbuf peer.opts then `Lost
+            let rcvbuf = Sockopt.rcvbuf peer.opts in
+            let size, full =
+              if t.hub.os = Windows then (n, peer.rmem >= rcvbuf)
+              else
+                let size = udp_size ~v4 n in
+                (size, peer.rmem + size > rcvbuf)
+            in
+            if full then `Lost
             else begin
               peer.rmem <- peer.rmem + size;
               Queue.push
@@ -920,11 +928,12 @@ module Datagram_socket = struct
 
   (* A datagram a receive takes. A UDP one's memory is freed with that of
      the others read before, once they reach a quarter of the buffer or the
-     receive takes the last of its batch, as Linux frees it. *)
+     receive takes the last of its batch, as Linux frees it; macOS and
+     Windows free it at once. *)
   let taken t d =
     match d.sender with
     | Some _ -> freed t d
-    | None when t.hub.os = Macos -> freed t d
+    | None when t.hub.os <> Linux -> freed t d
     | None ->
         t.unfreed <- t.unfreed + d.size;
         if t.unfreed >= Sockopt.rcvbuf t.opts / 4 || t.batch = 0 then begin

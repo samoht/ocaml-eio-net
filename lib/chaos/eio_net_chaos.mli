@@ -239,14 +239,14 @@ val conformance :
     reset macOS then sends has arrived depends on when the operation runs; and,
     under [`Windows], the scenarios eio-net.mem does not model (socket options'
     values, the addresses a connect or a datagram reaches across families, the
-    edge addresses, the receive memory and the names getnameinfo gives). Under
-    [`Windows] an answer where eio_windows breaks Eio's contract (a refused
-    connect that never returns, a read that waits after a receive shutdown, an
-    unclassified [WSAESHUTDOWN], a datagram receive that raises [EMSGSIZE], a
-    write of no bytes on a closed flow, a raw [Unix.Unix_error], lookups,
-    abstract Unix paths and [reuse_addr] on a Unix path) is allowed the answer
-    the contract gives, and the report names each such defect it allowed. Unix
-    paths are made in the current directory.
+    edge addresses and the names getnameinfo gives). Under [`Windows] an answer
+    where eio_windows breaks Eio's contract (a refused connect that never
+    returns, a read that waits after a receive shutdown, an unclassified
+    [WSAESHUTDOWN], a datagram receive that raises [EMSGSIZE], a write of no
+    bytes on a closed flow, a raw [Unix.Unix_error], lookups, abstract Unix
+    paths and [reuse_addr] on a Unix path) is allowed the answer the contract
+    gives, and the report names each such defect it allowed. Unix paths are made
+    in the current directory.
 
     An operation is "would wait" if it has not completed after 64 turns of the
     event loop, as the recorder took it, and a sequence that has not ended after

@@ -127,6 +127,7 @@ let default_sndbuf t =
 let default_rcvbuf t =
   match (t.os, t.family, t.kind) with
   | (Linux | Windows), (V4 | V6), Stream _ -> 131072
+  | Windows, (V4 | V6), Datagram -> 131072
   | (Linux | Windows), _, _ -> 229376
   | Macos, (V4 | V6), Stream (Unconnected | Listening) -> 131072
   | Macos, V4, Stream (Connected Client) -> 408300

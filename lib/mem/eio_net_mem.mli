@@ -663,7 +663,8 @@ val pair :
       A send with no destination raises [ENOTCONN]. A datagram sent to a port no
       socket holds makes the sender's next receive raise a connection reset, as
       the ICMP port unreachable does. Of sockets sharing an address with
-      [reuse_addr], the first bound receives.
+      [reuse_addr], the first bound receives. A UDP socket's receive buffer is
+      128 KiB, and takes a datagram, counted by its length, while it holds less.
     - Unix paths. A [connect] to a path no socket binds is refused, and one
       bound at an IP address fails with {!Address_family}.
     - Resolution. [getaddrinfo] gives the stream addresses, then the datagram
@@ -672,9 +673,10 @@ val pair :
       only.
 
     Not modelled: [SO_EXCLUSIVEADDRUSE], which neither Eio nor OCaml's Unix
-    reaches; the socket options' defaults and values, which follow Linux; which
-    addresses a [connect] or a datagram reaches across families, the edge
-    addresses and the receive memory, which follow Linux; sends off loopback and
+    reaches; the socket options' defaults and values, which follow Linux but for
+    a UDP socket's receive buffer, so one set with [SO_RCVBUF] holds twice what
+    Windows holds; which addresses a [connect] or a datagram reaches across
+    families and the edge addresses, which follow Linux; sends off loopback and
     port exhaustion, which the recordings leave out; and a connect's timeout, 21
     seconds as Windows documents it, which no trace records.
     [Eio_net_chaos.conformance] leaves those scenarios out under [`Windows] and
