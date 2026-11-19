@@ -35,6 +35,7 @@ depends: [
   "ohex" {with-test}
   "eio_main" {with-test & >= "1.7"}
   "eio_posix" {with-test & >= "1.7" & os != "win32"}
+  "eio_windows" {with-test & >= "1.7" & os = "win32"}
   "mdx" {with-test & >= "2.3.0"}
   "odoc" {with-doc}
 ]
