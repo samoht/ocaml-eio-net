@@ -1,0 +1,11 @@
+(executable
+ (name device)
+ (libraries eio-net.mem eio-net.chaos))
+
+(env
+ (_
+  (env-vars
+   (NO_COLOR 1))))
+
+(cram
+ (deps device.exe))
