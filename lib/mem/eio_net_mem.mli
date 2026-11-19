@@ -664,7 +664,8 @@ val pair :
       socket holds makes the sender's next receive raise a connection reset, as
       the ICMP port unreachable does. Of sockets sharing an address with
       [reuse_addr], the first bound receives.
-    - Unix paths. A [connect] to a path no socket binds is refused.
+    - Unix paths. A [connect] to a path no socket binds is refused, and one
+      bound at an IP address fails with {!Address_family}.
     - Resolution. [getaddrinfo] gives the stream addresses, then the datagram
       ones, [::1] first, as eio_windows asks for each socket type. A host is a
       dotted quad, an IPv6 address, in brackets or not, with a numeric scope

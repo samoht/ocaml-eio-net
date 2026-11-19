@@ -1284,7 +1284,8 @@ module Network = struct
   (* A connect's socket has its destination's family, and fails to bind an
      address of another as Linux's bind(2) does: an IPv4 socket with
      EAFNOSUPPORT, an IPv6 or Unix-domain one with EINVAL. IPv6 against
-     IPv4-mapped fails as on Linux. *)
+     IPv4-mapped fails as on Linux. Windows's Unix-domain socket fails with
+     EAFNOSUPPORT. *)
   let check_bind ~os (bind_to : Eio.Net.Sockaddr.stream option)
       (addr : Eio.Net.Sockaddr.stream) =
     match (bind_to, addr) with
@@ -1305,6 +1306,7 @@ module Network = struct
         | code -> Option.iter fail code)
     | Some (`Tcp _), `Tcp (d, _) when String.length (d :> string) = 16 ->
         fail Invalid_address
+    | Some (`Tcp _), `Unix _ when os = Windows -> fail Address_family
     | Some (`Tcp _), `Unix _ -> fail Invalid_address
     | Some _, `Tcp _ -> fail Address_family
 

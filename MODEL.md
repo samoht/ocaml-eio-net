@@ -167,8 +167,8 @@ Modelled:
   side, or a receive side shut with bytes unread, reset the connection.
 - A read after its end's receive shutdown raises `ESHUTDOWN`.
 - No Unix-domain datagram sockets (`EAFNOSUPPORT`); a Unix-domain connect to a
-  path no socket binds is refused; a Unix-domain end takes one write after its
-  peer closed.
+  path no socket binds is refused, and one bound at an IP address fails with
+  `EAFNOSUPPORT`; a Unix-domain end takes one write after its peer closed.
 - Datagrams: a send with no destination raises `ENOTCONN`; one to a port no
   socket holds makes the sender's next receive raise a reset; of sockets that
   share an address, the first bound receives.
