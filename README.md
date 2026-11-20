@@ -83,7 +83,7 @@ So a program with no timeout hangs on a silent peer, and a server that
 listens without `~reuse_addr:true` cannot restart, because its old port is
 still held:
 
-<!-- $MDX os_type<>Win32 -->
+<!-- $MDX os_type<>Win32,non-deterministic=output -->
 ```ocaml
 # match Eio_net_chaos.run (app ~reuse_addr:false) with
   | () -> print_endline "passed"
