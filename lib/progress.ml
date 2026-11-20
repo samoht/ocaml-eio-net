@@ -98,6 +98,12 @@ let move t f =
 let pp ppf t =
   Fmt.pf ppf "<progress: %d B/s over %a>" t.min_rate Mtime.Span.pp t.window
 
+let pp_too_slow ppf (min_rate, window) =
+  Fmt.pf ppf
+    "Operation too slow. Less than %d bytes/sec transferred the last %g seconds"
+    min_rate
+    (Int64.to_float (Mtime.Span.to_uint64_ns window) /. 1e9)
+
 let reader t r =
   let open Bytesrw in
   Bytes.Reader.make ~slice_length:(Bytes.Reader.slice_length r) @@ fun () ->
