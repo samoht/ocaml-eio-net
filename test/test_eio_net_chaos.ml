@@ -1684,7 +1684,9 @@ let test_listener_failing_then_stall () =
     | exception Failure m -> String.equal m "the cued failure");
   Chaos.Listener.stall ~sw net addr "GET" ~on_end:ignore;
   let flow, _ = Eio.Net.accept ~sw listening in
-  Alcotest.(check string) "the stalled peer's bytes" "GET" (read1 flow)
+  Alcotest.(check string) "the stalled peer's bytes" "GET" (read1 flow);
+  (* The peer drains until its connection ends, so the case ends it. *)
+  Eio.Flow.close flow
 
 let suite =
   ( "eio_net_chaos",
