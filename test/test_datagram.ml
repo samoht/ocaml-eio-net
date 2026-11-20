@@ -49,14 +49,14 @@ let eio_posix f =
    (ocaml-multicore/eio#963). *)
 let test_unix_source_round_trip () =
   eio_posix @@ fun env ->
-  (* Under /tmp, not $TMPDIR, which may be too long for sun_path. *)
-  let dir = Filename.temp_dir ~temp_dir:"/tmp" "eio-net" "" in
-  let path_a = Filename.concat dir "a" and path_b = Filename.concat dir "b" in
+  (* Relative to the test's directory: short enough for sun_path, and writable
+     where /tmp is not, as in opam's build sandbox. *)
+  let path n = Fmt.str "eio-net-%d-%s.sock" (Unix.getpid ()) n in
+  let path_a = path "a" and path_b = path "b" in
   Fun.protect ~finally:(fun () ->
       List.iter
         (fun path -> if Sys.file_exists path then Sys.remove path)
-        [ path_a; path_b ];
-      Sys.rmdir dir)
+        [ path_a; path_b ])
   @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   let bind path = Eio.Net.datagram_socket ~sw env#net (`Unix path) in
