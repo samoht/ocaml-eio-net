@@ -15,6 +15,7 @@
   fmt
   ipaddr
   cstruct
+  loopback
   unix)
  (foreign_stubs
   (language c)

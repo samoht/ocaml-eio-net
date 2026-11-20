@@ -13,4 +13,5 @@
   cstruct
   fmt
   unix
+  loopback
   alcotest))

@@ -8,7 +8,7 @@ let file = "mem"
 let per_stream ~test kinds expect body =
   List.map
     (fun k ->
-      case ~file ~test ~variant:(kind_name (Stream k))
+      case ~file ~test ~variant:(kind_name (Stream k)) ~ip:(needs_ip (Stream k))
         ~ipv6:(needs_ipv6 (Stream k)) (expect k) (fun ctx -> body ctx k))
     kinds
 
@@ -174,22 +174,23 @@ let cases =
       ];
       (* Stream and datagram sockets share one namespace of Unix paths. *)
       [
-        case ~file ~test:"UnixPathShared" ~variant:"listen at a datagram path"
-          (expect "EADDRINUSE") (fun ctx ->
+        case ~file ~test:"UnixPathShared" ~ip:false
+          ~variant:"listen at a datagram path" (expect "EADDRINUSE") (fun ctx ->
             let _, addr = dgram_socket ctx Unix_dgram in
             let path = match addr with `Unix p -> p | `Udp _ -> "" in
             outcome (fun () ->
                 ignore (listen ctx (`Unix path));
                 "listening"));
-        case ~file ~test:"UnixPathShared" ~variant:"datagram at a listener path"
-          (expect "EADDRINUSE") (fun ctx ->
+        case ~file ~test:"UnixPathShared" ~ip:false
+          ~variant:"datagram at a listener path" (expect "EADDRINUSE")
+          (fun ctx ->
             let addr = stream_addr ctx Unix_stream in
             ignore (listen ctx addr);
             let path = match addr with `Unix p -> p | `Tcp _ -> "" in
             outcome (fun () ->
                 ignore (datagram_socket ctx (`Unix path));
                 "bound"));
-        case ~file ~test:"UnixPathShared"
+        case ~file ~test:"UnixPathShared" ~ip:false
           ~variant:"datagram sent to a listener path" (expect "EPROTOTYPE")
           (fun ctx ->
             let addr = stream_addr ctx Unix_stream in
@@ -199,7 +200,7 @@ let cases =
             outcome (fun () ->
                 send s ~dst:(`Unix path) "abc";
                 "sent"));
-        case ~file ~test:"UnixPathShared"
+        case ~file ~test:"UnixPathShared" ~ip:false
           ~variant:"connect bound to a listener path" (expect "EADDRINUSE")
           (fun ctx ->
             let addr = stream_addr ctx Unix_stream in
@@ -215,15 +216,15 @@ let cases =
       (* A listener closed by hand removes its file: a listen there binds,
          and a connect there finds no file. *)
       [
-        case ~file ~test:"ListenerClosedByHand" ~variant:"listen there"
-          (expect "listening") (fun ctx ->
+        case ~file ~test:"ListenerClosedByHand" ~ip:false
+          ~variant:"listen there" (expect "listening") (fun ctx ->
             let addr = stream_addr ctx Unix_stream in
             Eio.Net.close (listen ctx addr);
             outcome (fun () ->
                 ignore (listen ctx addr);
                 "listening"));
-        case ~file ~test:"ListenerClosedByHand" ~variant:"connect there"
-          (expect "ENOENT") (fun ctx ->
+        case ~file ~test:"ListenerClosedByHand" ~ip:false
+          ~variant:"connect there" (expect "ENOENT") (fun ctx ->
             let addr = stream_addr ctx Unix_stream in
             Eio.Net.close (listen ctx addr);
             outcome (fun () ->

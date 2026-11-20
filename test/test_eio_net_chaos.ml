@@ -513,7 +513,7 @@ let identity ~clock ~real ~os ~make =
               Alcotest.(check (list string)) name bare (run true))
             endings)
         [ false; true ])
-    [ `Tcp; `Unix ]
+    (if real && not (Loopback.ipv4 ()) then [ `Unix ] else [ `Tcp; `Unix ])
 
 (* A wrapper that injects no fault does what its network does: on eio-net.mem
    under each kernel, and on the host's real sockets. *)

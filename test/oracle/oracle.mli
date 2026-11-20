@@ -113,6 +113,9 @@ type kind = Stream of stream_kind | Dgram of dgram_kind
 val kind_name : kind -> string
 (** [kind_name k] names [k], as a case's variant. *)
 
+val needs_ip : kind -> bool
+(** [needs_ip k] is [true] for the IP kinds. *)
+
 val needs_ipv6 : kind -> bool
 (** [needs_ipv6 k] is [true] for the IPv6 kinds. *)
 
@@ -147,6 +150,7 @@ type case
 
 val case :
   ?variant:string ->
+  ?ip:bool ->
   ?ipv6:bool ->
   ?capacity:int ->
   file:string ->
@@ -155,8 +159,9 @@ val case :
   (ctx -> string) ->
   case
 (** [case ~file ~test expect body] runs [body] for gVisor's test [test] of
-    [file]. A case with [ipv6] is skipped on real sockets where ::1 cannot be
-    bound. eio-net.mem runs it with [capacity], unbounded by default. *)
+    [file]. A case with [ip] (the default) is skipped on real sockets where
+    127.0.0.1 cannot be bound, and one with [ipv6] where ::1 cannot be bound.
+    eio-net.mem runs it with [capacity], unbounded by default. *)
 
 val suite : string -> case list -> string * unit Alcotest.test_case list
 (** [suite name cases] runs each case once on eio-net.mem and once on real

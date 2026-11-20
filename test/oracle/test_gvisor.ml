@@ -22,8 +22,8 @@ let all_kinds =
 let per_kind ?capacity ~file ~test kinds expect body =
   List.map
     (fun k ->
-      case ?capacity ~file ~test ~variant:(kind_name k) ~ipv6:(needs_ipv6 k)
-        (expect k) (fun ctx -> body ctx k))
+      case ?capacity ~file ~test ~variant:(kind_name k) ~ip:(needs_ip k)
+        ~ipv6:(needs_ipv6 k) (expect k) (fun ctx -> body ctx k))
     kinds
 
 let per_stream ?capacity ~file ~test kinds expect body =

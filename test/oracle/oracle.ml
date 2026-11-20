@@ -254,17 +254,9 @@ let pair ctx = function
       let r, dst = dgram_socket ctx k in
       { send = send s ~dst; recv = recv r; recv_all = recv r }
 
-(* IPv6 loopback is there when a socket binds ::1: a host or a container may
-   run without IPv6. *)
-let ipv6 =
-  lazy
-    (let s = Unix.socket Unix.PF_INET6 Unix.SOCK_STREAM 0 in
-     Fun.protect
-       ~finally:(fun () -> Unix.close s)
-       (fun () ->
-         match Unix.bind s (Unix.ADDR_INET (Unix.inet6_addr_loopback, 0)) with
-         | () -> true
-         | exception Unix.Unix_error _ -> false))
+let needs_ip = function
+  | Stream (Tcp4 | Tcp6) | Dgram (Udp4 | Udp6) -> true
+  | Stream Unix_stream | Dgram Unix_dgram -> false
 
 let needs_ipv6 = function
   | Stream Tcp6 | Dgram Udp6 -> true
@@ -292,13 +284,15 @@ type case = {
   test : string;
   variant : string;
   expect : expect;
+  ip : bool;
   ipv6 : bool;
   capacity : int option;
   body : ctx -> string;
 }
 
-let case ?(variant = "") ?(ipv6 = false) ?capacity ~file ~test expect body =
-  { file; test; variant; expect; ipv6; capacity; body }
+let case ?(variant = "") ?(ip = true) ?(ipv6 = false) ?capacity ~file ~test
+    expect body =
+  { file; test; variant; expect; ip; ipv6; capacity; body }
 
 let real_expected e = match platform with Linux -> e.linux | Macos -> e.macos
 
@@ -325,7 +319,9 @@ let consistent c =
       Alcotest.failf "%s: a mem bug is noted where mem matches" (label c)
 
 let test_cases c =
-  let skip_ipv6 () = c.ipv6 && not (Lazy.force ipv6) in
+  let skip () =
+    (c.ip && not (Loopback.ipv4 ())) || (c.ipv6 && not (Loopback.ipv6 ()))
+  in
   let mem () =
     consistent c;
     Alcotest.(check string)
@@ -333,7 +329,7 @@ let test_cases c =
       (run ?capacity:c.capacity Mem c.body)
   in
   let real () =
-    if skip_ipv6 () then Alcotest.skip ()
+    if skip () then Alcotest.skip ()
     else
       let expected = real_expected c.expect in
       let got = run Real c.body in

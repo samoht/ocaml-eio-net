@@ -23,6 +23,7 @@ let port_of = function
   | `Unix _ -> Alcotest.fail "expected a TCP address"
 
 let test_forward_echo () =
+  if not (Loopback.ipv4 ()) then Alcotest.skip ();
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
@@ -41,6 +42,7 @@ let test_forward_echo () =
   Alcotest.(check string) "echoed through" "through the relay" back
 
 let test_forward_reports_port () =
+  if not (Loopback.ipv4 ()) then Alcotest.skip ();
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
@@ -53,7 +55,7 @@ let test_forward_reports_port () =
 let test_dial_failure_keeps_listening () =
   (* On the Windows job, eio_windows 1.7 never failed the dial to a closed
      port. *)
-  if Sys.win32 then Alcotest.skip ();
+  if Sys.win32 || not (Loopback.ipv4 ()) then Alcotest.skip ();
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in

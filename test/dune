@@ -17,6 +17,7 @@
   unix
   fmt
   mtime
+  loopback
   alcotest))
 
 (rule

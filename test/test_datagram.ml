@@ -2,6 +2,7 @@
    source address the tests assert on. UDP on the loopback, which every
    backend sends to; Unix-domain addresses are tested on eio_posix below. *)
 let with_bound_pair f =
+  if not (Loopback.ipv4 ()) then Alcotest.skip ();
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let bind () =

@@ -244,6 +244,7 @@ let test_offload_write_reads_a_bounded_prefix () =
    reports them. Each receive waits for the socket to be readable, which the
    datagram and the error each make it. *)
 let test_connected_datagram_error_after_a_datagram () =
+  if not (Loopback.ipv4 ()) then Alcotest.skip ();
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let socket () =
