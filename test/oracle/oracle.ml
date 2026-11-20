@@ -296,8 +296,8 @@ let case ?(variant = "") ?(ip = true) ?(ipv6 = false) ?capacity ~file ~test
 
 let real_expected e = match platform with Linux -> e.linux | Macos -> e.macos
 
-(* A real platform's expectation may list outcomes that depend on timing,
-   separated by " | ". *)
+(* A real platform's expectation may list outcomes that depend on timing or
+   on the release, separated by " | ". *)
 let alternatives s = List.map String.trim (String.split_on_char '|' s)
 let among s expected = List.mem s (alternatives expected)
 

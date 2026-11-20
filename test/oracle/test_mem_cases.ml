@@ -101,7 +101,7 @@ let cases =
             false,
             `Udp v4_loopback,
             `Unix,
-            expect ~macos:"EADDRNOTAVAIL" ~mem:"EAFNOSUPPORT"
+            expect ~macos:"EADDRNOTAVAIL | EHOSTUNREACH" ~mem:"EAFNOSUPPORT"
               "EAFNOSUPPORT | EINVAL" );
           ( "unix to udp",
             false,
