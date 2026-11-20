@@ -167,6 +167,25 @@ let test_printer () =
     (Printexc.to_string
        (Progress.Too_slow { min_rate = 100; window = seconds 10; moved = 12 }))
 
+(* curl's words for its low-speed check (lib/speedcheck.c,
+   Curl_speedcheck), the window in seconds, a fraction of one included. *)
+let test_pp_too_slow () =
+  List.iter
+    (fun (min_rate, window, words) ->
+      Alcotest.(check string)
+        words words
+        (Fmt.str "%a" Progress.pp_too_slow (min_rate, window)))
+    [
+      ( 100,
+        seconds 10,
+        "Operation too slow. Less than 100 bytes/sec transferred the last 10 \
+         seconds" );
+      ( 1,
+        Mtime.Span.(200 * ms),
+        "Operation too slow. Less than 1 bytes/sec transferred the last 0.2 \
+         seconds" );
+    ]
+
 let cases name f =
   List.map
     (fun n ->
@@ -183,4 +202,7 @@ let suite =
     @ cases "the time before the first move counts in no window" test_first_move
     @ cases "two fibers sharing a transfer judge each window once" test_shared
     @ cases "a move that outlasts a window runs once" test_move_runs_once
-    @ [ Alcotest.test_case "Too_slow printer" `Quick test_printer ] )
+    @ [
+        Alcotest.test_case "Too_slow printer" `Quick test_printer;
+        Alcotest.test_case "Too_slow in curl's words" `Quick test_pp_too_slow;
+      ] )
