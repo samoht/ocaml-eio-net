@@ -51,3 +51,10 @@ val flow : t -> _ Eio.Flow.two_way -> Eio.Flow.two_way_ty Eio.Resource.t
 
 val pp : t Fmt.t
 (** [pp] prints the minimum rate and the window of a transfer. *)
+
+val pp_too_slow : (int * Mtime.Span.t) Fmt.t
+(** [pp_too_slow] formats the [min_rate] and the [window] of a {!Too_slow} as
+    curl words its low-speed check:
+    ["Operation too slow. Less than MIN_RATE bytes/sec transferred the last
+     SECONDS seconds"], [SECONDS] the window in seconds, a fraction of one
+    included. *)
