@@ -18,7 +18,7 @@ let suite =
       Alcotest.test_case "keep-alive: retries resets only, by the linear tier"
         `Quick
         (Expect.caught (fun () -> test_kv ~bug:`Reset_only ()));
-      Alcotest.test_case "broker: correct" `Quick
+      Alcotest.test_case "broker: correct" `Slow
         (Expect.passes (fun () -> test_pubsub ()));
       Alcotest.test_case "broker: head-of-line blocking, by the linear tier"
         `Quick

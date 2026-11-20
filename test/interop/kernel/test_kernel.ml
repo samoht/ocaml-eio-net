@@ -178,21 +178,24 @@ let suite =
       Alcotest.test_case "the traces hold eio-net's sequences" `Quick test_rows;
       Alcotest.test_case "a broken network fails, with a report" `Quick
         test_broken;
-      Alcotest.test_case "every allowance is needed" `Quick test_allowances;
+      Alcotest.test_case "every allowance is needed" `Slow test_allowances;
       Alcotest.test_case "every eio_windows defect is needed" `Quick
         test_defects;
-      Alcotest.test_case "a network over a faulty network" `Quick
+      Alcotest.test_case "a network over a faulty network" `Slow
         test_over_faulty_network;
-      Alcotest.test_case "macOS leaves out what depends on timing" `Quick
+      Alcotest.test_case "macOS leaves out what depends on timing" `Slow
         test_macos_timing;
     ]
     @ List.map
         (fun os ->
-          Alcotest.test_case ("eio-net.mem " ^ os_name os) `Quick (test_mem os))
+          Alcotest.test_case
+            ("eio-net.mem " ^ os_name os)
+            (if os = `Linux then `Quick else `Slow)
+            (test_mem os))
         oses
     @ List.map
         (fun os ->
           Alcotest.test_case
             ("eio-net.mem wrapped with no fault " ^ os_name os)
-            `Quick (test_quiet_wrap os))
+            `Slow (test_quiet_wrap os))
         oses )

@@ -3,7 +3,16 @@
  (package eio-net)
  (libraries eio_net_kernel eio-net.mem eio-net.chaos eio-chaos fmt alcotest)
  (deps
-  (source_tree traces)))
+  (source_tree traces))
+ (action
+  (run %{test} --quick-tests)))
+
+(rule
+ (alias slow)
+ (deps
+  (source_tree traces))
+ (action
+  (run %{exe:test.exe})))
 
 (rule
  (alias regen-traces)

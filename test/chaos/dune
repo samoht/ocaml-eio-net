@@ -1,6 +1,8 @@
 (test
  (name test)
  (package eio-net)
+ (action
+  (run %{test} --quick-tests))
  (libraries
   eio-chaos
   eio-net.chaos
@@ -12,3 +14,8 @@
   cstruct
   fmt
   alcotest))
+
+(rule
+ (alias slow)
+ (action
+  (run %{exe:test.exe})))

@@ -1227,12 +1227,12 @@ let suite =
            spin);
       Alcotest.test_case "a client that reconnects at once spins" `Quick
         (first_fails ops reconnect);
-      Alcotest.test_case "a listen retried at once is a busy loop" `Quick
+      Alcotest.test_case "a listen retried at once is a busy loop" `Slow
         (first_fails busy relisten);
-      Alcotest.test_case "a send loop that never waits is a busy loop" `Quick
+      Alcotest.test_case "a send loop that never waits is a busy loop" `Slow
         (first_fails busy udp_flood);
       Alcotest.test_case
-        "sockets opened in a loop that never waits are a busy loop" `Quick
+        "sockets opened in a loop that never waits are a busy loop" `Slow
         (first_fails busy sockets);
       Alcotest.test_case "lookups in a loop that never waits are a busy loop"
         `Quick (first_fails busy lookups);
@@ -1240,9 +1240,9 @@ let suite =
         (first_returned batch);
       Alcotest.test_case "a client of a server a fault broke spins" `Quick
         (error_is ops broken_server);
-      Alcotest.test_case "a client that polls with a deadline" `Quick
+      Alcotest.test_case "a client that polls with a deadline" `Slow
         (Expect.passes (poll ~patience:1.0));
-      Alcotest.test_case "a client that polls for ever hangs" `Quick
+      Alcotest.test_case "a client that polls for ever hangs" `Slow
         (error_is
            (busy ^ "; outage multiplied its operations, 3333331 of them")
            (poll ?patience:None));
@@ -1267,7 +1267,7 @@ let suite =
       Alcotest.test_case "20000 jobs between 1 ms sleeps are too large" `Quick
         (first_fails too_large (jobs 20_000));
       Alcotest.test_case "a budget too small says so" `Quick test_tiny_budget;
-      Alcotest.test_case "many fibers on a heartbeat are no busy loop" `Quick
+      Alcotest.test_case "many fibers on a heartbeat are no busy loop" `Slow
         (first_returned heartbeats);
       Alcotest.test_case "a busy loop's trace is bounded" `Quick
         test_busy_memory;
@@ -1283,7 +1283,7 @@ let suite =
         test_replay_case;
       Alcotest.test_case "a malformed scenario is refused" `Quick
         test_malformed_scenario;
-      Alcotest.test_case "a server that yields while it computes" `Quick
+      Alcotest.test_case "a server that yields while it computes" `Slow
         (Expect.passes compute);
       Alcotest.test_case "a server that streams until its client leaves" `Quick
         (Expect.passes stream);
@@ -1298,9 +1298,9 @@ let suite =
         (first_returned scan);
       Alcotest.test_case "a large transfer fits the default budget" `Quick
         (Expect.passes (transfer 25 4096));
-      Alcotest.test_case "80 clients of an echo fit the default budget" `Quick
+      Alcotest.test_case "80 clients of an echo fit the default budget" `Slow
         (Expect.passes (echo ~size:100 80));
-      Alcotest.test_case "400 queries over UDP fit the default budget" `Quick
+      Alcotest.test_case "400 queries over UDP fit the default budget" `Slow
         (Expect.passes queries);
       Alcotest.test_case "20 clients of a 4 KiB echo meet one-byte reads" `Quick
         (Expect.passes (echo 20));
