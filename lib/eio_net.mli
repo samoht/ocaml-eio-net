@@ -1,5 +1,6 @@
-(** Frame channels for Eio, the classifier of a failed connect, an accept loop,
-    a stream relay and a transfer bounded by its progress.
+(** Frame channels for Eio, the classifiers of a failed connect and of a failed
+    socket creation, an accept loop, a stream relay and a transfer bounded by
+    its progress.
 
     A frame channel ({!Frame}) is a packet link where one receive is one frame.
     It runs over a {!Datagram} channel, the addressed channel over a datagram
@@ -8,10 +9,11 @@
     an in-memory pair. [Eio_net_unix.Frame] builds one over a Unix datagram
     descriptor, with batched system calls.
 
-    {!Connect} tells a refused connect from an unreachable peer, and {!Accept}
-    is the loop a listener serves its connections with, holding at most a given
-    number of them. {!Relay} forwards stream connections between two addresses,
-    and {!Progress} ends a transfer that moves too few bytes a second. *)
+    {!Connect} tells a refused connect from an unreachable peer, {!Socket} tells
+    why the system refused a new socket, and {!Accept} is the loop a listener
+    serves its connections with, holding at most a given number of them.
+    {!Relay} forwards stream connections between two addresses, and {!Progress}
+    ends a transfer that moves too few bytes a second. *)
 
 module Frame = Frame
 (** Frame channels. *)
@@ -24,6 +26,9 @@ module Datagram = Datagram
 
 module Connect = Connect
 (** Classifiers of failed connects. *)
+
+module Socket = Socket
+(** Classifiers of failed socket creations. *)
 
 module Accept = Accept
 (** Accept loops bounded by their connections. *)
