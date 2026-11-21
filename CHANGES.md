@@ -5,6 +5,7 @@
 - `Eio_net_chaos.datagram_socket` wraps a datagram socket the caller made, and `seeded_receives` draws its receive faults from a seed (#7)
 - `Local.connect ~wait:false` raises `EAGAIN` at once when the backlog is full, instead of waiting for room (#8)
 - `Progress.pp_too_slow` formats a `Too_slow` in curl's words (#10)
+- `Socket.classify` tells why the system refused a new socket, from the raw `Unix.Unix_error` eio_posix raises or a wrapped one (#11)
 
 ## 0.1.0 (21/11/2026)
 

@@ -22,3 +22,17 @@ let connect exn =
   match code exn with
   | Some (ENETUNREACH | EHOSTUNREACH) -> Some `Unreachable
   | _ -> None
+
+(* eio_posix creates a socket with Unix.socket and lets its error through
+   unwrapped. *)
+let socket exn =
+  let code =
+    match exn with Unix.Unix_error (e, _, _) -> Some e | exn -> code exn
+  in
+  match code with
+  | Some (EMFILE | ENFILE) -> Some `Descriptors
+  | Some (ENOBUFS | ENOMEM) -> Some `Memory
+  | Some (EAFNOSUPPORT | EPROTONOSUPPORT | EPROTOTYPE | EINVAL) ->
+      Some `Unsupported
+  | Some (EACCES | EPERM) -> Some `Denied
+  | _ -> None
