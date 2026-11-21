@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -230,38 +231,72 @@ CAMLprim value caml_eio_net_id_at(value v_dir, value v_name)
     CAMLreturn(v_id);
 }
 
-/* linkat(2) or renameat(2) the entry [v_old] of [v_odir] to [v_new] of
- * [v_ndir]. */
-static value move_at(value v_odir, value v_old, value v_ndir, value v_new,
-                     int link)
+/* linkat(2) the entry [v_old] of [v_odir] to [v_new] of [v_ndir]. */
+CAMLprim value caml_eio_net_link_at(value v_odir, value v_old, value v_ndir,
+                                    value v_new)
 {
     CAMLparam4(v_odir, v_old, v_ndir, v_new);
     int odir = Int_val(v_odir), ndir = Int_val(v_ndir), r, e = 0;
-    const char *fn = link ? "linkat" : "renameat";
-    char *old = name_of(v_old, fn);
-    char *new = name_of(v_new, fn);
+    char *old = name_of(v_old, "linkat");
+    char *new = name_of(v_new, "linkat");
     caml_enter_blocking_section();
-    r = link ? linkat(odir, old, ndir, new, 0) : renameat(odir, old, ndir, new);
+    r = linkat(odir, old, ndir, new, 0);
     if (r < 0)
         e = errno;
     caml_leave_blocking_section();
     caml_stat_free(old);
     if (r < 0)
-        fail(fn, v_new, new, e);
+        fail("linkat", v_new, new, e);
     caml_stat_free(new);
     CAMLreturn(Val_unit);
 }
 
-CAMLprim value caml_eio_net_link_at(value v_odir, value v_old, value v_ndir,
-                                    value v_new)
+/* Open the entry [v_name] of the directory open as [v_dir], made if missing,
+ * and take an exclusive flock(2) on it without waiting. The lock belongs to
+ * the descriptor returned, and closing it releases the lock. A symbolic link
+ * there is not followed (O_NOFOLLOW: ELOOP, EMLINK on FreeBSD) and only a
+ * regular file is a lock; either, and a lock another holds, is EADDRINUSE,
+ * the error of a name in use. OCaml's Unix exposes neither O_NOFOLLOW nor
+ * flock(2). */
+CAMLprim value caml_eio_net_lock_at(value v_dir, value v_name)
 {
-    return move_at(v_odir, v_old, v_ndir, v_new, 1);
-}
-
-CAMLprim value caml_eio_net_rename_at(value v_odir, value v_old, value v_ndir,
-                                      value v_new)
-{
-    return move_at(v_odir, v_old, v_ndir, v_new, 0);
+    CAMLparam2(v_dir, v_name);
+    int dir = Int_val(v_dir), fd, e = 0;
+    const char *fn = "openat";
+    char *name = name_of(v_name, "openat");
+    struct stat st;
+    caml_enter_blocking_section();
+    fd = openat(dir, name, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd < 0)
+    {
+        e = errno;
+        if (e == ELOOP || e == EMLINK)
+            e = EADDRINUSE;
+    }
+    else if (fstat(fd, &st) != 0)
+    {
+        fn = "fstat";
+        e = errno;
+    }
+    else if (!S_ISREG(st.st_mode))
+    {
+        fn = "flock";
+        e = EADDRINUSE;
+    }
+    else if (flock(fd, LOCK_EX | LOCK_NB) != 0)
+    {
+        fn = "flock";
+        e = errno;
+        if (e == EWOULDBLOCK || e == EAGAIN)
+            e = EADDRINUSE;
+    }
+    if (e != 0 && fd >= 0)
+        close(fd);
+    caml_leave_blocking_section();
+    if (e != 0)
+        fail(fn, v_name, name, e);
+    caml_stat_free(name);
+    CAMLreturn(Val_int(fd));
 }
 
 /* Remove the entry [v_name] of the directory open as [v_dir], an empty

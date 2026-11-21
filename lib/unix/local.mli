@@ -3,8 +3,9 @@
     A socket is reached through a capability: {!connect} and {!listen} through
     the directory the {!Eio.Path.t} they are handed is part of, whose descriptor
     resolves the socket's name, so a path of any length works and a confined
-    directory confines it. No function here opens a file by a name of its own,
-    changes the working directory of the process or its umask. *)
+    directory confines it. A file they reach, a socket or {!listen}'s lock, is
+    reached from that directory; no function here changes the working directory
+    of the process or its umask. *)
 
 val max_path_length : int
 (** [max_path_length] is the longest path, in bytes, a Unix-domain socket
@@ -79,17 +80,30 @@ val listen :
     read nor changed. On Linux the bind goes through [/proc], as {!connect}
     does, and other systems refuse it with [ENOSYS], as they refuse {!connect}.
 
+    The listener claims [path] with an exclusive [flock(2)] on the regular file
+    [path.lock] beside it, made with mode [0o600] if missing and left in place,
+    and opened without following a symbolic link. It takes the lock before it
+    examines [path] and holds it until its release has removed [path] and closed
+    the socket, so a second [listen] of [path] fails while the first lives, even
+    once [path] itself is gone.
+
     A file already at [path] is kept and the listen fails with [EADDRINUSE],
     unclassified, as bind(2) fails. When [replace] is [true] (defaults to
-    [false]) a socket there, whether a listener still serves it or not, is
-    replaced; a file of any other kind is still kept. Releasing [sw] closes the
-    socket and removes [path] while it is still that socket's file. Each is
-    checked before the name is replaced or removed, so one who can write the
-    directory can swap another file in between, which is then replaced or
-    removed in its place. renameat(2) and unlinkat(2) act on the name and follow
-    no link, so that is only a name the writer could itself remove or put there:
-    no file outside the directory is reached. A failure is an {!Eio.Io} error,
-    made by {!Eio_unix.Err.v}.
+    [false]) a socket there is removed and replaced if nobody listens on it: an
+    immediate connect is refused. A listener that answers, or whose backlog is
+    full on Linux, keeps the socket, and so does one whose state the connect
+    does not establish; macOS and FreeBSD refuse a connect to a full backlog as
+    they refuse one nobody listens on, so there a listener whose backlog is full
+    and that did not claim [path] through [listen] is taken for gone. A file of
+    any other kind, a symbolic link included, is always kept. Releasing [sw]
+    closes the socket and removes [path] while it is still that socket's file.
+    Each is checked before the name is removed, so one who can write the
+    directory can swap another file in between, which is then removed in its
+    place. unlinkat(2) acts on the name and follows no link, so that is only a
+    name the writer could itself remove: no file outside the directory is
+    reached. A failure is an {!Eio.Io} error, made by {!Eio_unix.Err.v}: a file
+    in the way, a lock another listener holds and a [path.lock] that is not a
+    regular file are [EADDRINUSE].
 
     {!Eio.Net.listening_addr} is [`Unix p], with [p] the native path of [path]
     ({!Eio.Path.native}), which may be longer than {!max_path_length}. The
