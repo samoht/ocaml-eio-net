@@ -5,4 +5,13 @@
 (mdx
  (package eio-net)
  (files README.md)
- (libraries eio-chaos eio-net.chaos eio-net.mem eio eio.core eio.mock fmt))
+ (libraries
+  eio-chaos
+  eio-net
+  eio-net.chaos
+  eio-net.mem
+  eio
+  eio.core
+  eio.mock
+  cstruct
+  fmt))
