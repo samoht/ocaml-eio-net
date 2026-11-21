@@ -359,18 +359,21 @@ let listen_at ~sw path =
   Eio_unix.Net.import_socket_listening ~sw ~close_unix:true fd
 
 (* A server at [path] answering each connection with what it read, prefixed
-   with [name]; [accepted] counts its connections. *)
+   with [name]; [accepted] counts its connections. A peer that leaves before
+   the answer, as a probe does, ends its connection alone. *)
 let with_server ?(name = "echo") ?(accepted = ref 0) ~sw path f =
   let listening = listen_at ~sw path in
   Eio.Fiber.fork_daemon ~sw (fun () ->
       let rec serve () =
         let flow, _ = Eio.Net.accept ~sw listening in
         incr accepted;
-        let got =
-          Eio.Buf_read.parse_exn ~max_size:4096 Eio.Buf_read.take_all flow
-        in
-        Eio.Flow.copy_string (name ^ ":" ^ got) flow;
-        Eio.Flow.close flow;
+        (try
+           let got =
+             Eio.Buf_read.parse_exn ~max_size:4096 Eio.Buf_read.take_all flow
+           in
+           Eio.Flow.copy_string (name ^ ":" ^ got) flow
+         with End_of_file | Eio.Io _ -> ());
+        (try Eio.Flow.close flow with Eio.Io _ -> ());
         serve ()
       in
       serve ());
@@ -530,7 +533,7 @@ let listen ?replace ~sw ~net ~fs ?(perm = 0o600) p =
    returns reads [perm] under a process umask of 0o022, which would leave
    0o640 of 0o660. Two modes, so a hard-coded 0o600 fails one of them. The
    process's umask is the one it had, the socket serves, and the directory
-   holds the socket alone. *)
+   holds the socket and its lock alone, which only its owner may open. *)
 let test_local_listen_perm () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
@@ -549,7 +552,15 @@ let test_local_listen_perm () =
         Alcotest.(check int) (Fmt.str "mode %o" perm) perm s.st_perm;
         Alcotest.(check int) "the umask unchanged" 0o022 (Unix.umask 0o022);
         Alcotest.(check (array string))
-          "the socket alone" [| "s" |] (Sys.readdir dir);
+          "the socket and its lock alone" [| "s"; "s.lock" |]
+          (let a = Sys.readdir dir in
+           Array.sort compare a;
+           a);
+        Alcotest.(check bool)
+          "a regular lock of mode 600" true
+          (match kind_perm (p ^ ".lock") with
+          | Unix.S_REG, 0o600 -> true
+          | _ -> false);
         Eio.Fiber.both
           (fun () ->
             let flow, _ = Eio.Net.accept ~sw listening in
@@ -653,11 +664,11 @@ let address_in_use f =
     ->
       ()
 
-(* A socket already at the path, whether a listener still serves it or not,
-   is replaced only when the caller asks for it: otherwise the listen fails
-   with the EADDRINUSE Eio.Net.listen would raise, the socket untouched, and
-   its listener keeps its clients. A file of any other kind is never
-   replaced. *)
+(* A socket nobody listens on is replaced only when the caller asks for it:
+   otherwise the listen fails with the EADDRINUSE Eio.Net.listen would raise,
+   the socket untouched. A live listener keeps its socket and its clients,
+   and a file of any other kind is never replaced. Each claim leaves its lock
+   file. *)
 let test_local_listen_existing () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
@@ -692,10 +703,138 @@ let test_local_listen_existing () =
     "the file untouched" "kept"
     (In_channel.with_open_bin file In_channel.input_all);
   Alcotest.(check (array string))
-    "nothing else left" [| "file"; "live" |]
+    "nothing else left"
+    [| "file"; "file.lock"; "live"; "live.lock"; "stale.lock" |]
     (let a = Sys.readdir dir in
      Array.sort compare a;
      a)
+
+(* A listener that did not take Local.listen's lock is still live: its
+   answering connection, not the mere presence of a socket file, decides that
+   its name cannot be claimed, even by a caller that asks to replace a socket.
+   The failed claimant leaves it serving. An unconditional replace takes its
+   name. *)
+let test_local_listen_active () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  Eio.Switch.run @@ fun sw ->
+  let p = Filename.concat (Filename.temp_dir "active" "") "s" in
+  with_server ~sw p @@ fun () ->
+  (match Eio.Switch.run (fun sw -> listen ~replace:true ~sw ~net ~fs p) with
+  | _ -> Alcotest.fail "replaced a listener that still answers"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ());
+  Alcotest.(check string)
+    "the first listener still serves" "echo:ping" (exchange ~sw ~net p)
+
+(* A listener of Local.listen whose backlog is full answers no connect at
+   once, and on macOS and FreeBSD that connect is refused as a stale socket's
+   is; its lock still keeps its name from a claim that asks to replace it. The
+   first listener serves once it accepts. *)
+let test_local_listen_full_backlog () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  Eio.Switch.run @@ fun sw ->
+  let p = Filename.concat (Filename.temp_dir "full" "") "s" in
+  let l =
+    Eio_net_unix.Local.listen ~sw ~net ~backlog:1 ~perm:0o600 Eio.Path.(fs / p)
+  in
+  let rec fill n =
+    let s = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    Unix.set_nonblock s;
+    match Unix.connect s (Unix.ADDR_UNIX p) with
+    | () ->
+        Eio.Switch.on_release sw (fun () -> Unix.close s);
+        fill (n + 1)
+    | exception Unix.Unix_error ((EAGAIN | ECONNREFUSED), _, _) ->
+        Unix.close s;
+        n
+  in
+  let queued = fill 0 in
+  Alcotest.(check bool) "the backlog takes some" true (queued > 0);
+  let id = file_id p in
+  (match Eio.Switch.run (fun sw -> listen ~replace:true ~sw ~net ~fs p) with
+  | _ -> Alcotest.fail "replaced a listener whose backlog is full"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ());
+  Alcotest.(check bool) "the first socket kept" true (file_id p = id);
+  for _ = 1 to queued do
+    Eio.Flow.close (fst (Eio.Net.accept ~sw l))
+  done;
+  Eio.Fiber.both
+    (fun () ->
+      let flow, _ = Eio.Net.accept ~sw l in
+      Eio.Flow.copy_string "first" flow;
+      Eio.Flow.close flow)
+    (fun () ->
+      Alcotest.(check string)
+        "the first listener serves" "first"
+        (Eio.Buf_read.parse_exn ~max_size:64 Eio.Buf_read.take_all
+           (Eio_net_unix.Local.connect ~sw ~net Eio.Path.(fs / p))))
+
+(* The lock belongs to the listener, not to its name: once somebody removes
+   the name, a second Local.listen still cannot claim it while the first
+   listener's switch is alive. *)
+let test_local_listen_lock_outlives_name () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  let p = Filename.concat (Filename.temp_dir "locked" "") "s" in
+  Eio.Switch.run @@ fun sw ->
+  ignore (listen ~sw ~net ~fs p);
+  Unix.unlink p;
+  match Eio.Switch.run (fun sw -> listen ~sw ~net ~fs p) with
+  | _ -> Alcotest.fail "bound a second listener beside the first one's lock"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ()
+
+(* A symbolic link is not a stale socket, even to a caller that asks to
+   replace one. Refusing it leaves both the link and its target
+   byte-identical; an unconditional unlink would at least remove the link. *)
+let test_local_listen_symlink () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  let dir = Filename.temp_dir "symlink" "" in
+  let target = Filename.concat dir "sentinel" in
+  let p = Filename.concat dir "socket" in
+  Out_channel.with_open_bin target (fun oc -> output_string oc "keep me");
+  Unix.symlink target p;
+  (match Eio.Switch.run (fun sw -> listen ~replace:true ~sw ~net ~fs p) with
+  | _ -> Alcotest.fail "bound over a symbolic link"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ());
+  Alcotest.(check bool)
+    "the link remains" true
+    ((Unix.lstat p).st_kind = Unix.S_LNK);
+  Alcotest.(check string)
+    "the sentinel remains byte-identical" "keep me"
+    (In_channel.with_open_bin target In_channel.input_all)
+
+(* A symbolic link where the lock goes is refused, not followed: a lock
+   opened through it would create its target, a file in another directory.
+   The listen fails as for a name in use and binds nothing. *)
+let test_local_listen_lock_symlink () =
+  Eio_main.run @@ fun env ->
+  let net = Eio.Stdenv.net env in
+  let fs = Eio.Stdenv.fs env in
+  let dir = Filename.temp_dir "locklink" "" in
+  let target = Filename.concat (Filename.temp_dir "elsewhere" "") "planted" in
+  let p = Filename.concat dir "s" in
+  Unix.symlink target (p ^ ".lock");
+  (match Eio.Switch.run (fun sw -> listen ~sw ~net ~fs p) with
+  | _ -> Alcotest.fail "took a lock through a symbolic link"
+  | exception Eio.Io (Eio.Exn.X (Eio_unix.Unix_error (Unix.EADDRINUSE, _, _)), _)
+    ->
+      ());
+  Alcotest.(check bool) "the target not made" false (Sys.file_exists target);
+  Alcotest.(check bool) "nothing bound" false (Sys.file_exists p)
 
 (* A path no socket address holds is bound through its directory, and
    served; releasing the switch removes it. Releasing the switch after
@@ -915,6 +1054,16 @@ let suite =
         (local test_local_receive_long);
       Alcotest.test_case "a local listener over an existing file" `Quick
         (local test_local_listen_existing);
+      Alcotest.test_case "a live local listener is not displaced" `Quick
+        (local test_local_listen_active);
+      Alcotest.test_case "a full local listener is not displaced" `Quick
+        (local test_local_listen_full_backlog);
+      Alcotest.test_case "a local listener's claim outlives its name" `Quick
+        (local test_local_listen_lock_outlives_name);
+      Alcotest.test_case "a local listener refuses a symbolic link" `Quick
+        (local test_local_listen_symlink);
+      Alcotest.test_case "a local listener's lock is no symbolic link" `Quick
+        (local test_local_listen_lock_symlink);
       Alcotest.test_case "a local listener at a long path, and released" `Quick
         (local test_local_listen_long);
       Alcotest.test_case "the longest path an address holds" `Quick
