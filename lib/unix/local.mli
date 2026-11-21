@@ -49,9 +49,9 @@ val connect :
 
     While the listener's backlog is full, a connect on Linux waits for room,
     trying again after a pause of at most 0.1 seconds, and a cancellation, such
-    as one from {!Eio.Time.with_timeout}, ends the wait. macOS refuses it at
-    once with [Eio.Net.Connection_failure (Refused _)], as connect(2) refuses it
-    there.
+    as one from {!Eio.Time.with_timeout}, ends the wait. macOS and FreeBSD
+    refuse it at once with [Eio.Net.Connection_failure (Refused _)], as
+    connect(2) refuses it there.
 
     @raise Invalid_argument
       if [path] names no file ([""], ["/"], or a base name of ["."] or [".."])

@@ -3,10 +3,11 @@
 
 (** {1 Platforms and backends} *)
 
-type platform = Linux | Macos
+type platform = Linux | Macos | Other of string
 
 val platform : platform
-(** The platform the suite runs on. *)
+(** The platform the suite runs on, as [uname -s] names it. Only Linux and macOS
+    have recorded answers: elsewhere the real cases skip. *)
 
 type backend = Mem | Real
 

@@ -3,11 +3,18 @@
    test/syscalls/linux (Apache License 2.0). Each case names the gVisor test
    and file it comes from. *)
 
-type platform = Linux | Macos
+type platform = Linux | Macos | Other of string
 
-(* macOS has no procfs. *)
-let platform = if Sys.file_exists "/proc/self" then Linux else Macos
-let platform_name = function Linux -> "Linux" | Macos -> "macOS"
+let platform =
+  let ic = Unix.open_process_in "uname -s" in
+  let name = String.trim (In_channel.input_all ic) in
+  ignore (Unix.close_process_in ic);
+  match name with "Linux" -> Linux | "Darwin" -> Macos | n -> Other n
+
+let platform_name = function
+  | Linux -> "Linux"
+  | Macos -> "macOS"
+  | Other n -> n
 
 type backend = Mem | Real
 
@@ -294,7 +301,12 @@ let case ?(variant = "") ?(ip = true) ?(ipv6 = false) ?capacity ~file ~test
     expect body =
   { file; test; variant; expect; ip; ipv6; capacity; body }
 
-let real_expected e = match platform with Linux -> e.linux | Macos -> e.macos
+(* Only Linux and macOS have recorded answers. *)
+let real_expected e =
+  match platform with
+  | Linux -> Some e.linux
+  | Macos -> Some e.macos
+  | Other _ -> None
 
 (* A real platform's expectation may list outcomes that depend on timing or
    on the release, separated by " | ". *)
@@ -329,12 +341,13 @@ let test_cases c =
       (run ?capacity:c.capacity Mem c.body)
   in
   let real () =
-    if skip () then Alcotest.skip ()
-    else
-      let expected = real_expected c.expect in
-      let got = run Real c.body in
-      if among got expected then ()
-      else Alcotest.(check string) (platform_name platform) expected got
+    match real_expected c.expect with
+    | None -> Alcotest.skip ()
+    | Some _ when skip () -> Alcotest.skip ()
+    | Some expected ->
+        let got = run Real c.body in
+        if among got expected then ()
+        else Alcotest.(check string) (platform_name platform) expected got
   in
   [
     Alcotest.test_case (label c ^ " [mem]") `Quick mem;

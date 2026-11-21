@@ -38,7 +38,9 @@ let test_connected_datagram_backpressure () =
   (* Each payload is distinct, so a frame sent twice or overwritten by a later
      one shows. *)
   let payload i =
-    Fmt.str "%03d" i ^ String.make 60000 (Char.chr (65 + (i mod 26)))
+    (* FreeBSD sends no Unix datagram over 8192 bytes (net.local.dgram.maxdgram),
+       whatever SO_SNDBUF says. *)
+    Fmt.str "%03d" i ^ String.make 8000 (Char.chr (65 + (i mod 26)))
   in
   let payloads = List.init count payload in
   let frames = List.map (fun p -> [ Cstruct.of_string p ]) payloads in
@@ -759,7 +761,7 @@ let with_mono_clock mono f =
 
 (* A listener whose backlog is full: on Linux a connect waits for room, and
    a timeout ends the wait, and an accept that makes room lets it through;
-   on macOS a connect is refused at once. *)
+   on macOS and FreeBSD a connect is refused at once. *)
 let test_local_connect_full_backlog () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
@@ -783,7 +785,7 @@ let test_local_connect_full_backlog () =
   Alcotest.(check bool) "the backlog takes some" true (fill 0 > 0);
   let connect () = Eio_net_unix.Local.connect ~sw ~net Eio.Path.(fs / p) in
   match Lazy.force system with
-  | "Darwin" -> (
+  | "Darwin" | "FreeBSD" -> (
       match connect () with
       | _ -> Alcotest.fail "connected past a full backlog"
       | exception
