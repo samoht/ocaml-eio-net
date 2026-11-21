@@ -10,11 +10,8 @@ external private_dir : fd -> string -> fd = "caml_eio_net_private_dir"
 external chmod_at : fd -> string -> int -> unit = "caml_eio_net_chmod_at"
 external id_at : fd -> string -> bool * int64 * int64 = "caml_eio_net_id_at"
 external link_at : fd -> string -> fd -> string -> unit = "caml_eio_net_link_at"
-
-external rename_at : fd -> string -> fd -> string -> unit
-  = "caml_eio_net_rename_at"
-
 external unlink_at : fd -> string -> bool -> unit = "caml_eio_net_unlink_at"
+external lock_at : fd -> string -> fd = "caml_eio_net_lock_at"
 
 let eio f =
   try f ()
@@ -99,12 +96,33 @@ let rec private_dir_in dir ~attempts =
   | exception Unix.Unix_error (EEXIST, _, _) when attempts > 1 ->
       private_dir_in dir ~attempts:(attempts - 1)
 
+(* Whether nobody listens on the socket [name] of [dir]: an immediate connect
+   is refused, or finds the name gone. A connection, one in progress, a full
+   backlog on Linux (EAGAIN) and every other answer leave its listener alive,
+   or its state unknown. *)
+let stale dir name =
+  let sock = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
+  Fun.protect ~finally:(fun () -> Unix.close sock) @@ fun () ->
+  Unix.set_nonblock sock;
+  match connect_at_dir dir sock name with
+  | () -> false
+  | exception Unix.Unix_error ((ECONNREFUSED | ENOENT), _, _) -> true
+  | exception Unix.Unix_error _ -> false
+
+(* Remove the entry [name] of [dir] while it is still the file [id]. *)
+let unlink_if dir name id =
+  match id_at dir name with
+  | _, dev, ino when (dev, ino) = id -> unlink_at dir name false
+  | _ -> ()
+  | exception Unix.Unix_error (ENOENT, _, _) -> ()
+
 (* bind(2) makes the socket's file with the modes the process's umask leaves,
    and changing the umask would change them for every thread. The socket is
    bound in a directory of its own, which no other user can enter, its mode
    set there, and it listens before it is linked to [name]: a peer reaches it
-   only with its final mode. linkat(2) refuses a name that is taken;
-   renameat(2), when [replace], takes the place of a socket. *)
+   only with its final mode. linkat(2) refuses a name that is taken. When
+   [replace], a socket nobody listens on is removed first, while it is still
+   the file found there. *)
 let bind_and_place dir ~replace ~backlog ~perm name =
   let tmp, private_fd = private_dir_in dir ~attempts:16 in
   Fun.protect ~finally:(fun () ->
@@ -119,11 +137,15 @@ let bind_and_place dir ~replace ~backlog ~perm name =
     let _, dev, ino = id_at private_fd "s" in
     Unix.listen sock backlog;
     let in_use () = raise (Unix.Unix_error (EADDRINUSE, "bind", name)) in
+    let link () =
+      try link_at private_fd "s" dir name
+      with Unix.Unix_error (EEXIST, _, _) -> in_use ()
+    in
     (match id_at dir name with
-    | exception Unix.Unix_error (ENOENT, _, _) -> (
-        try link_at private_fd "s" dir name
-        with Unix.Unix_error (EEXIST, _, _) -> in_use ())
-    | true, _, _ when replace -> rename_at private_fd "s" dir name
+    | exception Unix.Unix_error (ENOENT, _, _) -> link ()
+    | true, dev', ino' when replace && stale dir name ->
+        unlink_if dir name (dev', ino');
+        link ()
     | _ -> in_use ());
     Unix.set_nonblock sock;
     (dev, ino)
@@ -160,18 +182,25 @@ let listening_handler = Eio_unix.Pi.listening_socket_handler (module Listening)
 let listen ?(replace = false) ~sw ~net:_ ~backlog ~perm path =
   let addr = `Unix (Option.value (Eio.Path.native path) ~default:(snd path)) in
   let dir, name = parent ~fn:"Eio_net_unix.Local.listen" ~sw path in
-  let sock, id =
+  (* The lock on [name.lock] is the listener's claim on [name]: taken before
+     the name is examined, it excludes every other claim until it is closed. *)
+  let lock, sock, id =
     Eio_unix.Fd.use_exn "Eio_net_unix.Local.listen" dir @@ fun dir ->
     eio @@ fun () ->
     Eio_unix.run_in_systhread ~label:"local-listen" (fun () ->
-        bind_and_place dir ~replace ~backlog ~perm name)
+        let lock = lock_at dir (name ^ ".lock") in
+        match bind_and_place dir ~replace ~backlog ~perm name with
+        | sock, id -> (lock, sock, id)
+        | exception e ->
+            Unix.close lock;
+            raise e)
   in
+  let _ : Eio_unix.Fd.t = Eio_unix.Fd.of_unix ~sw ~close_unix:true lock in
   let socket = Eio_unix.Net.import_socket_listening ~sw ~close_unix:true sock in
-  (* Release runs its hooks last registered first, so [dir], opened on [sw]
-     before this hook, is still open. *)
+  (* Release runs its hooks last registered first: this one removes the name,
+     then the socket and the lock are closed, and [dir], opened on [sw] before
+     them all, is still open here. *)
   Eio.Switch.on_release sw (fun () ->
       Eio_unix.Fd.use_exn "Eio_net_unix.Local.listen" dir @@ fun dir ->
-      ignore_unix_error (fun () ->
-          let _, dev, ino = id_at dir name in
-          if (dev, ino) = id then unlink_at dir name false));
+      ignore_unix_error (fun () -> unlink_if dir name id));
   Eio.Resource.T (Listening.{ socket; addr }, listening_handler)
