@@ -14,6 +14,7 @@ type t =
   | Dup
   | Reorder
   | Garble of int
+  | Cancel of int
 
 let pp ppf = function
   | Short n ->
@@ -31,6 +32,8 @@ let pp ppf = function
   | Dup -> Fmt.string ppf "is duplicated"
   | Reorder -> Fmt.string ppf "is reordered"
   | Garble n -> Fmt.pf ppf "is replaced with %d bytes of noise" n
+  | Cancel n when n <= 0 -> Fmt.string ppf "is cancelled before it starts"
+  | Cancel n -> Fmt.pf ppf "is cancelled after %d turn%s" n (Text.plural n)
 
 let key = function
   | Short n -> Fmt.str "short%d" n
@@ -46,3 +49,4 @@ let key = function
   | Dup -> "dup"
   | Reorder -> "reorder"
   | Garble n -> Fmt.str "garble%d" n
+  | Cancel n -> Fmt.str "cancel%d" (max 0 n)

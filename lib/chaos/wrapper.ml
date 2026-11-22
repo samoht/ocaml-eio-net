@@ -22,6 +22,80 @@ let rec takev len = function
       else if n <= len then b :: takev (len - n) bs
       else [ Cstruct.sub b 0 len ]
 
+(* [Fault.Cancel]: the base runs under a cancel of its own, on the
+   wrapper's own buffer, which the cancel's contract is checked against. *)
+exception Cancelled_by_fault
+
+let canary = 0xa5
+
+(* [cancelled k f] is [f ()], cancelled [k] turns after it starts, or
+   before it starts if [k <= 0]: [`Done x] if it returned, [`Cancelled] if the
+   cancel stopped it. *)
+let cancelled k f =
+  let finished = ref false and cc = ref None in
+  Eio.Switch.run @@ fun sw ->
+  if k > 0 then
+    Eio.Fiber.fork ~sw (fun () ->
+        for _ = 1 to k do
+          Eio.Fiber.yield ()
+        done;
+        match !cc with
+        | Some c when not !finished -> Eio.Cancel.cancel c Cancelled_by_fault
+        | _ -> ());
+  Eio.Cancel.sub @@ fun c ->
+  cc := Some c;
+  if k <= 0 then Eio.Cancel.cancel c Cancelled_by_fault;
+  match f () with
+  | x ->
+      finished := true;
+      `Done x
+  | exception Eio.Cancel.Cancelled Cancelled_by_fault ->
+      finished := true;
+      `Cancelled
+  | exception e ->
+      finished := true;
+      raise e
+
+(* The first byte of [buf] from [from] that is not the canary. *)
+let written buf ~from =
+  let rec go i =
+    if i >= Cstruct.length buf then None
+    else if not (Int.equal (Cstruct.get_uint8 buf i) canary) then Some i
+    else go (i + 1)
+  in
+  go from
+
+let breach fmt = Fmt.failwith ("Eio_net_chaos: " ^^ fmt)
+
+(* A cancelled operation gets a millisecond of [clock] to show a late
+   completion, as a backend that let the cancel return before its operation
+   ended may still complete it. *)
+let settle clock = Eio.Time.sleep clock 0.001
+
+(* [cancelled_read ~clock k read dst] is [read dst] under [Fault.Cancel k]. *)
+let cancelled_read ~clock k read dst =
+  let len = Cstruct.length dst in
+  let mine = Cstruct.create_unsafe len in
+  Cstruct.memset mine canary;
+  match cancelled k (fun () -> read mine) with
+  | `Done got ->
+      (match written mine ~from:got with
+      | Some i ->
+          breach "a read that returned %d bytes wrote byte %d of its buffer" got
+            i
+      | None -> ());
+      Cstruct.blit mine 0 dst 0 got;
+      got
+  | `Cancelled -> (
+      settle clock;
+      match written mine ~from:0 with
+      | Some i ->
+          breach
+            "a read cancelled %a wrote byte %d of its buffer after its cancel \
+             returned"
+            Fault.pp (Fault.Cancel k) i
+      | None -> read dst)
+
 type stream = [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 
 (* A connection, shared by its two ends. A reset breaks both, as on TCP. An
@@ -616,6 +690,10 @@ module Flow = struct
       else
         match fault with
         | Some (Fault.Short n) -> deliver t dst ~cap:(max 1 n)
+        | Some (Cancel k) ->
+            cancelled_read ~clock:t.ctx.clock k
+              (fun dst -> deliver t dst ~cap:0)
+              dst
         | Some (Stall d) ->
             Eio.Time.sleep t.ctx.clock d;
             deliver t dst ~cap:0
@@ -674,7 +752,8 @@ module Flow = struct
               | Some (Reset | Eof) -> 0
               | Some
                   ( Hang | Stall _ | Refuse | Timeout | Unreachable
-                  | No_descriptor | Drop | Dup | Reorder | Garble _ )
+                  | No_descriptor | Drop | Dup | Reorder | Garble _ | Cancel _
+                    )
               | None ->
                   total
             in
@@ -682,20 +761,36 @@ module Flow = struct
             t.cut_short <- n < total;
             (fault, n)
       in
-      let write () =
-        let rec go bufs =
-          if Cstruct.lenv bufs > 0 then
-            go (Cstruct.shiftv bufs (base_write t bufs))
-        in
-        (* An empty write reaches the base, which may raise. On a silent
-           connection the error is the base's own: the end gave up on its
-           peer. *)
-        match
-          if total = 0 then ignore (base_write t bufs : int)
-          else go (takev n bufs)
-        with
+      let rec go bufs =
+        if Cstruct.lenv bufs > 0 then
+          go (Cstruct.shiftv bufs (base_write t bufs))
+      in
+      (* An empty write reaches the base, which may raise. On a silent
+         connection the error is the base's own: the end gave up on its
+         peer. *)
+      let reset_if_broken f =
+        match f () with
         | () -> n
         | exception Eio.Io _ when broken t && not (silent t) -> write_reset t
+      in
+      let write () =
+        reset_if_broken (fun () ->
+            if total = 0 then ignore (base_write t bufs : int)
+            else go (takev n bufs))
+      in
+      (* The first base write goes from the wrapper's copy, which is noise
+         once the cancel stopped it: a peer that reads noise or a byte twice
+         got bytes the cancel claimed it had not sent. *)
+      let cancelled_write k =
+        reset_if_broken (fun () ->
+            let bufs = takev n bufs in
+            let mine = Cstruct.of_string (Cstruct.copyv bufs) in
+            match cancelled k (fun () -> base_write t [ mine ]) with
+            | `Done m -> go (Cstruct.shiftv bufs m)
+            | `Cancelled ->
+                Cstruct.memset mine canary;
+                settle t.ctx.clock;
+                go bufs)
       in
       if n < 0 then total
       else
@@ -715,9 +810,10 @@ module Flow = struct
         | Some (Stall d) ->
             Eio.Time.sleep t.ctx.clock d;
             write ()
+        | Some (Cancel k) when total > 0 -> cancelled_write k
         | Some
             ( Short _ | Refuse | Timeout | Unreachable | No_descriptor | Drop
-            | Dup | Reorder | Garble _ )
+            | Dup | Reorder | Garble _ | Cancel _ )
         | None ->
             write ()
 
@@ -922,7 +1018,7 @@ module Datagram = struct
                     `Wait None
                 | Some
                     ( Short _ | Reset | Eof | Refuse | Timeout | Unreachable
-                    | No_descriptor )
+                    | No_descriptor | Cancel _ )
                 | None ->
                     `Pass)
           in
@@ -1085,7 +1181,7 @@ module Listener = struct
           (Flow.resource flow, peer)
       | Some
           ( Short _ | Refuse | Timeout | Unreachable | Drop | Dup | Reorder
-          | Garble _ )
+          | Garble _ | Cancel _ )
       | None ->
           (Flow.resource flow, peer)
 
@@ -1172,7 +1268,9 @@ module Network = struct
       | Some (Stall d) ->
           Eio.Time.sleep ctx.clock d;
           go ()
-      | Some (Short _ | Eof | No_descriptor | Drop | Dup | Reorder | Garble _)
+      | Some
+          ( Short _ | Eof | No_descriptor | Drop | Dup | Reorder | Garble _
+          | Cancel _ )
       | None ->
           go ()
 
