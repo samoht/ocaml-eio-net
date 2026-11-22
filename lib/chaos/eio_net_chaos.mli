@@ -433,6 +433,24 @@ module Fault : sig
     | Garble of int
         (** [n] bytes of noise arrive in place of the datagram, from the same
             sender. *)
+    | Cancel of int
+        (** A read or a write of a connection is cancelled [n] turns of the
+            event loop after it starts, or before it starts if [n <= 0]. If the
+            cancel stopped it, it runs again, so the program sees it complete as
+            with no fault. The wrapper checks the cancel against [net] and
+            raises [Failure] on a breach.
+
+            A read that returned [k] bytes wrote none of its buffer past them. A
+            read the cancel stopped wrote none of it, then or in the millisecond
+            of [clock] that follows. A write the cancel stopped is made again
+            from the caller's buffers, after the copy it was given is
+            overwritten with noise. A peer that reads noise or a byte twice was
+            sent bytes by a write that raised [Eio.Cancel.Cancelled].
+
+            [n = 1] cancels at the first wait of the operation, when its
+            completion may already be on its way, and a larger [n] while it
+            waits. On other operations it does nothing. {!run} does not try it.
+        *)
 
   val pp : t Fmt.t
   (** [pp] formats a fault for logs and reports. *)

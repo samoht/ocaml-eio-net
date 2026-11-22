@@ -14,4 +14,5 @@ let all =
       Dup;
       Reorder;
       Garble 3;
+      Cancel 1;
     ]

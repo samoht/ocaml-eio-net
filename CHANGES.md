@@ -7,6 +7,7 @@
 - `Progress.pp_too_slow` formats a `Too_slow` in curl's words (#10)
 - `Socket.classify` tells why the system refused a new socket, from the raw `Unix.Unix_error` eio_posix raises or a wrapped one (#11)
 - `Local.listen` claims its path with a lock file beside it, and with `~replace` replaces only a socket nobody listens on: a live listener no longer loses its name (#12)
+- `Eio_net_chaos.Fault.Cancel n` cancels a read or a write `n` turns in and checks the network's cancel: no byte reaches a buffer after the cancel returns, and a write it stopped sends nothing (#16)
 
 ## 0.1.0 (21/11/2026)
 

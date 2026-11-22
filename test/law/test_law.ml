@@ -38,6 +38,7 @@ let constructor : Fault.t -> int = function
   | Dup -> 10
   | Reorder -> 11
   | Garble _ -> 12
+  | Cancel _ -> 13
 
 let outcome f =
   match f () with
@@ -473,7 +474,7 @@ let test_complete () =
         Alcotest.failf "%a is no operation of Eio" pp_call call)
     rows;
   let ctors = List.sort_uniq compare (List.map constructor Faults.all) in
-  Alcotest.(check int) "every fault" 13 (List.length ctors);
+  Alcotest.(check int) "every fault" 14 (List.length ctors);
   let rows =
     List.filter
       (fun (Law.Op o) ->

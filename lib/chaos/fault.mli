@@ -14,6 +14,7 @@ type t =
   | Dup
   | Reorder
   | Garble of int
+  | Cancel of int
 
 val pp : t Fmt.t
 (** [pp] formats a fault as what it does to an operation. *)
