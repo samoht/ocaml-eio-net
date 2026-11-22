@@ -74,7 +74,7 @@ val listen :
     own, made in that one and that no other user can enter, and it listens
     before it is linked to [path]'s base name; the process's umask is neither
     read nor changed. On Linux the bind goes through [/proc], as {!connect}
-    does.
+    does, and other systems refuse it with [ENOSYS], as they refuse {!connect}.
 
     A file already at [path] is kept and the listen fails with [EADDRINUSE],
     unclassified, as bind(2) fails. When [replace] is [true] (defaults to

@@ -735,6 +735,13 @@ let system =
      ignore (Unix.close_process_in ic);
      s)
 
+(* Local reaches a socket from its directory on Linux, macOS and FreeBSD; other
+   systems refuse with ENOSYS. *)
+let local f () =
+  match Lazy.force system with
+  | "Linux" | "Darwin" | "FreeBSD" -> f ()
+  | _ -> Alcotest.skip ()
+
 (* Lets the event loop run, and take the results of the system threads, 64
    times or until [until ()]. *)
 let settle ?(until = fun () -> false) () =
@@ -835,27 +842,27 @@ let suite =
   ( "eio_net_unix",
     [
       Alcotest.test_case "a local listener's mode, from its creation" `Quick
-        test_local_listen_perm;
+        (local test_local_listen_perm);
       Alcotest.test_case "a local listener reports its path" `Quick
-        test_local_listening_addr;
+        (local test_local_listening_addr);
       Alcotest.test_case "a message and its descriptors" `Quick
-        test_local_receive;
+        (local test_local_receive);
       Alcotest.test_case "descriptors through a long socket path" `Quick
-        test_local_receive_long;
+        (local test_local_receive_long);
       Alcotest.test_case "a local listener over an existing file" `Quick
-        test_local_listen_existing;
+        (local test_local_listen_existing);
       Alcotest.test_case "a local listener at a long path, and released" `Quick
-        test_local_listen_long;
+        (local test_local_listen_long);
       Alcotest.test_case "the longest path an address holds" `Quick
-        test_local_max_path_length;
+        (local test_local_max_path_length);
       Alcotest.test_case "a local socket by a path of any length" `Quick
-        test_local_connect;
+        (local test_local_connect);
       Alcotest.test_case "a local socket that is missing or refusing" `Quick
-        test_local_errors;
+        (local test_local_errors);
       Alcotest.test_case "a local connect confined to its directory" `Quick
-        test_local_connect_is_confined;
+        (local test_local_connect_is_confined);
       Alcotest.test_case "a local connect to a full backlog" `Quick
-        test_local_connect_full_backlog;
+        (local test_local_connect_full_backlog);
       Alcotest.test_case "connected datagram batch" `Quick
         test_connected_datagram_batch;
       Alcotest.test_case "connected datagram duplex" `Quick
