@@ -1,3 +1,9 @@
+## Unreleased
+
+### Fixed
+
+- The `cancel` test skips the host network where binding a socket is denied, as in opam's build sandbox on macOS (#19)
+
 ## 0.2.0 (23/11/2026)
 
 ### Breaking
