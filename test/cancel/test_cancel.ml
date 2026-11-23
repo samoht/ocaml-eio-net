@@ -135,6 +135,7 @@ let run_seed env ~name ~seed =
       Some (seed, Printexc.to_string e)
 
 let check name () =
+  if name = "host" && not (Loopback.ipv4 ()) then Alcotest.skip ();
   Eio_main.run @@ fun env ->
   let failed =
     List.filter_map (fun seed -> run_seed env ~name ~seed) (seeds ())
