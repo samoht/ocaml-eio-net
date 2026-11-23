@@ -1,0 +1,6 @@
+; One program per eio_windows issue checked against ocaml-multicore/eio#996:
+; each prints what it saw and exits 1 where Linux and macOS answer otherwise.
+
+(executables
+ (names r986 r987 r988 r989 r990 r991 r992 r993 r994)
+ (libraries eio eio_main eio.unix optint cstruct unix))
