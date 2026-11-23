@@ -2,10 +2,26 @@
 # REGEN=1; test/provenance checks it.
 generator: test/interop/kernel/scripts/generate.sh
 regenerate: REGEN=1 dune build @test/interop/kernel/regen-traces
-revision: 7fcdd274c3132321729e1af6e400534fb50105a4
-recorded: 2026-11-18T23:49:26Z
-uid: 501
-host: Darwin 27.3.0 arm64
+revision: 1a23ef7c68be10ad49012fec65b677632a5252b4
+recorded: 2026-11-23T16:43:01Z
+uid: 197108
+host: CYGWIN_NT-10.0-26100 3.6.12-1.x86_64 x86_64
+eio_windows: dev
+windows: Microsoft Windows Server 2025 Datacenter 10.0.26100
+windows.image: win25-vs2026 20261116.315.1
+windows.tcpip.TcpTimedWaitDelay: absent
+windows.tcpip.MaxUserPort: absent
+windows.tcpip.TcpMaxDataRetransmissions: absent
+windows.tcpip.TcpMaxConnectRetransmissions: absent
+windows.tcpip.KeepAliveTime: absent
+windows.tcpip.KeepAliveInterval: absent
+windows.dynamicport.tcp: 49152 16384
+windows.dynamicport.udp: 49152 16384
+posix.revision: 7fcdd274c3132321729e1af6e400534fb50105a4
+posix.recorded: 2026-11-18T23:49:26Z
+posix.input: scripts/generate.sh 33e1c4a5a8ab73604449fb72f090f4c4
+posix.input: scripts/record.ml 1fdd9fe2456088fbe380566b08bc9918
+posix.input: scripts/backend.posix.ml 6738ef28f5f9b522d77fb2e65944f0b4
 macos: 27.3 (26C5035r)
 macos.kern.ipc.somaxconn: 128
 macos.net.inet.tcp.keepinit: 75000
@@ -41,29 +57,13 @@ linux.net.core.somaxconn: 4096
 linux.net.core.rmem_default: 229376
 linux.net.core.wmem_default: 229376
 linux.net.unix.max_dgram_qlen: 10
-windows.revision: 7fcdd274c3132321729e1af6e400534fb50105a4
-windows.recorded: 2026-11-18T22:56:23Z
-windows.input: scripts/generate-windows.sh 33284c8567cb2f7ce110a8c4faaca8e1
-windows.input: scripts/record.ml 1fdd9fe2456088fbe380566b08bc9918
-windows.input: scripts/backend.windows.ml 18326013ab88affa9e2f8f1be82e7e65
-eio_windows: 1.7
-windows: Microsoft Windows Server 2025 Datacenter 10.0.26100
-windows.image: win25-vs2026 20261103.298.1
-windows.tcpip.TcpTimedWaitDelay: absent
-windows.tcpip.MaxUserPort: absent
-windows.tcpip.TcpMaxDataRetransmissions: absent
-windows.tcpip.TcpMaxConnectRetransmissions: absent
-windows.tcpip.KeepAliveTime: absent
-windows.tcpip.KeepAliveInterval: absent
-windows.dynamicport.tcp: 49152 16384
-windows.dynamicport.udp: 49152 16384
-input: scripts/generate.sh 33e1c4a5a8ab73604449fb72f090f4c4
+input: scripts/generate-windows.sh 33284c8567cb2f7ce110a8c4faaca8e1
 input: scripts/record.ml 1fdd9fe2456088fbe380566b08bc9918
-input: scripts/backend.posix.ml 6738ef28f5f9b522d77fb2e65944f0b4
-trace: traces/tcp4.csv e3b0783e648efa3581994a1d2a773c7f
-trace: traces/tcp6.csv a9675fb234b36700ef994853856d1c50
-trace: traces/unix-stream.csv 1be2264863994e9bc7a060ac529b5c0f
-trace: traces/udp4.csv 7fb7fc932132fb29153c9b0a47d277fd
-trace: traces/udp6.csv bbbf9567cf2fc8d3464396760be41d42
+input: scripts/backend.windows.ml 18326013ab88affa9e2f8f1be82e7e65
+trace: traces/tcp4.csv 3bc0b2292390d836eca9b2733459c721
+trace: traces/tcp6.csv ac96ab52c31501a024c187f04d63dba0
+trace: traces/unix-stream.csv 55f6be20cf1dc2f642d7ad2fe2ac8e8f
+trace: traces/udp4.csv eeddac7fec333fd1807b4753c2d02963
+trace: traces/udp6.csv 33b12a1c771ee4fb858ef99b44834712
 trace: traces/unix-dgram.csv 8f3694fbeb349fdea29f3d03214b5d92
-trace: traces/scenarios.csv c60ea2e02f5cd079ce33aaf9edaea897
+trace: traces/scenarios.csv 1283e2bfe3ed333f1b99359b84a96b69

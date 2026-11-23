@@ -1,5 +1,5 @@
 ops,linux,macos,windows eio_windows
-three,123 EOF blk EOF x Reset Reset Reset EOF Refused 1 r1,123 EOF blk EOF x Reset Reset Reset EOF Refused 1 r1,timeout
+three,123 EOF blk EOF x Reset Reset Reset EOF Refused 1 r1,123 EOF blk EOF x Reset Reset Reset EOF Refused 1 r1,123 EOF blk EOF x Reset Reset Reset Reset Refused 1 r1
 backlog 0,ok blk blk accepted=1 then ok,ok ok ok accepted=3 then ok,ok blk blk accepted=1 then ok
 backlog 1,ok ok blk blk accepted=2 then ok,ok blk blk blk accepted=1 then ok,ok blk blk blk accepted=1 then ok
 backlog 2,ok ok ok blk blk accepted=3 then ok,ok ok blk blk blk accepted=2 then ok,ok ok blk blk blk accepted=2 then ok
@@ -124,59 +124,59 @@ connect 127.0.0.1 from ::ffff:127.0.0.1 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,E
 connect 127.0.0.1 from ::ffff:0.0.0.0 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from 127.0.0.2 to 127.0.0.1,ok tcp:127.0.0.2,EADDRNOTAVAIL,ok tcp:127.0.0.2
 connect 127.0.0.1 from 10.255.255.1 to 127.0.0.1,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect 0.0.0.0 from - to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
-connect 0.0.0.0 from 127.0.0.1 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
-connect 0.0.0.0 from 0.0.0.0 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect 0.0.0.0 from - to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
+connect 0.0.0.0 from 127.0.0.1 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
+connect 0.0.0.0 from 0.0.0.0 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect 0.0.0.0 from ::1 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from :: to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:127.0.0.1 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:0.0.0.0 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 0.0.0.0 from 127.0.0.2 to 127.0.0.1,Refused,EADDRNOTAVAIL,timeout
+connect 0.0.0.0 from 127.0.0.2 to 127.0.0.1,Refused,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 0.0.0.0 from 10.255.255.1 to 127.0.0.1,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect ::1 from - to 127.0.0.1,Refused,Refused,timeout
+connect ::1 from - to 127.0.0.1,Refused,Refused,Refused
 connect ::1 from 127.0.0.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::1 from 0.0.0.0 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::1 from ::1 to 127.0.0.1,Refused,Refused,timeout
-connect ::1 from :: to 127.0.0.1,Refused,Refused,timeout
+connect ::1 from ::1 to 127.0.0.1,Refused,Refused,Refused
+connect ::1 from :: to 127.0.0.1,Refused,Refused,Refused
 connect ::1 from ::ffff:127.0.0.1 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from ::ffff:0.0.0.0 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from 127.0.0.2 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::1 from 10.255.255.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from - to 127.0.0.1,Refused,Refused,timeout
+connect :: from - to 127.0.0.1,Refused,Refused,EADDRNOTAVAIL
 connect :: from 127.0.0.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 0.0.0.0 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from ::1 to 127.0.0.1,Refused,Refused,timeout
-connect :: from :: to 127.0.0.1,Refused,Refused,timeout
+connect :: from ::1 to 127.0.0.1,Refused,Refused,EADDRNOTAVAIL
+connect :: from :: to 127.0.0.1,Refused,Refused,EADDRNOTAVAIL
 connect :: from ::ffff:127.0.0.1 to 127.0.0.1,ok tcp:127.0.0.1,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from ::ffff:0.0.0.0 to 127.0.0.1,ok tcp:127.0.0.1,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from 127.0.0.2 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 10.255.255.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from - to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:127.0.0.1 from - to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 0.0.0.0 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from ::1 to 127.0.0.1,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:127.0.0.1 from :: to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:127.0.0.1 from ::1 to 127.0.0.1,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:127.0.0.1 from :: to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:127.0.0.1 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:0.0.0.0 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.2 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 10.255.255.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from - to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:0.0.0.0 from - to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:0.0.0.0 from 0.0.0.0 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from ::1 to 127.0.0.1,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:0.0.0.0 from :: to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:0.0.0.0 from ::1 to 127.0.0.1,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:0.0.0.0 from :: to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:127.0.0.1 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:0.0.0.0 to 127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.2 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:0.0.0.0 from 10.255.255.1 to 127.0.0.1,EINVAL,EAFNOSUPPORT,Bad address
-connect 127.0.0.2 from - to 127.0.0.1,Refused,timeout,timeout
-connect 127.0.0.2 from 127.0.0.1 to 127.0.0.1,Refused,timeout,timeout
-connect 127.0.0.2 from 0.0.0.0 to 127.0.0.1,Refused,timeout,timeout
+connect 127.0.0.2 from - to 127.0.0.1,Refused,timeout,Refused
+connect 127.0.0.2 from 127.0.0.1 to 127.0.0.1,Refused,timeout,Refused
+connect 127.0.0.2 from 0.0.0.0 to 127.0.0.1,Refused,timeout,Refused
 connect 127.0.0.2 from ::1 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from :: to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from ::ffff:127.0.0.1 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from ::ffff:0.0.0.0 to 127.0.0.1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 127.0.0.2 from 127.0.0.2 to 127.0.0.1,Refused,EADDRNOTAVAIL,timeout
+connect 127.0.0.2 from 127.0.0.2 to 127.0.0.1,Refused,EADDRNOTAVAIL,Refused
 connect 127.0.0.2 from 10.255.255.1 to 127.0.0.1,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 127.0.0.1 from - to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1
 connect 127.0.0.1 from 127.0.0.1 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,ok tcp:127.0.0.1
@@ -187,47 +187,47 @@ connect 127.0.0.1 from ::ffff:127.0.0.1 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAF
 connect 127.0.0.1 from ::ffff:0.0.0.0 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from 127.0.0.2 to 0.0.0.0,ok tcp:127.0.0.2,EADDRNOTAVAIL,ok tcp:127.0.0.2
 connect 127.0.0.1 from 10.255.255.1 to 0.0.0.0,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect 0.0.0.0 from - to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
-connect 0.0.0.0 from 127.0.0.1 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
-connect 0.0.0.0 from 0.0.0.0 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect 0.0.0.0 from - to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
+connect 0.0.0.0 from 127.0.0.1 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
+connect 0.0.0.0 from 0.0.0.0 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect 0.0.0.0 from ::1 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from :: to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:127.0.0.1 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:0.0.0.0 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 0.0.0.0 from 127.0.0.2 to 0.0.0.0,ok tcp:127.0.0.2,EADDRNOTAVAIL,timeout
+connect 0.0.0.0 from 127.0.0.2 to 0.0.0.0,ok tcp:127.0.0.2,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 0.0.0.0 from 10.255.255.1 to 0.0.0.0,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect ::1 from - to 0.0.0.0,Refused,Refused,timeout
+connect ::1 from - to 0.0.0.0,Refused,Refused,Refused
 connect ::1 from 127.0.0.1 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
 connect ::1 from 0.0.0.0 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
-connect ::1 from ::1 to 0.0.0.0,Refused,Refused,timeout
-connect ::1 from :: to 0.0.0.0,Refused,Refused,timeout
+connect ::1 from ::1 to 0.0.0.0,Refused,Refused,Refused
+connect ::1 from :: to 0.0.0.0,Refused,Refused,Refused
 connect ::1 from ::ffff:127.0.0.1 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from ::ffff:0.0.0.0 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from 127.0.0.2 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
 connect ::1 from 10.255.255.1 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from - to 0.0.0.0,Refused,Refused,timeout
+connect :: from - to 0.0.0.0,Refused,Refused,EADDRNOTAVAIL
 connect :: from 127.0.0.1 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 0.0.0.0 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from ::1 to 0.0.0.0,Refused,Refused,timeout
-connect :: from :: to 0.0.0.0,Refused,Refused,timeout
+connect :: from ::1 to 0.0.0.0,Refused,Refused,EADDRNOTAVAIL
+connect :: from :: to 0.0.0.0,Refused,Refused,EADDRNOTAVAIL
 connect :: from ::ffff:127.0.0.1 to 0.0.0.0,ok tcp:127.0.0.1,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from ::ffff:0.0.0.0 to 0.0.0.0,ok tcp:127.0.0.1,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from 127.0.0.2 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 10.255.255.1 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from - to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:127.0.0.1 from - to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.1 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 0.0.0.0 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from ::1 to 0.0.0.0,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:127.0.0.1 from :: to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:127.0.0.1 from ::1 to 0.0.0.0,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:127.0.0.1 from :: to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:127.0.0.1 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:0.0.0.0 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.2 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 10.255.255.1 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from - to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:0.0.0.0 from - to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.1 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:0.0.0.0 from 0.0.0.0 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from ::1 to 0.0.0.0,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:0.0.0.0 from :: to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,timeout
+connect ::ffff:0.0.0.0 from ::1 to 0.0.0.0,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:0.0.0.0 from :: to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:127.0.0.1 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:0.0.0.0 to 0.0.0.0,ok tcp:127.0.0.1,ok tcp:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.2 to 0.0.0.0,EINVAL,EAFNOSUPPORT,Bad address
@@ -241,23 +241,23 @@ connect 127.0.0.2 from ::ffff:127.0.0.1 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAF
 connect 127.0.0.2 from ::ffff:0.0.0.0 to 0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from 127.0.0.2 to 0.0.0.0,ok tcp:127.0.0.2,EADDRNOTAVAIL,ok tcp:127.0.0.2
 connect 127.0.0.2 from 10.255.255.1 to 0.0.0.0,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect 127.0.0.1 from - to ::1,Refused,Refused,timeout
-connect 127.0.0.1 from 127.0.0.1 to ::1,Refused,Refused,timeout
-connect 127.0.0.1 from 0.0.0.0 to ::1,Refused,Refused,timeout
+connect 127.0.0.1 from - to ::1,Refused,Refused,Refused
+connect 127.0.0.1 from 127.0.0.1 to ::1,Refused,Refused,Refused
+connect 127.0.0.1 from 0.0.0.0 to ::1,Refused,Refused,Refused
 connect 127.0.0.1 from ::1 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from :: to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from ::ffff:127.0.0.1 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from ::ffff:0.0.0.0 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 127.0.0.1 from 127.0.0.2 to ::1,Refused,EADDRNOTAVAIL,timeout
+connect 127.0.0.1 from 127.0.0.2 to ::1,Refused,EADDRNOTAVAIL,Refused
 connect 127.0.0.1 from 10.255.255.1 to ::1,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect 0.0.0.0 from - to ::1,Refused,Refused,timeout
-connect 0.0.0.0 from 127.0.0.1 to ::1,Refused,Refused,timeout
-connect 0.0.0.0 from 0.0.0.0 to ::1,Refused,Refused,timeout
+connect 0.0.0.0 from - to ::1,Refused,Refused,EADDRNOTAVAIL
+connect 0.0.0.0 from 127.0.0.1 to ::1,Refused,Refused,EADDRNOTAVAIL
+connect 0.0.0.0 from 0.0.0.0 to ::1,Refused,Refused,EADDRNOTAVAIL
 connect 0.0.0.0 from ::1 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from :: to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:127.0.0.1 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:0.0.0.0 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 0.0.0.0 from 127.0.0.2 to ::1,Refused,EADDRNOTAVAIL,timeout
+connect 0.0.0.0 from 127.0.0.2 to ::1,Refused,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 0.0.0.0 from 10.255.255.1 to ::1,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::1 from - to ::1,ok tcp:::1,ok tcp:::1,ok tcp:::1
 connect ::1 from 127.0.0.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
@@ -268,59 +268,59 @@ connect ::1 from ::ffff:127.0.0.1 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from ::ffff:0.0.0.0 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from 127.0.0.2 to ::1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::1 from 10.255.255.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from - to ::1,ok tcp:::1,ok tcp:::1,timeout
+connect :: from - to ::1,ok tcp:::1,ok tcp:::1,EADDRNOTAVAIL
 connect :: from 127.0.0.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 0.0.0.0 to ::1,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from ::1 to ::1,ok tcp:::1,ok tcp:::1,timeout
-connect :: from :: to ::1,ok tcp:::1,ok tcp:::1,timeout
+connect :: from ::1 to ::1,ok tcp:::1,ok tcp:::1,EADDRNOTAVAIL
+connect :: from :: to ::1,ok tcp:::1,ok tcp:::1,EADDRNOTAVAIL
 connect :: from ::ffff:127.0.0.1 to ::1,Refused,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from ::ffff:0.0.0.0 to ::1,Refused,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from 127.0.0.2 to ::1,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 10.255.255.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from - to ::1,Refused,Refused,timeout
+connect ::ffff:127.0.0.1 from - to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 0.0.0.0 to ::1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from ::1 to ::1,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:127.0.0.1 from :: to ::1,Refused,Refused,timeout
+connect ::ffff:127.0.0.1 from ::1 to ::1,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:127.0.0.1 from :: to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:127.0.0.1 to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:0.0.0.0 to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.2 to ::1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 10.255.255.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from - to ::1,Refused,Refused,timeout
+connect ::ffff:0.0.0.0 from - to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:0.0.0.0 from 0.0.0.0 to ::1,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from ::1 to ::1,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:0.0.0.0 from :: to ::1,Refused,Refused,timeout
+connect ::ffff:0.0.0.0 from ::1 to ::1,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:0.0.0.0 from :: to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:127.0.0.1 to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:0.0.0.0 to ::1,Refused,Refused,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.2 to ::1,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:0.0.0.0 from 10.255.255.1 to ::1,EINVAL,EAFNOSUPPORT,Bad address
-connect 127.0.0.2 from - to ::1,Refused,timeout,timeout
-connect 127.0.0.2 from 127.0.0.1 to ::1,Refused,timeout,timeout
-connect 127.0.0.2 from 0.0.0.0 to ::1,Refused,timeout,timeout
+connect 127.0.0.2 from - to ::1,Refused,timeout,Refused
+connect 127.0.0.2 from 127.0.0.1 to ::1,Refused,timeout,Refused
+connect 127.0.0.2 from 0.0.0.0 to ::1,Refused,timeout,Refused
 connect 127.0.0.2 from ::1 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from :: to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from ::ffff:127.0.0.1 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from ::ffff:0.0.0.0 to ::1,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 127.0.0.2 from 127.0.0.2 to ::1,Refused,EADDRNOTAVAIL,timeout
+connect 127.0.0.2 from 127.0.0.2 to ::1,Refused,EADDRNOTAVAIL,Refused
 connect 127.0.0.2 from 10.255.255.1 to ::1,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect 127.0.0.1 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
-connect 127.0.0.1 from 127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
-connect 127.0.0.1 from 0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
+connect 127.0.0.1 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,Refused
+connect 127.0.0.1 from 127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,Refused
+connect 127.0.0.1 from 0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,Refused
 connect 127.0.0.1 from ::1 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from :: to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from ::ffff:127.0.0.1 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.1 from ::ffff:0.0.0.0 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 127.0.0.1 from 127.0.0.2 to ::,ok tcp:::ffff:127.0.0.2,EADDRNOTAVAIL,timeout
+connect 127.0.0.1 from 127.0.0.2 to ::,ok tcp:::ffff:127.0.0.2,EADDRNOTAVAIL,Refused
 connect 127.0.0.1 from 10.255.255.1 to ::,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
-connect 0.0.0.0 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
-connect 0.0.0.0 from 127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
-connect 0.0.0.0 from 0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
+connect 0.0.0.0 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
+connect 0.0.0.0 from 127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
+connect 0.0.0.0 from 0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect 0.0.0.0 from ::1 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from :: to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:127.0.0.1 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:0.0.0.0 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 0.0.0.0 from 127.0.0.2 to ::,ok tcp:::ffff:127.0.0.2,EADDRNOTAVAIL,timeout
+connect 0.0.0.0 from 127.0.0.2 to ::,ok tcp:::ffff:127.0.0.2,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 0.0.0.0 from 10.255.255.1 to ::,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::1 from - to ::,ok tcp:::1,ok tcp:::1,ok tcp:::1
 connect ::1 from 127.0.0.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
@@ -331,41 +331,41 @@ connect ::1 from ::ffff:127.0.0.1 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from ::ffff:0.0.0.0 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EADDRNOTAVAIL
 connect ::1 from 127.0.0.2 to ::,EINVAL,EAFNOSUPPORT,Bad address
 connect ::1 from 10.255.255.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from - to ::,ok tcp:::1,ok tcp:::1,timeout
+connect :: from - to ::,ok tcp:::1,ok tcp:::1,EADDRNOTAVAIL
 connect :: from 127.0.0.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 0.0.0.0 to ::,EINVAL,EAFNOSUPPORT,Bad address
-connect :: from ::1 to ::,ok tcp:::1,ok tcp:::1,timeout
-connect :: from :: to ::,ok tcp:::1,ok tcp:::1,timeout
+connect :: from ::1 to ::,ok tcp:::1,ok tcp:::1,EADDRNOTAVAIL
+connect :: from :: to ::,ok tcp:::1,ok tcp:::1,EADDRNOTAVAIL
 connect :: from ::ffff:127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from ::ffff:0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,EAFNOSUPPORT,EADDRNOTAVAIL
 connect :: from 127.0.0.2 to ::,EINVAL,EAFNOSUPPORT,Bad address
 connect :: from 10.255.255.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
+connect ::ffff:127.0.0.1 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 0.0.0.0 to ::,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:127.0.0.1 from ::1 to ::,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:127.0.0.1 from :: to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
+connect ::ffff:127.0.0.1 from ::1 to ::,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:127.0.0.1 from :: to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.2 to ::,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:127.0.0.1 from 10.255.255.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
+connect ::ffff:0.0.0.0 from - to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:0.0.0.0 from 0.0.0.0 to ::,EINVAL,EAFNOSUPPORT,Bad address
-connect ::ffff:0.0.0.0 from ::1 to ::,ENETUNREACH,EAFNOSUPPORT,timeout
-connect ::ffff:0.0.0.0 from :: to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,timeout
+connect ::ffff:0.0.0.0 from ::1 to ::,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+connect ::ffff:0.0.0.0 from :: to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.2 to ::,EINVAL,EAFNOSUPPORT,Bad address
 connect ::ffff:0.0.0.0 from 10.255.255.1 to ::,EINVAL,EAFNOSUPPORT,Bad address
-connect 127.0.0.2 from - to ::,ok tcp:::ffff:127.0.0.1,timeout,timeout
-connect 127.0.0.2 from 127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,timeout,timeout
-connect 127.0.0.2 from 0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,timeout,timeout
+connect 127.0.0.2 from - to ::,ok tcp:::ffff:127.0.0.1,timeout,Refused
+connect 127.0.0.2 from 127.0.0.1 to ::,ok tcp:::ffff:127.0.0.1,timeout,Refused
+connect 127.0.0.2 from 0.0.0.0 to ::,ok tcp:::ffff:127.0.0.1,timeout,Refused
 connect 127.0.0.2 from ::1 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from :: to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from ::ffff:127.0.0.1 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
 connect 127.0.0.2 from ::ffff:0.0.0.0 to ::,EAFNOSUPPORT,EAFNOSUPPORT,EAFNOSUPPORT
-connect 127.0.0.2 from 127.0.0.2 to ::,ok tcp:::ffff:127.0.0.2,EADDRNOTAVAIL,timeout
+connect 127.0.0.2 from 127.0.0.2 to ::,ok tcp:::ffff:127.0.0.2,EADDRNOTAVAIL,Refused
 connect 127.0.0.2 from 10.255.255.1 to ::,EADDRNOTAVAIL,EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 127.0.0.1 from - to ::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,listen EADDRNOTAVAIL
 connect 127.0.0.1 from 127.0.0.1 to ::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,ok tcp:::ffff:127.0.0.1,listen EADDRNOTAVAIL
@@ -493,56 +493,56 @@ connect 127.0.0.2 from ::ffff:127.0.0.1 to ::ffff:0.0.0.0,EAFNOSUPPORT,EAFNOSUPP
 connect 127.0.0.2 from ::ffff:0.0.0.0 to ::ffff:0.0.0.0,EAFNOSUPPORT,EAFNOSUPPORT,listen EADDRNOTAVAIL
 connect 127.0.0.2 from 127.0.0.2 to ::ffff:0.0.0.0,ok tcp:::ffff:127.0.0.2,EADDRNOTAVAIL,listen EADDRNOTAVAIL
 connect 127.0.0.2 from 10.255.255.1 to ::ffff:0.0.0.0,EADDRNOTAVAIL,EADDRNOTAVAIL,listen EADDRNOTAVAIL
-connect 127.0.0.1 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
-connect 127.0.0.1 from 127.0.0.1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
-connect 127.0.0.1 from 0.0.0.0 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect 127.0.0.1 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,Refused
+connect 127.0.0.1 from 127.0.0.1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,Refused
+connect 127.0.0.1 from 0.0.0.0 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,Refused
 connect 127.0.0.1 from ::1 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
 connect 127.0.0.1 from :: to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
 connect 127.0.0.1 from ::ffff:127.0.0.1 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
 connect 127.0.0.1 from ::ffff:0.0.0.0 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
-connect 127.0.0.1 from 127.0.0.2 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect 127.0.0.1 from 127.0.0.2 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,Refused
 connect 127.0.0.1 from 10.255.255.1 to 127.0.0.2,EADDRNOTAVAIL,listen EADDRNOTAVAIL,EADDRNOTAVAIL
-connect 0.0.0.0 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
-connect 0.0.0.0 from 127.0.0.1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
-connect 0.0.0.0 from 0.0.0.0 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect 0.0.0.0 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
+connect 0.0.0.0 from 127.0.0.1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
+connect 0.0.0.0 from 0.0.0.0 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 0.0.0.0 from ::1 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
 connect 0.0.0.0 from :: to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:127.0.0.1 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
 connect 0.0.0.0 from ::ffff:0.0.0.0 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EAFNOSUPPORT
-connect 0.0.0.0 from 127.0.0.2 to 127.0.0.2,ok tcp:127.0.0.2,listen EADDRNOTAVAIL,timeout
+connect 0.0.0.0 from 127.0.0.2 to 127.0.0.2,ok tcp:127.0.0.2,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect 0.0.0.0 from 10.255.255.1 to 127.0.0.2,EADDRNOTAVAIL,listen EADDRNOTAVAIL,EADDRNOTAVAIL
-connect ::1 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect ::1 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,Refused
 connect ::1 from 127.0.0.1 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
 connect ::1 from 0.0.0.0 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
-connect ::1 from ::1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
-connect ::1 from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect ::1 from ::1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,Refused
+connect ::1 from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,Refused
 connect ::1 from ::ffff:127.0.0.1 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::1 from ::ffff:0.0.0.0 to 127.0.0.2,EAFNOSUPPORT,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::1 from 127.0.0.2 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
 connect ::1 from 10.255.255.1 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
-connect :: from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect :: from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect :: from 127.0.0.1 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
 connect :: from 0.0.0.0 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
-connect :: from ::1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
-connect :: from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect :: from ::1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
+connect :: from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect :: from ::ffff:127.0.0.1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect :: from ::ffff:0.0.0.0 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect :: from 127.0.0.2 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
 connect :: from 10.255.255.1 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
-connect ::ffff:127.0.0.1 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect ::ffff:127.0.0.1 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.1 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
 connect ::ffff:127.0.0.1 from 0.0.0.0 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
-connect ::ffff:127.0.0.1 from ::1 to 127.0.0.2,ENETUNREACH,listen EADDRNOTAVAIL,timeout
-connect ::ffff:127.0.0.1 from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect ::ffff:127.0.0.1 from ::1 to 127.0.0.2,ENETUNREACH,listen EADDRNOTAVAIL,EADDRNOTAVAIL
+connect ::ffff:127.0.0.1 from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:127.0.0.1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from ::ffff:0.0.0.0 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:127.0.0.1 from 127.0.0.2 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
 connect ::ffff:127.0.0.1 from 10.255.255.1 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
-connect ::ffff:0.0.0.0 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect ::ffff:0.0.0.0 from - to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.1 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
 connect ::ffff:0.0.0.0 from 0.0.0.0 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
-connect ::ffff:0.0.0.0 from ::1 to 127.0.0.2,ENETUNREACH,listen EADDRNOTAVAIL,timeout
-connect ::ffff:0.0.0.0 from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,timeout
+connect ::ffff:0.0.0.0 from ::1 to 127.0.0.2,ENETUNREACH,listen EADDRNOTAVAIL,EADDRNOTAVAIL
+connect ::ffff:0.0.0.0 from :: to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:127.0.0.1 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from ::ffff:0.0.0.0 to 127.0.0.2,Refused,listen EADDRNOTAVAIL,EADDRNOTAVAIL
 connect ::ffff:0.0.0.0 from 127.0.0.2 to 127.0.0.2,EINVAL,listen EADDRNOTAVAIL,Bad address
@@ -934,28 +934,28 @@ dgram ::1 from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL,sent blk
 dgram :: from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL,EADDRNOTAVAIL blk
 dgram ::ffff:127.0.0.1 from UdpV6 to 127.0.0.2,sent blk,recv EADDRNOTAVAIL,EADDRNOTAVAIL blk
 dgram 127.0.0.2 from UdpV6 to 127.0.0.2,sent udp:127.0.0.1 n=2,recv EADDRNOTAVAIL,Bad address blk
-getaddrinfo "localhost" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
+getaddrinfo "localhost" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
 getaddrinfo "localhost" "http",tcp:127.0.0.1:80 tcp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80
-getaddrinfo "localhost" "",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "localhost" "1_000",SERVICE,NONAME,NONAME
-getaddrinfo "localhost" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost" "-1",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost" "0o17",SERVICE,NONAME,NONAME
-getaddrinfo "localhost" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost" "4294967295",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost" "2147483648",SERVICE,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost" "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 tcp:127.0.0.1:7 udp:::1:7 udp:127.0.0.1:7
-getaddrinfo "localhost" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "localhost" "+",SERVICE,NONAME,NONAME
-getaddrinfo "localhost" "-",SERVICE,NONAME,NONAME
+getaddrinfo "localhost" "",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost" "1_000",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost" "-1",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost" "0o17",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost" "4294967295",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost" "2147483648",SERVICE,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost" "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 udp:::1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7
+getaddrinfo "localhost" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost" "-",SERVICE,NONAME,SERVICE
 getaddrinfo "127.0.0.1" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:127.0.0.1:80 udp:127.0.0.1:80
 getaddrinfo "127.0.0.1" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:127.0.0.1:0 udp:127.0.0.1:0
 getaddrinfo "127.0.0.1" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:127.0.0.1:65535 udp:127.0.0.1:65535
@@ -964,20 +964,20 @@ getaddrinfo "127.0.0.1" "http",tcp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:8
 getaddrinfo "127.0.0.1" "",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:127.0.0.1:0 udp:127.0.0.1:0
 getaddrinfo "127.0.0.1" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:127.0.0.1:80 udp:127.0.0.1:80
 getaddrinfo "127.0.0.1" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:127.0.0.1:80 udp:127.0.0.1:80
-getaddrinfo "127.0.0.1" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "127.0.0.1" "1_000",SERVICE,NONAME,NONAME
+getaddrinfo "127.0.0.1" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "127.0.0.1" "1_000",SERVICE,NONAME,SERVICE
 getaddrinfo "127.0.0.1" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:127.0.0.1:80 udp:127.0.0.1:80
 getaddrinfo "127.0.0.1" "-1",SERVICE,NONAME,tcp:127.0.0.1:65535 udp:127.0.0.1:65535
 getaddrinfo "127.0.0.1" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:127.0.0.1:0 udp:127.0.0.1:0
-getaddrinfo "127.0.0.1" "0o17",SERVICE,NONAME,NONAME
+getaddrinfo "127.0.0.1" "0o17",SERVICE,NONAME,SERVICE
 getaddrinfo "127.0.0.1" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:127.0.0.1:65535 udp:127.0.0.1:65535
 getaddrinfo "127.0.0.1" "4294967295",SERVICE,NONAME,tcp:127.0.0.1:65535 udp:127.0.0.1:65535
 getaddrinfo "127.0.0.1" "2147483648",SERVICE,NONAME,tcp:127.0.0.1:0 udp:127.0.0.1:0
 getaddrinfo "127.0.0.1" "99999999999999999999",SERVICE,NONAME,tcp:127.0.0.1:65535 udp:127.0.0.1:65535
 getaddrinfo "127.0.0.1" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:127.0.0.1:7 udp:127.0.0.1:7
-getaddrinfo "127.0.0.1" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "127.0.0.1" "+",SERVICE,NONAME,NONAME
-getaddrinfo "127.0.0.1" "-",SERVICE,NONAME,NONAME
+getaddrinfo "127.0.0.1" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "127.0.0.1" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "127.0.0.1" "-",SERVICE,NONAME,SERVICE
 getaddrinfo "::1" "80",ADDRFAMILY,udp:::1:80 tcp:::1:80,tcp:::1:80 udp:::1:80
 getaddrinfo "::1" "0",ADDRFAMILY,udp:::1:0 tcp:::1:0,tcp:::1:0 udp:::1:0
 getaddrinfo "::1" "65535",ADDRFAMILY,udp:::1:65535 tcp:::1:65535,tcp:::1:65535 udp:::1:65535
@@ -986,64 +986,64 @@ getaddrinfo "::1" "http",ADDRFAMILY,udp:::1:80 tcp:::1:80,tcp:::1:80
 getaddrinfo "::1" "",ADDRFAMILY,udp:::1:0 tcp:::1:0,tcp:::1:0 udp:::1:0
 getaddrinfo "::1" "+80",ADDRFAMILY,udp:::1:80 tcp:::1:80,tcp:::1:80 udp:::1:80
 getaddrinfo "::1" "080",ADDRFAMILY,udp:::1:80 tcp:::1:80,tcp:::1:80 udp:::1:80
-getaddrinfo "::1" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "::1" "1_000",SERVICE,NONAME,NONAME
+getaddrinfo "::1" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "::1" "1_000",SERVICE,NONAME,SERVICE
 getaddrinfo "::1" " 80",ADDRFAMILY,udp:::1:80 tcp:::1:80,tcp:::1:80 udp:::1:80
 getaddrinfo "::1" "-1",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535
 getaddrinfo "::1" "-0",ADDRFAMILY,udp:::1:0 tcp:::1:0,tcp:::1:0 udp:::1:0
-getaddrinfo "::1" "0o17",SERVICE,NONAME,NONAME
+getaddrinfo "::1" "0o17",SERVICE,NONAME,SERVICE
 getaddrinfo "::1" "4294967296",ADDRFAMILY,NONAME,tcp:::1:65535 udp:::1:65535
 getaddrinfo "::1" "4294967295",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535
 getaddrinfo "::1" "2147483648",SERVICE,NONAME,tcp:::1:0 udp:::1:0
 getaddrinfo "::1" "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535
 getaddrinfo "::1" "\t7",ADDRFAMILY,udp:::1:7 tcp:::1:7,tcp:::1:7 udp:::1:7
-getaddrinfo "::1" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "::1" "+",SERVICE,NONAME,NONAME
-getaddrinfo "::1" "-",SERVICE,NONAME,NONAME
-getaddrinfo "LOCALHOST" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "LOCALHOST" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "LOCALHOST" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "LOCALHOST" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
+getaddrinfo "::1" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "::1" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "::1" "-",SERVICE,NONAME,SERVICE
+getaddrinfo "LOCALHOST" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "LOCALHOST" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "LOCALHOST" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "LOCALHOST" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
 getaddrinfo "LOCALHOST" "http",tcp:127.0.0.1:80 tcp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80
-getaddrinfo "LOCALHOST" "",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "LOCALHOST" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "LOCALHOST" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "LOCALHOST" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "LOCALHOST" "1_000",SERVICE,NONAME,NONAME
-getaddrinfo "LOCALHOST" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "LOCALHOST" "-1",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "LOCALHOST" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "LOCALHOST" "0o17",SERVICE,NONAME,NONAME
-getaddrinfo "LOCALHOST" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "LOCALHOST" "4294967295",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "LOCALHOST" "2147483648",SERVICE,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "LOCALHOST" "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "LOCALHOST" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 tcp:127.0.0.1:7 udp:::1:7 udp:127.0.0.1:7
-getaddrinfo "LOCALHOST" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "LOCALHOST" "+",SERVICE,NONAME,NONAME
-getaddrinfo "LOCALHOST" "-",SERVICE,NONAME,NONAME
-getaddrinfo "localhost." "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost." "0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost." "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost." "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
+getaddrinfo "LOCALHOST" "",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "LOCALHOST" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "LOCALHOST" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "LOCALHOST" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "LOCALHOST" "1_000",SERVICE,NONAME,SERVICE
+getaddrinfo "LOCALHOST" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "LOCALHOST" "-1",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "LOCALHOST" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "LOCALHOST" "0o17",SERVICE,NONAME,SERVICE
+getaddrinfo "LOCALHOST" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "LOCALHOST" "4294967295",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "LOCALHOST" "2147483648",SERVICE,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "LOCALHOST" "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "LOCALHOST" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 udp:::1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7
+getaddrinfo "LOCALHOST" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "LOCALHOST" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "LOCALHOST" "-",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost." "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost." "0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost." "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost." "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
 getaddrinfo "localhost." "http",tcp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80
-getaddrinfo "localhost." "",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost." "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost." "080",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost." "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "localhost." "1_000",SERVICE,NONAME,NONAME
-getaddrinfo "localhost." " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "localhost." "-1",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost." "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost." "0o17",SERVICE,NONAME,NONAME
-getaddrinfo "localhost." "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost." "4294967295",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost." "2147483648",SERVICE,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "localhost." "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "localhost." "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 tcp:127.0.0.1:7 udp:::1:7 udp:127.0.0.1:7
-getaddrinfo "localhost." "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "localhost." "+",SERVICE,NONAME,NONAME
-getaddrinfo "localhost." "-",SERVICE,NONAME,NONAME
+getaddrinfo "localhost." "",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost." "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost." "080",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost." "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost." "1_000",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost." " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "localhost." "-1",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost." "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost." "0o17",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost." "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost." "4294967295",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost." "2147483648",SERVICE,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "localhost." "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "localhost." "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 udp:::1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7
+getaddrinfo "localhost." "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost." "+",SERVICE,NONAME,SERVICE
+getaddrinfo "localhost." "-",SERVICE,NONAME,SERVICE
 getaddrinfo "0.0.0.0" "80",tcp:0.0.0.0:80 udp:0.0.0.0:80,udp:0.0.0.0:80 tcp:0.0.0.0:80,tcp:0.0.0.0:80 udp:0.0.0.0:80
 getaddrinfo "0.0.0.0" "0",tcp:0.0.0.0:0 udp:0.0.0.0:0,udp:0.0.0.0:0 tcp:0.0.0.0:0,tcp:0.0.0.0:0 udp:0.0.0.0:0
 getaddrinfo "0.0.0.0" "65535",tcp:0.0.0.0:65535 udp:0.0.0.0:65535,udp:0.0.0.0:65535 tcp:0.0.0.0:65535,tcp:0.0.0.0:65535 udp:0.0.0.0:65535
@@ -1052,20 +1052,20 @@ getaddrinfo "0.0.0.0" "http",tcp:0.0.0.0:80,udp:0.0.0.0:80 tcp:0.0.0.0:80,tcp:0.
 getaddrinfo "0.0.0.0" "",tcp:0.0.0.0:0 udp:0.0.0.0:0,udp:0.0.0.0:0 tcp:0.0.0.0:0,tcp:0.0.0.0:0 udp:0.0.0.0:0
 getaddrinfo "0.0.0.0" "+80",tcp:0.0.0.0:80 udp:0.0.0.0:80,udp:0.0.0.0:80 tcp:0.0.0.0:80,tcp:0.0.0.0:80 udp:0.0.0.0:80
 getaddrinfo "0.0.0.0" "080",tcp:0.0.0.0:80 udp:0.0.0.0:80,udp:0.0.0.0:80 tcp:0.0.0.0:80,tcp:0.0.0.0:80 udp:0.0.0.0:80
-getaddrinfo "0.0.0.0" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "0.0.0.0" "1_000",SERVICE,NONAME,NONAME
+getaddrinfo "0.0.0.0" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "0.0.0.0" "1_000",SERVICE,NONAME,SERVICE
 getaddrinfo "0.0.0.0" " 80",tcp:0.0.0.0:80 udp:0.0.0.0:80,udp:0.0.0.0:80 tcp:0.0.0.0:80,tcp:0.0.0.0:80 udp:0.0.0.0:80
 getaddrinfo "0.0.0.0" "-1",SERVICE,NONAME,tcp:0.0.0.0:65535 udp:0.0.0.0:65535
 getaddrinfo "0.0.0.0" "-0",tcp:0.0.0.0:0 udp:0.0.0.0:0,udp:0.0.0.0:0 tcp:0.0.0.0:0,tcp:0.0.0.0:0 udp:0.0.0.0:0
-getaddrinfo "0.0.0.0" "0o17",SERVICE,NONAME,NONAME
+getaddrinfo "0.0.0.0" "0o17",SERVICE,NONAME,SERVICE
 getaddrinfo "0.0.0.0" "4294967296",tcp:0.0.0.0:0 udp:0.0.0.0:0,NONAME,tcp:0.0.0.0:65535 udp:0.0.0.0:65535
 getaddrinfo "0.0.0.0" "4294967295",SERVICE,NONAME,tcp:0.0.0.0:65535 udp:0.0.0.0:65535
 getaddrinfo "0.0.0.0" "2147483648",SERVICE,NONAME,tcp:0.0.0.0:0 udp:0.0.0.0:0
 getaddrinfo "0.0.0.0" "99999999999999999999",SERVICE,NONAME,tcp:0.0.0.0:65535 udp:0.0.0.0:65535
 getaddrinfo "0.0.0.0" "\t7",tcp:0.0.0.0:7 udp:0.0.0.0:7,udp:0.0.0.0:7 tcp:0.0.0.0:7,tcp:0.0.0.0:7 udp:0.0.0.0:7
-getaddrinfo "0.0.0.0" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "0.0.0.0" "+",SERVICE,NONAME,NONAME
-getaddrinfo "0.0.0.0" "-",SERVICE,NONAME,NONAME
+getaddrinfo "0.0.0.0" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "0.0.0.0" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "0.0.0.0" "-",SERVICE,NONAME,SERVICE
 getaddrinfo "::" "80",ADDRFAMILY,udp::::80 tcp::::80,tcp::::80 udp::::80
 getaddrinfo "::" "0",ADDRFAMILY,udp::::0 tcp::::0,tcp::::0 udp::::0
 getaddrinfo "::" "65535",ADDRFAMILY,udp::::65535 tcp::::65535,tcp::::65535 udp::::65535
@@ -1074,20 +1074,20 @@ getaddrinfo "::" "http",ADDRFAMILY,udp::::80 tcp::::80,tcp::::80
 getaddrinfo "::" "",ADDRFAMILY,udp::::0 tcp::::0,tcp::::0 udp::::0
 getaddrinfo "::" "+80",ADDRFAMILY,udp::::80 tcp::::80,tcp::::80 udp::::80
 getaddrinfo "::" "080",ADDRFAMILY,udp::::80 tcp::::80,tcp::::80 udp::::80
-getaddrinfo "::" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "::" "1_000",SERVICE,NONAME,NONAME
+getaddrinfo "::" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "::" "1_000",SERVICE,NONAME,SERVICE
 getaddrinfo "::" " 80",ADDRFAMILY,udp::::80 tcp::::80,tcp::::80 udp::::80
 getaddrinfo "::" "-1",SERVICE,NONAME,tcp::::65535 udp::::65535
 getaddrinfo "::" "-0",ADDRFAMILY,udp::::0 tcp::::0,tcp::::0 udp::::0
-getaddrinfo "::" "0o17",SERVICE,NONAME,NONAME
+getaddrinfo "::" "0o17",SERVICE,NONAME,SERVICE
 getaddrinfo "::" "4294967296",ADDRFAMILY,NONAME,tcp::::65535 udp::::65535
 getaddrinfo "::" "4294967295",SERVICE,NONAME,tcp::::65535 udp::::65535
 getaddrinfo "::" "2147483648",SERVICE,NONAME,tcp::::0 udp::::0
 getaddrinfo "::" "99999999999999999999",SERVICE,NONAME,tcp::::65535 udp::::65535
 getaddrinfo "::" "\t7",ADDRFAMILY,udp::::7 tcp::::7,tcp::::7 udp::::7
-getaddrinfo "::" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "::" "+",SERVICE,NONAME,NONAME
-getaddrinfo "::" "-",SERVICE,NONAME,NONAME
+getaddrinfo "::" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "::" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "::" "-",SERVICE,NONAME,SERVICE
 getaddrinfo "127.1" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,NONAME
 getaddrinfo "127.1" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:127.0.0.1:0 tcp:127.0.0.1:0,NONAME
 getaddrinfo "127.1" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:127.0.0.1:65535 tcp:127.0.0.1:65535,NONAME
@@ -1096,20 +1096,20 @@ getaddrinfo "127.1" "http",tcp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,NO
 getaddrinfo "127.1" "",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:127.0.0.1:0 tcp:127.0.0.1:0,NONAME
 getaddrinfo "127.1" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,NONAME
 getaddrinfo "127.1" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,NONAME
-getaddrinfo "127.1" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "127.1" "1_000",SERVICE,NONAME,NONAME
+getaddrinfo "127.1" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "127.1" "1_000",SERVICE,NONAME,SERVICE
 getaddrinfo "127.1" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:127.0.0.1:80 tcp:127.0.0.1:80,NONAME
 getaddrinfo "127.1" "-1",SERVICE,NONAME,NONAME
 getaddrinfo "127.1" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:127.0.0.1:0 tcp:127.0.0.1:0,NONAME
-getaddrinfo "127.1" "0o17",SERVICE,NONAME,NONAME
+getaddrinfo "127.1" "0o17",SERVICE,NONAME,SERVICE
 getaddrinfo "127.1" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,NONAME
 getaddrinfo "127.1" "4294967295",SERVICE,NONAME,NONAME
 getaddrinfo "127.1" "2147483648",SERVICE,NONAME,NONAME
 getaddrinfo "127.1" "99999999999999999999",SERVICE,NONAME,NONAME
 getaddrinfo "127.1" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:127.0.0.1:7 tcp:127.0.0.1:7,NONAME
-getaddrinfo "127.1" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "127.1" "+",SERVICE,NONAME,NONAME
-getaddrinfo "127.1" "-",SERVICE,NONAME,NONAME
+getaddrinfo "127.1" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "127.1" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "127.1" "-",SERVICE,NONAME,SERVICE
 getaddrinfo "::ffff:127.0.0.1" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::ffff:127.0.0.1:80 tcp:::ffff:127.0.0.1:80,tcp:::ffff:127.0.0.1:80 udp:::ffff:127.0.0.1:80
 getaddrinfo "::ffff:127.0.0.1" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::ffff:127.0.0.1:0 tcp:::ffff:127.0.0.1:0,tcp:::ffff:127.0.0.1:0 udp:::ffff:127.0.0.1:0
 getaddrinfo "::ffff:127.0.0.1" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::ffff:127.0.0.1:65535 tcp:::ffff:127.0.0.1:65535,tcp:::ffff:127.0.0.1:65535 udp:::ffff:127.0.0.1:65535
@@ -1118,56 +1118,56 @@ getaddrinfo "::ffff:127.0.0.1" "http",tcp:127.0.0.1:80,udp:::ffff:127.0.0.1:80 t
 getaddrinfo "::ffff:127.0.0.1" "",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::ffff:127.0.0.1:0 tcp:::ffff:127.0.0.1:0,tcp:::ffff:127.0.0.1:0 udp:::ffff:127.0.0.1:0
 getaddrinfo "::ffff:127.0.0.1" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::ffff:127.0.0.1:80 tcp:::ffff:127.0.0.1:80,tcp:::ffff:127.0.0.1:80 udp:::ffff:127.0.0.1:80
 getaddrinfo "::ffff:127.0.0.1" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::ffff:127.0.0.1:80 tcp:::ffff:127.0.0.1:80,tcp:::ffff:127.0.0.1:80 udp:::ffff:127.0.0.1:80
-getaddrinfo "::ffff:127.0.0.1" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "::ffff:127.0.0.1" "1_000",SERVICE,NONAME,NONAME
+getaddrinfo "::ffff:127.0.0.1" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "::ffff:127.0.0.1" "1_000",SERVICE,NONAME,SERVICE
 getaddrinfo "::ffff:127.0.0.1" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::ffff:127.0.0.1:80 tcp:::ffff:127.0.0.1:80,tcp:::ffff:127.0.0.1:80 udp:::ffff:127.0.0.1:80
 getaddrinfo "::ffff:127.0.0.1" "-1",SERVICE,NONAME,tcp:::ffff:127.0.0.1:65535 udp:::ffff:127.0.0.1:65535
 getaddrinfo "::ffff:127.0.0.1" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::ffff:127.0.0.1:0 tcp:::ffff:127.0.0.1:0,tcp:::ffff:127.0.0.1:0 udp:::ffff:127.0.0.1:0
-getaddrinfo "::ffff:127.0.0.1" "0o17",SERVICE,NONAME,NONAME
+getaddrinfo "::ffff:127.0.0.1" "0o17",SERVICE,NONAME,SERVICE
 getaddrinfo "::ffff:127.0.0.1" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::ffff:127.0.0.1:65535 udp:::ffff:127.0.0.1:65535
 getaddrinfo "::ffff:127.0.0.1" "4294967295",SERVICE,NONAME,tcp:::ffff:127.0.0.1:65535 udp:::ffff:127.0.0.1:65535
 getaddrinfo "::ffff:127.0.0.1" "2147483648",SERVICE,NONAME,tcp:::ffff:127.0.0.1:0 udp:::ffff:127.0.0.1:0
 getaddrinfo "::ffff:127.0.0.1" "99999999999999999999",SERVICE,NONAME,tcp:::ffff:127.0.0.1:65535 udp:::ffff:127.0.0.1:65535
 getaddrinfo "::ffff:127.0.0.1" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::ffff:127.0.0.1:7 tcp:::ffff:127.0.0.1:7,tcp:::ffff:127.0.0.1:7 udp:::ffff:127.0.0.1:7
-getaddrinfo "::ffff:127.0.0.1" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "::ffff:127.0.0.1" "+",SERVICE,NONAME,NONAME
-getaddrinfo "::ffff:127.0.0.1" "-",SERVICE,NONAME,NONAME
-getaddrinfo "" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
+getaddrinfo "::ffff:127.0.0.1" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "::ffff:127.0.0.1" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "::ffff:127.0.0.1" "-",SERVICE,NONAME,SERVICE
+getaddrinfo "" "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "" "0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "" "65535",tcp:127.0.0.1:65535 udp:127.0.0.1:65535,udp:::1:65535 tcp:::1:65535 udp:127.0.0.1:65535 tcp:127.0.0.1:65535,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "" "65536",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
 getaddrinfo "" "http",tcp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80
 getaddrinfo "" "",NONAME,NONAME,NONAME
-getaddrinfo "" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "" "0x50",SERVICE,NONAME,NONAME
-getaddrinfo "" "1_000",SERVICE,NONAME,NONAME
-getaddrinfo "" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
-getaddrinfo "" "-1",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "" "0o17",SERVICE,NONAME,NONAME
-getaddrinfo "" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "" "4294967295",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "" "2147483648",SERVICE,NONAME,tcp:::1:0 tcp:127.0.0.1:0 udp:::1:0 udp:127.0.0.1:0
-getaddrinfo "" "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 tcp:127.0.0.1:65535 udp:::1:65535 udp:127.0.0.1:65535
-getaddrinfo "" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 tcp:127.0.0.1:7 udp:::1:7 udp:127.0.0.1:7
-getaddrinfo "" "8 ",SERVICE,NONAME,NONAME
-getaddrinfo "" "+",SERVICE,NONAME,NONAME
-getaddrinfo "" "-",SERVICE,NONAME,NONAME
-getnameinfo tcp 127.0.0.1:80,localhost/http,localhost/http,runnervmm7ud1/http
-getnameinfo tcp ::1:22,localhost/ssh,localhost/ssh,runnervmm7ud1/ssh
-getnameinfo udp 127.0.0.1:53,localhost/domain,localhost/domain,runnervmm7ud1/domain
-getnameinfo tcp 127.0.0.1:49999,localhost/49999,localhost/49999,runnervmm7ud1/49999
+getaddrinfo "" "+80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "" "080",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "" "0x50",SERVICE,NONAME,SERVICE
+getaddrinfo "" "1_000",SERVICE,NONAME,SERVICE
+getaddrinfo "" " 80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
+getaddrinfo "" "-1",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "" "-0",tcp:127.0.0.1:0 udp:127.0.0.1:0,udp:::1:0 tcp:::1:0 udp:127.0.0.1:0 tcp:127.0.0.1:0,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "" "0o17",SERVICE,NONAME,SERVICE
+getaddrinfo "" "4294967296",tcp:127.0.0.1:0 udp:127.0.0.1:0,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "" "4294967295",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "" "2147483648",SERVICE,NONAME,tcp:::1:0 udp:::1:0 tcp:127.0.0.1:0 udp:127.0.0.1:0
+getaddrinfo "" "99999999999999999999",SERVICE,NONAME,tcp:::1:65535 udp:::1:65535 tcp:127.0.0.1:65535 udp:127.0.0.1:65535
+getaddrinfo "" "\t7",tcp:127.0.0.1:7 udp:127.0.0.1:7,udp:::1:7 tcp:::1:7 udp:127.0.0.1:7 tcp:127.0.0.1:7,tcp:::1:7 udp:::1:7 tcp:127.0.0.1:7 udp:127.0.0.1:7
+getaddrinfo "" "8 ",SERVICE,NONAME,SERVICE
+getaddrinfo "" "+",SERVICE,NONAME,SERVICE
+getaddrinfo "" "-",SERVICE,NONAME,SERVICE
+getnameinfo tcp 127.0.0.1:80,localhost/http,localhost/http,runnervmbpeip/http
+getnameinfo tcp ::1:22,localhost/ssh,localhost/ssh,runnervmbpeip/ssh
+getnameinfo udp 127.0.0.1:53,localhost/domain,localhost/domain,runnervmbpeip/domain
+getnameinfo tcp 127.0.0.1:49999,localhost/49999,localhost/49999,runnervmbpeip/49999
 getnameinfo tcp 10.1.2.3:80,10.1.2.3/http,10.1.2.3/http,10.1.2.3/http
 getnameinfo tcp 127.0.0.2:8080,127.0.0.2/http-alt,127.0.0.2/http-alt,127.0.0.2/8080
 reuse server closes first,EADDRINUSE EADDRINUSE,EADDRINUSE ok,ok ok
 reuse client closes first,ok ok,EADDRINUSE ok,ok ok
 reuse connection open,EADDRINUSE EADDRINUSE,EADDRINUSE ok,ok ok
 reuse no connection,ok ok,ok ok,ok ok
-reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok,timeout
+reuse bound client closes first,EADDRINUSE EADDRINUSE EADDRINUSE,EADDRINUSE EADDRINUSE ok,EADDRINUSE ok ok
 reuse bound server closes first,ok ok ok,EADDRINUSE EADDRINUSE ok,ok ok ok
 unix paths,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EINVAL,ENAMETOOLONG ENAMETOOLONG ENAMETOOLONG EAFNOSUPPORT,ENAMETOOLONG ENAMETOOLONG EAFNOSUPPORT EAFNOSUPPORT
-bind error shapes,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EINVAL io:ENAMETOOLONG io:EADDRINUSE,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EAFNOSUPPORT io:ENAMETOOLONG io:EADDRINUSE,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EADDRNOTAVAIL raw:EAFNOSUPPORT io:EADDRINUSE
+bind error shapes,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EINVAL io:ENAMETOOLONG io:EADDRINUSE,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EAFNOSUPPORT io:ENAMETOOLONG io:EADDRINUSE,io:EADDRINUSE io:EADDRINUSE io:EADDRNOTAVAIL io:EADDRNOTAVAIL io:EAFNOSUPPORT io:EADDRINUSE
 autobind,abstract6 abstract6 distinct r2,abort EINVAL,abort EAFNOSUPPORT
 udp reuse two at 127.0.0.1,s0=blk s1=got,abort EADDRINUSE,s0=got s1=blk
 udp reuse 0.0.0.0 then 127.0.0.1,s0=blk s1=got,s0=blk s1=got,s0=blk s1=got
@@ -1230,7 +1230,7 @@ off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=10,ENETUNREACH,not recorded
 off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=65508,ENETUNREACH,not recorded,not recorded
 off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=65536,EMSGSIZE,not recorded,not recorded
 off loopback: dgram error v4 127.0.0.2->10.1.2.3 len=300000,EMSGSIZE,not recorded,not recorded
-dgram error v4->224.0.0.1 len=10,sent,EADDRNOTAVAIL,ENETUNREACH
+dgram error v4->224.0.0.1 len=10,sent,EADDRNOTAVAIL,sent
 dgram error v4->224.0.0.1 len=65508,EMSGSIZE,EMSGSIZE,EMSGSIZE
 dgram error v4->224.0.0.1 len=65536,EMSGSIZE,EMSGSIZE,EMSGSIZE
 dgram error v4->224.0.0.1 len=300000,EMSGSIZE,EMSGSIZE,EMSGSIZE
@@ -1240,10 +1240,10 @@ edge bind ::ffff:224.0.0.1,ok ok,EAFNOSUPPORT ok,EADDRNOTAVAIL EADDRNOTAVAIL
 edge bind ff02::1,EINVAL EINVAL,EAFNOSUPPORT ok,EADDRNOTAVAIL EADDRNOTAVAIL
 edge bind fe80::1,EINVAL EINVAL,EADDRNOTAVAIL EADDRNOTAVAIL,EADDRNOTAVAIL EADDRNOTAVAIL
 edge bind ff05::1,EINVAL ok,EAFNOSUPPORT ok,EADDRNOTAVAIL EADDRNOTAVAIL
-edge connect 255.255.255.255 from -,ENETUNREACH,EAFNOSUPPORT,timeout
-edge connect 224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT,timeout
-edge connect ::ffff:224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT,timeout
-edge connect ff02::1 from -,ENETUNREACH,EAFNOSUPPORT,timeout
+edge connect 255.255.255.255 from -,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+edge connect 224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+edge connect ::ffff:224.0.0.1 from -,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
+edge connect ff02::1 from -,ENETUNREACH,EAFNOSUPPORT,EADDRNOTAVAIL
 edge connect fe80::1 from -,EINVAL,No route to host,timeout
 off loopback: edge connect 10.1.2.3 from 127.0.0.1,ENETUNREACH,not recorded,not recorded
 off loopback: edge connect 10.1.2.3 from 127.0.0.2,ENETUNREACH,not recorded,not recorded
@@ -1256,10 +1256,10 @@ takeover: 127.0.0.1 reuse=false then 127.0.0.1 reuse=false,second EADDRINUSE,sec
 takeover: 127.0.0.1 reuse=true then 127.0.0.1 reuse=true,second EADDRINUSE,second EADDRINUSE,second ok connect=ok first=accepted second=blk
 takeover: 127.0.0.1 reuse=false then 127.0.0.1 reuse=true,second EADDRINUSE,second EADDRINUSE,second Fs
 takeover: 127.0.0.1 reuse=true then 127.0.0.1 reuse=false,second EADDRINUSE,second EADDRINUSE,second EADDRINUSE
-takeover: 127.0.0.1 reuse=false then 0.0.0.0 reuse=false,second EADDRINUSE,second EADDRINUSE,timeout
-takeover: 127.0.0.1 reuse=true then 0.0.0.0 reuse=true,second EADDRINUSE,second ok connect=ok first=accepted second=blk,timeout
-takeover: 127.0.0.1 reuse=false then 0.0.0.0 reuse=true,second EADDRINUSE,second ok connect=ok first=accepted second=blk,timeout
-takeover: 127.0.0.1 reuse=true then 0.0.0.0 reuse=false,second EADDRINUSE,second EADDRINUSE,timeout
+takeover: 127.0.0.1 reuse=false then 0.0.0.0 reuse=false,second EADDRINUSE,second EADDRINUSE,second ok connect=EADDRNOTAVAIL first=blk second=blk
+takeover: 127.0.0.1 reuse=true then 0.0.0.0 reuse=true,second EADDRINUSE,second ok connect=ok first=accepted second=blk,second ok connect=EADDRNOTAVAIL first=blk second=blk
+takeover: 127.0.0.1 reuse=false then 0.0.0.0 reuse=true,second EADDRINUSE,second ok connect=ok first=accepted second=blk,second ok connect=EADDRNOTAVAIL first=blk second=blk
+takeover: 127.0.0.1 reuse=true then 0.0.0.0 reuse=false,second EADDRINUSE,second EADDRINUSE,second ok connect=EADDRNOTAVAIL first=blk second=blk
 abort: peer closes then read read,EOF EOF,EOF EOF,EOF EOF
 abort: peer closes then read write write,EOF 1 Reset EPIPE,EOF 1 Reset EPIPE,EOF 1 Reset ECONNABORTED
 abort: peer closes then read write read,EOF 1 EOF,EOF 1 Reset ECONNRESET,EOF 1 Reset ECONNABORTED
@@ -1272,24 +1272,24 @@ abort: peer resets then read read,Reset ECONNRESET EOF,Reset ECONNRESET EOF,Rese
 abort: peer resets then read write write,Reset ECONNRESET Reset EPIPE Reset EPIPE,Reset ECONNRESET Reset EPIPE Reset EPIPE,Reset ECONNRESET Reset ECONNRESET Reset ECONNRESET
 abort: peer resets then read write read,Reset ECONNRESET Reset EPIPE EOF,Reset ECONNRESET Reset EPIPE EOF,Reset ECONNRESET Reset ECONNRESET Reset ECONNRESET
 abort: peer resets then read shutdown,Reset ECONNRESET ok,Reset ECONNRESET ok,Reset ECONNRESET ok
-abort: client resets before accept,accepted Reset ECONNRESET,accepted Reset ECONNRESET,accepted Reset ECONNRESET
+abort: client resets before accept,accepted Reset ECONNRESET,accepted Reset ECONNRESET,Reset ECONNRESET
 unix relisten with reuse_addr,second ok connect=ok first=blk second=accepted,second ok connect=ok first=blk second=accepted,second EADDRINUSE
-abstract connect unbound,Refused,Not_found,EINVAL
+abstract connect unbound,Refused,Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-a");;  connecting to unix:"\000eio-net-a"
 abstract send unbound,Refused,Not_found,EAFNOSUPPORT
 abstract send closed,ok Refused,Not_found Not_found,EAFNOSUPPORT EAFNOSUPPORT
-abstract connect closed,ok Refused,Not_found Not_found,ok EINVAL
+abstract connect closed,ok Refused,Not_found Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-d") Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-d");;  connecting to unix:"\000eio-net-d"
 abstract connect at datagram,Refused,Not_found,EAFNOSUPPORT
-abstract send at listener,Refused,Not_found,EAFNOSUPPORT
-abstract listen in use,EADDRINUSE EADDRINUSE,Not_found,ok ok
+abstract send at listener,Refused,Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-f")
+abstract listen in use,EADDRINUSE EADDRINUSE,Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-g")
 abstract listen at datagram's,ok,Not_found,EAFNOSUPPORT
-abstract datagram at listener's,ok,Not_found,EAFNOSUPPORT
-abstract listen after close,ok ok,Not_found Not_found,ok ok
+abstract datagram at listener's,ok,Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-i")
+abstract listen after close,ok ok,Not_found Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-j") Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-j")
 empty path listen twice,abstract6 abstract6 distinct x,EINVAL,EINVAL
 empty path bind_to,abstract6,EINVAL,unix:.
 empty path connect,EINVAL,EINVAL,EINVAL
 empty path send,EINVAL,EINVAL,EAFNOSUPPORT
 listening_addr after close,Invalid_argument,Invalid_argument,Invalid_argument
-getaddrinfo "LocalHost." "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 tcp:127.0.0.1:80 udp:::1:80 udp:127.0.0.1:80
+getaddrinfo "LocalHost." "80",tcp:127.0.0.1:80 udp:127.0.0.1:80,udp:::1:80 tcp:::1:80 udp:127.0.0.1:80 tcp:127.0.0.1:80,tcp:::1:80 udp:::1:80 tcp:127.0.0.1:80 udp:127.0.0.1:80
 getaddrinfo "[::1]" "80",NONAME,NONAME,tcp:::1:80 udp:::1:80
 getaddrinfo "0x" "80",NONAME,NONAME,NONAME
 getaddrinfo "0X" "80",NONAME,NONAME,NONAME
@@ -1310,10 +1310,10 @@ getnameinfo tcp ::1:0:80,::0.1.0.0/http,::0.1.0.0/http,::0.1.0.0/http
 getnameinfo tcp ::2:80,::2/http,::2/http,::2/http
 getnameinfo tcp ::ffff:0:a01:203:80,::ffff:0:a01:203/http,::ffff:0:a01:203/http,::ffff:0:10.1.2.3/http
 getnameinfo unix abstract,HOSTNAME/,abort Net,abort Net
-failed connect: tcp,Refused EADDRINUSE EADDRINUSE then ok,Refused Refused ok then ok,timeout
+failed connect: tcp,Refused EADDRINUSE EADDRINUSE then ok,Refused Refused ok then ok,Refused EADDRINUSE EADDRINUSE then ok
 failed connect: path,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE,Not_found EADDRINUSE EADDRINUSE then EADDRINUSE,Refused EADDRINUSE EADDRINUSE then EADDRINUSE
-failed connect: abstract,Refused EADDRINUSE EADDRINUSE then ok,Not_found Not_found Not_found then Not_found,EINVAL EINVAL ok then ok
-failed connect: abstract to the empty path,EINVAL EADDRINUSE EADDRINUSE then ok,Not_found Not_found Not_found then Not_found,EINVAL EINVAL ok then ok
+failed connect: abstract,Refused EADDRINUSE EADDRINUSE then ok,Not_found Not_found Not_found then Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-kk");;  connecting to unix:"\000eio-net-kk" Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-kk");;  connecting to unix:"\000eio-net-kk" Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-k") then Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-k")
+failed connect: abstract to the empty path,EINVAL EADDRINUSE EADDRINUSE then ok,Not_found Not_found Not_found then Not_found,Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-m");;  connecting to unix:"" Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-m");;  connecting to unix:"" Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-m") then Eio.Io Not_available Unix_error (The attempted operation is not supported for the type of object referenced.;;; "abstract Unix socket"; "\000eio-net-m")
 unix path with a NUL,Not_found Not_found Not_found Not_found Not_found,Not_found Not_found Not_found Not_found Not_found,Not_found Not_found EAFNOSUPPORT EAFNOSUPPORT Not_found
 wildcard bind: bound at :: after listen 0.0.0.0,ok/EADDRINUSE,ok/ok,ok/ok
 wildcard bind: listen 0.0.0.0 after bound at ::,ok/EADDRINUSE,ok/ok,ok/ok
@@ -1327,16 +1327,16 @@ wildcard bind: bound at :: after client 127.0.0.1,ok/EADDRINUSE,ok/EADDRINUSE,ok
 wildcard bind: client 127.0.0.1 after bound at ::,ok/ok,ok/ok,ok/ok
 blocked tcp writer: reader shuts receive,blk data EOF blk Reset,blk EOF blk Reset,blk Reset Reset Reset
 blocked tcp writer: reader shuts down,blk data EOF blk,blk EOF Reset,blk Reset Reset
-blocked tcp writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Reset Reset,blk data EOF ESHUTDOWN ESHUTDOWN
+blocked tcp writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Reset Reset,blk data EOF Reset Reset
 blocked unix writer: reader shuts receive,blk data EOF Reset Reset,blk EOF blk Reset,blk Reset Reset Reset
 blocked unix writer: reader shuts down,blk data EOF Reset,blk EOF blk,blk Reset Reset
-blocked unix writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Reset Reset,blk data EOF ESHUTDOWN ESHUTDOWN
+blocked unix writer: writer shuts send,blk data EOF Reset Reset,blk data EOF Reset Reset,blk data EOF Reset Reset
 dual-stack hold: listen :: client ::1 open,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=EADDRINUSE 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen :: client ::1 server closes first,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=EADDRINUSE 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen :: client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
-dual-stack hold: listen :: client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,timeout
-dual-stack hold: listen :: client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,timeout
-dual-stack hold: listen :: client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,timeout
+dual-stack hold: listen :: client 127.0.0.1 open,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,abort Refused
+dual-stack hold: listen :: client 127.0.0.1 server closes first,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,abort Refused
+dual-stack hold: listen :: client 127.0.0.1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=ok 0.0.0.0=EADDRINUSE 127.0.0.1=EADDRINUSE,abort Refused
 dual-stack hold: listen ::1 client ::1 open,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen ::1 client ::1 server closes first,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
 dual-stack hold: listen ::1 client ::1 client closes first,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok,::=EADDRINUSE ::1=EADDRINUSE 0.0.0.0=ok 127.0.0.1=ok,::=ok ::1=ok 0.0.0.0=ok 127.0.0.1=ok
@@ -1387,8 +1387,8 @@ sockopt: tcp4 listener SO_RCVBUF,get=131072 set=ok get=20000,get=131072 set=ok g
 sockopt: tcp4 listener SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 listener SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 listener SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=none set=ok get=5
-sockopt: tcp4 listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
-sockopt: tcp4 listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
+sockopt: tcp4 listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
+sockopt: tcp4 listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
 sockopt: tcp4 listener TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30,get=7200 set=ok get=30
 sockopt: tcp4 listener TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5,get=1 set=ok get=5
 sockopt: tcp4 listener TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3,get=10 set=ok get=3
@@ -1425,8 +1425,8 @@ sockopt: tcp4 listener Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Inv
 sockopt: tcp4 listener Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 listener Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 listener Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=none set=ok get=5
-sockopt: tcp4 listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
-sockopt: tcp4 listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
+sockopt: tcp4 listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
+sockopt: tcp4 listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
 sockopt: tcp4 client SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true,get=false set=ok get=true
 sockopt: tcp4 client SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 client SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
@@ -1449,7 +1449,7 @@ sockopt: tcp4 client TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3,get=10 se
 sockopt: tcp4 client TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 client TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 client TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: tcp4 client TCP_MAXSEG,get=32741 set=ok get=32741,get=16332 set=ok get=1000,get=65495 set=EWOULDBLOCK get=65495
+sockopt: tcp4 client TCP_MAXSEG,get=32741 set=ok get=32741,get=16332 set=ok get=1000,get=65495 set=EINVAL get=65495
 sockopt: tcp4 client TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 client TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 client TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
@@ -1503,7 +1503,7 @@ sockopt: tcp4 server TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3,get=10 se
 sockopt: tcp4 server TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 server TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 server TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: tcp4 server TCP_MAXSEG,get=32768 set=ok get=32768,get=4024 set=ok get=1000,get=65495 set=EWOULDBLOCK get=65495
+sockopt: tcp4 server TCP_MAXSEG,get=32768 set=ok get=32768,get=4024 set=ok get=1000,get=65495 set=EINVAL get=65495
 sockopt: tcp4 server TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 server TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp4 server TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
@@ -1549,8 +1549,8 @@ sockopt: tcp6 listener SO_RCVBUF,get=131072 set=ok get=20000,get=131072 set=ok g
 sockopt: tcp6 listener SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 listener SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 listener SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=none set=ok get=5
-sockopt: tcp6 listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
-sockopt: tcp6 listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
+sockopt: tcp6 listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
+sockopt: tcp6 listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
 sockopt: tcp6 listener TCP_KEEPIDLE,get=7200 set=ok get=30,get=7200 set=ok get=30,get=7200 set=ok get=30
 sockopt: tcp6 listener TCP_KEEPINTVL,get=75 set=ok get=5,get=75 set=ok get=5,get=1 set=ok get=5
 sockopt: tcp6 listener TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3,get=10 set=ok get=3
@@ -1587,8 +1587,8 @@ sockopt: tcp6 listener Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Inv
 sockopt: tcp6 listener Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 listener Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 listener Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=none set=ok get=5
-sockopt: tcp6 listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
-sockopt: tcp6 listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
+sockopt: tcp6 listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
+sockopt: tcp6 listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
 sockopt: tcp6 client SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true,get=false set=ok get=true
 sockopt: tcp6 client SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
@@ -1611,7 +1611,7 @@ sockopt: tcp6 client TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3,get=10 se
 sockopt: tcp6 client TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: tcp6 client TCP_MAXSEG,get=32732 set=ok get=32732,get=16312 set=ok get=1000,get=65475 set=EWOULDBLOCK get=65475
+sockopt: tcp6 client TCP_MAXSEG,get=32732 set=ok get=32732,get=16312 set=ok get=1000,get=65475 set=EINVAL get=65475
 sockopt: tcp6 client TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
@@ -1621,9 +1621,9 @@ sockopt: tcp6 client TCP_FASTOPEN,get=0 set=EINVAL get=0,get=Invalid_option set=
 sockopt: tcp6 client IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: tcp6 client IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,get=128 set=EWOULDBLOCK get=128
+sockopt: tcp6 client IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,get=128 set=EINVAL get=128
 sockopt: tcp6 client IP_MTU,get=65536 set=Invalid_argument get=65536,get=Invalid_option set=Invalid_argument get=Invalid_option,get=65535 set=Invalid_argument get=65535
-sockopt: tcp6 client IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option,get=dont set=EWOULDBLOCK get=dont
+sockopt: tcp6 client IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option,get=dont set=EINVAL get=dont
 sockopt: tcp6 client Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true,get=false set=ok get=true
 sockopt: tcp6 client Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 client Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
@@ -1665,7 +1665,7 @@ sockopt: tcp6 server TCP_KEEPCNT,get=9 set=ok get=3,get=8 set=ok get=3,get=10 se
 sockopt: tcp6 server TCP_CONGESTION,get=cubic set=ok get=reno,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 server TCP_CORK,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 server TCP_USER_TIMEOUT,get=0 set=ok get=1000,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: tcp6 server TCP_MAXSEG,get=32768 set=ok get=32768,get=4004 set=ok get=1000,get=65475 set=EWOULDBLOCK get=65475
+sockopt: tcp6 server TCP_MAXSEG,get=32768 set=ok get=32768,get=4004 set=ok get=1000,get=65475 set=EINVAL get=65475
 sockopt: tcp6 server TCP_LINGER2,get=60 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 server TCP_DEFER_ACCEPT,get=0 set=ok get=7,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 server TCP_SYNCNT,get=6 set=ok get=3,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
@@ -1675,9 +1675,9 @@ sockopt: tcp6 server TCP_FASTOPEN,get=0 set=EINVAL get=0,get=Invalid_option set=
 sockopt: tcp6 server IP_FREEBIND,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 server IP_BIND_ADDRESS_NO_PORT,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 server IP_LOCAL_PORT_RANGE,get=0-0 set=ok get=40000-40100,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: tcp6 server IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,get=128 set=EWOULDBLOCK get=128
+sockopt: tcp6 server IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,get=128 set=EINVAL get=128
 sockopt: tcp6 server IP_MTU,get=65536 set=Invalid_argument get=65536,get=Invalid_option set=Invalid_argument get=Invalid_option,get=65535 set=Invalid_argument get=65535
-sockopt: tcp6 server IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option,get=dont set=EWOULDBLOCK get=dont
+sockopt: tcp6 server IP_MTU_DISCOVER,get=want set=ok get=do,get=Invalid_option set=Invalid_option get=Invalid_option,get=dont set=EINVAL get=dont
 sockopt: tcp6 server Unix.SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true,get=false set=ok get=true
 sockopt: tcp6 server Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: tcp6 server Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
@@ -1711,8 +1711,8 @@ sockopt: unix listener SO_RCVBUF,get=229376 set=ok get=20000,get=8192 set=ok get
 sockopt: unix listener SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: unix listener SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: unix listener SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=none set=ok get=5
-sockopt: unix listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
-sockopt: unix listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
+sockopt: unix listener SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
+sockopt: unix listener SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
 sockopt: unix listener TCP_KEEPIDLE,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: unix listener TCP_KEEPINTVL,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: unix listener TCP_KEEPCNT,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_available EOPNOTSUPP set=Not_available EOPNOTSUPP get=Not_available EOPNOTSUPP,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
@@ -1749,8 +1749,8 @@ sockopt: unix listener Unix.SO_TYPE,get=1 set=Invalid_option get=1,get=1 set=Inv
 sockopt: unix listener Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: unix listener Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: unix listener Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=none set=ok get=5
-sockopt: unix listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
-sockopt: unix listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000483 set=ok get=1
+sockopt: unix listener Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
+sockopt: unix listener Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.000448 set=ok get=1
 sockopt: unix client SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true,get=false set=ok get=true
 sockopt: unix client SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: unix client SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
@@ -1863,7 +1863,7 @@ sockopt: udp4 SO_DEBUG,get=false set=Permission_denied Permission denied get=fal
 sockopt: udp4 SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp4 SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp4 SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp4 SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=true set=ok get=true
+sockopt: udp4 SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp4 SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: udp4 TCP_NODELAY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp4 IPV6_ONLY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL,get=true set=EINVAL get=true
@@ -1873,8 +1873,8 @@ sockopt: udp4 SO_RCVBUF,get=229376 set=ok get=20000,get=786896 set=ok get=10000,
 sockopt: udp4 SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp4 SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp4 SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp4 SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
-sockopt: udp4 SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
+sockopt: udp4 SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
+sockopt: udp4 SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
 sockopt: udp4 TCP_KEEPIDLE,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: udp4 TCP_KEEPINTVL,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: udp4 TCP_KEEPCNT,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
@@ -1898,7 +1898,7 @@ sockopt: udp4 Unix.SO_DEBUG,get=false set=Permission_denied Permission denied ge
 sockopt: udp4 Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp4 Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp4 Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp4 Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=true set=ok get=true
+sockopt: udp4 Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp4 Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: udp4 Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: udp4 Unix.TCP_NODELAY,get=Not_available EOPNOTSUPP set=Invalid_option get=Not_available EOPNOTSUPP,get=EINVAL set=EINVAL get=EINVAL,get=EINVAL set=EINVAL get=EINVAL
@@ -1911,13 +1911,13 @@ sockopt: udp4 Unix.SO_TYPE,get=2 set=Invalid_option get=2,get=2 set=Invalid_opti
 sockopt: udp4 Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp4 Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp4 Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp4 Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
-sockopt: udp4 Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
+sockopt: udp4 Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
+sockopt: udp4 Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
 sockopt: udp6 SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp6 SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp6 SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp6 SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp6 SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=true set=ok get=true
+sockopt: udp6 SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp6 SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: udp6 TCP_NODELAY,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp6 IPV6_ONLY,get=true set=EINVAL get=true,get=false set=EINVAL get=false,get=true set=EINVAL get=true
@@ -1927,8 +1927,8 @@ sockopt: udp6 SO_RCVBUF,get=229376 set=ok get=20000,get=786896 set=ok get=10000,
 sockopt: udp6 SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp6 SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp6 SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp6 SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
-sockopt: udp6 SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
+sockopt: udp6 SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
+sockopt: udp6 SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
 sockopt: udp6 TCP_KEEPIDLE,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: udp6 TCP_KEEPINTVL,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: udp6 TCP_KEEPCNT,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
@@ -1952,7 +1952,7 @@ sockopt: udp6 Unix.SO_DEBUG,get=false set=Permission_denied Permission denied ge
 sockopt: udp6 Unix.SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp6 Unix.SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp6 Unix.SO_KEEPALIVE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp6 Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=true set=ok get=true
+sockopt: udp6 Unix.SO_DONTROUTE,get=false set=ok get=true,get=false set=ok get=true,get=false set=ok get=true
 sockopt: udp6 Unix.SO_OOBINLINE,get=false set=ok get=true,get=false set=ok get=true,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: udp6 Unix.SO_ACCEPTCONN,get=false set=Invalid_option get=false,get=Invalid_option set=Invalid_option get=Invalid_option,get=Invalid_option set=Invalid_option get=Invalid_option
 sockopt: udp6 Unix.TCP_NODELAY,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL,get=EINVAL set=EINVAL get=EINVAL
@@ -1965,8 +1965,8 @@ sockopt: udp6 Unix.SO_TYPE,get=2 set=Invalid_option get=2,get=2 set=Invalid_opti
 sockopt: udp6 Unix.SO_RCVLOWAT,get=1 set=ok get=10,get=1 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp6 Unix.SO_SNDLOWAT,get=1 set=Invalid_option get=1,get=2048 set=ok get=10,get=EINVAL set=EINVAL get=EINVAL
 sockopt: udp6 Unix.SO_LINGER,get=none set=ok get=5,get=none set=ok get=5,get=Invalid_option set=Invalid_option get=Invalid_option
-sockopt: udp6 Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
-sockopt: udp6 Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0.032758 set=ok get=1
+sockopt: udp6 Unix.SO_RCVTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
+sockopt: udp6 Unix.SO_SNDTIMEO,get=0 set=ok get=1.5,get=0 set=ok get=1.5,get=0 set=ok get=1
 sockopt: unix dgram SO_DEBUG,get=false set=Permission_denied Permission denied get=false,get=false set=ok get=true,abort EAFNOSUPPORT
 sockopt: unix dgram SO_BROADCAST,get=false set=ok get=true,get=false set=ok get=true,abort EAFNOSUPPORT
 sockopt: unix dgram SO_REUSEADDR,get=false set=ok get=true,get=false set=ok get=true,abort EAFNOSUPPORT
@@ -2164,12 +2164,12 @@ sockopt connect: unix client IP_MTU_DISCOVER,connect=Not_available EOPNOTSUPP,co
 sockopt: tcp6any listener IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false,get=true set=EINVAL get=true
 sockopt: tcp6any listener TCP_MAXSEG,get=536 set=ok get=1000,get=1024 set=ok get=1000,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: tcp6any listener IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,get=128 set=Not_found ENOENT get=128
-sockopt: tcp6any client IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false,timeout
-sockopt: tcp6any client TCP_MAXSEG,get=32732 set=ok get=32732,get=16312 set=ok get=1000,timeout
-sockopt: tcp6any client IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,timeout
-sockopt: tcp6any server IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false,timeout
-sockopt: tcp6any server TCP_MAXSEG,get=32768 set=ok get=32768,get=4004 set=ok get=1000,timeout
-sockopt: tcp6any server IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,timeout
+sockopt: tcp6any client IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false,connect=EADDRNOTAVAIL
+sockopt: tcp6any client TCP_MAXSEG,get=32732 set=ok get=32732,get=16312 set=ok get=1000,connect=EADDRNOTAVAIL
+sockopt: tcp6any client IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,connect=EADDRNOTAVAIL
+sockopt: tcp6any server IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false,connect=EADDRNOTAVAIL
+sockopt: tcp6any server TCP_MAXSEG,get=32768 set=ok get=32768,get=4004 set=ok get=1000,connect=EADDRNOTAVAIL
+sockopt: tcp6any server IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,connect=EADDRNOTAVAIL
 sockopt: udp6any IPV6_ONLY,get=false set=EINVAL get=false,get=false set=EINVAL get=false,get=true set=EINVAL get=true
 sockopt: udp6any TCP_MAXSEG,get=Invalid_option set=Invalid_option get=Invalid_option,get=EINVAL set=EINVAL get=EINVAL,get=Not_found ENOENT set=Not_found ENOENT get=Not_found ENOENT
 sockopt: udp6any IP_TTL,get=64 set=ok get=32,get=EINVAL set=EINVAL get=EINVAL,get=128 set=Not_found ENOENT get=128
@@ -2192,27 +2192,27 @@ sockopt value: tcp4 client SO_RCVLOWAT=0,set=ok get=1,set=EINVAL get=1,set=Inval
 sockopt value: tcp4 client SO_RCVLOWAT=-1,set=ok get=16777216,set=EINVAL get=1,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 client SO_RCVLOWAT=1000000000,set=ok get=16777216,set=ok get=408300,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 client TCP_KEEPIDLE=-1,set=Invalid_argument get=7200,set=Invalid_argument get=7200,set=Invalid_argument get=7200
-sockopt value: tcp4 client TCP_KEEPIDLE=0,set=EINVAL get=7200,set=ok get=7200,set=EWOULDBLOCK get=7200
+sockopt value: tcp4 client TCP_KEEPIDLE=0,set=EINVAL get=7200,set=ok get=7200,set=EINVAL get=7200
 sockopt value: tcp4 client TCP_KEEPIDLE=1,set=ok get=1,set=ok get=1,set=ok get=1
 sockopt value: tcp4 client TCP_KEEPIDLE=32767,set=ok get=32767,set=ok get=32767,set=ok get=32767
 sockopt value: tcp4 client TCP_KEEPIDLE=32768,set=EINVAL get=7200,set=ok get=32768,set=ok get=32768
-sockopt value: tcp4 client TCP_KEEPINTVL=0,set=EINVAL get=75,set=ok get=75,set=EWOULDBLOCK get=1
+sockopt value: tcp4 client TCP_KEEPINTVL=0,set=EINVAL get=75,set=ok get=75,set=EINVAL get=1
 sockopt value: tcp4 client TCP_KEEPINTVL=32767,set=ok get=32767,set=ok get=32767,set=ok get=32767
 sockopt value: tcp4 client TCP_KEEPINTVL=32768,set=EINVAL get=75,set=ok get=32768,set=ok get=32768
 sockopt value: tcp4 client TCP_KEEPCNT=0,set=EINVAL get=9,set=ok get=8,set=ok get=0
 sockopt value: tcp4 client TCP_KEEPCNT=127,set=ok get=127,set=ok get=127,set=ok get=127
 sockopt value: tcp4 client TCP_KEEPCNT=128,set=EINVAL get=9,set=ok get=128,set=ok get=128
 sockopt value: tcp4 client TCP_KEEPCNT=255,set=EINVAL get=9,set=ok get=255,set=ok get=255
-sockopt value: tcp4 client TCP_KEEPCNT=256,set=EINVAL get=9,set=ok get=256,set=EWOULDBLOCK get=10
+sockopt value: tcp4 client TCP_KEEPCNT=256,set=EINVAL get=9,set=ok get=256,set=EINVAL get=10
 sockopt value: tcp4 client TCP_USER_TIMEOUT=-1,set=Invalid_argument get=0,set=Invalid_argument get=Invalid_option,set=Invalid_argument get=Invalid_option
 sockopt value: tcp4 client TCP_USER_TIMEOUT=0,set=ok get=0,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
-sockopt value: tcp4 client TCP_MAXSEG=0,set=ok get=32741,set=EINVAL get=16332,set=EWOULDBLOCK get=65495
-sockopt value: tcp4 client TCP_MAXSEG=87,set=EINVAL get=32741,set=EINVAL get=16332,set=EWOULDBLOCK get=65495
-sockopt value: tcp4 client TCP_MAXSEG=88,set=ok get=32741,set=EINVAL get=16332,set=EWOULDBLOCK get=65495
-sockopt value: tcp4 client TCP_MAXSEG=536,set=ok get=32741,set=ok get=536,set=EWOULDBLOCK get=65495
-sockopt value: tcp4 client TCP_MAXSEG=32767,set=ok get=32741,set=EINVAL get=16332,set=EWOULDBLOCK get=65495
-sockopt value: tcp4 client TCP_MAXSEG=32768,set=EINVAL get=32741,set=EINVAL get=16332,set=EWOULDBLOCK get=65495
-sockopt value: tcp4 client TCP_MAXSEG=70000,set=EINVAL get=32741,set=EINVAL get=16332,set=EWOULDBLOCK get=65495
+sockopt value: tcp4 client TCP_MAXSEG=0,set=ok get=32741,set=EINVAL get=16332,set=EINVAL get=65495
+sockopt value: tcp4 client TCP_MAXSEG=87,set=EINVAL get=32741,set=EINVAL get=16332,set=EINVAL get=65495
+sockopt value: tcp4 client TCP_MAXSEG=88,set=ok get=32741,set=EINVAL get=16332,set=EINVAL get=65495
+sockopt value: tcp4 client TCP_MAXSEG=536,set=ok get=32741,set=ok get=536,set=EINVAL get=65495
+sockopt value: tcp4 client TCP_MAXSEG=32767,set=ok get=32741,set=EINVAL get=16332,set=EINVAL get=65495
+sockopt value: tcp4 client TCP_MAXSEG=32768,set=EINVAL get=32741,set=EINVAL get=16332,set=EINVAL get=65495
+sockopt value: tcp4 client TCP_MAXSEG=70000,set=EINVAL get=32741,set=EINVAL get=16332,set=EINVAL get=65495
 sockopt value: tcp4 client TCP_DEFER_ACCEPT=0,set=ok get=0,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 client TCP_DEFER_ACCEPT=1,set=ok get=1,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 client TCP_DEFER_ACCEPT=2,set=ok get=3,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
@@ -2256,9 +2256,9 @@ sockopt value: tcp4 client TCP_LINGER2=121,set=ok get=120,set=Invalid_option get
 sockopt value: tcp4 client TCP_LINGER2=100000,set=ok get=120,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 client SO_RCVTIMEO=0,set=ok get=0,set=ok get=0,set=ok get=0
 sockopt value: tcp4 client SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0,set=ok get=-1
-sockopt value: tcp4 client SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,not recorded
-sockopt value: tcp4 client SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,not recorded
-sockopt value: tcp4 client SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,not recorded
+sockopt value: tcp4 client SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,set=ok get=0
+sockopt value: tcp4 client SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,set=ok get=0
+sockopt value: tcp4 client SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,set=ok get=1e+09
 sockopt value: tcp4 client TCP_CONGESTION=cubic,set=ok get=cubic,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 client TCP_CONGESTION=nope,set=Not_found ENOENT get=cubic,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 client TCP_CONGESTION=,set=EINVAL get=cubic,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
@@ -2296,9 +2296,9 @@ sockopt value: unix client SO_LINGER=32768,set=ok get=32768,set=Numerical argume
 sockopt value: unix client SO_LINGER=100000,set=ok get=100000,set=Numerical argument out of domain get=none,set=ok get=34464
 sockopt value: unix client SO_RCVTIMEO=0,set=ok get=0,set=ok get=0,set=ok get=0
 sockopt value: unix client SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0,set=ok get=-1
-sockopt value: unix client SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,not recorded
-sockopt value: unix client SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,not recorded
-sockopt value: unix client SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,not recorded
+sockopt value: unix client SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,set=ok get=0
+sockopt value: unix client SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,set=ok get=0
+sockopt value: unix client SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,set=ok get=1e+09
 sockopt value: udp4 SO_SNDBUF=0,set=ok get=4608,set=EINVAL get=9216,set=ok get=0
 sockopt value: udp4 SO_SNDBUF=1,set=ok get=4608,set=ok get=1,set=ok get=1
 sockopt value: udp4 SO_SNDBUF=3000,set=ok get=6000,set=ok get=3000,set=ok get=3000
@@ -2323,9 +2323,9 @@ sockopt value: udp4 SO_LINGER=32768,set=ok get=32768,set=Numerical argument out 
 sockopt value: udp4 SO_LINGER=100000,set=ok get=100000,set=Numerical argument out of domain get=none,set=Invalid_option get=Invalid_option
 sockopt value: udp4 SO_RCVTIMEO=0,set=ok get=0,set=ok get=0,set=ok get=0
 sockopt value: udp4 SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0,set=ok get=-1
-sockopt value: udp4 SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,not recorded
-sockopt value: udp4 SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,not recorded
-sockopt value: udp4 SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,not recorded
+sockopt value: udp4 SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,set=ok get=0
+sockopt value: udp4 SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,set=ok get=0
+sockopt value: udp4 SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,set=ok get=1e+09
 sockopt value: unix dgram SO_SNDBUF=0,set=ok get=4608,set=EINVAL get=2048,abort EAFNOSUPPORT
 sockopt value: unix dgram SO_SNDBUF=1,set=ok get=4608,set=ok get=1,abort EAFNOSUPPORT
 sockopt value: unix dgram SO_SNDBUF=3000,set=ok get=6000,set=ok get=3000,abort EAFNOSUPPORT
@@ -2350,9 +2350,9 @@ sockopt value: unix dgram SO_LINGER=32768,set=ok get=32768,set=Numerical argumen
 sockopt value: unix dgram SO_LINGER=100000,set=ok get=100000,set=Numerical argument out of domain get=none,abort EAFNOSUPPORT
 sockopt value: unix dgram SO_RCVTIMEO=0,set=ok get=0,set=ok get=0,abort EAFNOSUPPORT
 sockopt value: unix dgram SO_RCVTIMEO=-1,set=ok get=0,set=Numerical argument out of domain get=0,abort EAFNOSUPPORT
-sockopt value: unix dgram SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,not recorded
-sockopt value: unix dgram SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,not recorded
-sockopt value: unix dgram SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,not recorded
+sockopt value: unix dgram SO_RCVTIMEO=1e-07,set=ok get=0,set=ok get=0,abort EAFNOSUPPORT
+sockopt value: unix dgram SO_RCVTIMEO=1.5e-06,set=ok get=0.001,set=ok get=1e-06,abort EAFNOSUPPORT
+sockopt value: unix dgram SO_RCVTIMEO=1e+09,set=ok get=1e+09,set=ok get=1e+09,abort EAFNOSUPPORT
 sockopt value: tcp4 listener TCP_FASTOPEN=0,set=ok get=0,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 listener TCP_FASTOPEN=1,set=ok get=1,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
 sockopt value: tcp4 listener TCP_FASTOPEN=4096,set=ok get=4096,set=Invalid_option get=Invalid_option,set=Invalid_option get=Invalid_option
@@ -2370,17 +2370,17 @@ sockopt fill: tcp4 sndbuf=0 rcvbuf=2000,queued=2555846,queued=278528,queued=1935
 sockopt fill: tcp4 sndbuf=0 rcvbuf=10000,queued=2564038,queued=278528,queued=185344
 sockopt fill: tcp4 sndbuf=0 rcvbuf=100000,queued=2689536,queued=360448,queued=196608
 sockopt fill: tcp4 sndbuf=2000 rcvbuf=0,queued=89573,queued=17408,queued=2048
-sockopt fill: tcp4 sndbuf=2000 rcvbuf=2000,queued=34789,queued=17408,queued=2048
+sockopt fill: tcp4 sndbuf=2000 rcvbuf=2000,queued=34789,queued=17408,queued=64512
 sockopt fill: tcp4 sndbuf=2000 rcvbuf=10000,queued=42981,queued=17408,queued=2048
 sockopt fill: tcp4 sndbuf=2000 rcvbuf=100000,queued=130048,queued=17408,queued=2048
 sockopt fill: tcp4 sndbuf=10000 rcvbuf=0,queued=89573,queued=25600,queued=10240
 sockopt fill: tcp4 sndbuf=10000 rcvbuf=2000,queued=34789,queued=25600,queued=72704
-sockopt fill: tcp4 sndbuf=10000 rcvbuf=10000,queued=42981,queued=25600,queued=10240
+sockopt fill: tcp4 sndbuf=10000 rcvbuf=10000,queued=42981,queued=25600,queued=64512
 sockopt fill: tcp4 sndbuf=10000 rcvbuf=100000,queued=130048,queued=25600,queued=10240
 sockopt fill: tcp4 sndbuf=100000 rcvbuf=0,queued=280576,queued=280576,queued=100352
 sockopt fill: tcp4 sndbuf=100000 rcvbuf=2000,queued=198494,queued=231424,queued=162816
 sockopt fill: tcp4 sndbuf=100000 rcvbuf=10000,queued=206686,queued=231424,queued=154624
-sockopt fill: tcp4 sndbuf=100000 rcvbuf=100000,queued=321536,queued=313344,queued=100352
+sockopt fill: tcp4 sndbuf=100000 rcvbuf=100000,queued=321536,queued=313344,queued=165888
 sockopt fill: unix sndbuf=2000 rcvbuf=0,queued=2048,queued=1024,queued=2048
 sockopt fill: unix sndbuf=2000 rcvbuf=2000,queued=2048,queued=1024,queued=2048
 sockopt fill: unix sndbuf=2000 rcvbuf=10000,queued=2048,queued=1024,queued=2048
@@ -2521,7 +2521,7 @@ timed: server closes first with reuse_addr on both,ok ok,ok ok,ok ok
 timed: client closes first,ok ok,EADDRINUSE ok,ok ok
 timed: server closes and client stays,EADDRINUSE ok,EADDRINUSE ok,ok ok
 timed: reset by unread bytes,ok ok,ok ok,ok ok
-timed: bound client closes first,EADDRINUSE/EADDRINUSE ok/ok,EADDRINUSE/EADDRINUSE ok/ok,timeout
+timed: bound client closes first,EADDRINUSE/EADDRINUSE ok/ok,EADDRINUSE/EADDRINUSE ok/ok,EADDRINUSE/ok EADDRINUSE/ok
 timed: both shut send and server first,EADDRINUSE ok,EADDRINUSE ok,ok ok
 timed: server shuts send then client closes,EADDRINUSE ok,EADDRINUSE ok,ok ok
 timed: client shuts send then server closes,ok ok,EADDRINUSE ok,ok ok
